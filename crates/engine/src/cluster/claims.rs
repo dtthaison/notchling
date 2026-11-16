@@ -81,6 +81,7 @@ pub(super) fn put_side_copy(copies: &mut Vec<SideCopy>, incoming: &SideCopy, now
     let before = held.clone();
     held.extra_bytes = held.extra_bytes.max(incoming.extra_bytes);
     held.repo_changed |= incoming.repo_changed;
+    held.hidden |= incoming.hidden;
     if incoming.path.is_some() {
         held.path = incoming.path;
     }

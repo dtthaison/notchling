@@ -110,15 +110,8 @@ fn unknown_op_is_not_allowed() {
 }
 
 #[test]
-fn member_may_ask_for_a_join_token_and_a_delegate_dispatch() {
+fn member_may_ask_for_a_delegate_dispatch() {
     let worker = facts("w1", Role::Worker, false, MemberState::Active);
-    let rule = check(
-        "cluster.join.token",
-        &worker,
-        &origin("w1", OriginTier::Agent),
-    )
-    .expect("rule");
-    assert!(rule.home_only);
     assert!(check(
         "cluster.dispatch",
         &worker,
@@ -162,9 +155,11 @@ fn every_rule_names_a_known_op() {
         "node.sessions",
         "node.versions",
         "node.load",
+        "node.reach",
         "cluster.dispatch",
         "cluster.member.set",
         "cluster.remove",
+        "cluster.record",
         "cluster.join.token",
         "grant.deliver",
         "grant.revoke",
@@ -451,4 +446,133 @@ fn outbox_ops_forward_by_session() {
             assert!(!rule.home_only, "{op}");
         }
     }
+}
+
+#[test]
+fn an_active_member_may_record_at_the_home_from_its_daemon() {
+    for (name, role, client) in [("w1", Role::Worker, false), ("m1", Role::Standby, true)] {
+        let member = facts(name, role, client, MemberState::Active);
+        let rule = check("cluster.record", &member, &origin(name, OriginTier::Node)).expect("rule");
+        assert!(rule.home_only);
+    }
+}
+
+#[test]
+fn only_a_client_or_the_home_records_from_its_app() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    assert!(check("cluster.record", &client, &origin("m1", OriginTier::App)).is_ok());
+    let home = facts("m5", Role::Home, true, MemberState::Active);
+    assert!(check("cluster.record", &home, &origin("m5", OriginTier::App)).is_ok());
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    assert_eq!(
+        check("cluster.record", &worker, &origin("w1", OriginTier::App)).err(),
+        Some(Denied::TierTooHigh)
+    );
+}
+
+#[test]
+fn only_an_app_client_may_ask_for_a_join_token() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let rule = check(
+        "cluster.join.token",
+        &client,
+        &origin("m1", OriginTier::App),
+    )
+    .expect("rule");
+    assert!(rule.home_only);
+    for tier in [OriginTier::Agent, OriginTier::Node] {
+        assert!(check("cluster.join.token", &client, &origin("m1", tier)).is_err());
+    }
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    for tier in [OriginTier::App, OriginTier::Agent, OriginTier::Node] {
+        assert!(check("cluster.join.token", &standby, &origin("m2", tier)).is_err());
+    }
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    for tier in [OriginTier::App, OriginTier::Agent, OriginTier::Node] {
+        assert!(check("cluster.join.token", &worker, &origin("w1", tier)).is_err());
+    }
+}
+
+#[test]
+fn a_standby_without_an_app_cannot_record_from_the_app_tier() {
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    assert!(check("cluster.record", &standby, &origin("m2", OriginTier::App)).is_err());
+    assert!(check("cluster.record", &standby, &origin("m2", OriginTier::Node)).is_ok());
+}
+
+#[test]
+fn an_agent_never_records_and_a_record_names_its_own_sender() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    assert!(check("cluster.record", &client, &origin("m1", OriginTier::Agent)).is_err());
+    assert_eq!(
+        check("cluster.record", &client, &origin("m5", OriginTier::Node)).err(),
+        Some(Denied::NotAllowed)
+    );
+}
+
+#[test]
+fn a_pending_or_removed_member_may_not_record() {
+    let pending = facts("w1", Role::Worker, false, MemberState::Pending);
+    assert_eq!(
+        check("cluster.record", &pending, &origin("w1", OriginTier::Node)).err(),
+        Some(Denied::NotAMember)
+    );
+    let removed = facts("w1", Role::Worker, false, MemberState::Removed);
+    assert_eq!(
+        check("cluster.record", &removed, &origin("w1", OriginTier::Node)).err(),
+        Some(Denied::Removed)
+    );
+}
+
+#[test]
+fn a_client_or_the_primary_may_send_a_promote_at_the_app_tier_only() {
+    let client = facts("m1", Role::Standby, true, MemberState::Active);
+    let home = facts("m5", Role::Home, false, MemberState::Active);
+    for (sender, name) in [(&client, "m1"), (&home, "m5")] {
+        let rule = check("cluster.promote", sender, &origin(name, OriginTier::App)).expect("rule");
+        assert!(!rule.home_only, "it goes to the named machine");
+        assert_eq!(rule.id_field, None);
+        for tier in [OriginTier::Agent, OriginTier::Node] {
+            assert!(
+                check("cluster.promote", sender, &origin(name, tier)).is_err(),
+                "{tier:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_worker_and_a_removed_member_cannot_send_a_promote() {
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let removed = facts("m1", Role::Standby, true, MemberState::Removed);
+    for (sender, name) in [(&worker, "w1"), (&removed, "m1")] {
+        for tier in [OriginTier::App, OriginTier::Node, OriginTier::Agent] {
+            assert!(
+                check("cluster.promote", sender, &origin(name, tier)).is_err(),
+                "{name} {tier:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn any_member_may_ask_another_whether_it_reaches_a_node_at_the_node_tier_only() {
+    let worker = facts("w1", Role::Worker, false, MemberState::Active);
+    let standby = facts("m2", Role::Standby, false, MemberState::Active);
+    let home = facts("m5", Role::Home, true, MemberState::Active);
+    for (sender, name) in [(&worker, "w1"), (&standby, "m2"), (&home, "m5")] {
+        let rule = check("node.reach", sender, &origin(name, OriginTier::Node)).expect("rule");
+        assert!(!rule.home_only);
+        for tier in [OriginTier::Agent, OriginTier::App] {
+            assert!(
+                check("node.reach", sender, &origin(name, tier)).is_err(),
+                "{name} {tier:?}"
+            );
+        }
+    }
+    let pending = facts("m3", Role::Standby, true, MemberState::Pending);
+    assert_eq!(
+        check("node.reach", &pending, &origin("m3", OriginTier::Node)).err(),
+        Some(Denied::NotAMember)
+    );
 }

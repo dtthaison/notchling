@@ -341,3 +341,25 @@ fn a_state_written_before_claims_loads_with_none() {
     let state: ClusterState = serde_json::from_value(json).expect("old state");
     assert!(state.claims.is_empty() && state.side_copies.is_empty());
 }
+
+#[test]
+fn a_pushed_hidden_copy_hides_the_one_held_and_never_the_other_way() {
+    let mut state = cluster();
+    apply(
+        &mut state,
+        Command::SideCopy {
+            copy: copy("s1", "m5", "set-1", 4_000),
+        },
+        50,
+    )
+    .expect("side copy");
+    let mut hidden = copy("s1", "m5", "set-1", 4_000);
+    hidden.hidden = true;
+    let applied = apply(&mut state, Command::SideCopy { copy: hidden }, 51).expect("merge");
+    assert!(applied.entry.is_some());
+    assert!(state.side_copies[0].hidden);
+    let shown = copy("s1", "m5", "set-1", 4_000);
+    let applied = apply(&mut state, Command::SideCopy { copy: shown }, 52).expect("merge");
+    assert!(applied.entry.is_none());
+    assert!(state.side_copies[0].hidden);
+}

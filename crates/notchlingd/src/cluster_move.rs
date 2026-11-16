@@ -1,4 +1,4 @@
-use crate::cluster_fence::{clear_moved, mark_moved_in};
+use crate::cluster_fence::{clear_moved, fence_keys, mark_moved_in};
 use crate::cluster_node::ClusterNode;
 use crate::cluster_sessions::LocalRows;
 use crate::inbox_ops::InboxOps;
@@ -14,6 +14,7 @@ use notchling_engine::cluster::move_home::{
 };
 use notchling_engine::cluster::persist;
 use notchling_engine::cluster::snapshot::{Manifest, Movable};
+use notchling_engine::cluster::state::Command;
 use notchling_engine::cluster::versions::{compat, Compat, Purpose, Versions};
 use notchling_engine::cluster::wire::{Origin, OriginTier, WireError};
 use notchling_engine::cluster::{LocalCmd, NodeId, Tool};
@@ -57,10 +58,15 @@ pub fn failed(why: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::Failed, why)
 }
 
+pub type SendHook = Arc<dyn Fn(&str) + Send + Sync>;
+
+pub const SEND_OPS: [&str; 3] = ["session.reply", "session.send", "codex.send"];
+
 #[derive(Default)]
 pub struct MoveGate {
     held: Mutex<Option<(BTreeSet<String>, String)>>,
     fence: Mutex<Option<String>>,
+    on_send: std::sync::OnceLock<SendHook>,
 }
 
 impl MoveGate {
@@ -98,6 +104,27 @@ impl MoveGate {
                 return Err(failed(why.clone()));
             }
         }
+        self.check_held(op, args, prompt_session)?;
+        if SEND_OPS.contains(&op) {
+            if let (Some(hook), Some(id)) =
+                (self.on_send.get(), args.get("id").and_then(Value::as_str))
+            {
+                hook(id);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn on_send(&self, hook: SendHook) {
+        let _ = self.on_send.set(hook);
+    }
+
+    fn check_held(
+        &self,
+        op: &str,
+        args: &Value,
+        prompt_session: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<(), ApiError> {
         let held = lock(&self.held);
         let Some((ids, to_name)) = held.as_ref() else {
             return Ok(());
@@ -136,6 +163,15 @@ pub trait Link: Send + Sync {
     ) -> Result<Value, WireError>;
     fn take_primary(&self, takeover: Takeover) -> Result<Value, WireError>;
     fn fence(&self, reason: Option<String>);
+    fn record(&self, command: Command, tier: OriginTier, within: Duration)
+        -> Result<(), WireError>;
+    fn call_app(
+        &self,
+        to: &NodeId,
+        op: &str,
+        args: Value,
+        within: Duration,
+    ) -> Result<Value, WireError>;
 }
 
 #[derive(Default)]
@@ -211,6 +247,39 @@ impl Link for LateLink {
 
     fn fence(&self, reason: Option<String>) {
         let _ = self.local(LocalCmd::Fence { reason }, Duration::from_secs(30));
+    }
+
+    fn record(
+        &self,
+        command: Command,
+        tier: OriginTier,
+        within: Duration,
+    ) -> Result<(), WireError> {
+        self.local(LocalCmd::Record { command, tier }, within)
+            .map(|_| ())
+    }
+
+    fn call_app(
+        &self,
+        to: &NodeId,
+        op: &str,
+        args: Value,
+        within: Duration,
+    ) -> Result<Value, WireError> {
+        let node = self.node()?;
+        let origin = Origin {
+            node: node.me().clone(),
+            tier: OriginTier::App,
+        };
+        node.local_wire(
+            LocalCmd::Forward {
+                node: to.clone(),
+                op: op.to_string(),
+                args: args.into(),
+                origin,
+            },
+            within,
+        )
     }
 }
 
@@ -555,7 +624,7 @@ impl Mover {
         self.p.snaps.hold(to, on);
     }
 
-    fn agents(&self) -> Vec<Agent> {
+    pub(crate) fn agents(&self) -> Vec<Agent> {
         self.p
             .rows
             .rows()
@@ -631,22 +700,6 @@ impl Mover {
         })
     }
 
-    fn fence_keys(&self, main: &BTreeMap<String, MainSession>, ids: &[String]) -> Vec<String> {
-        let mut keys = Vec::new();
-        for id in ids {
-            keys.push(id.clone());
-            let conversation = main
-                .get(id)
-                .filter(|session| session.tool == Tool::Claude)
-                .and_then(|session| session.transcript.as_deref())
-                .and_then(conversation_of);
-            keys.extend(conversation);
-        }
-        keys.sort();
-        keys.dedup();
-        keys
-    }
-
     fn fence_moved(
         &self,
         me: Option<NodeId>,
@@ -678,7 +731,7 @@ impl Mover {
     }
 
     fn lift(&self, main: &BTreeMap<String, MainSession>, id: &str) {
-        let keys = self.fence_keys(main, &[id.to_string()]);
+        let keys = fence_keys(main, &[id.to_string()]);
         if let Err(why) = clear_moved(&self.p.cluster, &keys) {
             self.notice(
                 &format!("cluster-move-lift-{id}"),
@@ -697,7 +750,7 @@ impl Mover {
         term: u64,
     ) -> SwitchResult {
         let me = self.me();
-        let keys = self.fence_keys(&self.mains(), sessions);
+        let keys = fence_keys(&self.mains(), sessions);
         let result = self.switch_link(to, sessions, set, term);
         if !matches!(result, SwitchResult::Done) {
             return result;
@@ -763,7 +816,7 @@ impl Mover {
             .collect())
     }
 
-    fn mains(&self) -> BTreeMap<String, MainSession> {
+    pub(crate) fn mains(&self) -> BTreeMap<String, MainSession> {
         persist::load(&self.p.cluster)
             .ok()
             .flatten()
@@ -772,21 +825,16 @@ impl Mover {
     }
 
     fn start_one(&self, main: &BTreeMap<String, MainSession>, id: &str) -> Result<(), String> {
-        match main.get(id) {
-            None => Err("this machine has no record of it".to_string()),
-            Some(session) if session.tool != Tool::Claude => {
-                self.lift(main, id);
-                Ok(())
-            }
-            Some(_) if self.live(id) => {
-                self.lift(main, id);
-                Ok(())
-            }
-            Some(session) => {
-                self.lift(main, id);
-                self.p.acts.start_claude(session)
-            }
+        let Some(session) = main.get(id) else {
+            return Err("this machine has no record of it".to_string());
+        };
+        let _turn = self.turn();
+        self.claim_here(id, main)?;
+        self.lift(main, id);
+        if session.tool != Tool::Claude || self.live(id) {
+            return Ok(());
         }
+        self.p.acts.start_claude(session)
     }
 
     pub fn start_here(&self, sessions: &[String]) -> Started {
@@ -804,13 +852,15 @@ impl Mover {
             .map(|id| {
                 let result = match main.get(id) {
                     None => Err("this machine has no record of it".to_string()),
-                    Some(session) if session.tool != Tool::Claude => {
-                        self.lift(&main, id);
-                        Ok(())
-                    }
                     Some(session) => {
-                        self.lift(&main, id);
-                        self.p.acts.start_claude(session)
+                        let _turn = self.turn();
+                        self.claim_here(id, &main).and_then(|()| {
+                            self.lift(&main, id);
+                            match session.tool {
+                                Tool::Claude => self.p.acts.start_claude(session),
+                                _ => Ok(()),
+                            }
+                        })
                     }
                 };
                 (id.clone(), result)
@@ -839,24 +889,33 @@ impl Mover {
     }
 
     pub fn notice(&self, id: &str, kind: Kind, title: &str, detail: &str) {
-        self.p.inbox.raise(
-            Item {
-                id: id.to_string(),
-                kind,
-                title: title.to_string(),
-                detail: detail.to_string(),
-                source: Source::default(),
-                created_ms: self.now(),
-                expires_ms: None,
-                actions: Vec::new(),
-                state: ItemState::Open,
-                answer: None,
-                answered_by: None,
-                seen: false,
-                open: None,
-                closed_ms: None,
-            },
-            None,
-        );
+        raise_notice(&self.p.inbox, self.now(), id, (kind, title, detail));
     }
+}
+
+pub fn raise_notice(
+    inbox: &InboxOps,
+    now: i64,
+    id: &str,
+    (kind, title, detail): (Kind, &str, &str),
+) {
+    inbox.raise(
+        Item {
+            id: id.to_string(),
+            kind,
+            title: title.to_string(),
+            detail: detail.to_string(),
+            source: Source::default(),
+            created_ms: now,
+            expires_ms: None,
+            actions: Vec::new(),
+            state: ItemState::Open,
+            answer: None,
+            answered_by: None,
+            seen: false,
+            open: None,
+            closed_ms: None,
+        },
+        None,
+    );
 }

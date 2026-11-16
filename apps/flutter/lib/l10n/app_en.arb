@@ -753,6 +753,39 @@
       }
     }
   },
+  "inboxConfirmContinueBodyUnnamed": "The newer copy on the other machine is kept beside it.",
+  "@inboxConfirmContinueBodyUnnamed": {
+    "description": "Body of that question."
+  },
+  "inboxConfirmContinueTitle": "Continue {title} here?",
+  "@inboxConfirmContinueTitle": {
+    "description": "Title of the question before a waiting session continues from this machine's copy. $title is the session's name.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxConfirmMoveAnywayTitle": "Move anyway?",
+  "@inboxConfirmMoveAnywayTitle": {
+    "description": "Title of the question before an inbox answer that moves the primary although safety can't be shown."
+  },
+  "inboxConfirmMoveHereBody": "Sessions continue here from the newest copy this machine holds. Work the old machine did after that is kept on it.",
+  "@inboxConfirmMoveHereBody": {
+    "description": "Body of that question."
+  },
+  "inboxConfirmMoveHereTitle": "Move to this machine now?",
+  "@inboxConfirmMoveHereTitle": {
+    "description": "Title of the question before the inbox answer that moves the primary here."
+  },
+  "inboxConfirmTakeBackBody": "This machine becomes the primary again. Sessions that moved away come back when their turn ends.",
+  "@inboxConfirmTakeBackBody": {
+    "description": "Body of that question."
+  },
+  "inboxConfirmTakeBackTitle": "Take Back?",
+  "@inboxConfirmTakeBackTitle": {
+    "description": "Title of the question before the inbox answer that takes the primary back."
+  },
   "inboxDeclined": "The Mac didn't take that answer. Try again on the Mac.",
   "@inboxDeclined": {
     "description": "Shown in the Inbox."
@@ -792,6 +825,123 @@
   "languageName": "English",
   "@languageName": {
     "description": "The language's own name, as its speakers write it. It is the label of this language in the Language row."
+  },
+  "machinesChoose": "Choose a Machine",
+  "@machinesChoose": {
+    "description": "Button in an inbox card that opens the Machines popup."
+  },
+  "machinesConfirmBody": "Sessions continue there from {time}. Work {old} did after that is kept on {old}.",
+  "@machinesConfirmBody": {
+    "description": "Body of that question for a machine with a copy. $time is the clock time of the copy, such as 14:02. $old is the name of the machine that can't be reached, such as m5.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "old": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesConfirmBodyJobs": "{machine} holds no copy of your sessions, so it will only control jobs. Work done on the old machine stays there.",
+  "@machinesConfirmBodyJobs": {
+    "description": "Body of that question for a machine that holds no copy of the sessions. $machine is the machine's name, such as m3.",
+    "placeholders": {
+      "machine": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesConfirmBodyUnnamed": "Sessions continue there from {time}. Work the old machine did after that is kept on it.",
+  "@machinesConfirmBodyUnnamed": {
+    "description": "Body of that question for a machine with a copy when the old machine's name is not known. $time is the clock time of the copy, such as 14:02.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesConfirmTitle": "Move to {machine} now?",
+  "@machinesConfirmTitle": {
+    "description": "Title of the question before a session moves to a machine. $machine is the machine's name, such as m1.",
+    "placeholders": {
+      "machine": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesEmpty": "No other machine is online.",
+  "@machinesEmpty": {
+    "description": "Shown in the Machines popup when no other machine is online."
+  },
+  "machinesFailed": "Couldn't start the move. Try again.",
+  "@machinesFailed": {
+    "description": "Shown when a move could not be started."
+  },
+  "machinesIntro": "Your main machine can't be reached. Pick the machine that should take over.",
+  "@machinesIntro": {
+    "description": "Shown under the title of the Machines popup."
+  },
+  "machinesJobsOnly": "Controls jobs only",
+  "@machinesJobsOnly": {
+    "description": "One machine in the Machines popup that holds no copy of the sessions."
+  },
+  "machinesMove": "Move",
+  "@machinesMove": {
+    "description": "Button that sends the move."
+  },
+  "machinesMoveAnyway": "Move Anyway",
+  "@machinesMoveAnyway": {
+    "description": "Button that sends the move after the risk was shown."
+  },
+  "machinesMoving": "Moving to {machine}. Sessions continue there soon.",
+  "@machinesMoving": {
+    "description": "Shown after a move was sent. $machine is the machine's name, such as m1.",
+    "placeholders": {
+      "machine": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesNotMaster": "Can Be Master is off",
+  "@machinesNotMaster": {
+    "description": "One machine in the Machines popup that is not allowed to be the primary. It can't be picked."
+  },
+  "machinesNotReady": "Not ready to take over",
+  "@machinesNotReady": {
+    "description": "One machine in the Machines popup that is not ready to take over."
+  },
+  "machinesRelayedFallback": "The old machine is reachable through another machine; nothing moved.",
+  "@machinesRelayedFallback": {
+    "description": "Shown when the Mac says the old machine can be reached and nothing moved but gave no words."
+  },
+  "machinesResume": "Can resume old sessions · copy from {time}",
+  "@machinesResume": {
+    "description": "One machine in the Machines popup that holds a copy of the sessions. $time is the clock time of the copy, such as 14:02.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesRiskTitle": "Move anyway?",
+  "@machinesRiskTitle": {
+    "description": "Title of the risk question that follows a move the Mac wants confirmed."
+  },
+  "machinesRowLabel": "{name}, {detail}",
+  "@machinesRowLabel": {
+    "description": "Spoken description of one machine in the Machines popup. $name is the machine's name, such as m1. $detail is what the row says under the name, such as Controls jobs only.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesTitle": "Choose a Machine",
+  "@machinesTitle": {
+    "description": "Title of the popup the phone opens when no primary machine can be reached."
   },
   "macsActive": "In use",
   "@macsActive": {

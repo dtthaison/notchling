@@ -1306,7 +1306,7 @@ class InboxAction {
     'primary': primary,
   };
 
-  /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open. open is for the Mac only: the phone shows it disabled and the Mac refuses it.
+  /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open, and, from a cluster, move_here, move_anyway, take_back, keep, wait_for and continue_here. open is for the Mac only: the phone shows it disabled and the Mac refuses it. move_here, move_anyway, take_back and continue_here change where sessions run, so a phone asks before it answers with one.
   final String id;
   final String label;
 
@@ -1366,7 +1366,7 @@ class InboxItem {
 
   final String id;
 
-  /// secret_approval, secret_request, limit_notice, action_failed or notice; a phone treats a kind it doesn't know as notice.
+  /// secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits; a phone treats a kind it doesn't know as notice.
   final String kind;
   final String title;
   final String detail;
@@ -3996,6 +3996,219 @@ class HeldChangedEvent {
   final List<HeldNotice>? notices;
 }
 
+/// A machine of the cluster, for the phone's Machines popup. Online or not, Can Be Master or not.
+class ClusterMachine {
+  const ClusterMachine({
+    required this.id,
+    required this.name,
+    required this.online,
+    required this.canBeMaster,
+    required this.ready,
+    this.setAt,
+    required this.canResume,
+  });
+
+  factory ClusterMachine.fromJson(JsonMap json) => ClusterMachine(
+    id: _need(json, 'id', _asString),
+    name: _need(json, 'name', _asString),
+    online: _need(json, 'online', _asBool),
+    canBeMaster: _need(json, 'canBeMaster', _asBool),
+    ready: _need(json, 'ready', _asBool),
+    setAt: _maybe(json, 'setAt', _asInt),
+    canResume: _need(json, 'canResume', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+    'online': online,
+    'canBeMaster': canBeMaster,
+    'ready': ready,
+    if (setAt != null) 'setAt': setAt,
+    'canResume': canResume,
+  };
+
+  /// The node's id.
+  final String id;
+
+  /// The name to show.
+  final String name;
+  final bool online;
+
+  /// False: the machine only controls jobs, it is listed but can't be picked.
+  final bool canBeMaster;
+
+  /// True when the machine's own readiness checks pass.
+  final bool ready;
+
+  /// Wall time in milliseconds since 1970 of the newest snapshot set the machine holds; absent when it holds none.
+  final int? setAt;
+
+  /// canBeMaster, ready and a set: sessions continue there from setAt.
+  final bool canResume;
+}
+
+/// Additive: the machines a phone can pick when no primary is reachable. An older Mac answers invalid, and the phone hides the popup. Paired phone only.
+class ClusterMachinesRequest {
+  const ClusterMachinesRequest({
+    this.id,
+    this.op = 'cluster.machines',
+  });
+
+  factory ClusterMachinesRequest.fromJson(JsonMap json) => ClusterMachinesRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+  };
+
+  final Object? id;
+  final String op;
+}
+
+/// Additive: move the primary to a machine now, when the old primary can't be reached. Handled on the Mac the phone reached and never held or relayed. Needs the Mac to be allowed to act.
+class ClusterPromoteRequest {
+  const ClusterPromoteRequest({
+    this.id,
+    this.op = 'cluster.promote',
+    required this.node,
+    this.confirmed,
+  });
+
+  factory ClusterPromoteRequest.fromJson(JsonMap json) => ClusterPromoteRequest(
+    id: json['id'],
+    op: _need(json, 'op', _asString),
+    node: _need(json, 'node', _asString),
+    confirmed: _maybe(json, 'confirmed', _asBool),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'op': op,
+    'node': node,
+    if (confirmed != null) 'confirmed': confirmed,
+  };
+
+  final Object? id;
+  final String op;
+
+  /// The machine's id, from cluster.machines.
+  final String node;
+
+  /// True after the person saw the text of an earlier needsConfirm answer and chose Move Anyway.
+  final bool? confirmed;
+}
+
+/// The machines of the cluster this Mac knows.
+class ClusterMachinesResponse {
+  const ClusterMachinesResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory ClusterMachinesResponse.fromJson(JsonMap json) => ClusterMachinesResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => ClusterMachinesResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final ClusterMachinesResponseData data;
+}
+
+/// The answer.
+class ClusterMachinesResponseData {
+  const ClusterMachinesResponseData({
+    required this.machines,
+  });
+
+  factory ClusterMachinesResponseData.fromJson(JsonMap json) => ClusterMachinesResponseData(
+    machines: _need(json, 'machines', (Object? v) => _asList<ClusterMachine>(v, (Object? e) => ClusterMachine.fromJson(_asMap(e)))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'machines': <Object?>[for (final ClusterMachine e in machines) e.toJson()],
+  };
+
+  final List<ClusterMachine> machines;
+}
+
+/// What the promote did. One of step, relayed or needsConfirm.
+class ClusterPromoteResponse {
+  const ClusterPromoteResponse({
+    this.id,
+    this.ok = true,
+    required this.data,
+  });
+
+  factory ClusterPromoteResponse.fromJson(JsonMap json) => ClusterPromoteResponse(
+    id: json['id'],
+    ok: _need(json, 'ok', _asBool),
+    data: _need(json, 'data', (Object? v) => ClusterPromoteResponseData.fromJson(_asMap(v))),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (id != null) 'id': id,
+    'ok': ok,
+    'data': data.toJson(),
+  };
+
+  final Object? id;
+  final bool ok;
+
+  /// The answer.
+  final ClusterPromoteResponseData data;
+}
+
+/// The answer.
+class ClusterPromoteResponseData {
+  const ClusterPromoteResponseData({
+    this.step,
+    this.relayed,
+    this.text,
+    this.needsConfirm,
+  });
+
+  factory ClusterPromoteResponseData.fromJson(JsonMap json) => ClusterPromoteResponseData(
+    step: _maybe(json, 'step', _asString),
+    relayed: _maybe(json, 'relayed', _asBool),
+    text: _maybe(json, 'text', _asString),
+    needsConfirm: _maybe(json, 'needsConfirm', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (step != null) 'step': step,
+    if (relayed != null) 'relayed': relayed,
+    if (text != null) 'text': text,
+    if (needsConfirm != null) 'needsConfirm': needsConfirm,
+  };
+
+  /// Where the promote is; it goes on after this answer.
+  final String? step;
+
+  /// True when the old primary was reachable through another machine: nothing moved.
+  final bool? relayed;
+
+  /// With relayed: the words to show, such as m5 is reachable through m1; nothing moved.
+  final String? text;
+
+  /// The risk the person must accept first; ask again with confirmed true to go on.
+  final String? needsConfirm;
+}
+
 /// Parses a map as the type named by the key and writes it back.
 final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Function(JsonMap)>{
   'Subagent': (JsonMap json) => Subagent.fromJson(json).toJson(),
@@ -4097,4 +4310,9 @@ final Map<String, JsonMap Function(JsonMap)> roundtrips = <String, JsonMap Funct
   'HeldCancelResponse': (JsonMap json) => HeldCancelResponse.fromJson(json).toJson(),
   'HeldConfirmResponse': (JsonMap json) => HeldConfirmResponse.fromJson(json).toJson(),
   'HeldChangedEvent': (JsonMap json) => HeldChangedEvent.fromJson(json).toJson(),
+  'ClusterMachine': (JsonMap json) => ClusterMachine.fromJson(json).toJson(),
+  'ClusterMachinesRequest': (JsonMap json) => ClusterMachinesRequest.fromJson(json).toJson(),
+  'ClusterPromoteRequest': (JsonMap json) => ClusterPromoteRequest.fromJson(json).toJson(),
+  'ClusterMachinesResponse': (JsonMap json) => ClusterMachinesResponse.fromJson(json).toJson(),
+  'ClusterPromoteResponse': (JsonMap json) => ClusterPromoteResponse.fromJson(json).toJson(),
 };

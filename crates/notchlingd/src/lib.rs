@@ -15,6 +15,7 @@ pub mod awake_loop;
 pub mod awake_ops;
 pub mod bridge_backend;
 pub mod bridge_cluster;
+pub mod bridge_machines;
 pub mod bridge_ops;
 pub mod catalog_ops;
 pub mod cli;
@@ -30,6 +31,8 @@ mod cluster_driver_order_tests;
 mod cluster_driver_rebuild_tests;
 pub mod cluster_failover_setting;
 pub mod cluster_fence;
+pub mod cluster_fence_feed;
+pub mod cluster_fence_keeper;
 pub mod cluster_forward;
 pub mod cluster_host_facts;
 pub mod cluster_inbox;
@@ -47,11 +50,17 @@ pub mod cluster_main;
 pub mod cluster_mirror;
 pub mod cluster_move;
 pub mod cluster_move_calls;
+pub mod cluster_move_promote;
 pub mod cluster_move_run;
 pub mod cluster_move_snaps;
 pub mod cluster_node;
 pub mod cluster_ops;
 pub mod cluster_outbox;
+pub mod cluster_promote;
+mod cluster_promote_acts;
+mod cluster_promote_facts;
+pub mod cluster_promote_items;
+pub mod cluster_promote_watch;
 pub mod cluster_prompts;
 mod cluster_prompts_book;
 mod cluster_prompts_clean;
@@ -59,6 +68,14 @@ pub mod cluster_publisher;
 pub mod cluster_redact;
 pub mod cluster_relay;
 pub mod cluster_relay_wiring;
+pub mod cluster_returns;
+mod cluster_returns_aside;
+mod cluster_returns_claim;
+mod cluster_returns_items;
+mod cluster_returns_step;
+mod cluster_returns_touch;
+pub mod cluster_returns_waiting;
+mod cluster_returns_wire;
 pub mod cluster_sessions;
 pub mod cluster_switches;
 pub mod cluster_tail_mask;
@@ -67,6 +84,7 @@ pub mod cluster_wiring;
 pub mod cluster_workspace;
 pub mod cluster_workspace_send;
 pub mod codex_children;
+pub mod codex_fence;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod cost_ops;
@@ -190,9 +208,17 @@ mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
 #[cfg(test)]
+mod cluster_fence_keeper_kit;
+#[cfg(test)]
+mod cluster_fence_keeper_stop_tests;
+#[cfg(test)]
+mod cluster_fence_keeper_tests;
+#[cfg(test)]
 mod cluster_fence_stale_tests;
 #[cfg(test)]
 mod cluster_fence_tests;
+#[cfg(test)]
+mod cluster_fence_turn_tests;
 #[cfg(test)]
 mod cluster_fence_write_tests;
 #[cfg(test)]
@@ -208,9 +234,35 @@ mod cluster_move_tests;
 #[cfg(test)]
 mod cluster_node_tools_tests;
 #[cfg(test)]
+mod cluster_promote_codex_tests;
+#[cfg(test)]
+pub(crate) mod cluster_promote_kit;
+#[cfg(test)]
+mod cluster_promote_ops_tests;
+#[cfg(test)]
+mod cluster_promote_reach_tests;
+#[cfg(test)]
+mod cluster_promote_tests;
+#[cfg(test)]
+mod cluster_promote_watch_tests;
+#[cfg(test)]
 mod cluster_redact_tests;
 #[cfg(test)]
 mod cluster_relay_testkit;
+#[cfg(test)]
+mod cluster_returns_claim_tests;
+#[cfg(test)]
+pub(crate) mod cluster_returns_kit;
+#[cfg(test)]
+mod cluster_returns_ops_tests;
+#[cfg(test)]
+mod cluster_returns_step_tests;
+#[cfg(test)]
+mod cluster_returns_tests;
+#[cfg(test)]
+mod cluster_returns_touch_tests;
+#[cfg(test)]
+mod cluster_returns_waiting_tests;
 #[cfg(test)]
 mod cluster_testkit;
 #[cfg(test)]

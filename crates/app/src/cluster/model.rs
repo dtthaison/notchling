@@ -5,6 +5,7 @@ use notchling_locale as t;
 use serde_json::Value;
 
 use super::move_sheet::MoveStatus;
+use super::promote::PromoteInfo;
 use super::replication::ReplicationRow;
 use super::secrets::SecretsModel;
 use super::wire::{self, Request};
@@ -185,31 +186,12 @@ impl Line {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FailoverStatus {
-    pub value: String,
-    pub armed: bool,
-    pub target: Option<String>,
-}
-
-fn failover_of(status: &Value) -> Option<FailoverStatus> {
-    let failover = status.get("failover").filter(|f| f.is_object())?;
-    Some(FailoverStatus {
-        value: text(failover, "value").to_owned(),
-        armed: flag(failover, "armed"),
-        target: failover
-            .get("target")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-    })
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClusterModel {
     loaded: bool,
     cluster: Option<String>,
     joining: Option<bool>,
-    failover: Option<FailoverStatus>,
+    pub(super) promote: PromoteInfo,
     me: String,
     rows: Vec<NodeRow>,
     reference: Option<Versions>,
@@ -456,7 +438,7 @@ impl ClusterModel {
             loaded: true,
             cluster,
             joining,
-            failover: failover_of(status),
+            promote: PromoteInfo::of(status),
             me: me.to_owned(),
             rows: ranked
                 .into_iter()
@@ -488,16 +470,16 @@ impl ClusterModel {
         self.cluster.as_deref()
     }
 
-    pub fn failover(&self) -> Option<&FailoverStatus> {
-        self.failover.as_ref()
-    }
-
     pub fn rows(&self) -> Vec<NodeRow> {
         self.rows.clone()
     }
 
     pub fn move_status(&self) -> Option<&MoveStatus> {
         self.moving.as_ref()
+    }
+
+    pub fn link_on(&self) -> bool {
+        self.link
     }
 
     pub fn move_running(&self) -> bool {

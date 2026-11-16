@@ -106,6 +106,7 @@ pub const ROW_MENU_ENV: &str = "NOTCHLING_RENDER_ROW_MENU";
 pub const COPY_MENU_ENV: &str = "NOTCHLING_RENDER_COPY_MENU";
 pub const ACCOUNT_MENU_ENV: &str = "NOTCHLING_RENDER_ACCOUNT_MENU";
 pub const PAGE_ENV: &str = page_panel::PAGE_ENV;
+pub use page_panel::open_file_in_chat;
 pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
 pub const REMOTE_ENV: &str = "NOTCHLING_RENDER_REMOTE";
 pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";

@@ -212,6 +212,8 @@ fn leaving_the_cluster_forgets_the_attaches_in_flight() {
                 members,
                 failover: None,
                 armed: false,
+                claims: Vec::new(),
+                side_copies: Vec::new(),
             },
         },
     );

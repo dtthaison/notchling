@@ -693,6 +693,8 @@ fn a_forged_members_push_from_a_worker_is_not_followed() {
                 members: state.members.values().cloned().collect(),
                 failover: None,
                 armed: true,
+                claims: Vec::new(),
+                side_copies: Vec::new(),
             },
         },
     );
@@ -746,6 +748,8 @@ fn the_primarys_armed_flag_is_forgotten_with_its_term() {
                 members,
                 failover: Some(crate::cluster::failover::Failover::After30m),
                 armed: true,
+                claims: Vec::new(),
+                side_copies: Vec::new(),
             },
         },
     );
@@ -800,6 +804,8 @@ fn a_forged_members_push_cannot_wipe_a_node() {
                 members: removed_list(&hub, &m5, &m5),
                 failover: None,
                 armed: false,
+                claims: Vec::new(),
+                side_copies: Vec::new(),
             },
         },
     );
@@ -826,6 +832,8 @@ fn a_forged_members_push_cannot_wipe_a_node() {
                 members: removed_list(&hub, &w1, &m5),
                 failover: None,
                 armed: false,
+                claims: Vec::new(),
+                side_copies: Vec::new(),
             },
         },
     );

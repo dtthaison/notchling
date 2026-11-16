@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{Effect, NodeCore, Target, Then, MOVE_CALL_MS};
-use crate::cluster::claims::{put_claim, Claim};
+use crate::cluster::claims::{put_claim, put_side_copy, Claim};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
 use crate::cluster::state::{apply, Change, ClusterState, Command};
@@ -196,6 +196,14 @@ impl NodeCore {
         }
         let claims_changed = next.claims != claims_before;
         let next_claims = next.claims.clone();
+        if let Some(restored) = &t.restored {
+            let mut merged = restored.side_copies.clone();
+            for copy in &next.side_copies {
+                put_side_copy(&mut merged, copy, self.wall_ms);
+            }
+            next.side_copies = merged;
+        }
+        let next_copies = next.side_copies.clone();
         self.state = Some(next);
         self.changed = true;
         if t.staged {
@@ -205,6 +213,9 @@ impl NodeCore {
             let mut changes = applied.changes;
             if claims_changed || t.restored.is_some() {
                 changes.push(Change::Claims(next_claims));
+            }
+            if t.restored.is_some() {
+                changes.push(Change::SideCopies(next_copies));
             }
             if t.restored.is_some() {
                 self.complete_persist(&t.members, dropped, &mut changes);

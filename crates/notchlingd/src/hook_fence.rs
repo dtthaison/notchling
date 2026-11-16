@@ -81,6 +81,52 @@ fn look(path: &Path, session: &str, boot_id: &str, now: u64) -> Fence {
     }
 }
 
+pub(crate) fn look_all(path: &Path, sessions: &[&str], boot_id: &str, now: u64) -> Fence {
+    let mut wait = false;
+    for session in sessions {
+        match look(path, session, boot_id, now) {
+            Fence::Deny(reason) => return Fence::Deny(reason),
+            Fence::Wait => wait = true,
+            Fence::Pass => {}
+        }
+    }
+    if wait {
+        Fence::Wait
+    } else {
+        Fence::Pass
+    }
+}
+
+pub(crate) fn settle(
+    path: &Path,
+    sessions: &[&str],
+    boot_id: &str,
+    clock: (&dyn Fn() -> u64, &dyn Fn(u64)),
+    max_wait: u64,
+) -> Result<(), String> {
+    let (now, sleep) = clock;
+    let max_wait = max_wait.min(WAIT_MAX_MS);
+    let started = now();
+    let mut polls = 0u64;
+    loop {
+        match look_all(path, sessions, boot_id, now()) {
+            Fence::Pass => return Ok(()),
+            Fence::Deny(reason) => return Err(reason),
+            Fence::Wait => {}
+        }
+        polls += 1;
+        let waited = now().saturating_sub(started);
+        if waited >= max_wait || polls * POLL_MS > max_wait {
+            break;
+        }
+        sleep(POLL_MS);
+    }
+    match after_wait() {
+        Fence::Deny(reason) => Err(reason),
+        _ => Err(String::new()),
+    }
+}
+
 pub fn answer(
     stdin: &[u8],
     data: &Path,
@@ -101,23 +147,10 @@ pub(crate) fn answer_within(
 ) -> Option<String> {
     let session = session_of(stdin)?;
     let path = data.join(FENCE_FILE);
-    let max_wait = max_wait.min(WAIT_MAX_MS);
-    let started = now();
-    let mut polls = 0u64;
-    loop {
-        match look(&path, &session, boot_id, now()) {
-            Fence::Pass => return None,
-            Fence::Deny(reason) => return Some(deny_output(&reason)),
-            Fence::Wait => {}
-        }
-        polls += 1;
-        let waited = now().saturating_sub(started);
-        if waited >= max_wait || polls * POLL_MS > max_wait {
-            break;
-        }
-        sleep(POLL_MS);
+    match settle(&path, &[&session], boot_id, (now, sleep), max_wait) {
+        Ok(()) => None,
+        Err(reason) => Some(deny_output(&reason)),
     }
-    Some(after_wait_output())
 }
 
 fn after_wait_output() -> String {
@@ -127,11 +160,11 @@ fn after_wait_output() -> String {
     }
 }
 
-fn real_now() -> u64 {
+pub(crate) fn real_now() -> u64 {
     notchling_platform::clock::boot_ms().unwrap_or(CLOCK_FAILED)
 }
 
-fn real_sleep(ms: u64) {
+pub(crate) fn real_sleep(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
 }
 

@@ -98,7 +98,7 @@ fn results(rows: Started) -> Value {
     json!({"results": list})
 }
 
-struct Busy<'a, T: Default>(&'a Mutex<T>);
+pub(crate) struct Busy<'a, T: Default>(&'a Mutex<T>);
 
 impl<T: Default> Drop for Busy<'_, T> {
     fn drop(&mut self) {
@@ -116,7 +116,7 @@ impl Drop for Resuming<'_> {
 }
 
 impl Mover {
-    fn begin_switch(&self, term: u64) -> Result<Busy<'_, Option<u64>>, ApiError> {
+    pub(crate) fn begin_switch(&self, term: u64) -> Result<Busy<'_, Option<u64>>, ApiError> {
         let mut running = lock(&self.switching);
         if running.is_some() {
             return Err(failed(IN_PROGRESS));
@@ -187,7 +187,7 @@ impl Mover {
         answer
     }
 
-    fn stage_and_take(
+    pub(crate) fn stage_and_take(
         &self,
         mut takeover: Takeover,
         primary: &NodeId,

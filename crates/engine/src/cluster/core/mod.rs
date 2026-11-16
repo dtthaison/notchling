@@ -4,6 +4,7 @@ mod failover_set;
 mod forward;
 mod join;
 mod link;
+mod record;
 mod snap;
 mod takeover;
 
@@ -157,6 +158,10 @@ pub enum LocalCmd {
     },
     Fence {
         reason: Option<String>,
+    },
+    Record {
+        command: Command,
+        tier: OriginTier,
     },
 }
 
@@ -474,6 +479,8 @@ impl NodeCore {
             "main": state.main.keys().collect::<Vec<_>>(),
             "kept": state.kept,
             "failover": self.failover_status(state),
+            "claims": state.claims.values().collect::<Vec<_>>(),
+            "sideCopies": state.side_copies,
         })
     }
 
@@ -643,6 +650,10 @@ pub(super) fn shown_members(members: Vec<Member>) -> Vec<Member> {
 mod core_tests;
 #[cfg(test)]
 mod core_tests_adopt;
+#[cfg(test)]
+mod core_tests_claims;
+#[cfg(test)]
+mod core_tests_claims_lose;
 #[cfg(test)]
 mod core_tests_clean;
 #[cfg(test)]

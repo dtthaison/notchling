@@ -1,5 +1,6 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{bad, broad_folder, forbidden, text_arg, Room};
+use crate::codex_fence::CodexFence;
 use crate::layout::Layout;
 use crate::outbox_ops::OutboxOps;
 use notchling_engine::control::{Command, Launcher, RealLauncher};
@@ -50,6 +51,7 @@ pub struct CodexOps {
     room: Arc<dyn Room>,
     reply_wait_ms: AtomicU64,
     outbox: OnceLock<Arc<OutboxOps>>,
+    fence: OnceLock<CodexFence>,
 }
 
 impl CodexOps {
@@ -78,6 +80,7 @@ impl CodexOps {
             room,
             reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
             outbox: OnceLock::new(),
+            fence: OnceLock::new(),
         }
     }
 
@@ -87,7 +90,7 @@ impl CodexOps {
         room: Arc<dyn Room>,
         claude: &Path,
     ) -> CodexOps {
-        CodexOps::new(
+        let ops = CodexOps::new(
             acting,
             CodexSetup {
                 codex_home: layout.codex_dir(),
@@ -98,7 +101,22 @@ impl CodexOps {
             Arc::new(RealSpawner),
             Arc::new(RealLauncher::with_claude(claude.to_path_buf())),
             room,
-        )
+        );
+        ops.set_fence(CodexFence::real(&layout.cluster_dir()));
+        ops
+    }
+
+    pub fn set_fence(&self, fence: CodexFence) {
+        let _ = self.fence.set(fence);
+    }
+
+    pub(crate) fn fenced(&self, session: &str) -> Result<(), ApiError> {
+        match self.fence.get() {
+            Some(fence) => fence
+                .clear(session)
+                .map_err(|why| ApiError::new(ErrorCode::Failed, why)),
+            None => Ok(()),
+        }
     }
 
     pub fn with_resolver(mut self, resolve: Resolver) -> CodexOps {
@@ -170,6 +188,7 @@ impl CodexOps {
         let (session, folder) = match (args.get("id"), args.get("draft_folder")) {
             (Some(_), None) => {
                 let session = Self::session_arg(args)?;
+                self.fenced(&session)?;
                 if let Some(outbox) = self.outbox.get() {
                     return self.enqueue(outbox, &session, text, &pick);
                 }
@@ -374,3 +393,7 @@ use slow::{send_error, sent_json};
 #[cfg(test)]
 #[path = "codex_ops_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "codex_fence_tests.rs"]
+mod fence_tests;

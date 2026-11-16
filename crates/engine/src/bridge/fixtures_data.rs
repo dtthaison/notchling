@@ -375,3 +375,21 @@ pub fn viz(include_entity: bool) -> BridgeViz {
         ],
     }
 }
+
+pub fn cluster_machines() -> Vec<wire::ClusterMachine> {
+    let machine =
+        |id: &str, name: &str, can_be_master: bool, set_at: Option<i64>| wire::ClusterMachine {
+            id: id.into(),
+            name: name.into(),
+            online: true,
+            can_be_master,
+            ready: true,
+            set_at,
+            can_resume: can_be_master && set_at.is_some(),
+        };
+    vec![
+        machine("1111111111111111", "m1", true, Some(NOW_MS as i64)),
+        machine("3333333333333333", "m3", true, None),
+        machine("4444444444444444", "pi", false, None),
+    ]
+}

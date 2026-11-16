@@ -111,8 +111,8 @@ fn a_fixture_daemon_is_a_node_that_links_nowhere() {
     assert!(!err.contains("nlj1.secret"), "{err}");
 
     let (code, _, err) = run(root, &["cluster", "token"], "");
-    assert_eq!(code, 1, "{err}");
-    assert!(err.contains("no cluster"), "{err}");
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("Usage"), "{err}");
 
     let (code, _, err) = run(
         root,

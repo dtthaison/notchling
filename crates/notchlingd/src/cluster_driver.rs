@@ -387,7 +387,7 @@ impl Driver {
                 state.home.clone(),
                 Origin {
                     node: self.me.clone(),
-                    tier: OriginTier::Agent,
+                    tier: OriginTier::App,
                 },
             );
             let cmd = LocalCmd::Forward {
@@ -607,6 +607,11 @@ impl Driver {
     fn run_local(&mut self, call: u64, op: String, args: Value, origin: Origin) {
         if op == "node.load" {
             let result = Ok(self.loads.get(&self.me).cloned().unwrap_or(Value::Null));
+            let _ = self.tx.send(In::Core(Input::LocalDone { call, result }));
+            return;
+        }
+        if op == "node.reach" {
+            let result = Ok(self.reach(&args));
             let _ = self.tx.send(In::Core(Input::LocalDone { call, result }));
             return;
         }

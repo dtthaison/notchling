@@ -442,12 +442,13 @@ fn only_movable_sessions_resume() {
             _ => None,
         })
         .collect();
+    let flags = vec!["--model".to_string(), "opus".to_string()];
     assert_eq!(
         resumes,
-        vec![(
-            "s1".to_string(),
-            vec!["--model".to_string(), "opus".to_string()]
-        )]
+        vec![
+            ("s1".to_string(), flags.clone()),
+            ("s3".to_string(), flags.clone())
+        ]
     );
     let claimed: Vec<_> = run
         .all
@@ -498,7 +499,8 @@ fn each_resume_follows_its_claim() {
     assert!(is_resume(&actions[1]));
     let third = claim_of(&actions[2]).expect("claim");
     assert!(third.session == "s3" && third.n == 1 && !third.touched);
-    assert_eq!(actions.len(), 3);
+    assert!(is_resume(&actions[3]));
+    assert_eq!(actions.len(), 4);
 }
 
 #[test]
@@ -587,7 +589,7 @@ fn a_session_that_did_not_resume_raises_no_item() {
 }
 
 #[test]
-fn codex_sessions_are_claimed_and_not_started() {
+fn codex_sessions_are_claimed_and_resumed() {
     let mut f = plain();
     f.set = Some(set_with(vec![
         session("c1", Tool::Codex, Movable::Yes),
@@ -610,7 +612,10 @@ fn codex_sessions_are_claimed_and_not_started() {
         .iter()
         .filter_map(claim_of)
         .any(|claim| claim.session == "c1"));
-    assert!(!run.all.iter().any(is_resume));
+    assert!(run
+        .all
+        .iter()
+        .any(|a| matches!(a, PromoteAction::Resume { session, .. } if session == "c1")));
 }
 
 #[test]
@@ -623,9 +628,11 @@ fn a_codex_only_promote_runs_held_and_finishes() {
         "c1",
         vec![push_step()],
     )])));
+    assert_eq!(run.p.step, PromoteStep::Resume);
+    assert!(is_resume(actions.last().expect("resume")));
+    assert!(!run.all.contains(&PromoteAction::RunHeld));
+    run.feed(PromoteEvent::Resumed { failed: vec![] });
     assert_eq!(run.p.step, PromoteStep::Held);
-    assert_eq!(actions.last(), Some(&PromoteAction::RunHeld));
-    assert!(!run.all.iter().any(is_resume));
     let actions = run.feed(PromoteEvent::HeldRun);
     assert!(matches!(&actions[0], PromoteAction::PausedStep { session, .. } if session == "c1"));
     run.feed(PromoteEvent::Announced);

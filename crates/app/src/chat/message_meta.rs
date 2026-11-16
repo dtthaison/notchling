@@ -85,7 +85,7 @@ const WEEKDAYS: [t::Text; 7] = [
     t::units::WEEKDAY_LONG_SATURDAY,
 ];
 
-fn clock_text(hour: u32, minute: u32) -> String {
+pub(crate) fn clock_text(hour: u32, minute: u32) -> String {
     let h = match hour % 12 {
         0 => 12,
         h => h,

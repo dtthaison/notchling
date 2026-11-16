@@ -47,7 +47,7 @@ pub const VIEWS: [ViewSpec; 15] = [
     ViewSpec {
         name: "settings-cluster",
         size: (620.0, 1800.0),
-        about: "the Settings sheet's General page on a Mac in a cluster: Automatic Failover on After 30 Minutes with the machines named and the not ready line (made-up data)",
+        about: "the Settings sheet's General page on a Mac in a cluster: the Automatic Failover row saying it is not available yet, though the status says 30m (made-up data)",
     },
     ViewSpec {
         name: "settings-agents",

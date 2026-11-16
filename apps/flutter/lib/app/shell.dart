@@ -13,6 +13,7 @@ import '../features/connection/subscription_sync.dart';
 import '../features/sessions/held_notifier.dart';
 import '../features/inbox/inbox_notifier.dart';
 import '../features/inbox/inbox_screen.dart';
+import '../features/machines/machines_sheet.dart';
 import '../features/macs/macs_notifier.dart';
 import '../features/macs/macs_screen.dart';
 import '../features/pairing/pairing_screen.dart';
@@ -146,6 +147,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       bridgeClientProvider,
       (BridgeClient? previous, BridgeClient? next) => _bind(next),
     );
+    listenMachinesOffers(context, ref);
     final int tab = ref.watch(activeTabProvider);
     final bool hideBar =
         tab == 1 &&

@@ -569,6 +569,32 @@ class AppL10nEn extends AppL10n {
   }
 
   @override
+  String get inboxConfirmContinueBodyUnnamed =>
+      'The newer copy on the other machine is kept beside it.';
+
+  @override
+  String inboxConfirmContinueTitle(String title) {
+    return 'Continue $title here?';
+  }
+
+  @override
+  String get inboxConfirmMoveAnywayTitle => 'Move anyway?';
+
+  @override
+  String get inboxConfirmMoveHereBody =>
+      'Sessions continue here from the newest copy this machine holds. Work the old machine did after that is kept on it.';
+
+  @override
+  String get inboxConfirmMoveHereTitle => 'Move to this machine now?';
+
+  @override
+  String get inboxConfirmTakeBackBody =>
+      'This machine becomes the primary again. Sessions that moved away come back when their turn ends.';
+
+  @override
+  String get inboxConfirmTakeBackTitle => 'Take Back?';
+
+  @override
   String get inboxDeclined =>
       'The Mac didn\'t take that answer. Try again on the Mac.';
 
@@ -598,6 +624,79 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get languageName => 'English';
+
+  @override
+  String get machinesChoose => 'Choose a Machine';
+
+  @override
+  String machinesConfirmBody(String time, String old) {
+    return 'Sessions continue there from $time. Work $old did after that is kept on $old.';
+  }
+
+  @override
+  String machinesConfirmBodyJobs(String machine) {
+    return '$machine holds no copy of your sessions, so it will only control jobs. Work done on the old machine stays there.';
+  }
+
+  @override
+  String machinesConfirmBodyUnnamed(String time) {
+    return 'Sessions continue there from $time. Work the old machine did after that is kept on it.';
+  }
+
+  @override
+  String machinesConfirmTitle(String machine) {
+    return 'Move to $machine now?';
+  }
+
+  @override
+  String get machinesEmpty => 'No other machine is online.';
+
+  @override
+  String get machinesFailed => 'Couldn\'t start the move. Try again.';
+
+  @override
+  String get machinesIntro =>
+      'Your main machine can\'t be reached. Pick the machine that should take over.';
+
+  @override
+  String get machinesJobsOnly => 'Controls jobs only';
+
+  @override
+  String get machinesMove => 'Move';
+
+  @override
+  String get machinesMoveAnyway => 'Move Anyway';
+
+  @override
+  String machinesMoving(String machine) {
+    return 'Moving to $machine. Sessions continue there soon.';
+  }
+
+  @override
+  String get machinesNotMaster => 'Can Be Master is off';
+
+  @override
+  String get machinesNotReady => 'Not ready to take over';
+
+  @override
+  String get machinesRelayedFallback =>
+      'The old machine is reachable through another machine; nothing moved.';
+
+  @override
+  String machinesResume(String time) {
+    return 'Can resume old sessions · copy from $time';
+  }
+
+  @override
+  String get machinesRiskTitle => 'Move anyway?';
+
+  @override
+  String machinesRowLabel(String name, String detail) {
+    return '$name, $detail';
+  }
+
+  @override
+  String get machinesTitle => 'Choose a Machine';
 
   @override
   String get macsActive => 'In use';

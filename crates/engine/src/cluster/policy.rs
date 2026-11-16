@@ -45,6 +45,7 @@ const CLIENT: &[Sent] = &[Sent::Client, Sent::Home];
 const CLIENT_ONLY: &[Sent] = &[Sent::Client];
 const MEMBER: &[Sent] = &[Sent::Member];
 const PHONE_RELAY: &[Sent] = &[Sent::Client, Sent::Standby];
+const STANDBY: &[Sent] = &[Sent::Standby];
 const VAULT_HOME: &[Sent] = &[Sent::Vault];
 const CLEAR: &[Sent] = &[Sent::Home, Sent::VaultNode];
 
@@ -181,11 +182,15 @@ pub const RULES: &[Rule] = &[
     client_home("cluster.move_home"),
     client_home("cluster.move.now"),
     client_home("cluster.failover.set"),
+    client_plain("cluster.promote"),
+    rule("cluster.promote", STANDBY, OriginTier::App, None, false),
+    rule("cluster.record", MEMBER, OriginTier::Node, None, true),
+    rule("cluster.record", CLIENT, OriginTier::App, None, true),
     rule("node.sessions", CLIENT, OriginTier::Node, None, false),
     rule("node.versions", MEMBER, OriginTier::Node, None, false),
     rule("node.load", MEMBER, OriginTier::Node, None, false),
-    rule("cluster.join.token", MEMBER, OriginTier::Agent, None, true),
-    rule("cluster.join.token", MEMBER, OriginTier::App, None, true),
+    rule("node.reach", MEMBER, OriginTier::Node, None, false),
+    client_home("cluster.join.token"),
     rule("cluster.dispatch", MEMBER, OriginTier::Agent, None, true),
     home_app("install.plan"),
     home_app("install.apply"),

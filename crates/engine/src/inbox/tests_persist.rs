@@ -329,3 +329,65 @@ fn outbox_unsent_kind_and_its_actions_use_their_wire_words() {
     assert_eq!(book.items().len(), 1);
     assert_eq!(book.items()[0].kind, Kind::OutboxUnsent);
 }
+
+#[test]
+fn failover_kinds_and_actions_use_their_wire_words_and_survive_a_save() {
+    let kinds = [
+        (Kind::PrimaryUnreachable, "primary_unreachable"),
+        (Kind::Failover, "failover"),
+        (Kind::PausedStep, "paused_step"),
+        (Kind::NoPrimary, "no_primary"),
+        (Kind::PrimaryBack, "primary_back"),
+        (Kind::SessionWaits, "session_waits"),
+    ];
+    let actions = [
+        (ActionId::MoveHere, "move_here"),
+        (ActionId::MoveAnyway, "move_anyway"),
+        (ActionId::TakeBack, "take_back"),
+        (ActionId::Keep, "keep"),
+        (ActionId::ContinueHere, "continue_here"),
+        (ActionId::WaitFor, "wait_for"),
+    ];
+    for (kind, word) in kinds {
+        assert_eq!(serde_json::to_value(kind).unwrap(), serde_json::json!(word));
+        assert_eq!(
+            serde_json::from_value::<Kind>(serde_json::json!(word)).unwrap(),
+            kind
+        );
+    }
+    for (action, word) in actions {
+        assert_eq!(
+            serde_json::to_value(action).unwrap(),
+            serde_json::json!(word)
+        );
+        assert_eq!(
+            serde_json::from_value::<ActionId>(serde_json::json!(word)).unwrap(),
+            action
+        );
+    }
+    let tmp = TempDir::new("inbox-failover-kinds");
+    let dir = tmp.path("data");
+    for (n, (kind, _)) in kinds.into_iter().enumerate() {
+        let mut a = item(&format!("k{n}"), n as i64 + 1, State::Open);
+        a.kind = kind;
+        a.actions = actions
+            .iter()
+            .map(|(id, word)| Action {
+                id: *id,
+                label: (*word).to_string(),
+                primary: false,
+            })
+            .collect();
+        save(&dir, &Change::Raised(a)).unwrap();
+    }
+    let book = load(&dir, 100).unwrap();
+    let mut found: Vec<Kind> = book.items().into_iter().map(|i| i.kind).collect();
+    found.sort_by_key(|k| format!("{k:?}"));
+    let mut want: Vec<Kind> = kinds.iter().map(|(k, _)| *k).collect();
+    want.sort_by_key(|k| format!("{k:?}"));
+    assert_eq!(found, want);
+    assert!(book
+        .items()
+        .iter()
+        .all(|i| i.actions.len() == actions.len()));
+}

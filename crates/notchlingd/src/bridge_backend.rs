@@ -11,8 +11,8 @@ use notchling_engine::bridge::foreign::ForeignRow;
 use notchling_engine::bridge::inbox::InboxOutcome;
 use notchling_engine::bridge::live::{Acting, ForeignLive, Sources};
 use notchling_engine::bridge::model::{
-    Control, ModelChoice, PendingPrompt, PromptKind, PromptQuestion, PromptResponse, Session,
-    TakeoverOutcome,
+    ClusterMachine, Control, ModelChoice, PendingPrompt, PromptKind, PromptQuestion,
+    PromptResponse, Session, TakeoverOutcome,
 };
 use notchling_engine::bridge::relay::Relay;
 use notchling_engine::bridge::BridgeFailure;
@@ -173,6 +173,27 @@ impl Sources for DaemonSources {
 
     fn relay(&self) -> Option<Arc<dyn Relay>> {
         self.cluster.relay()
+    }
+
+    fn cluster_machines(&self) -> Vec<ClusterMachine> {
+        let Ok(status) = self.cluster.call(ops::CLUSTER_STATUS, &json!({})) else {
+            return Vec::new();
+        };
+        let own_set = self.cluster.relay().and_then(|relay| relay.stale_ms());
+        crate::bridge_machines::machines(&status, own_set, self.now_ms() as i64)
+    }
+
+    fn cluster_promote(&self, node: &str, confirmed: bool) -> Result<Value, BridgeFailure> {
+        if !self.cluster.attached() {
+            return Err(BridgeFailure::invalid("This Mac isn't in a cluster."));
+        }
+        let mut args = json!({"node": node});
+        if confirmed {
+            args["confirmed"] = json!(true);
+        }
+        self.cluster
+            .call(ops::CLUSTER_PROMOTE, &args)
+            .map_err(failure)
     }
 
     fn follow_remote(&self, session: &Session) {

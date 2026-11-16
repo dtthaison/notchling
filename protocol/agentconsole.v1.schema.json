@@ -1035,7 +1035,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "One of allow, allow_once, allow_always, deny, continue, cancel, done, open. open is for the Mac only: the phone shows it disabled and the Mac refuses it."
+          "description": "One of allow, allow_once, allow_always, deny, continue, cancel, done, open, and, from a cluster, move_here, move_anyway, take_back, keep, wait_for and continue_here. open is for the Mac only: the phone shows it disabled and the Mac refuses it. move_here, move_anyway, take_back and continue_here change where sessions run, so a phone asks before it answers with one."
         },
         "label": {
           "type": "string"
@@ -1061,7 +1061,7 @@
         },
         "kind": {
           "type": "string",
-          "description": "secret_approval, secret_request, limit_notice, action_failed or notice; a phone treats a kind it doesn't know as notice."
+          "description": "secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits; a phone treats a kind it doesn't know as notice."
         },
         "title": {
           "type": "string"
@@ -3231,6 +3231,12 @@
         },
         {
           "$ref": "#/$defs/HeldConfirmRequest"
+        },
+        {
+          "$ref": "#/$defs/ClusterMachinesRequest"
+        },
+        {
+          "$ref": "#/$defs/ClusterPromoteRequest"
         }
       ]
     },
@@ -3262,6 +3268,167 @@
           "$ref": "#/$defs/HeldChangedEvent"
         }
       ]
+    },
+    "ClusterMachine": {
+      "type": "object",
+      "description": "A machine of the cluster, for the phone's Machines popup. Online or not, Can Be Master or not.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The node's id."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name to show."
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "canBeMaster": {
+          "type": "boolean",
+          "description": "False: the machine only controls jobs, it is listed but can't be picked."
+        },
+        "ready": {
+          "type": "boolean",
+          "description": "True when the machine's own readiness checks pass."
+        },
+        "setAt": {
+          "type": "integer",
+          "description": "Wall time in milliseconds since 1970 of the newest snapshot set the machine holds; absent when it holds none."
+        },
+        "canResume": {
+          "type": "boolean",
+          "description": "canBeMaster, ready and a set: sessions continue there from setAt."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "online",
+        "canBeMaster",
+        "ready",
+        "canResume"
+      ],
+      "additionalProperties": true
+    },
+    "ClusterMachinesRequest": {
+      "type": "object",
+      "description": "Additive: the machines a phone can pick when no primary is reachable. An older Mac answers invalid, and the phone hides the popup. Paired phone only.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "cluster.machines"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": true
+    },
+    "ClusterPromoteRequest": {
+      "type": "object",
+      "description": "Additive: move the primary to a machine now, when the old primary can't be reached. Handled on the Mac the phone reached and never held or relayed. Needs the Mac to be allowed to act.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "op": {
+          "type": "string",
+          "const": "cluster.promote"
+        },
+        "node": {
+          "type": "string",
+          "description": "The machine's id, from cluster.machines."
+        },
+        "confirmed": {
+          "type": "boolean",
+          "description": "True after the person saw the text of an earlier needsConfirm answer and chose Move Anyway."
+        }
+      },
+      "required": [
+        "op",
+        "node"
+      ],
+      "additionalProperties": true
+    },
+    "ClusterMachinesResponse": {
+      "type": "object",
+      "description": "The machines of the cluster this Mac knows.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "machines": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ClusterMachine"
+              }
+            }
+          },
+          "required": [
+            "machines"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
+    },
+    "ClusterPromoteResponse": {
+      "type": "object",
+      "description": "What the promote did. One of step, relayed or needsConfirm.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "description": "The answer.",
+          "properties": {
+            "step": {
+              "type": "string",
+              "description": "Where the promote is; it goes on after this answer."
+            },
+            "relayed": {
+              "type": "boolean",
+              "description": "True when the old primary was reachable through another machine: nothing moved."
+            },
+            "text": {
+              "type": "string",
+              "description": "With relayed: the words to show, such as m5 is reachable through m1; nothing moved."
+            },
+            "needsConfirm": {
+              "type": "string",
+              "description": "The risk the person must accept first; ask again with confirmed true to go on."
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok",
+        "data"
+      ],
+      "additionalProperties": true
     }
   }
 }

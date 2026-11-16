@@ -5,9 +5,19 @@ use notchling_engine::cluster::persist;
 use notchling_engine::cluster::{Input, NodeId};
 use notchling_events::kinds::security::ClusterStep;
 use notchling_events::spec::Outcome;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 impl Driver {
+    pub(super) fn reach(&self, args: &Value) -> Value {
+        let seen = args
+            .get("node")
+            .and_then(Value::as_str)
+            .and_then(NodeId::parse)
+            .is_some_and(|node| node == self.me || self.core.online().contains(&node));
+        json!({"online": seen})
+    }
+
     pub(super) fn opened(&mut self, conn: Arc<dyn Conn>) {
         let Some(peer) = Driver::peer_of(&conn.peer_fingerprint()) else {
             conn.close();

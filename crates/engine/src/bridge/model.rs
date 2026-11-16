@@ -3,8 +3,8 @@ use notchling_protocol::generated as wire;
 use std::collections::BTreeMap;
 
 pub use wire::{
-    ChatMessage, Command, Facts, LastMessage, Limit, PromptQuestion, SessionNode, SessionState,
-    Subagent, VizSpec,
+    ChatMessage, ClusterMachine, Command, Facts, LastMessage, Limit, PromptQuestion, SessionNode,
+    SessionState, Subagent, VizSpec,
 };
 
 pub const ALIVE_REASON: &str =

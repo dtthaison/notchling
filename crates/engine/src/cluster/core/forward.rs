@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use super::link::clean_reason;
+use super::record::Pushed;
 use super::{
     Effect, NodeCore, OutCall, Seen, Target, Then, ATTACH_CALL_MS, CALL_MS, DEDUPE_MS,
     MOVE_CALL_MS, PEER_STALE_TERM, WORKSPACE_CALL_MS,
@@ -92,7 +93,17 @@ impl NodeCore {
                         members,
                         failover,
                         armed,
-                    } => self.on_members(from, term, home, vault, members, failover, armed, out),
+                        claims,
+                        side_copies,
+                    } => {
+                        let pushed = Pushed {
+                            failover,
+                            armed,
+                            claims,
+                            side_copies,
+                        };
+                        self.on_members(from, (term, home, vault), members, pushed, out)
+                    }
                     Msg::Call {
                         id,
                         op,
@@ -276,6 +287,7 @@ impl NodeCore {
             "cluster.main.set" => self.native_main_set(target, &args, out),
             "cluster.failover.set" => self.native_failover_set(target, &args, out),
             "cluster.allow.set" => self.native_allow_set(target, &args, out),
+            "cluster.record" => self.native_record(target, &args, &origin, out),
             "node.versions" => self.native_versions(target, &args, out),
             _ => {
                 let args = match &target {

@@ -119,6 +119,65 @@ cluster-move-cut = Stopped mid-turn, so their last step isn't finished: { $names
 # A session that didn't start on the new primary; $name is the session, $why the reason.
 cluster-move-failed = { $name } didn't start on the new primary: { $why }
 
+# Sentence in the Move sheet when the move's last step ended without the old primary pausing the moved sessions; $primary is the old primary's name, $names the sessions, $why the reason it gave.
+cluster-move-unfenced = { $primary } couldn't pause { $names }. They may run on both machines until it stops them. { $why }
+# Stands for the old primary's name in that sentence when the app doesn't know it.
+cluster-move-old-primary = The old primary
+
+## Move when the primary can't be reached
+
+# Text of the sheet that moves the primary while it is silent; $name is the machine that becomes the primary, $primary the one that went quiet.
+cluster-promote-intro = { $primary } can't be reached. { $name } becomes the primary from its last set. Work { $primary } did after that stays on { $primary } as a side copy.
+# Text while the request is out; $name is the machine.
+cluster-promote-asking = Asking { $name } to take the primary…
+# Button that goes ahead after the daemon named a risk.
+cluster-move-anyway = Move Anyway
+# Said when the machine asked to take the primary found the old one reachable.
+cluster-promote-nothing-moved = Nothing moved.
+# Steps of taking the primary, in order; $name is the machine that becomes the primary, $primary the old one.
+cluster-promote-step-check = Checking { $name }
+cluster-promote-step-reach = Looking for { $primary }
+cluster-promote-step-bump = Making { $name } the primary
+cluster-promote-step-restore = Restoring the sessions from the last set
+cluster-promote-step-resume = Starting the sessions on { $name }
+cluster-promote-step-held = Sending the messages that were held
+cluster-promote-step-items = Listing what needs a look
+# Shown when the machine is the primary but its progress isn't reported to this app.
+cluster-promote-step-unknown = Moving the primary…
+
+## Take Back
+
+cluster-take-back = Take Back
+cluster-take-back-title = Take Back the Primary?
+cluster-take-back-note = Sessions come home after their turns end.
+# $error is the reason.
+cluster-take-back-failed = Couldn't take the primary back: { $error }
+
+## Side copies
+
+cluster-copies-title = Side Copies
+cluster-copies-note = Work a machine did after the set its successor resumed from. Notchling never deletes or merges one.
+# Under a side copy; $machine is where it is, $age such as 5 minutes ago.
+cluster-copy-line = On { $machine } · { $age }
+cluster-copy-open = Open
+cluster-copy-hide = Hide
+cluster-copy-gone = That copy isn't on this Mac any more.
+# $error is the reason.
+cluster-copy-hide-failed = Couldn't hide that copy: { $error }
+
+## Waiting sessions
+
+cluster-waiting-title = Waiting Sessions
+# $title is the session, $machine the one with newer work in it.
+cluster-waits = { $title } waits for { $machine }, which has newer work in it.
+cluster-wait = Wait
+cluster-continue-copy = Continue From This Copy
+cluster-continue-title = Continue From This Copy?
+# Question before a waiting session continues here; $title is the session, $machine the one with the newer copy.
+cluster-continue-note = Continue { $title } here? The newer copy on { $machine } is kept beside it.
+# $error is the reason.
+cluster-continue-failed = Couldn't continue it here: { $error }
+
 ## Keep on this Mac
 
 # Check in a session's menu; $machine is this Mac's name. On means the session isn't carried over by a Standby.

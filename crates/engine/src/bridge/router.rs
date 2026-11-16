@@ -284,6 +284,8 @@ impl Router {
             "held.cancel" => self.held_cancel(connection, body),
             "held.confirm" => self.held_confirm(connection, body),
             "inbox.answer" => self.inbox_answer(body, connection),
+            "cluster.machines" => Ok(self.cluster_machines()),
+            "cluster.promote" => self.cluster_promote(body, connection),
             "projects.recent" => Ok(json!({"projects": self.backend.recent_projects()})),
             "subscribe" => self.subscribe(body, connection),
             "unsubscribe" => {

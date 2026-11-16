@@ -85,6 +85,7 @@ impl CodexOps {
         text: &str,
         options: Option<&Value>,
     ) -> Result<(), Delivery> {
+        self.fenced(session).map_err(failed_with)?;
         let pick = self
             .pick(options.unwrap_or(&Value::Null))
             .map_err(failed_with)?;

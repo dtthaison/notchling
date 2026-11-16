@@ -756,8 +756,9 @@ impl Wired {
             }),
             (inbox.clone(), vault.clone()),
             events.clone(),
-            sessions.clone(),
+            (sessions.clone(), acting.acting_switch()),
         );
+        cluster.fence_keeper().set_codex(codex.clone());
         bridge.cluster().attach(
             cluster.handler(),
             cluster.remote.clone(),

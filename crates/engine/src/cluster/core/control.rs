@@ -3,11 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::record::Pushed;
 use super::{
     shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, ATTACH_CALL_MS, CALL_MS,
     DELEGATE_CALL_MS,
 };
-use crate::cluster::failover::{armed_at_current, Failover};
+use crate::cluster::failover::armed_at_current;
 use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
 use crate::cluster::main_sessions::{aliases, reconcile};
@@ -172,6 +173,7 @@ impl NodeCore {
                 self.set_fence(reason, out);
                 self.finish(target, Ok(json!({})), out);
             }
+            LocalCmd::Record { command, tier } => self.local_record(id, command, tier, out),
             LocalCmd::SetVersions { versions } => self.set_versions(id, versions, out),
             LocalCmd::SetFailover { failover } => self.local_failover(id, failover, out),
             LocalCmd::SetAllow { node, names, any } => {
@@ -248,7 +250,7 @@ impl NodeCore {
         self.relay_to_home_as(local, op, args, origin, out);
     }
 
-    fn relay_to_home_as(
+    pub(super) fn relay_to_home_as(
         &mut self,
         local: u64,
         op: &str,
@@ -617,6 +619,8 @@ impl NodeCore {
             members: self.shared_members(),
             failover: Some(state.failover),
             armed: armed_at_current(state),
+            claims: state.claims.values().cloned().collect(),
+            side_copies: state.side_copies.clone(),
         };
         let targets: Vec<NodeId> = match only {
             Some(n) => vec![n.clone()],
@@ -639,16 +643,12 @@ impl NodeCore {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn on_members(
         &mut self,
         from: NodeId,
-        term: Term,
-        home: NodeId,
-        vault: Option<NodeId>,
+        (term, home, vault): (Term, NodeId, Option<NodeId>),
         members: Vec<Member>,
-        failover: Option<Failover>,
-        armed: bool,
+        pushed: Pushed,
         out: &mut Vec<Effect>,
     ) {
         let Some(state) = &self.state else {
@@ -695,6 +695,7 @@ impl NodeCore {
             },
             out,
         );
-        self.follow_failover(failover, armed, out);
+        self.follow_failover(pushed.failover, pushed.armed, out);
+        self.merge_pushed(pushed, out);
     }
 }

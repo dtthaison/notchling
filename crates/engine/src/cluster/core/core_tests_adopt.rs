@@ -133,6 +133,8 @@ fn members_push(hub: &Hub, from: &NodeId, term: Term) -> Msg {
             .collect(),
         failover: None,
         armed: false,
+        claims: Vec::new(),
+        side_copies: Vec::new(),
     }
 }
 
@@ -426,6 +428,8 @@ fn members_push_of(core: &NodeCore, from: &NodeId, term: Term) -> Msg {
             .collect(),
         failover: None,
         armed: false,
+        claims: Vec::new(),
+        side_copies: Vec::new(),
     }
 }
 

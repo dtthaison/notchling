@@ -12,8 +12,9 @@ pub const STANDBY: &str = "1122334455667788";
 pub const WORKER: &str = "99aabbccddeeff00";
 pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
+pub const STANDBY_NAME: &str = "mac-mini";
 
-pub const VIEWS: [ViewSpec; 11] = [
+pub const VIEWS: [ViewSpec; 14] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -60,6 +61,21 @@ pub const VIEWS: [ViewSpec; 11] = [
         about: "the Move sheet over the cluster sheet while the primary is moving to the Standby: sessions that move and stay, the steps, Move Now (made-up data)",
     },
     ViewSpec {
+        name: "cluster-promote",
+        size: (WIDTH, 1000.0),
+        about: "the cluster sheet while the primary is silent, on its Standby: Move to Now asking to confirm a risk, a side copy and a waiting session, with no failover line though the status says 30m (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-take-back",
+        size: (WIDTH, HEIGHT),
+        about: "the cluster sheet on the old primary after another machine took over, asking to Take Back the primary (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-move-unfenced",
+        size: (WIDTH, 720.0),
+        about: "the Move sheet after a move whose old primary couldn't pause the moved sessions: the warning with its reason (made-up data)",
+    },
+    ViewSpec {
         name: "cluster-joining",
         size: (WIDTH, 300.0),
         about: "the cluster sheet while this Mac waits for the Primary to approve its join (made-up data)",
@@ -84,6 +100,9 @@ pub enum Shown {
     Replication,
     Move,
     Secrets,
+    Promote,
+    Unfenced,
+    TakeBack,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -96,6 +115,9 @@ pub fn shown(name: &str) -> Option<Shown> {
         "cluster-joining" => Some(Shown::Joining),
         "cluster-replication" => Some(Shown::Replication),
         "cluster-move" => Some(Shown::Move),
+        "cluster-promote" => Some(Shown::Promote),
+        "cluster-take-back" => Some(Shown::TakeBack),
+        "cluster-move-unfenced" => Some(Shown::Unfenced),
         "cluster-install" => Some(Shown::Install),
         "cluster-install-off" => Some(Shown::InstallOff),
         "cluster-secrets" => Some(Shown::Secrets),
@@ -252,6 +274,115 @@ pub fn moving(step: &str) -> Value {
     status
 }
 
+pub const RENDER_NOW: i64 = 1_800_000_000_000;
+
+pub fn silent() -> Value {
+    let mut status = status();
+    set_member(&mut status, ME, "online", json!(false));
+    status["me"] = json!(STANDBY);
+    status
+}
+
+pub fn stepped_down() -> Value {
+    let mut status = status();
+    status["cluster"]["home"] = json!(STANDBY);
+    set_member(&mut status, ME, "role", json!("standby"));
+    set_member(&mut status, STANDBY, "role", json!("home"));
+    status
+}
+
+pub fn with_failover(
+    mut status: Value,
+    value: &str,
+    armed: bool,
+    takes_over_at: Option<i64>,
+) -> Value {
+    status["failover"] = json!({
+        "value": value,
+        "armed": armed,
+        "target": STANDBY,
+        "takesOverAt": takes_over_at,
+    });
+    status
+}
+
+pub fn side_copy(session: &str, node: &str, path: Option<&str>, at_ms: i64, hidden: bool) -> Value {
+    json!({
+        "session": session,
+        "node": node,
+        "base_set": "set-7",
+        "extra_bytes": 48_000,
+        "repo_changed": false,
+        "path": path,
+        "at_ms": at_ms,
+        "hidden": hidden,
+    })
+}
+
+pub fn waiting_entry(session: &str, node: &str, name: &str, title: Option<&str>) -> Value {
+    json!({"session": session, "node": node, "name": name, "title": title})
+}
+
+pub fn claim(session: &str, node: &str) -> Value {
+    json!({
+        "session": session,
+        "node": node,
+        "n": 2,
+        "term": {"n": 2, "node": node},
+        "base_set": "set-7",
+        "base_len": 1200,
+        "touched": false,
+    })
+}
+
+fn render_promote() -> Value {
+    let mut status = with_failover(silent(), "30m", false, None);
+    status["sideCopies"] = json!([
+        side_copy(
+            "j-bench",
+            ME,
+            Some("/Users/maintainer/.claude/projects/p/bench.jsonl"),
+            RENDER_NOW - 37 * 60_000,
+            false,
+        ),
+        side_copy(
+            "j-fork",
+            STANDBY,
+            Some("/Users/maintainer/.claude/projects/p/fork.jsonl"),
+            RENDER_NOW - 5 * 3_600_000,
+            false,
+        ),
+        side_copy("j-old", ME, None, RENDER_NOW - 90_000_000, true),
+    ]);
+    status["waiting"] = json!([waiting_entry("j-tests", ME, "MacBook", None)]);
+    status
+}
+
+pub fn back() -> Value {
+    let mut status = stepped_down();
+    status["sideCopies"] = json!([side_copy(
+        "j-bench",
+        ME,
+        Some("/Users/maintainer/.claude/projects/p/bench.jsonl"),
+        RENDER_NOW - 12 * 60_000,
+        false,
+    )]);
+    status
+}
+
+pub fn risk_reply() -> Value {
+    json!({
+        "needsConfirm": "MacBook may still be running its sessions. If it is, they keep going until it hears of this."
+    })
+}
+
+pub fn unfenced(step: &str) -> Value {
+    let mut status = stepped_down();
+    status["move"] = moving(step)["move"].clone();
+    status["move"]["unfenced"] = json!("MacBook didn't answer the pause request");
+    status
+}
+
 pub fn keep_model(session: &str) -> ClusterModel {
     let mut status = status();
     status["main"] = json!([session]);
@@ -397,6 +528,9 @@ pub fn model_of(which: Shown) -> ClusterModel {
         Shown::Install => ClusterModel::from_status(&install_on(), ME),
         Shown::Replication => ClusterModel::from_status(&replication(), ME),
         Shown::Move => ClusterModel::from_status(&moving("freeze"), ME),
+        Shown::Promote => ClusterModel::from_status(&render_promote(), STANDBY),
+        Shown::Unfenced => ClusterModel::from_status(&unfenced("done"), ME),
+        Shown::TakeBack => ClusterModel::from_status(&back(), ME),
         Shown::Full | Shown::Menu | Shown::InstallOff | Shown::Secrets => model(true),
     }
 }

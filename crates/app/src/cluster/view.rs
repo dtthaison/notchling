@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +20,11 @@ use super::feed::ClusterFeed;
 use super::install::{applied_note, plan_of, Plan};
 use super::model::ClusterModel;
 use super::move_sheet::{MoveSheet, Names};
-use super::renders::{install_plan_reply, model_of, names, shown, Shown, STANDBY, THIS_MAC};
+use super::promote::PromoteSheet;
+use super::renders::{
+    install_plan_reply, model_of, names, risk_reply, shown, Shown, RENDER_NOW, STANDBY,
+    STANDBY_NAME, THIS_MAC,
+};
 use super::secrets::VaultAccess;
 use super::secrets_view::{editor_body, editor_footer, editor_title, Editor, SecretsEvent};
 use super::view_secrets::{secrets_fixture, Editing};
@@ -48,6 +53,11 @@ pub struct ClusterSheetView {
     pub(super) editing: Option<Editing>,
     pub(super) menu: Option<String>,
     pub(super) move_sheet: Option<MoveSheet>,
+    pub(super) promote_sheet: Option<PromoteSheet>,
+    pub(super) taking_back: bool,
+    pub(super) continuing: Option<String>,
+    pub(super) waited: BTreeSet<String>,
+    pub(super) now: Option<i64>,
     pub(super) names: Names,
     pub(super) removing: Option<String>,
     pub(super) installing: Option<InstallAsk>,
@@ -144,6 +154,11 @@ impl ClusterSheetView {
             editing: None,
             menu: None,
             move_sheet: None,
+            promote_sheet: None,
+            taking_back: false,
+            continuing: None,
+            waited: BTreeSet::new(),
+            now: None,
             names: Names::new(),
             removing: None,
             installing: None,
@@ -171,7 +186,12 @@ impl ClusterSheetView {
         .detach();
     }
 
-    fn run(&mut self, request: Request, failed: fn(&str) -> String, cx: &mut Context<Self>) {
+    pub(super) fn run(
+        &mut self,
+        request: Request,
+        failed: fn(&str) -> String,
+        cx: &mut Context<Self>,
+    ) {
         if self.busy || !self.feed.is_live() {
             return;
         }
@@ -287,7 +307,13 @@ impl ClusterSheetView {
     }
 
     pub(super) fn feed_offers_move(&self, id: &str) -> bool {
-        self.feed.snapshot().offers_move_now(id)
+        let model = self.feed.snapshot();
+        model.move_kind(id).is_some() && !(model.me() == id && model.offers_take_back())
+    }
+
+    pub(super) fn feed_offers_take_back(&self, id: &str) -> bool {
+        let model = self.feed.snapshot();
+        model.me() == id && model.offers_take_back()
     }
 
     pub(super) fn feed_offers_install(&self, id: &str) -> bool {
@@ -610,9 +636,12 @@ impl Render for ClusterSheetView {
         } else {
             body = body.child(self.connection(&model, a, cx));
             body = body.children(self.move_running_line(&model, a, cx));
+            body = body.children(self.promote_running_line(&model, a, cx));
+            body = body.children(self.waiting_block(&model, a, cx));
             for row in model.rows() {
                 body = body.child(self.node_row(&row, a, cx));
             }
+            body = body.children(self.copies_block(&model, a, cx));
         }
         if let Some((text, error)) = &self.note {
             body = body.child(label(
@@ -632,6 +661,8 @@ impl Render for ClusterSheetView {
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let alert = self.remove_alert(&model, a, cx);
         let install = self.install_alert(a, cx);
+        let take_back = self.take_back_alert(&model, a, cx);
+        let continuing = self.continue_alert(&model, a, cx);
         let moving = self.move_overlay(&model, a, cx);
         let on: Handler<Self, SecretsEvent> =
             Rc::new(|this, event, cx| this.secrets_event(event, cx));
@@ -680,6 +711,8 @@ impl Render for ClusterSheetView {
             .children(footer)
             .children(alert)
             .children(install)
+            .children(take_back)
+            .children(continuing)
             .children(moving)
             .part("Cluster View", a, cx)
     }
@@ -716,8 +749,25 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
         if which == Shown::Menu {
             sheet.menu = Some(STANDBY.to_owned());
         }
+        sheet.now = Some(RENDER_NOW);
         if which == Shown::Move {
             sheet.move_sheet = Some(MoveSheet::running(STANDBY, "mac-mini"));
+            sheet.names = names();
+        }
+        if which == Shown::Unfenced {
+            sheet.move_sheet = Some(MoveSheet::running(STANDBY, STANDBY_NAME).with_from(THIS_MAC));
+            sheet.names = names();
+        }
+        if which == Shown::TakeBack {
+            sheet.taking_back = true;
+            sheet.names = names();
+        }
+        if which == Shown::Promote {
+            let mut ask = PromoteSheet::new(STANDBY, STANDBY_NAME, THIS_MAC);
+            let model = sheet.feed.snapshot();
+            ask.start(&model);
+            ask.answered(Ok(risk_reply()));
+            sheet.promote_sheet = Some(ask);
             sheet.names = names();
         }
         if which == Shown::Install || which == Shown::InstallOff {

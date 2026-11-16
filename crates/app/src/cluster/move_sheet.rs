@@ -78,6 +78,7 @@ pub struct MoveStatus {
     pub cut: Vec<String>,
     pub stopped: Vec<String>,
     pub failed: Vec<(String, String)>,
+    pub unfenced: Option<String>,
     pub reason: Option<String>,
 }
 
@@ -122,6 +123,11 @@ impl MoveStatus {
             cut: texts(moved, "cut"),
             stopped: texts(moved, "stopped"),
             failed: pairs(moved, "failed"),
+            unfenced: moved
+                .get("unfenced")
+                .and_then(Value::as_str)
+                .filter(|r| !r.is_empty())
+                .map(str::to_owned),
             reason: moved
                 .get("reason")
                 .and_then(Value::as_str)
@@ -146,6 +152,7 @@ pub enum Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Button {
     Start,
+    Anyway,
     Cancel,
     MoveNow,
     Close,
@@ -154,6 +161,7 @@ pub enum Button {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepState {
     Done,
+    Problem,
     Current,
     Waiting,
 }
@@ -193,11 +201,12 @@ pub struct MoveSheet {
     pub to_name: String,
     pub phase: Phase,
     pub failure: Option<String>,
+    pub from_name: Option<String>,
 }
 
 pub type Names = BTreeMap<String, String>;
 
-fn shown(names: &Names, id: &str) -> String {
+pub(super) fn shown(names: &Names, id: &str) -> String {
     names
         .get(id)
         .filter(|n| !n.is_empty())
@@ -219,7 +228,13 @@ impl MoveSheet {
             to_name: to_name.to_owned(),
             phase: Phase::Confirm,
             failure: None,
+            from_name: None,
         }
+    }
+
+    pub fn with_from(mut self, name: &str) -> MoveSheet {
+        self.from_name = Some(name.to_owned()).filter(|n| !n.is_empty());
+        self
     }
 
     pub fn running(to: &str, to_name: &str) -> MoveSheet {
@@ -290,7 +305,9 @@ impl MoveSheet {
                 .enumerate()
                 .map(|(index, step)| StepLine {
                     text: step.line(&self.to_name),
-                    state: if index < at || status.step == Step::Done {
+                    state: if *step == Step::Switch && status.unfenced.is_some() && index < at {
+                        StepState::Problem
+                    } else if index < at || status.step == Step::Done {
                         StepState::Done
                     } else if index == at {
                         StepState::Current
@@ -299,6 +316,16 @@ impl MoveSheet {
                     },
                 })
                 .collect();
+        }
+        if let Some(why) = &status.unfenced {
+            let primary = self
+                .from_name
+                .clone()
+                .unwrap_or_else(|| t::cluster::move_old_primary().to_owned());
+            view.notes.push(Note {
+                text: t::cluster::move_unfenced(&primary, &list(names, &status.moving), why),
+                problem: true,
+            });
         }
         if !status.cut.is_empty() {
             view.notes.push(Note {
