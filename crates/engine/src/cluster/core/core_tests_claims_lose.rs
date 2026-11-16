@@ -89,3 +89,23 @@ fn a_retry_of_the_winning_claim_still_answers_ok() {
     record(&mut hub, &m1, claim("s1", &m1, 2));
     assert_eq!(answered(&hub, mark, "m1").expect("ok")["changed"], false);
 }
+
+#[test]
+fn a_members_claim_is_journaled_on_it_before_its_record_is_answered() {
+    let (mut hub, _, m1) = pair();
+    let mark = hub.seen.len();
+    record(&mut hub, &m1, claim("s1", &m1, 1));
+    let mine: Vec<&Effect> = hub.seen[mark..]
+        .iter()
+        .filter(|(n, _)| n == "m1")
+        .map(|(_, e)| e)
+        .collect();
+    let saved = mine.iter().position(|e| {
+        matches!(e, Effect::Persist { entry, .. } if matches!(entry.command, Command::Claim { .. }))
+    });
+    let reply = mine
+        .iter()
+        .position(|e| matches!(e, Effect::Answer { result: Ok(_), .. }));
+    assert!(saved.is_some() && reply.is_some(), "{mine:?}");
+    assert!(saved < reply, "{mine:?}");
+}

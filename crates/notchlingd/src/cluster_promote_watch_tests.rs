@@ -49,8 +49,9 @@ fn open(r: &Rig, id: &str) -> Option<Item> {
     r.item(id).filter(|i| i.state == State::Open)
 }
 
-const UNREACHABLE: &str = "primary-unreachable:1";
-const CONFIRM: &str = "primary-unreachable:1:confirm";
+const UNREACHABLE: &str = "primary-unreachable:1:5000000";
+const CONFIRM: &str = "primary-unreachable:1:5000000:confirm";
+const NO_PRIMARY: &str = "no-primary:1:5000000";
 
 #[test]
 fn nothing_is_raised_before_a_minute() {
@@ -119,10 +120,16 @@ fn the_item_is_raised_once_and_withdrawn_when_the_primary_returns() {
     home_online(&r, false);
     at(&r, UNREACHABLE_AFTER_MS + 1_000);
     w.tick();
-    assert!(open(&r, UNREACHABLE).is_none());
+    assert!(r.open_ids().is_empty());
     at(&r, 2 * UNREACHABLE_AFTER_MS + 1_000);
     w.tick();
-    assert!(open(&r, UNREACHABLE).is_none());
+    let second = format!(
+        "primary-unreachable:1:{}",
+        BOOT_MS + UNREACHABLE_AFTER_MS + 1_000
+    );
+    assert!(open(&r, &second).is_some());
+    assert_eq!(r.item(UNREACHABLE).unwrap().state, State::Withdrawn);
+    assert_eq!(r.kinds(Kind::PrimaryUnreachable).len(), 2);
 }
 
 #[test]
@@ -168,12 +175,12 @@ fn a_client_hears_after_two_minutes() {
     assert!(r.open_ids().is_empty());
     at(&r, NO_PRIMARY_AFTER_MS);
     w.tick();
-    let item = open(&r, "no-primary:1").expect("the item");
+    let item = open(&r, NO_PRIMARY).expect("the item");
     assert_eq!(item.kind, Kind::NoPrimary);
     assert!(item.actions.is_empty());
     home_online(&r, true);
     w.tick();
-    assert_eq!(r.item("no-primary:1").unwrap().state, State::Withdrawn);
+    assert_eq!(r.item(NO_PRIMARY).unwrap().state, State::Withdrawn);
 }
 
 #[test]
@@ -297,4 +304,89 @@ fn the_confirm_item_is_withdrawn_when_the_primary_returns() {
     home_online(&r, true);
     w.tick();
     assert!(open(&r, CONFIRM).is_none());
+}
+
+#[test]
+fn a_second_outage_in_the_same_term_raises_a_new_confirm_item() {
+    let r = rig();
+    let w = raised(&r);
+    r.p.to
+        .inbox
+        .decide(UNREACHABLE, ActionId::MoveHere, "mac")
+        .unwrap();
+    crate::cluster_testkit::eventually("the confirm item", || open(&r, CONFIRM).is_some());
+    r.finish();
+    home_online(&r, true);
+    w.tick();
+    assert!(open(&r, CONFIRM).is_none());
+    home_online(&r, false);
+    at(&r, UNREACHABLE_AFTER_MS + 1_000);
+    w.tick();
+    at(&r, 2 * UNREACHABLE_AFTER_MS + 1_000);
+    w.tick();
+    let second = format!(
+        "primary-unreachable:1:{}",
+        BOOT_MS + UNREACHABLE_AFTER_MS + 1_000
+    );
+    r.p.to
+        .inbox
+        .decide(&second, ActionId::MoveHere, "mac")
+        .unwrap();
+    let confirm = format!("{second}:confirm");
+    crate::cluster_testkit::eventually("the second confirm item", || open(&r, &confirm).is_some());
+}
+
+#[test]
+fn a_client_hears_again_about_a_second_outage() {
+    let r = rig();
+    home_online(&r, false);
+    me_as_client(&r);
+    let w = watch(&r);
+    w.tick();
+    at(&r, NO_PRIMARY_AFTER_MS);
+    w.tick();
+    assert!(open(&r, NO_PRIMARY).is_some());
+    home_online(&r, true);
+    w.tick();
+    home_online(&r, false);
+    at(&r, NO_PRIMARY_AFTER_MS + 1_000);
+    w.tick();
+    at(&r, 2 * NO_PRIMARY_AFTER_MS + 1_000);
+    w.tick();
+    let second = format!("no-primary:1:{}", BOOT_MS + NO_PRIMARY_AFTER_MS + 1_000);
+    assert!(open(&r, &second).is_some());
+    assert_eq!(r.item(NO_PRIMARY).unwrap().state, State::Withdrawn);
+}
+
+#[test]
+fn an_item_open_before_a_restart_is_withdrawn_when_the_primary_is_back() {
+    let r = rig();
+    let _before = raised(&r);
+    assert!(open(&r, UNREACHABLE).is_some());
+    let after = watch(&r);
+    home_online(&r, true);
+    after.tick();
+    assert_eq!(r.item(UNREACHABLE).unwrap().state, State::Withdrawn);
+    assert!(r.open_ids().is_empty());
+}
+
+#[test]
+fn an_item_open_before_a_restart_is_withdrawn_when_a_new_outage_begins() {
+    let r = rig();
+    let _before = raised(&r);
+    r.p.to
+        .inbox
+        .decide(UNREACHABLE, ActionId::MoveHere, "mac")
+        .unwrap();
+    crate::cluster_testkit::eventually("the confirm item", || open(&r, CONFIRM).is_some());
+    r.finish();
+    let after = watch(&r);
+    assert!(open(&r, CONFIRM).is_some());
+    after.tick();
+    assert!(open(&r, CONFIRM).is_none());
+    assert!(r.open_ids().is_empty());
+    at(&r, 2 * UNREACHABLE_AFTER_MS);
+    after.tick();
+    let fresh = format!("primary-unreachable:1:{}", BOOT_MS + UNREACHABLE_AFTER_MS);
+    assert!(open(&r, &fresh).is_some());
 }

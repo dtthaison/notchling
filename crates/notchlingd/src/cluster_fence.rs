@@ -13,6 +13,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 static WRITES: Mutex<()> = Mutex::new(());
+static TURNS: Mutex<BTreeMap<PathBuf, &'static Mutex<()>>> = Mutex::new(BTreeMap::new());
+
+pub fn turn(cluster: &Path) -> MutexGuard<'static, ()> {
+    let mutex = *TURNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(cluster.to_path_buf())
+        .or_insert_with(|| Box::leak(Box::new(Mutex::new(()))));
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn serial() -> MutexGuard<'static, ()> {
     WRITES.lock().unwrap_or_else(|e| e.into_inner())

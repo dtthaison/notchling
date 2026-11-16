@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use notchling_local_api::{
-    Client, ClientError, ClientKind, ConnectOptions, CALL_TIMEOUT, SOCKET_NAME,
+    ops as api_ops, Client, ClientError, ClientKind, ConnectOptions, CALL_TIMEOUT, SOCKET_NAME,
 };
 use serde_json::{json, Value};
 
@@ -24,14 +24,24 @@ pub struct Socket {
 
 pub const SESSION_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub const CODE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
+pub const PROMOTE_CALL_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub fn call_timeout(op: &str) -> Duration {
-    if op == ops::CLUSTER_DISPATCH || op == ops::CLUSTER_RETURN {
+    if op == ops::CLUSTER_DISPATCH
+        || op == ops::CLUSTER_RETURN
+        || op == api_ops::CLUSTER_TAKE_BACK
+        || op == api_ops::CLUSTER_CONTINUE_HERE
+    {
         CODE_CALL_TIMEOUT
+    } else if op == api_ops::CLUSTER_PROMOTE {
+        PROMOTE_CALL_TIMEOUT
     } else if (op.starts_with("session.") && op != ops::SESSION_SEND)
         || op == ops::FOLDER_TRUST
         || op == ops::CLUSTER_FOLLOW
         || op == ops::SHELL_STOP
+        || op == api_ops::CLUSTER_MOVE_HOME
+        || op == api_ops::CLUSTER_MOVE_NOW
+        || op == api_ops::CLUSTER_SIDE_COPY_HIDE
     {
         SESSION_CALL_TIMEOUT
     } else {
@@ -297,9 +307,23 @@ mod tests {
         ] {
             assert_eq!(call_timeout(op), SESSION_CALL_TIMEOUT, "{op}");
         }
-        for op in [ops::CLUSTER_DISPATCH, ops::CLUSTER_RETURN] {
+        for op in [
+            ops::CLUSTER_DISPATCH,
+            ops::CLUSTER_RETURN,
+            api_ops::CLUSTER_TAKE_BACK,
+            api_ops::CLUSTER_CONTINUE_HERE,
+        ] {
             assert_eq!(call_timeout(op), CODE_CALL_TIMEOUT, "{op}");
         }
+        for op in [
+            api_ops::CLUSTER_MOVE_HOME,
+            api_ops::CLUSTER_MOVE_NOW,
+            api_ops::CLUSTER_SIDE_COPY_HIDE,
+        ] {
+            assert_eq!(call_timeout(op), SESSION_CALL_TIMEOUT, "{op}");
+        }
+        assert_eq!(call_timeout(api_ops::CLUSTER_PROMOTE), PROMOTE_CALL_TIMEOUT);
+        assert!(PROMOTE_CALL_TIMEOUT > Duration::from_secs(60));
         for op in [
             ops::SESSION_SEND,
             ops::OUTBOX_LIST,

@@ -218,6 +218,8 @@ mod cluster_fence_stale_tests;
 #[cfg(test)]
 mod cluster_fence_tests;
 #[cfg(test)]
+mod cluster_fence_turn_tests;
+#[cfg(test)]
 mod cluster_fence_write_tests;
 #[cfg(test)]
 mod cluster_move_fence_fail_tests;

@@ -27,6 +27,7 @@ pub(crate) struct RecLink {
     pub app_answer: Mutex<Result<Value, WireError>>,
     pub fail: Mutex<Option<String>>,
     pub rival: Mutex<Option<Command>>,
+    pub lag: Mutex<Option<Duration>>,
     pub log: Log,
 }
 
@@ -99,7 +100,16 @@ impl Link for RecLink {
                 _ => Ok(()),
             };
         };
-        persist::save(&self.cluster, &entry, &applied.changes).unwrap();
+        let lag = *self.lag.lock().unwrap();
+        let Some(lag) = lag else {
+            persist::save(&self.cluster, &entry, &applied.changes).unwrap();
+            return Ok(());
+        };
+        let cluster = self.cluster.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(lag);
+            persist::save(&cluster, &entry, &applied.changes).unwrap();
+        });
         Ok(())
     }
 
@@ -226,6 +236,7 @@ pub(crate) fn kit(tag: &str, mut seed: Seed) -> Kit {
         app_answer: Mutex::new(Ok(json!({"started": true}))),
         fail: Mutex::default(),
         rival: Mutex::default(),
+        lag: Mutex::default(),
         log: log.clone(),
     });
     let rows = Arc::new(Rows::default());

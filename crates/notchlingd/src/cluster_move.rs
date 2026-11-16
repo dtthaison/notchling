@@ -828,6 +828,7 @@ impl Mover {
         let Some(session) = main.get(id) else {
             return Err("this machine has no record of it".to_string());
         };
+        let _turn = self.turn();
         self.claim_here(id, main)?;
         self.lift(main, id);
         if session.tool != Tool::Claude || self.live(id) {
@@ -851,13 +852,16 @@ impl Mover {
             .map(|id| {
                 let result = match main.get(id) {
                     None => Err("this machine has no record of it".to_string()),
-                    Some(session) => self.claim_here(id, &main).and_then(|()| {
-                        self.lift(&main, id);
-                        match session.tool {
-                            Tool::Claude => self.p.acts.start_claude(session),
-                            _ => Ok(()),
-                        }
-                    }),
+                    Some(session) => {
+                        let _turn = self.turn();
+                        self.claim_here(id, &main).and_then(|()| {
+                            self.lift(&main, id);
+                            match session.tool {
+                                Tool::Claude => self.p.acts.start_claude(session),
+                                _ => Ok(()),
+                            }
+                        })
+                    }
                 };
                 (id.clone(), result)
             })

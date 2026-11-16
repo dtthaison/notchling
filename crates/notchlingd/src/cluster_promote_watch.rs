@@ -8,7 +8,7 @@ use notchling_engine::cluster::NodeId;
 use notchling_engine::inbox::{ActionId, Item, Kind, State};
 use notchling_engine::pages::clock::{civil_at, local_offset_secs};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -98,22 +98,31 @@ pub struct Watcher {
     memory: Mutex<Memory>,
 }
 
-fn unreachable_id(term: u64) -> String {
-    format!("primary-unreachable:{term}")
+type Outage = (u64, u64);
+
+const UNREACHABLE_PREFIX: &str = "primary-unreachable:";
+const NO_PRIMARY_PREFIX: &str = "no-primary:";
+
+fn unreachable_id((term, since): Outage) -> String {
+    format!("{UNREACHABLE_PREFIX}{term}:{since}")
 }
 
-fn confirm_id(term: u64) -> String {
-    format!("primary-unreachable:{term}:confirm")
+fn confirm_id(outage: Outage) -> String {
+    format!("{}:confirm", unreachable_id(outage))
 }
 
-fn no_primary_id(term: u64) -> String {
-    format!("no-primary:{term}")
+fn no_primary_id((term, since): Outage) -> String {
+    format!("{NO_PRIMARY_PREFIX}{term}:{since}")
+}
+
+fn watched(id: &str) -> bool {
+    id.starts_with(UNREACHABLE_PREFIX) || id.starts_with(NO_PRIMARY_PREFIX)
 }
 
 struct Moving {
     promoter: Arc<Promoter>,
     items: Items,
-    term: u64,
+    outage: Outage,
     me_name: String,
     confirmed: bool,
 }
@@ -128,21 +137,27 @@ impl Responder for Moving {
             return false;
         }
         let (promoter, items) = (self.promoter.clone(), self.items.clone());
-        let (term, name, confirmed) = (self.term, self.me_name.clone(), self.confirmed);
+        let (outage, name, confirmed) = (self.outage, self.me_name.clone(), self.confirmed);
         std::thread::Builder::new()
             .name("cluster-promote-answer".into())
-            .spawn(move || report(&promoter, &items, (term, &name), confirmed))
+            .spawn(move || report(&promoter, &items, (outage, &name), confirmed))
             .is_ok()
     }
 }
 
-fn report(promoter: &Arc<Promoter>, items: &Items, (term, name): (u64, &str), confirmed: bool) {
+fn report(
+    promoter: &Arc<Promoter>,
+    items: &Items,
+    (outage, name): (Outage, &str),
+    confirmed: bool,
+) {
+    let term = outage.0;
     let title = format!("Couldn't move to {name}");
     match promoter.start(confirmed) {
         Ok(answer) => {
             if let Some(risk) = answer["needsConfirm"].as_str() {
                 match confirmed {
-                    false => raise_confirm(promoter, items, (term, name), risk),
+                    false => raise_confirm(promoter, items, (outage, name), risk),
                     true => items.failed(&format!("promote-start:{term}"), &title, risk),
                 }
             }
@@ -151,10 +166,15 @@ fn report(promoter: &Arc<Promoter>, items: &Items, (term, name): (u64, &str), co
     }
 }
 
-fn raise_confirm(promoter: &Arc<Promoter>, items: &Items, (term, name): (u64, &str), risk: &str) {
+fn raise_confirm(
+    promoter: &Arc<Promoter>,
+    items: &Items,
+    (outage, name): (Outage, &str),
+    risk: &str,
+) {
     let title = format!("{name} can't reach the primary");
     let mut item = open_item(
-        &confirm_id(term),
+        &confirm_id(outage),
         Kind::PrimaryUnreachable,
         (title, risk.to_string()),
         items.now(),
@@ -163,7 +183,7 @@ fn raise_confirm(promoter: &Arc<Promoter>, items: &Items, (term, name): (u64, &s
     let responder = Arc::new(Moving {
         promoter: promoter.clone(),
         items: items.clone(),
-        term,
+        outage,
         me_name: name.to_string(),
         confirmed: true,
     });
@@ -218,50 +238,52 @@ impl Watcher {
             self.withdraw_except(None);
             return;
         }
-        let down = {
-            let mut memory = lock(&self.memory);
-            now.saturating_sub(*memory.since.get_or_insert(now))
-        };
-        self.withdraw_except(Some(view.term));
+        let since = *lock(&self.memory).since.get_or_insert(now);
+        let down = now.saturating_sub(since);
+        let outage = (view.term, since);
+        self.withdraw_except(Some(outage));
         if view.can_be_master && down >= UNREACHABLE_AFTER_MS {
-            self.raise_unreachable(&view);
+            self.raise_unreachable(&view, outage);
         } else if view.client && !view.can_be_master && down >= NO_PRIMARY_AFTER_MS {
-            self.raise_no_primary(&view);
+            self.raise_no_primary(&view, outage);
         }
     }
 
-    fn withdraw_except(&self, term: Option<u64>) {
-        let keep = |id: &str| {
-            term.is_some_and(|n| {
-                [unreachable_id(n), confirm_id(n), no_primary_id(n)]
-                    .iter()
-                    .any(|own| own == id)
+    fn withdraw_except(&self, keep: Option<Outage>) {
+        let kept: Vec<String> = keep
+            .map(|outage| {
+                vec![
+                    unreachable_id(outage),
+                    confirm_id(outage),
+                    no_primary_id(outage),
+                ]
             })
-        };
-        let gone: Vec<String> = {
+            .unwrap_or_default();
+        let others = |id: &String| watched(id) && !kept.contains(id);
+        let mut gone: BTreeSet<String> = {
             let mut memory = lock(&self.memory);
             let ids: Vec<String> = memory
                 .raised
                 .keys()
-                .filter(|id| !keep(id))
+                .filter(|id| others(id))
                 .cloned()
                 .collect();
             for id in &ids {
                 memory.raised.remove(id);
             }
-            ids
+            ids.into_iter().collect()
         };
-        let confirms: Vec<String> = gone
-            .iter()
-            .filter_map(|id| id.strip_prefix("primary-unreachable:"))
-            .filter_map(|n| n.parse::<u64>().ok())
-            .map(confirm_id)
-            .collect();
-        for id in gone.into_iter().chain(confirms) {
-            self.promoter
-                .items()
-                .inbox
-                .resolve(&id, State::Withdrawn, None, None);
+        let inbox = &self.promoter.items().inbox;
+        gone.extend(
+            inbox
+                .own_items()
+                .into_iter()
+                .filter(|item| item.state == State::Open)
+                .map(|item| item.id)
+                .filter(others),
+        );
+        for id in gone {
+            inbox.resolve(&id, State::Withdrawn, None, None);
         }
     }
 
@@ -274,8 +296,8 @@ impl Watcher {
         true
     }
 
-    fn raise_unreachable(&self, view: &View) {
-        let id = unreachable_id(view.term);
+    fn raise_unreachable(&self, view: &View, outage: Outage) {
+        let id = unreachable_id(outage);
         let detail = match view.takes_over_at {
             Some(at) => {
                 let offset = (self.offset)(at / 1000);
@@ -297,15 +319,15 @@ impl Watcher {
         let responder = Arc::new(Moving {
             promoter: self.promoter.clone(),
             items: items.clone(),
-            term: view.term,
+            outage,
             me_name: view.me_name.clone(),
             confirmed: false,
         });
         items.inbox.raise(item, Some(responder));
     }
 
-    fn raise_no_primary(&self, view: &View) {
-        let id = no_primary_id(view.term);
+    fn raise_no_primary(&self, view: &View, outage: Outage) {
+        let id = no_primary_id(outage);
         let detail = format!("{} was the primary.", view.home_name);
         if !self.fresh(&id, &detail) {
             return;

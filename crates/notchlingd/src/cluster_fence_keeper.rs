@@ -1,4 +1,4 @@
-use crate::cluster_fence::{fence_keys, fence_path, sync_gates, Wanted};
+use crate::cluster_fence::{fence_keys, fence_path, sync_gates, turn, Wanted};
 use crate::cluster_move::{raise_notice, Acts};
 use crate::hook_fence::{look_all, real_now};
 use crate::inbox_ops::InboxOps;
@@ -167,6 +167,7 @@ impl Keeper {
     }
 
     pub fn tick(&self) {
+        let _turn = turn(&self.cluster);
         let Some(state) = persist::load(&self.cluster).ok().flatten() else {
             return;
         };
