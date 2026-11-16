@@ -17,11 +17,12 @@ pub const MACHINES_VERSIONS: &str = "machines-versions";
 pub const MACHINES_VERSIONS_NO_DAEMON: &str = "machines-versions-no-daemon";
 pub const MACHINES_SELFUPDATE: &str = "machines-selfupdate";
 pub const MACHINES_DRIFT: &str = "machines-drift";
+pub const MACHINES_FAILOVER: &str = "machines-failover";
 
 pub const WINDOW_SIZE: (f32, f32) = (900.0, 780.0);
 pub const WINDOW_MIN: (f32, f32) = (680.0, 460.0);
 
-pub const VIEWS: [ViewSpec; 9] = [
+pub const VIEWS: [ViewSpec; 10] = [
     ViewSpec {
         name: MACHINES,
         size: WINDOW_SIZE,
@@ -67,6 +68,11 @@ pub const VIEWS: [ViewSpec; 9] = [
         size: WINDOW_SIZE,
         about: "Tool Versions with drift: one worker ahead of the Mac and one behind, each row naming both versions",
     },
+    ViewSpec {
+        name: MACHINES_FAILOVER,
+        size: WINDOW_SIZE,
+        about: "the Machines window with the Automatic failover: not ready banner above the machine cards",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +86,7 @@ pub enum Shown {
     VersionsNoDaemon,
     SelfUpdate,
     Drift,
+    Failover,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -93,6 +100,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         MACHINES_VERSIONS_NO_DAEMON => Shown::VersionsNoDaemon,
         MACHINES_SELFUPDATE => Shown::SelfUpdate,
         MACHINES_DRIFT => Shown::Drift,
+        MACHINES_FAILOVER => Shown::Failover,
         _ => return None,
     })
 }
@@ -121,6 +129,7 @@ pub fn model(which: Shown) -> MachinesModel {
             seed_versions(&model);
             model.set_mac_versions(Ok(drift_mac()));
         }
+        Shown::Failover => model.set_failover_not_ready(true),
         Shown::JobSheet => {
             model.tab = Tab::Jobs;
             if let Some(m) = model.machine("m1") {
@@ -228,6 +237,8 @@ mod tests {
 
         assert!(matches!(model(Shown::Add).sheet, Some(Sheet::Add(_))));
         assert_eq!(model(Shown::Jobs).tab, Tab::Jobs);
+        assert!(model(Shown::Failover).failover_not_ready_line().is_some());
+        assert!(plain.failover_not_ready_line().is_none());
         let Some(Sheet::Job(form)) = model(Shown::JobSheet).sheet else {
             panic!("no job sheet");
         };

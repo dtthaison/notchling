@@ -5,6 +5,7 @@ use notchling_engine::machines::registry::{Machine, NodeSettings};
 use notchling_engine::machines::step::{ClusterTokens, StepId};
 
 use super::model::MachinesModel;
+use notchling_locale as t;
 
 pub struct ClusterAsk {
     tokens: Arc<dyn ClusterTokens>,
@@ -14,6 +15,10 @@ pub struct ClusterAsk {
 impl ClusterAsk {
     pub fn run(&self) -> BTreeMap<String, Option<bool>> {
         self.tokens.can_be_master_all(&self.asks)
+    }
+
+    pub fn failover_not_ready(&self) -> bool {
+        self.tokens.failover_not_ready()
     }
 }
 
@@ -58,6 +63,15 @@ impl MachinesModel {
 
     pub fn set_masters(&mut self, answer: BTreeMap<String, Option<bool>>) {
         self.masters = answer;
+    }
+
+    pub fn set_failover_not_ready(&mut self, not_ready: bool) {
+        self.failover_not_ready = not_ready;
+    }
+
+    pub fn failover_not_ready_line(&self) -> Option<&'static str> {
+        self.failover_not_ready
+            .then(t::settings::cluster_failover_not_ready)
     }
 
     pub fn can_be_master_line(&self, machine: &Machine) -> Option<String> {
