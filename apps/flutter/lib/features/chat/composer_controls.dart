@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/tokens.dart';
+import '../../core/protocol/models.dart';
 import '../../l10n/app_localizations.dart';
+
+const Duration pendingPickTimeout = Duration(seconds: 30);
 
 const List<String> currentModels = <String>[
   'claude-opus-5-5',
@@ -56,9 +59,11 @@ class ComposerControls extends StatefulWidget {
     required this.effort,
     required this.enabled,
     required this.onSend,
+    this.models,
   });
   final String? model;
   final String? effort;
+  final List<ModelChoice>? models;
   final bool enabled;
   final void Function(String text) onSend;
 
@@ -69,12 +74,76 @@ class ComposerControls extends StatefulWidget {
 class _ComposerControlsState extends State<ComposerControls> {
   String? _pickedEffort;
   String? _pickedModel;
+  Timer? _effortTimer;
+  Timer? _modelTimer;
 
   @override
   void didUpdateWidget(ComposerControls oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.effort != widget.effort) _pickedEffort = null;
-    if (oldWidget.model != widget.model) _pickedModel = null;
+    if (oldWidget.effort != widget.effort) _dropEffortPick();
+    if (oldWidget.model != widget.model) _dropModelPick();
+  }
+
+  @override
+  void dispose() {
+    _effortTimer?.cancel();
+    _modelTimer?.cancel();
+    super.dispose();
+  }
+
+  void _dropEffortPick() {
+    _effortTimer?.cancel();
+    _pickedEffort = null;
+  }
+
+  void _dropModelPick() {
+    _modelTimer?.cancel();
+    _pickedModel = null;
+  }
+
+  void _holdEffortPick(String level) {
+    _dropEffortPick();
+    if (level == widget.effort) return;
+    _pickedEffort = level;
+    _effortTimer = Timer(pendingPickTimeout, () {
+      if (mounted) setState(_dropEffortPick);
+    });
+  }
+
+  void _holdModelPick(String id) {
+    _dropModelPick();
+    if (id == widget.model) return;
+    _pickedModel = id;
+    _modelTimer = Timer(pendingPickTimeout, () {
+      if (mounted) setState(_dropModelPick);
+    });
+  }
+
+  String _modelName(String id) {
+    for (final ModelChoice choice in widget.models ?? const <ModelChoice>[]) {
+      if (choice.id == id) return choice.name;
+    }
+    return modelShortName(id);
+  }
+
+  List<_Group> _modelGroups(AppL10n l10n) {
+    final List<ModelChoice>? catalog = widget.models;
+    if (catalog != null && catalog.isNotEmpty) {
+      return <_Group>[
+        _Group(null, <_Choice>[
+          for (final ModelChoice m in catalog) _Choice(m.id, m.name),
+        ]),
+      ];
+    }
+    return <_Group>[
+      _Group(null, <_Choice>[
+        for (final String m in currentModels) _Choice(m, modelShortName(m)),
+      ]),
+      _Group(l10n.chatModelOlder, <_Choice>[
+        for (final String m in olderModels)
+          _Choice(m, modelShortName(m), detail: m),
+      ]),
+    ];
   }
 
   Future<void> _pickModel() async {
@@ -82,19 +151,11 @@ class _ComposerControlsState extends State<ComposerControls> {
     final String? id = await _sheet(
       context,
       title: l10n.chatModelSheetTitle,
-      groups: <_Group>[
-        _Group(null, <_Choice>[
-          for (final String m in currentModels) _Choice(m, modelShortName(m)),
-        ]),
-        _Group(l10n.chatModelOlder, <_Choice>[
-          for (final String m in olderModels)
-            _Choice(m, modelShortName(m), detail: m),
-        ]),
-      ],
+      groups: _modelGroups(l10n),
       current: _pickedModel ?? widget.model,
     );
     if (id == null || !mounted) return;
-    setState(() => _pickedModel = id);
+    setState(() => _holdModelPick(id));
     widget.onSend(_command('/model', id));
   }
 
@@ -111,7 +172,7 @@ class _ComposerControlsState extends State<ComposerControls> {
       current: _pickedEffort ?? widget.effort,
     );
     if (level == null || !mounted) return;
-    setState(() => _pickedEffort = level);
+    setState(() => _holdEffortPick(level));
     widget.onSend(_command('/effort', level));
   }
 
@@ -150,7 +211,8 @@ class _ComposerControlsState extends State<ComposerControls> {
           _Chip(
             key: const ValueKey<String>('model-chip'),
             icon: Icons.memory,
-            label: model == null ? l10n.chatModelChip : modelShortName(model),
+            label: model == null ? l10n.chatModelChip : _modelName(model),
+            pending: _pickedModel != null,
             onTap: widget.enabled ? () => unawaited(_pickModel()) : null,
           ),
           const SizedBox(width: Space.xs),
@@ -160,6 +222,7 @@ class _ComposerControlsState extends State<ComposerControls> {
             label: effort == null
                 ? l10n.chatEffortChip
                 : effortTitle(l10n, effort),
+            pending: _pickedEffort != null,
             onTap: widget.enabled ? () => unawaited(_pickEffort()) : null,
           ),
           IconButton(
@@ -184,14 +247,17 @@ class _Chip extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.pending = false,
   });
   final IconData icon;
   final String label;
+  final bool pending;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final Kit kit = Kit.of(context);
+    final AppL10n l10n = AppL10n.of(context);
     return InkWell(
       borderRadius: BorderRadius.circular(Radii.sm),
       onTap: onTap,
@@ -205,7 +271,16 @@ class _Chip extends StatelessWidget {
               Icon(icon, size: 14, color: kit.textMuted),
               const SizedBox(width: Space.xs),
               Text(label, style: kit.meta.copyWith(color: kit.textMuted)),
-              Icon(Icons.expand_more, size: 14, color: kit.textMuted),
+              if (pending) ...<Widget>[
+                const SizedBox(width: Space.xs),
+                Icon(Icons.schedule, size: 14, color: kit.textMuted),
+                const SizedBox(width: 2),
+                Text(
+                  l10n.chatPickPending,
+                  style: kit.meta.copyWith(color: kit.textMuted),
+                ),
+              ] else
+                Icon(Icons.expand_more, size: 14, color: kit.textMuted),
             ],
           ),
         ),

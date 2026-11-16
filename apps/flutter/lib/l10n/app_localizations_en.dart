@@ -338,6 +338,9 @@ class AppL10nEn extends AppL10n {
   String get chatPhotoTitle => 'Send a photo';
 
   @override
+  String get chatPickPending => 'Applying';
+
+  @override
   String get chatPictureClose => 'Close picture';
 
   @override

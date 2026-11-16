@@ -11,10 +11,11 @@ import '../macs/session_ref.dart';
 enum LoadPhase { loading, ready, error }
 
 class SessionsState {
-  const SessionsState({this.phase = LoadPhase.loading, this.sessions = const <Session>[], this.error});
+  const SessionsState({this.phase = LoadPhase.loading, this.sessions = const <Session>[], this.error, this.models});
   final LoadPhase phase;
   final List<Session> sessions;
   final BridgeException? error;
+  final List<ModelChoice>? models;
 
   Session? byId(String? id) {
     if (id == null) return null;
@@ -59,7 +60,7 @@ class SessionsNotifier extends Notifier<SessionsState> {
     final StreamSubscription<BridgeEvent> events = client.events.listen((BridgeEvent event) {
       switch (event) {
         case SessionsEvent(:final List<Session> sessions):
-          state = SessionsState(phase: LoadPhase.ready, sessions: sessions);
+          state = SessionsState(phase: LoadPhase.ready, sessions: sessions, models: state.models);
         case PromptEvent():
           break;
         default:
@@ -73,19 +74,19 @@ class SessionsNotifier extends Notifier<SessionsState> {
 
   Future<void> _load(BridgeClient client) async {
     try {
-      final List<Session> sessions = await client.listSessions();
+      final ({List<Session> sessions, List<ModelChoice>? models}) listing = await client.sessionsListing();
       if (!ref.mounted) return;
-      state = SessionsState(phase: LoadPhase.ready, sessions: sessions);
+      state = SessionsState(phase: LoadPhase.ready, sessions: listing.sessions, models: listing.models);
     } on BridgeException catch (error) {
       if (!ref.mounted) return;
-      state = SessionsState(phase: LoadPhase.error, sessions: state.sessions, error: error);
+      state = SessionsState(phase: LoadPhase.error, sessions: state.sessions, error: error, models: state.models);
     }
   }
 
   Future<void> refresh() async {
     final BridgeClient? client = ref.read(bridgeClientProvider);
     if (client == null) return;
-    if (state.phase == LoadPhase.error) state = SessionsState(sessions: state.sessions);
+    if (state.phase == LoadPhase.error) state = SessionsState(sessions: state.sessions, models: state.models);
     await _load(client);
   }
 }

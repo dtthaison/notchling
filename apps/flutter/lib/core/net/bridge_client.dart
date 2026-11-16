@@ -705,9 +705,14 @@ class BridgeClient {
     throw const BridgeException('internal', '');
   }
 
-  Future<List<Session>> listSessions() async {
+  Future<List<Session>> listSessions() async => (await sessionsListing()).sessions;
+
+  Future<({List<Session> sessions, List<ModelChoice>? models})> sessionsListing() async {
     final Json data = await request('sessions.list');
-    return data.objects('sessions').map(Session.fromJson).toList();
+    return (
+      sessions: data.objects('sessions').map(Session.fromJson).toList(),
+      models: ModelChoice.listOrNull(data['models']),
+    );
   }
 
   Future<({List<ChatMessage> messages, bool hasMore, bool reset})> chatGet(String sessionId,

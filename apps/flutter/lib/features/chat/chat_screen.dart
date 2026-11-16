@@ -260,6 +260,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                         String? tool,
                         String? model,
                         String? effort,
+                        List<ModelChoice>? models,
                         bool? takeoverAvailable,
                         bool? takeoverStoppable,
                         bool? takeoverBusy,
@@ -273,6 +274,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                             tool: session?.tool,
                             model: session?.facts?.model,
                             effort: session?.facts?.effort,
+                            models: s.models,
                             takeoverAvailable: session?.takeover?.available,
                             takeoverStoppable: session?.takeover?.stoppable,
                             takeoverBusy: session?.takeover?.busy,
@@ -320,6 +322,7 @@ class _SessionChatState extends ConsumerState<_SessionChat> {
                             : null,
                         model: view.model,
                         effort: view.effort,
+                        models: view.models,
                     onAttach: view.canMessage == true ? () => unawaited(pickAndSendPhoto(context, ref, id)) : null,
                         takeover: view.takeoverAvailable == null
                             ? null
