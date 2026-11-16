@@ -232,9 +232,9 @@ mod cluster_move_fix_tests;
 #[cfg(test)]
 mod cluster_move_tests;
 #[cfg(test)]
-pub(crate) mod cluster_promote_kit;
-#[cfg(test)]
 mod cluster_promote_codex_tests;
+#[cfg(test)]
+pub(crate) mod cluster_promote_kit;
 #[cfg(test)]
 mod cluster_promote_ops_tests;
 #[cfg(test)]
