@@ -191,29 +191,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               ),
               title: Text(l10n.appName, style: kit.titleMd),
               actions: <Widget>[
-                if (wide)
-                  IconButton(
-                    tooltip: l10n.appTabInbox,
-                    icon: Badge(
-                      isLabelVisible: ref.watch(inboxOpenCountProvider) > 0,
-                      label: Text('${ref.watch(inboxOpenCountProvider)}'),
-                      child: const Icon(Icons.inbox_outlined),
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: Metric.minTarget,
-                      minHeight: Metric.minTarget,
-                    ),
-                    onPressed: () => unawaited(
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (BuildContext context) => Scaffold(
-                            appBar: AppBar(title: Text(l10n.appTabInbox)),
-                            body: const InboxScreen(),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 IconButton(
                   tooltip: l10n.appOpenMacs,
                   icon: const Icon(Icons.laptop_mac),
@@ -254,18 +231,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 children: <Widget>[
                   const ConnectionBanner(),
                   Expanded(
-                    child: Row(
-                      children: <Widget>[
-                        SizedBox(
-                          width: 360,
-                          child: SessionsScreen(onOpenChat: () {}),
-                        ),
-                        const VerticalDivider(),
-                        const Expanded(child: ChatScreen()),
-                        const VerticalDivider(),
-                        const Expanded(child: VisualizeScreen()),
-                      ],
-                    ),
+                    child: tab == 2
+                        ? const VisualizeScreen()
+                        : tab == 3
+                        ? const InboxScreen()
+                        : Row(
+                            children: <Widget>[
+                              SizedBox(
+                                width: 360,
+                                child: SessionsScreen(onOpenChat: () {}),
+                              ),
+                              const VerticalDivider(),
+                              const Expanded(child: ChatScreen()),
+                            ],
+                          ),
                   ),
                 ],
               ),
@@ -467,9 +446,6 @@ class _BottomNav extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint) {
-      return const SizedBox.shrink();
-    }
     return GlassNav(
       selected: ref.watch(activeTabProvider),
       solid: ref.watch(activeTabProvider) == 1,
