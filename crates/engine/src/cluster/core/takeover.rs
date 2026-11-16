@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{Effect, NodeCore, Target, Then, MOVE_CALL_MS};
+use crate::cluster::claims::{put_claim, Claim};
 use crate::cluster::id::NodeId;
 use crate::cluster::members::{Member, MemberState, Term};
 use crate::cluster::state::{apply, Change, ClusterState, Command};
@@ -20,6 +21,8 @@ pub struct Takeover {
     pub sessions: Vec<String>,
     #[serde(default)]
     pub set: Option<String>,
+    #[serde(default)]
+    pub claims: Vec<Claim>,
     #[serde(skip)]
     pub restored: Option<ClusterState>,
     #[serde(skip)]
@@ -109,6 +112,7 @@ impl NodeCore {
             members: self.shared_members(),
             sessions: Vec::new(),
             set: None,
+            claims: state.claims.values().cloned().collect(),
             restored: None,
             staged: false,
         })
@@ -162,6 +166,12 @@ impl NodeCore {
             next.ended = restored.ended.clone();
             next.seq = next.seq.max(restored.seq);
         }
+        let claims_before = next.claims.clone();
+        let from_set = t.restored.iter().flat_map(|r| r.claims.values());
+        for claim in from_set.chain(t.claims.iter()) {
+            put_claim(&mut next.claims, claim);
+        }
+        let claims_changed = next.claims != claims_before;
         let command = Command::Sync {
             id: t.id.clone(),
             name: t.name.clone(),
@@ -172,6 +182,7 @@ impl NodeCore {
         };
         let applied =
             apply(&mut next, command, self.wall_ms).map_err(|e| refused(&e.to_string()))?;
+        let next_claims = next.claims.clone();
         self.state = Some(next);
         self.changed = true;
         if t.staged {
@@ -179,6 +190,9 @@ impl NodeCore {
         }
         if let Some(entry) = applied.entry {
             let mut changes = applied.changes;
+            if claims_changed || t.restored.is_some() {
+                changes.push(Change::Claims(next_claims));
+            }
             if t.restored.is_some() {
                 self.complete_persist(&t.members, dropped, &mut changes);
             }

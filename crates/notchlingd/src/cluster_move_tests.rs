@@ -229,6 +229,7 @@ pub(crate) fn takeover(from: &NodeId, to: &NodeId, n: u64, sessions: &[&str]) ->
         members: vec![member(from, "mine"), member(to, "m1")],
         sessions: sessions.iter().map(|s| s.to_string()).collect(),
         set: None,
+        claims: Vec::new(),
         restored: None,
         staged: false,
     }

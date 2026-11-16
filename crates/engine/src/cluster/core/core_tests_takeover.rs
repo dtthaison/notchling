@@ -4,12 +4,14 @@ use serde_json::json;
 
 use super::core_tests::{answers, dispatch_cmd, Hub};
 use super::{call_wait, Effect, LocalCmd, Takeover, CALL_MS, MOVE_CALL_MS};
+use crate::cluster::claims::Claim;
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::main_sessions::MainSession;
 use crate::cluster::members::Term;
 use crate::cluster::state::Change;
 use crate::cluster::testkit::id;
+use crate::cluster::wire::Msg;
 
 fn trio() -> (Hub, NodeId, NodeId) {
     let mut hub = Hub::new();
@@ -38,6 +40,7 @@ fn takeover_for(hub: &Hub, from: &NodeId, to: &NodeId) -> Takeover {
         members: hub.core(from).shared_members(),
         sessions: Vec::new(),
         set: None,
+        claims: Vec::new(),
         restored: None,
         staged: false,
     }
@@ -320,4 +323,121 @@ fn m2_move_calls_wait_for_what_the_target_does() {
     assert!(call_wait("move.resume", &three) > CALL_MS);
     assert_eq!(call_wait("move.switch", &json!({})), MOVE_CALL_MS);
     assert_eq!(call_wait("session.reply", &json!({})), CALL_MS);
+}
+
+fn claim(session: &str, node: &NodeId, n: u64, at: &NodeId) -> Claim {
+    Claim {
+        session: session.to_string(),
+        node: node.clone(),
+        n,
+        term: Term {
+            n: 1,
+            node: at.clone(),
+        },
+        base_set: "set-1".to_string(),
+        base_len: 10,
+        touched: false,
+    }
+}
+
+fn claims_of(hub: &Hub, who: &NodeId) -> Vec<Claim> {
+    hub.core(who)
+        .state()
+        .expect("state")
+        .claims
+        .values()
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn r175_the_handover_carries_the_old_primarys_claims() {
+    let (mut hub, m5, m1) = trio();
+    let late = claim("sess-1", &m5, 7, &m5);
+    hub.core_mut(&m5)
+        .state
+        .as_mut()
+        .expect("state")
+        .claims
+        .insert("sess-1".to_string(), late.clone());
+    let effects = hub.local(
+        &m5,
+        LocalCmd::MoveSwitch {
+            to: m1.clone(),
+            sessions: vec!["sess-1".to_string()],
+            set: None,
+        },
+    );
+    let sent: Vec<Takeover> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send {
+                msg: Msg::Call { op, args, .. },
+                ..
+            } if op == "move.switch" => serde_json::from_value((**args).clone()).ok(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].claims, vec![late]);
+}
+
+#[test]
+fn r175_a_primary_restored_from_a_set_gets_the_claims_made_after_it() {
+    let (mut hub, m5, m1) = trio();
+    let late = claim("sess-1", &m5, 7, &m5);
+    let mut restored = restored_state(&hub, &m5, 900);
+    restored.claims.clear();
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored);
+    takeover.claims = vec![late.clone()];
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(answers(&effects)[0].is_ok());
+    assert_eq!(claims_of(&hub, &m1), vec![late.clone()]);
+    let persisted = effects.iter().find_map(|e| match e {
+        Effect::Persist { changes, .. } => changes.iter().find_map(|c| match c {
+            Change::Claims(claims) => Some(claims.clone()),
+            _ => None,
+        }),
+        _ => None,
+    });
+    assert_eq!(persisted.expect("claims persisted")["sess-1"], late);
+}
+
+#[test]
+fn r175_the_stronger_claim_wins_whichever_side_it_comes_from() {
+    let (mut hub, m5, m1) = trio();
+    let old = claim("sess-1", &m5, 3, &m5);
+    let newer = claim("sess-1", &m1, 8, &m5);
+    let other = claim("sess-2", &m1, 1, &m5);
+    let mut restored = restored_state(&hub, &m5, 900);
+    restored.claims = BTreeMap::from([
+        ("sess-1".to_string(), old),
+        ("sess-2".to_string(), other.clone()),
+    ]);
+    let mut takeover = takeover_for(&hub, &m5, &m1);
+    takeover.restored = Some(restored);
+    takeover.claims = vec![newer.clone()];
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(answers(&effects)[0].is_ok());
+    assert_eq!(claims_of(&hub, &m1), vec![newer, other]);
+}
+
+#[test]
+fn r175_a_takeover_from_an_older_node_without_claims_changes_none() {
+    let (mut hub, m5, m1) = trio();
+    let mut value = serde_json::to_value(takeover_for(&hub, &m5, &m1)).unwrap();
+    value.as_object_mut().unwrap().remove("claims");
+    let takeover: Takeover = serde_json::from_value(value).unwrap();
+    assert!(takeover.claims.is_empty());
+    let own = claim("sess-1", &m1, 2, &m5);
+    hub.core_mut(&m1)
+        .state
+        .as_mut()
+        .expect("state")
+        .claims
+        .insert("sess-1".to_string(), own.clone());
+    let effects = take(&mut hub, &m1, takeover);
+    assert!(answers(&effects)[0].is_ok());
+    assert_eq!(claims_of(&hub, &m1), vec![own]);
 }

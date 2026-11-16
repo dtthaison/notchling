@@ -29,6 +29,7 @@ mod cluster_driver_order_tests;
 #[cfg(test)]
 mod cluster_driver_rebuild_tests;
 pub mod cluster_failover_setting;
+pub mod cluster_fence;
 pub mod cluster_forward;
 pub mod cluster_host_facts;
 pub mod cluster_inbox;
@@ -188,6 +189,10 @@ mod bridge_models_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
+#[cfg(test)]
+mod cluster_fence_tests;
+#[cfg(test)]
+mod cluster_move_fence_tests;
 #[cfg(test)]
 mod cluster_move_fix2_tests;
 #[cfg(test)]
