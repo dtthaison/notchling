@@ -161,3 +161,60 @@ fn notch_counts_one_of_n() {
     let card = &super::cards(&agents, &one.open_rows())["row-j1"];
     assert_eq!(card.step(), None, "one question needs no count");
 }
+
+#[test]
+fn a_lost_ask_answer_is_an_error_and_nothing_else_changes() {
+    let lost = json!({"answered": false, "state": "answered", "by": "phone"});
+    assert_eq!(
+        lost_reply(Some("ask:q1"), &lost).as_deref(),
+        Some("Already answered · Phone")
+    );
+    assert_eq!(lost_reply(Some("ask:q1"), &json!({"answered": true})), None);
+    assert_eq!(lost_reply(Some("tu1"), &json!({"ok": true})), None);
+    assert_eq!(lost_reply(None, &json!({"state": "answered"})), None);
+    assert_eq!(lost_reply(Some("tu1"), &json!({"state": "answered"})), None);
+    assert_eq!(
+        lost_reply(None, &json!({"answered": false})).as_deref(),
+        Some("Already answered")
+    );
+}
+
+#[test]
+fn an_ask_card_marks_its_own_key_not_an_answered_permission() {
+    let open = feed(&[wire("q1", "j1", 1, "open", &[])]);
+    let agents = vec![agent("j1", AgentGroup::Working)];
+    let mut m = NotchModel::default();
+    m.set_asks(&open);
+    m.update(agents.clone(), HashMap::new(), HashMap::new());
+    let hook = crate::notch::requests::HookRequest {
+        id: "r1".into(),
+        session_id: "row-j1".into(),
+        created: 0.0,
+        kind: crate::notch::requests::RequestKind::Permission,
+        tool_name: "Bash".into(),
+        summary: "ls".into(),
+        description: String::new(),
+        can_always_allow: false,
+        agy: None,
+    };
+    m.update(
+        agents,
+        HashMap::new(),
+        HashMap::from([("row-j1".to_owned(), hook)]),
+    );
+    m.mark_answered_key("r1");
+    let q = m
+        .question("row-j1")
+        .expect("the ask shows once the permission is answered");
+    assert_eq!(m.answer_key("row-j1").as_deref(), Some("r1"));
+    assert_eq!(answer_key(&m, "row-j1", &q).as_deref(), Some("ask:q1"));
+    let plain = PendingQuestion {
+        tool_use_id: "tu1".into(),
+        items: q.items.clone(),
+    };
+    assert_eq!(
+        answer_key(&m, "row-j1", &plain),
+        m.answer_key("row-j1"),
+        "everything else is unchanged"
+    );
+}

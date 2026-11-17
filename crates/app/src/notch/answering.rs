@@ -148,6 +148,9 @@ impl NotchView {
             this.update(cx, |view, cx| {
                 view.sending = None;
                 match result {
+                    Ok(reply) if super::ask::lost_reply(key.as_deref(), &reply).is_some() => {
+                        view.send_error = super::ask::lost_reply(key.as_deref(), &reply);
+                    }
                     Ok(_) => {
                         if let Some(key) = &key {
                             view.model.mark_answered_key(key);
@@ -209,7 +212,7 @@ impl NotchView {
                 gate::tip(row, gate, A).when(gate.enabled, |row| {
                     row.on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(answers) = this.draft.choose(&question, i + 1) {
-                            let key = this.model.answer_key(&session);
+                            let key = super::ask::answer_key(&this.model, &session, &question);
                             this.send_for(
                                 key,
                                 super::ask::request_for(&session, &question, &answers),
@@ -307,7 +310,7 @@ impl NotchView {
                             if let Some(answers) = this.draft.submit_text(&question) {
                                 let request =
                                     super::ask::request_for(&session, &question, &answers);
-                                let key = this.model.answer_key(&session);
+                                let key = super::ask::answer_key(&this.model, &session, &question);
                                 this.send_for(key, request, Sending::Answer, cx);
                             }
                         }
@@ -351,7 +354,7 @@ impl NotchView {
         let submit = gate::tip(submit, ready, A).when(ready.enabled, |b| {
             b.on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(answers) = this.draft.answers(&question) {
-                    let key = this.model.answer_key(&session);
+                    let key = super::ask::answer_key(&this.model, &session, &question);
                     this.send_for(
                         key,
                         super::ask::request_for(&session, &question, &answers),

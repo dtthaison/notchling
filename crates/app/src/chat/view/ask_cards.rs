@@ -68,6 +68,10 @@ impl ChatView {
             .iter()
             .find(|s| s.agent.outbox_key() == session)
             .map(|s| s.agent.id.clone());
+        self.inbox_panel = None;
+        if self.open_subagent.is_some() {
+            self.close_subagent(cx);
+        }
         if let Some(row) = row {
             self.select(&row, cx);
         }

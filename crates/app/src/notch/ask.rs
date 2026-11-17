@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use notchling_engine::sessions::Agent;
 use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem};
 use notchling_locale as t;
+use serde_json::Value;
 
+use super::model::NotchModel;
 use crate::acting::{Answer, AskAnswer, Request};
-use crate::chat::asks::AskRow;
+use crate::chat::asks::{lost_line, AskRow};
 
 pub const KEY_PREFIX: &str = "ask:";
 
@@ -63,6 +65,22 @@ pub fn cards(agents: &[Agent], rows: &[AskRow]) -> HashMap<String, AskCard> {
 
 pub fn is_ask(tool_use_id: &str) -> bool {
     tool_use_id.starts_with(KEY_PREFIX)
+}
+
+pub fn answer_key(model: &NotchModel, session: &str, q: &PendingQuestion) -> Option<String> {
+    if is_ask(&q.tool_use_id) {
+        return Some(q.tool_use_id.clone());
+    }
+    model.answer_key(session)
+}
+
+pub fn lost_reply(key: Option<&str>, reply: &Value) -> Option<String> {
+    let asked = key.is_some_and(|k| k.starts_with(KEY_PREFIX)) || reply.get("answered").is_some();
+    if asked {
+        lost_line(reply)
+    } else {
+        None
+    }
 }
 
 pub fn request_for(session: &str, q: &PendingQuestion, answers: &[Answer]) -> Request {

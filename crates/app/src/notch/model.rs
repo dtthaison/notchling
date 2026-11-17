@@ -71,7 +71,7 @@ pub struct NotchModel {
     pub inbox_unread: usize,
     pub message_needs: HashSet<String>,
     ask_rows: Vec<AskRow>,
-    ask_cards: HashMap<String, AskCard>,
+    pub(super) ask_cards: HashMap<String, AskCard>,
     hovering: bool,
     pending: Option<Pending>,
     last_groups: Option<HashMap<String, AgentGroup>>,
