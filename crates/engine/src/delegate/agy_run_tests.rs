@@ -574,3 +574,92 @@ fn a_recorded_agy_job_names_its_session_and_model_in_its_record() {
         .finish(&outcome, false, 20.0);
     assert_eq!(record::read_all(&dir)[0].outcome, Some(End::Ok));
 }
+
+fn asking_command(command: &'static str, id: Value) -> OnPrompt {
+    Arc::new(move |h, m| {
+        h.push(
+            &json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission",
+            "params": {"sessionId": "sess-1",
+                "toolCall": {"toolCallId": "c", "kind": "execute", "title": command,
+                    "rawInput": {"CommandLine": command}},
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]}}),
+        );
+        chunk(h, "Done.");
+        answer(h, m, json!({"stopReason": "end_turn"}));
+    })
+}
+
+#[test]
+fn notchling_ask_wait_is_allowed_once_without_write() {
+    let rig = rig_with(agent(asking_command(
+        "notchling ask --wait -- 'Keep it?'",
+        json!("a1"),
+    )));
+    let (outcome, _) = run_it(&rig, &rig.options(Tool::Agy, "x"));
+    let h = rig.agy.spawned().remove(0);
+    assert_eq!(
+        replies_to(&h, &json!("a1"))[0]["result"]["outcome"]["optionId"],
+        "allow"
+    );
+    assert!(outcome.declined.is_empty());
+}
+
+#[test]
+fn the_notchling_of_this_process_is_allowed_by_its_path() {
+    let rig = rig_with(agent(asking_command(
+        "/fake/notchling ask --wait -- x",
+        json!("a2"),
+    )));
+    let (outcome, _) = run_it(&rig, &rig.options(Tool::Agy, "x"));
+    let h = rig.agy.spawned().remove(0);
+    assert_eq!(
+        replies_to(&h, &json!("a2"))[0]["result"]["outcome"]["optionId"],
+        "allow"
+    );
+    assert!(outcome.declined.is_empty());
+}
+
+#[test]
+fn other_commands_are_still_declined_and_listed() {
+    let rig = rig_with(agent(asking_command(
+        "notchling ask --wait -- x; rm y",
+        json!("a3"),
+    )));
+    let mut options = rig.options(Tool::Agy, "x");
+    options.write = true;
+    let (outcome, _) = run_it(&rig, &options);
+    let h = rig.agy.spawned().remove(0);
+    assert_eq!(
+        replies_to(&h, &json!("a3"))[0]["result"]["outcome"]["optionId"],
+        "deny"
+    );
+    assert_eq!(outcome.declined, ["notchling ask --wait -- x; rm y"]);
+}
+
+#[test]
+fn child_env_has_the_deadline() {
+    let rig = rig_with(agent(plain_turn()));
+    let options = rig.options(Tool::Agy, "x");
+    let before = now_ms() + options.timeout.as_millis() as i64;
+    run_it(&rig, &options);
+    let after = now_ms() + options.timeout.as_millis() as i64;
+    let env = rig.agy.envs().remove(0);
+    let value = env
+        .iter()
+        .find(|(k, _)| k == "NOTCHLING_DELEGATE_DEADLINE_MS")
+        .map(|(_, v)| v.parse::<i64>().unwrap())
+        .expect("the deadline is in the child's env");
+    assert!(
+        value >= before && value <= after,
+        "{value} {before} {after}"
+    );
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}

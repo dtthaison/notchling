@@ -32,6 +32,16 @@ pub struct Spawned {
 
 pub trait Spawner: Send + Sync {
     fn spawn(&self, program: &str, args: &[String], folder: &str) -> Result<Spawned, String>;
+
+    fn spawn_with_env(
+        &self,
+        program: &str,
+        args: &[String],
+        folder: &str,
+        _env: &[(String, String)],
+    ) -> Result<Spawned, String> {
+        self.spawn(program, args, folder)
+    }
 }
 
 pub fn read_lines<R: Read>(mut reader: R, max: usize, mut emit: impl FnMut(Output)) {
@@ -92,6 +102,16 @@ impl RealSpawner {
 
 impl Spawner for RealSpawner {
     fn spawn(&self, program: &str, args: &[String], folder: &str) -> Result<Spawned, String> {
+        self.spawn_with_env(program, args, folder, &[])
+    }
+
+    fn spawn_with_env(
+        &self,
+        program: &str,
+        args: &[String],
+        folder: &str,
+        env: &[(String, String)],
+    ) -> Result<Spawned, String> {
         let cwd = if folder.is_empty() {
             self.home.clone()
         } else {
@@ -103,16 +123,17 @@ impl Spawner for RealSpawner {
             self.home.join(".local/bin").to_string_lossy().into_owned(),
             std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()),
         ];
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(args)
             .current_dir(cwd)
             .env("PATH", path.join(":"))
             .env("NO_COLOR", "1")
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().ok_or("no standard output")?;
         let stderr = child.stderr.take().ok_or("no standard error")?;
