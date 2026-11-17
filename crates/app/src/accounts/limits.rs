@@ -82,6 +82,15 @@ pub fn reset_text(resets_at: f64, now: f64, short: bool, zone: Zone) -> String {
     format!("{} {}:{:02}", WEEKDAYS[weekday], c.hour, c.minute)
 }
 
+pub fn resets_phrase(resets_at: f64, now: f64, short: bool, zone: Zone) -> String {
+    let text = reset_text(resets_at, now, short, zone);
+    if resets_at - now <= 0.0 {
+        text
+    } else {
+        format!("resets {text}")
+    }
+}
+
 fn line(
     label: &str,
     used: f64,
@@ -103,7 +112,7 @@ fn line(
         label: label.to_owned(),
         percent: shown,
         percent_text: text,
-        resets: resets_at.map(|at| format!("resets {}", reset_text(at, now, short, zone))),
+        resets: resets_at.map(|at| resets_phrase(at, now, short, zone)),
         fill: Fill::of(used),
         left: basis == Basis::Left,
     }
@@ -224,8 +233,11 @@ fn meter(
     let short = label.ends_with('h');
     let resets = resets_at.map(|at| reset_text(at, now, short, zone));
     let percent_text = format!("{}%", percent.round() as i64);
-    let tooltip = match &resets {
-        Some(r) => format!("{name}: {percent_text} used, resets {r}"),
+    let tooltip = match resets_at {
+        Some(at) => format!(
+            "{name}: {percent_text} used, {}",
+            resets_phrase(at, now, short, zone)
+        ),
         None => format!("{name}: {percent_text} used"),
     };
     Meter {
@@ -315,6 +327,32 @@ mod tests {
         assert!(WEEKDAYS.iter().any(|d| text.starts_with(d)), "{text}");
         assert!(text.contains(':'), "{text}");
         assert_eq!(reset_text(far, NOW, true, Zone::UTC), "in 48h 0m");
+    }
+
+    #[test]
+    fn a_reset_that_has_passed_reads_resetting_without_a_resets_before_it() {
+        assert_eq!(resets_phrase(NOW - 1.0, NOW, false, Zone::UTC), "resetting");
+        assert_eq!(resets_phrase(NOW, NOW, true, Zone::UTC), "resetting");
+        assert_eq!(
+            resets_phrase(NOW + 600.0, NOW, false, Zone::UTC),
+            "resets in 10m"
+        );
+        let past = UsageReport {
+            groups: vec![Group {
+                name: None,
+                bars: vec![Bar {
+                    label: "5h".into(),
+                    kind: BarKind::Session,
+                    percent: 100.0,
+                    resets_at: Some(NOW - 60.0),
+                }],
+            }],
+            fetched: NOW,
+        };
+        let groups = groups(&past, NOW, Zone::UTC);
+        assert_eq!(groups[0].lines[0].resets.as_deref(), Some("resetting"));
+        let meters = codex_meters(&past, NOW, Zone::UTC);
+        assert_eq!(meters[0].tooltip, "5-hour limit: 100% used, resetting");
     }
 
     #[test]

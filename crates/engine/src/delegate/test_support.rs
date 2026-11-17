@@ -85,6 +85,7 @@ pub fn rig(agy: AcpFake) -> Rig {
         recorder: None,
         cancel_grace: Duration::from_millis(100),
         terminate_after: Duration::from_millis(200),
+        quota: None,
     };
     Rig {
         deps,

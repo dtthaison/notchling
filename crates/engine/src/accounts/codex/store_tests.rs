@@ -476,3 +476,54 @@ fn the_sign_in_page_is_found_among_colour_codes_and_nothing_else_is() {
     );
     assert_eq!(sign_in_url("open https://example.com/login"), None);
 }
+
+mod delegate_quota {
+    use super::*;
+    use crate::delegate::options::Tool;
+    use crate::delegate::quota::{self, Verdict};
+    use crate::providers::usage::Reached;
+
+    fn read(rig: &Rig) -> Option<quota::Quota> {
+        quota::load(&rig.root.join("state"), Tool::Codex)
+    }
+
+    #[test]
+    fn a_sync_leaves_the_read_for_the_delegate_command() {
+        let rig = Rig::new("dq-room", FakeProcs::new(), FakeApps::new());
+        assert!(read(&rig).is_none());
+        rig.live(&login_at(FUTURE));
+        rig.http.ok(200, r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":97,"limit_window_seconds":18000,"reset_at":1800000000}}}"#);
+        rig.store.sync(false);
+        let q = read(&rig).unwrap();
+        assert!(q.signed_in);
+        assert_eq!(q.reached, None);
+        assert_eq!(q.pools[0].windows[0].percent, 97.0);
+        assert!(matches!(
+            quota::verdict(Some(&q), Tool::Codex, "gpt-6-astra", q.fetched),
+            Verdict::Out(_)
+        ));
+    }
+
+    #[test]
+    fn a_workspace_out_of_credits_is_written_as_reached() {
+        let rig = Rig::new("dq-credits", FakeProcs::new(), FakeApps::new());
+        rig.live(&login_at(FUTURE));
+        rig.http.ok(
+            200,
+            r#"{"rate_limit_reached_type":{"type":"workspace_member_credits_depleted"}}"#,
+        );
+        rig.store.sync(false);
+        assert_eq!(read(&rig).unwrap().reached, Some(Reached::Credits));
+    }
+
+    #[test]
+    fn no_login_is_written_as_signed_out_and_no_read_leaves_the_old_file() {
+        let rig = Rig::new("dq-out", FakeProcs::new(), FakeApps::new());
+        rig.store.sync(false);
+        assert!(!read(&rig).unwrap().signed_in);
+        let rig = Rig::new("dq-none", FakeProcs::new(), FakeApps::new());
+        rig.live(&login_at(NOW - 5.0));
+        rig.store.sync(true);
+        assert!(read(&rig).is_none(), "an expired token gives no read");
+    }
+}

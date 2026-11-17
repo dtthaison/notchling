@@ -56,6 +56,7 @@ pub fn folders(
         path,
         network,
         catalog_file: layout.state_dir().join("catalog.json"),
+        quota_dir: Some(layout.data_dir.join("daemon").join("accounts")),
     }
 }
 

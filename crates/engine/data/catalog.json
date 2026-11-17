@@ -44,7 +44,13 @@
     ],
     "picks": [
       {"model": "gpt-6-astra", "effort": "xhigh", "roles": ["review-final", "review-secrets"],
-       "use": "Final review of a branch; with gemini-4-argon high for code touching secrets, vault, auth or accounts. Can run git diff itself."}
+       "use": "Final review of a branch; with gemini-4-argon high for code touching secrets, vault, auth or accounts. Can run git diff itself.",
+       "then": {
+         "review-final": [
+           {"tool": "agy", "model": "gemini-4-hydrogen-xhigh"},
+           {"tool": "agy", "model": "claude-opus-5-5", "effort": "high"}],
+         "review-secrets": [
+           {"tool": "agy", "model": "gemini-4-hydrogen-xhigh"}]}}
     ],
     "not_for": [
       {"match": "terra", "roles": ["review"], "use": "Not for review."},
@@ -55,9 +61,20 @@
     "prices": [],
     "picks": [
       {"model": "gemini-4-hydrogen", "effort": "high", "roles": ["review"],
-       "use": "Review after each task. Cannot run commands: put the diff and task text in files under .review/."},
+       "use": "Review after each task. Cannot run commands: put the diff and task text in files under .review/.",
+       "then": {
+         "review": [
+           {"tool": "agy", "model": "gemini-4-hydrogen-xhigh"},
+           {"tool": "codex", "model": "gpt-6-sol", "effort": "high"}]}},
       {"model": "gemini-4-argon", "effort": "high", "roles": ["review-secrets", "spec-check"],
-       "use": "Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/."}
+       "use": "Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.",
+       "then": {
+         "review-secrets": [
+           {"tool": "agy", "model": "claude-opus-5-5", "effort": "high"},
+           {"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"}],
+         "spec-check": [
+           {"tool": "agy", "model": "gemini-4-hydrogen-xhigh"},
+           {"tool": "agy", "model": "claude-opus-5-5", "effort": "high"}]}}
     ],
     "not_for": [
       {"match": "orchestrator", "roles": ["review"], "use": "Not for review."},

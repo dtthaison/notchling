@@ -420,3 +420,120 @@ fn a_trusted_folder_is_added_to_agy_and_the_command_says_so_on_stderr() {
     trust_folder(&rig.folder.to_string_lossy(), &rig.deps, &mut again);
     assert!(again.is_empty());
 }
+
+mod quota_gate {
+    use super::*;
+    use crate::delegate::quota::{self, Pool, Quota, Source, Window};
+    use crate::providers::usage::Reached;
+
+    const NOW: f64 = 1_794_400_000.0;
+
+    fn clock() -> f64 {
+        NOW
+    }
+
+    fn gated() -> Rig {
+        let mut rig = rig(AcpFake::new());
+        rig.deps.quota = Some(Source {
+            dir: rig.root.join("quota"),
+            clock,
+        });
+        rig
+    }
+
+    fn argon_full() -> Quota {
+        Quota {
+            fetched: NOW,
+            signed_in: true,
+            reached: None,
+            pools: vec![
+                Pool {
+                    name: "Gemini Models".into(),
+                    windows: vec![Window {
+                        label: "Week".into(),
+                        percent: 0.0,
+                        resets_at: None,
+                    }],
+                },
+                Pool {
+                    name: "Gemini 4 Argon".into(),
+                    windows: vec![Window {
+                        label: "Week".into(),
+                        percent: 100.0,
+                        resets_at: Some(NOW + 3.0 * 86_400.0 + 4.0 * 3_600.0),
+                    }],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_model_in_a_used_up_pool_fails_at_once_naming_the_pool_and_the_reset() {
+        let rig = gated();
+        quota::save(&rig.root.join("quota"), "antigravity", &argon_full());
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-argon-high", "--", "hello"],
+            None,
+        );
+        assert_eq!(ran.code, 1);
+        assert!(
+            ran.out
+                .contains("Error: gemini-4-argon-high can't run now."),
+            "{}",
+            ran.out
+        );
+        assert!(
+            ran.out
+                .contains("Gemini 4 Argon: week quota used up, resets in 3d 4h"),
+            "{}",
+            ran.out
+        );
+        assert_eq!(rig.agy.calls().len(), 0, "nothing was started");
+    }
+
+    #[test]
+    fn json_carries_the_same_error() {
+        let rig = gated();
+        quota::save(&rig.root.join("quota"), "antigravity", &argon_full());
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-argon", "--json", "--", "hello"],
+            None,
+        );
+        assert_eq!(ran.code, 1);
+        let v: Value = serde_json::from_str(&ran.out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("Gemini 4 Argon"));
+    }
+
+    #[test]
+    fn codex_out_of_credits_fails_at_once() {
+        let rig = gated();
+        let q = Quota {
+            pools: Vec::new(),
+            reached: Some(Reached::Credits),
+            ..argon_full()
+        };
+        quota::save(&rig.root.join("quota"), "codex", &q);
+        let ran = delegate(
+            &rig,
+            &["codex", "--model", "gpt-6-astra", "--", "hello"],
+            None,
+        );
+        assert_eq!(ran.code, 1);
+        assert!(ran.out.contains("Codex: out of credits"), "{}", ran.out);
+        assert!(rig.codex.specs().is_empty());
+    }
+
+    #[test]
+    fn another_pool_or_no_read_runs_as_before() {
+        let rig = gated();
+        rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+        quota::save(&rig.root.join("quota"), "antigravity", &argon_full());
+        let ran = delegate(&rig, &["codex", "--", "hi"], None);
+        assert_eq!(ran.code, 0, "{}", ran.out);
+        let plain = gated();
+        plain.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+        assert_eq!(delegate(&plain, &["codex", "--", "hi"], None).code, 0);
+    }
+}

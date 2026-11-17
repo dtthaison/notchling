@@ -2,6 +2,7 @@ use super::agy_trust::{self, Trusted};
 use super::deps::Deps;
 use super::options::{self, Tool};
 use super::outcome::{render, to_json, Outcome};
+use super::quota::{self, Verdict};
 use super::record::{Delegation, Recorder};
 use super::{agy_pick, agy_run, codex_run, media, role_models};
 use crate::catalog::roles::Roles;
@@ -45,6 +46,13 @@ pub fn run(
     if !Path::new(&options.folder).exists() {
         return usage_error(err, &format!("No folder at {}.", options.folder));
     }
+    if let Some(message) = quota_refusal(&options, &deps) {
+        let mut outcome = Outcome::new(options.tool);
+        outcome.model = options.model.clone();
+        outcome.effort = options.effort.clone();
+        outcome.error = Some(message);
+        return finish(&outcome, parsed.json, out);
+    }
     let recorder = ctx.record.as_ref().map(|to| {
         let record = Delegation::new(
             to.parent_session,
@@ -84,6 +92,22 @@ pub fn run(
         recorder.finish(&outcome, stop.load(Ordering::SeqCst), now_secs());
     }
     finish(&outcome, parsed.json, out)
+}
+
+fn quota_refusal(options: &options::Options, deps: &Deps) -> Option<String> {
+    let source = deps.quota.as_ref()?;
+    let quota = source.load(options.tool)?;
+    let model = options.model.as_deref().unwrap_or_default();
+    let now = source.now();
+    match quota::verdict(Some(&quota), options.tool, model, now) {
+        Verdict::Out(out) => Some(quota::refusal(
+            options.tool,
+            options.model.as_deref(),
+            &out,
+            now,
+        )),
+        Verdict::Room | Verdict::SignedOut => None,
+    }
 }
 
 fn trust_folder(folder: &str, deps: &Deps, err: &mut dyn Write) {

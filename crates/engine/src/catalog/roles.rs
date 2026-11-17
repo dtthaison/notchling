@@ -1,11 +1,35 @@
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Step {
+    pub tool: String,
+    pub model: String,
+    pub effort: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ladder {
+    pub role: String,
+    pub steps: Vec<Step>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pick {
     pub model: String,
     pub effort: String,
     pub roles: Vec<String>,
     pub note: String,
+    pub then: Vec<Ladder>,
+}
+
+impl Pick {
+    pub fn ladder(&self, role: &str) -> &[Step] {
+        self.then
+            .iter()
+            .find(|l| l.role == role)
+            .map(|l| l.steps.as_slice())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +69,34 @@ fn text(v: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn steps_of(v: &Value) -> Vec<Ladder> {
+    let Some(map) = v.get("then").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    map.iter()
+        .map(|(role, list)| Ladder {
+            role: role.to_lowercase(),
+            steps: list
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|s| {
+                    let tool = match text(s, "tool")?.to_lowercase().as_str() {
+                        "codex" => "codex",
+                        "agy" | "antigravity" => "agy",
+                        _ => return None,
+                    };
+                    Some(Step {
+                        tool: tool.to_string(),
+                        model: text(s, "model")?,
+                        effort: text(s, "effort").unwrap_or_default(),
+                    })
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 fn parse_tool(section: &Value, keep_empty: bool) -> ToolRoles {
     let list = |key: &str| {
         section
@@ -67,6 +119,7 @@ fn parse_tool(section: &Value, keep_empty: bool) -> ToolRoles {
                 effort,
                 roles,
                 note: text(p, "use").unwrap_or_default(),
+                then: steps_of(p),
             })
         })
         .filter(|p| keep_empty || !p.roles.is_empty())

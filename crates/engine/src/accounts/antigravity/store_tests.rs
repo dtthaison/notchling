@@ -427,3 +427,55 @@ fn the_limits_read_are_kept_through_a_restart() {
     assert_eq!(usage_from_json(&usage_to_json(&usage)), usage);
     assert!(usage_from_json("not json").is_empty());
 }
+
+mod delegate_quota {
+    use super::*;
+    use crate::delegate::options::Tool;
+    use crate::delegate::quota;
+
+    const AGY_QUOTA: &str = include_str!("testdata/agy-quota.json");
+    const STATUS: &str = r#"{"userStatus":{"email":"a@example.com"}}"#;
+    const LISTEN: &str = "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nagy 777 me 12u IPv4 0x1 0t0 TCP 127.0.0.1:55483 (LISTEN)\n";
+
+    fn serving(tag: &str) -> Rig {
+        Rig::with_procs(
+            tag,
+            FakeProcs::new()
+                .answer("/usr/bin/pgrep -x agy", "777\n")
+                .answer("/usr/sbin/lsof -nP -a -p 777 -iTCP -sTCP:LISTEN", LISTEN),
+            FakeApps::new(),
+        )
+    }
+
+    fn read(rig: &Rig) -> Option<quota::Quota> {
+        quota::load(&rig.root.join("state"), Tool::Agy)
+    }
+
+    #[test]
+    fn a_sync_with_a_running_agy_leaves_every_pool_for_the_delegate_command() {
+        let rig = serving("dq-pools");
+        rig.set_live(&fake_login("1234", "a@example.com", "t1"));
+        rig.http.ok(200, STATUS);
+        rig.http.ok(200, AGY_QUOTA);
+        rig.store.sync(false);
+        let q = read(&rig).unwrap();
+        assert!(q.signed_in);
+        assert_eq!(q.fetched, 100.0);
+        let names: Vec<&str> = q.pools.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"]
+        );
+    }
+
+    #[test]
+    fn no_login_is_signed_out_and_no_server_leaves_nothing_new() {
+        let rig = Rig::new("dq-out", FakeApps::new());
+        rig.store.sync(false);
+        assert!(!read(&rig).unwrap().signed_in);
+        let rig = Rig::new("dq-quiet", FakeApps::new());
+        rig.set_live(&fake_login("1234", "a@example.com", "t1"));
+        rig.store.sync(false);
+        assert!(read(&rig).is_none());
+    }
+}

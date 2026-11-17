@@ -2,7 +2,8 @@ use super::agy_pick;
 use super::deps::Deps;
 use super::family::{self, Newest};
 use super::options::Tool;
-use crate::catalog::roles::{Roles, ToolRoles};
+use super::quota::{self, Verdict};
+use crate::catalog::roles::{Pick, Roles, ToolRoles};
 use crate::tools::codex::models;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -202,6 +203,131 @@ pub struct Found {
     pub error: Option<String>,
 }
 
+struct Cand {
+    tool: Tool,
+    model: String,
+    effort: String,
+    note: Option<String>,
+    verdict: Verdict,
+}
+
+fn family_of(model: &str) -> &str {
+    model.split('-').next().unwrap_or(model)
+}
+
+#[derive(Default)]
+struct Lives {
+    codex: Option<Live>,
+    agy: Option<Live>,
+}
+
+impl Lives {
+    fn of(&mut self, tool: Tool, deps: &Deps) -> &Live {
+        let slot = match tool {
+            Tool::Codex => &mut self.codex,
+            Tool::Agy => &mut self.agy,
+        };
+        slot.get_or_insert_with(|| live_of(tool, deps))
+    }
+}
+
+struct Taken {
+    picks: Vec<(Tool, String)>,
+}
+
+impl Taken {
+    fn family_free(&self, c: &Cand) -> bool {
+        !self
+            .picks
+            .iter()
+            .any(|(_, m)| family_of(m) == family_of(&c.model))
+    }
+
+    fn model_free(&self, c: &Cand) -> bool {
+        !self
+            .picks
+            .iter()
+            .any(|(t, m)| *t == c.tool && *m == c.model)
+    }
+}
+
+fn ladder_of(role: &str, head: &Pick, head_tool: Tool) -> Vec<(Tool, String, String)> {
+    let mut steps = vec![(head_tool, head.model.clone(), head.effort.clone())];
+    for s in head.ladder(role) {
+        if let Some(tool) = Tool::from_name(&s.tool) {
+            steps.push((tool, s.model.clone(), s.effort.clone()));
+        }
+    }
+    steps
+}
+
+fn choose(
+    role: &str,
+    steps: Vec<(Tool, String, String)>,
+    roles: &Roles,
+    deps: &Deps,
+    lives: &mut Lives,
+    taken: &Taken,
+) -> Option<(Cand, Vec<String>)> {
+    let source = deps.quota.as_ref();
+    let now = source.map(|s| s.now()).unwrap_or_default();
+    let mut tried: Vec<Cand> = Vec::new();
+    for (tool, marked, effort) in steps {
+        let live = lives.of(tool, deps);
+        let (model, note) = resolve(&marked, &effort, role, roles.tool(catalog_name(tool)), live);
+        let Some(model) = model else {
+            continue;
+        };
+        let quota = source.and_then(|s| s.load(tool));
+        let verdict = quota::verdict(quota.as_ref(), tool, &model, now);
+        let cand = Cand {
+            tool,
+            model,
+            effort,
+            note,
+            verdict,
+        };
+        if cand.verdict == Verdict::Room && taken.family_free(&cand) {
+            return Some(finish(tried, cand, now));
+        }
+        tried.push(cand);
+    }
+    let at = tried
+        .iter()
+        .position(|c| c.verdict == Verdict::Room && taken.model_free(c))
+        .or_else(|| tried.iter().position(|c| c.verdict == Verdict::Room));
+    match at {
+        Some(i) => {
+            let cand = tried.remove(i);
+            tried.truncate(i);
+            Some(finish(tried, cand, now))
+        }
+        None if tried.is_empty() => None,
+        None => {
+            let notes = skipped(&tried, now);
+            let first = tried.swap_remove(0);
+            Some((first, notes))
+        }
+    }
+}
+
+fn skipped(tried: &[Cand], now: f64) -> Vec<String> {
+    tried
+        .iter()
+        .filter_map(|c| match &c.verdict {
+            Verdict::Room => None,
+            Verdict::Out(out) => Some(quota::note(&c.model, out, now)),
+            Verdict::SignedOut => Some(format!("{}: {} is signed out", c.model, c.tool.raw())),
+        })
+        .collect()
+}
+
+fn finish(before: Vec<Cand>, chosen: Cand, now: f64) -> (Cand, Vec<String>) {
+    let mut notes = skipped(&before, now);
+    notes.extend(chosen.note.clone());
+    (chosen, notes)
+}
+
 pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
     let role = role.to_lowercase();
     let mut found = Found {
@@ -210,6 +336,8 @@ pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
         error: None,
     };
     let mut marked = false;
+    let mut lives = Lives::default();
+    let mut taken = Taken { picks: Vec::new() };
     for tool in [Tool::Codex, Tool::Agy] {
         let tool_roles = roles.tool(catalog_name(tool));
         let picks = tool_roles.picks_for(&role);
@@ -217,16 +345,17 @@ pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
             continue;
         }
         marked = true;
-        let live = live_of(tool, deps);
         for pick in picks {
-            let (model, note) = resolve(&pick.model, &pick.effort, &role, tool_roles, &live);
-            if let Some(model) = model {
-                let one = (tool.raw().to_string(), model, pick.effort.clone());
-                if !found.picks.contains(&one) {
-                    found.picks.push(one);
-                }
+            let steps = ladder_of(&role, pick, tool);
+            let Some((cand, notes)) = choose(&role, steps, roles, deps, &mut lives, &taken) else {
+                continue;
+            };
+            taken.picks.push((cand.tool, cand.model.clone()));
+            let one = (cand.tool.raw().to_string(), cand.model, cand.effort);
+            if !found.picks.contains(&one) {
+                found.picks.push(one);
             }
-            found.notes.extend(note);
+            found.notes.extend(notes);
         }
     }
     if !marked {
@@ -241,13 +370,27 @@ pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
     found
 }
 
+fn pick_line(tool: &str, model: &str, effort: &str) -> String {
+    if effort.is_empty() {
+        format!("{tool} --model {model}")
+    } else {
+        format!("{tool} --model {model} --effort {effort}")
+    }
+}
+
 pub fn models_for(role: &str, json: bool, roles: &Roles, deps: &Deps, out: &mut dyn Write) -> i32 {
     let found = find(role, roles, deps);
     let code = i32::from(found.error.is_some());
     if json {
         let mut v = json!({
             "role": role.to_lowercase(),
-            "picks": found.picks.iter().map(|(tool, model, effort)| json!({"tool": tool, "model": model, "effort": effort})).collect::<Vec<_>>(),
+            "picks": found.picks.iter().map(|(tool, model, effort)| {
+                let mut one = json!({"tool": tool, "model": model});
+                if !effort.is_empty() {
+                    one["effort"] = effort.clone().into();
+                }
+                one
+            }).collect::<Vec<_>>(),
             "notes": found.notes,
         });
         if let Some(e) = &found.error {
@@ -267,7 +410,7 @@ pub fn models_for(role: &str, json: bool, roles: &Roles, deps: &Deps, out: &mut 
     let mut lines: Vec<String> = found
         .picks
         .iter()
-        .map(|(tool, model, effort)| format!("{tool} --model {model} --effort {effort}"))
+        .map(|(tool, model, effort)| pick_line(tool, model, effort))
         .collect();
     lines.extend(found.notes.iter().map(|n| format!("note: {n}")));
     let _ = writeln!(out, "{}", lines.join("\n"));
@@ -310,3 +453,7 @@ pub fn run_for(args: &[String], json: bool, deps: &Deps, out: &mut dyn Write) ->
 #[cfg(test)]
 #[path = "role_models_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "role_models_quota_tests.rs"]
+mod quota_tests;

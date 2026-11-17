@@ -29,6 +29,7 @@ pub struct Deps {
     pub agy_trust: Option<super::agy_trust::Files>,
     pub recorder: Option<Arc<super::record::Recorder>>,
     pub terminate_after: Duration,
+    pub quota: Option<super::quota::Source>,
 }
 
 impl Deps {

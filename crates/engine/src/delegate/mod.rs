@@ -10,6 +10,7 @@ pub mod media;
 pub mod options;
 pub mod outcome;
 pub mod progress;
+pub mod quota;
 pub mod real;
 pub mod record;
 pub mod role_models;

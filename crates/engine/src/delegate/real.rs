@@ -18,6 +18,7 @@ pub struct Folders {
     pub path: String,
     pub network: bool,
     pub catalog_file: PathBuf,
+    pub quota_dir: Option<PathBuf>,
 }
 
 const MODELS_TIMEOUT: Duration = Duration::from_secs(60);
@@ -47,6 +48,10 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
         recorder: None,
         cancel_grace: Deps::CANCEL_GRACE,
         terminate_after: Deps::TERMINATE_AFTER,
+        quota: folders.quota_dir.clone().map(|dir| super::quota::Source {
+            dir,
+            clock: crate::transcript::util::now_secs,
+        }),
     }
 }
 
@@ -127,6 +132,7 @@ mod tests {
             path: String::new(),
             network: true,
             catalog_file: home.join("catalog.json"),
+            quota_dir: None,
         };
         let d = deps(&folders, Arc::new(AtomicBool::new(false)));
         assert_eq!(d.codex_media_root, home.join(".codex/generated_images"));

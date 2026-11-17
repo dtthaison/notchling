@@ -155,3 +155,72 @@ fn an_override_removes_a_pick_by_naming_only_the_model_and_empty_not_for_entries
     let parsed = Roles::parse(&json!({"codex": {"not_for": [{"effort": "ultra", "roles": []}]}}));
     assert!(parsed.tool("codex").avoids.is_empty());
 }
+
+fn ladder(pick: &Pick, role: &str) -> Vec<(String, String, String)> {
+    pick.ladder(role)
+        .iter()
+        .map(|s| (s.tool.clone(), s.model.clone(), s.effort.clone()))
+        .collect()
+}
+
+#[test]
+fn the_built_in_catalog_gives_each_role_its_fallback_ladder() {
+    let r = Roles::built_in();
+    let step = |t: &str, m: &str, e: &str| (t.to_string(), m.to_string(), e.to_string());
+    let hydrogen = &r.tool("antigravity").picks_for("review")[0];
+    assert_eq!(
+        ladder(hydrogen, "review"),
+        [
+            step("agy", "gemini-4-hydrogen-xhigh", ""),
+            step("codex", "gpt-6-sol", "high")
+        ]
+    );
+    let astra = &r.tool("codex").picks_for("review-final")[0];
+    assert_eq!(
+        ladder(astra, "review-final"),
+        [
+            step("agy", "gemini-4-hydrogen-xhigh", ""),
+            step("agy", "claude-opus-5-5", "high")
+        ]
+    );
+    assert_eq!(
+        ladder(astra, "review-secrets"),
+        [step("agy", "gemini-4-hydrogen-xhigh", "")]
+    );
+    let argon = &r.tool("antigravity").picks_for("spec-check")[0];
+    assert_eq!(
+        ladder(argon, "spec-check"),
+        [
+            step("agy", "gemini-4-hydrogen-xhigh", ""),
+            step("agy", "claude-opus-5-5", "high")
+        ]
+    );
+    assert_eq!(
+        ladder(argon, "review-secrets"),
+        [
+            step("agy", "claude-opus-5-5", "high"),
+            step("agy", "gemini-4-hydrogen", "high")
+        ]
+    );
+    assert!(argon.ladder("review").is_empty());
+}
+
+#[test]
+fn a_ladder_skips_a_step_with_an_unknown_tool_or_no_model() {
+    let r = Roles::parse(&json!({
+        "codex": {"picks": [{"model": "m", "effort": "low", "roles": ["review"],
+            "then": {"Review": [
+                {"tool": "Antigravity", "model": "a", "effort": "high"},
+                {"tool": "cursor", "model": "b"},
+                {"tool": "codex"},
+                {"tool": "codex", "model": "c"}]}}]}
+    }));
+    let pick = &r.tool("codex").picks[0];
+    assert_eq!(
+        ladder(pick, "review"),
+        [
+            ("agy".to_string(), "a".to_string(), "high".to_string()),
+            ("codex".to_string(), "c".to_string(), String::new())
+        ]
+    );
+}

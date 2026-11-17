@@ -1,0 +1,26 @@
+{
+ "response": {
+  "groups": [
+   {
+    "displayName": "Gemini Models",
+    "buckets": [
+     {"window": "weekly", "remainingFraction": 1, "resetTime": "2026-11-18T12:55:01Z"},
+     {"window": "5h", "remainingFraction": 1, "resetTime": "2026-11-11T17:55:01Z"}
+    ]
+   },
+   {
+    "displayName": "Claude and GPT models",
+    "buckets": [
+     {"window": "weekly", "remainingFraction": 0.53, "resetTime": "2026-11-18T12:55:01Z"},
+     {"window": "5h", "remainingFraction": 0.06, "resetTime": "2026-11-11T17:55:01Z"}
+    ]
+   },
+   {
+    "displayName": "Gemini 4 Argon",
+    "buckets": [
+     {"window": "weekly", "remainingFraction": 0, "resetTime": "2026-11-18T12:55:01Z"}
+    ]
+   }
+  ]
+ }
+}

@@ -5,6 +5,7 @@ use crate::accounts::book::{self, Saved};
 use crate::accounts::chunked::{self, Plain};
 use crate::accounts::generic_password::{Keychain, KeychainError};
 use crate::accounts::procs::{Apps, LoginChild, LoginSpawn, Procs};
+use crate::delegate::quota::{self, Quota};
 use crate::docfile::DocFile;
 use crate::providers::usage::{GroupedUsage, Standing, UsageReport};
 use crate::providers::{
@@ -270,6 +271,22 @@ impl CodexStore {
         }
     }
 
+    fn write_quota(&self) {
+        let inner = lock(&self.inner);
+        let quota = match inner.active.as_deref() {
+            None => Quota::of(self.now(), false, None, None),
+            Some(id) => {
+                let Some(fetched) = inner.fetched.get(id).copied() else {
+                    return;
+                };
+                let report = inner.usage.get(id).map(UsageReport::from);
+                Quota::of(fetched, true, report.as_ref(), inner.standing.get(id))
+            }
+        };
+        drop(inner);
+        quota::save(&self.paths.state_dir, "codex", &quota);
+    }
+
     fn finish_add(&self, flow: AddFlow, code: i32) -> AddProgress {
         let AddFlow {
             scratch, cancelled, ..
@@ -384,6 +401,7 @@ impl AccountProvider for CodexStore {
         let _op = lock(&self.op);
         self.capture();
         self.read_limits(force);
+        self.write_quota();
     }
 
     fn usage_report(&self, account: &str) -> Option<UsageReport> {

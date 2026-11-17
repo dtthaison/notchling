@@ -4,6 +4,7 @@ use crate::accounts::book::{self, Saved};
 use crate::accounts::chunked::{self, Plain};
 use crate::accounts::generic_password::{plan_write, Keychain, KeychainError};
 use crate::accounts::procs::{Apps, Procs};
+use crate::delegate::quota::{self as delegate_quota, Quota};
 use crate::docfile::DocFile;
 use crate::providers::usage::{GroupedUsage, UsageReport};
 use crate::providers::{
@@ -94,6 +95,18 @@ impl AntigravityStore {
 
     fn book(&self) -> DocFile {
         self.paths.book()
+    }
+
+    fn write_quota(&self, id: &str) {
+        let Some(usage) = lock(&self.inner).usage.get(id).cloned() else {
+            return;
+        };
+        let report = UsageReport::from(&usage);
+        delegate_quota::save(
+            &self.paths.state_dir,
+            "antigravity",
+            &Quota::of(usage.fetched, true, Some(&report), None),
+        );
     }
 
     fn save_book(&self, accounts: &[Saved]) {
@@ -349,16 +362,23 @@ impl AccountProvider for AntigravityStore {
                 .map(|a| a.email.clone());
             (inner.active.clone(), email)
         };
+        let now = (self.deps.clock)();
         let Some(id) = active else {
+            delegate_quota::save(
+                &self.paths.state_dir,
+                "antigravity",
+                &Quota::of(now, false, None, None),
+            );
             return;
         };
-        let now = (self.deps.clock)();
-        let Some(snapshot) = quota::fetch(
+        let fetched = quota::fetch(
             self.deps.procs.as_ref(),
             self.deps.http.as_ref(),
             email.as_deref(),
             now,
-        ) else {
+        );
+        let Some(snapshot) = fetched else {
+            self.write_quota(&id);
             return;
         };
         let mut inner = lock(&self.inner);
@@ -376,6 +396,8 @@ impl AccountProvider for AntigravityStore {
                 self.save_book(&accounts);
             }
         }
+        drop(inner);
+        self.write_quota(&id);
     }
 
     fn usage_report(&self, account: &str) -> Option<UsageReport> {
