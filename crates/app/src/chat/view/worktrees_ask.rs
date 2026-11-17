@@ -69,27 +69,55 @@ impl WorktreesState {
         in_repo && self.gate.ask(why, folder, visible, now_ms)
     }
 
+    fn kinds_now(
+        &self,
+        folder: &str,
+        sessions: &[Session],
+        subagents: &[SubagentRow],
+    ) -> Option<Vec<(String, u8)>> {
+        let rows = self
+            .rows
+            .as_ref()
+            .filter(|_| self.folder.as_deref() == Some(folder))?;
+        let held = worktrees::occupancy(&paths(rows), sessions, subagents);
+        Some(
+            rows.list
+                .iter()
+                .zip(&held)
+                .map(|(entry, held)| (entry.path.clone(), kind(held)))
+                .collect(),
+        )
+    }
+
+    pub fn occupancy_changed(
+        &self,
+        folder: &str,
+        sessions: &[Session],
+        subagents: &[SubagentRow],
+    ) -> bool {
+        self.kinds_now(folder, sessions, subagents)
+            .is_some_and(|after| !fresh_after(&self.kinds, &after).is_empty())
+    }
+
+    pub fn seed(&mut self, folder: &str, sessions: &[Session], subagents: &[SubagentRow]) {
+        if !self.kinds.is_empty() {
+            return;
+        }
+        if let Some(after) = self.kinds_now(folder, sessions, subagents) {
+            self.kinds = after;
+        }
+    }
+
     pub fn fresh_paths(
         &mut self,
         folder: &str,
         sessions: &[Session],
         subagents: &[SubagentRow],
     ) -> Vec<String> {
-        let Some(rows) = self
-            .rows
-            .clone()
-            .filter(|_| self.folder.as_deref() == Some(folder))
-        else {
+        let Some(after) = self.kinds_now(folder, sessions, subagents) else {
             self.kinds.clear();
             return Vec::new();
         };
-        let held = worktrees::occupancy(&paths(&rows), sessions, subagents);
-        let after: Vec<(String, u8)> = rows
-            .list
-            .iter()
-            .zip(&held)
-            .map(|(entry, held)| (entry.path.clone(), kind(held)))
-            .collect();
         let fresh = fresh_after(&self.kinds, &after);
         self.kinds = after;
         fresh
@@ -142,6 +170,19 @@ pub(super) fn section_of(view: &ChatView) -> Option<Arc<GitSection>> {
 }
 
 impl ChatView {
+    pub(super) fn worktrees_after_load(&mut self, cx: &mut Context<Self>) {
+        let Some(folder) = self.selected_folder() else {
+            return;
+        };
+        if self
+            .repo
+            .wt
+            .occupancy_changed(&folder, &self.sessions, &self.subagent_rows)
+        {
+            self.worktrees_ask(Why::TurnEnded, cx);
+        }
+    }
+
     pub(super) fn worktrees_ask(&mut self, why: Why, cx: &mut Context<Self>) {
         if self.root.fixture.is_some() {
             return;
@@ -187,7 +228,11 @@ impl ChatView {
             self.worktrees_ask(Why::Folder, cx);
             return;
         }
-        if self.repo.wt.apply(&folder, result) {
+        let changed = self.repo.wt.apply(&folder, result);
+        self.repo
+            .wt
+            .seed(&folder, &self.sessions, &self.subagent_rows);
+        if changed {
             self.refresh_details(cx);
         }
     }

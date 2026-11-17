@@ -199,6 +199,7 @@ impl ChatView {
             self.subagents = loaded.subagents;
             self.subagent_rows = loaded.subagent_rows;
             self.subagent_counts = loaded.subagent_counts;
+            self.worktrees_after_load(cx);
             if loaded.partial {
                 self.load_again = true;
             } else {
@@ -279,7 +280,6 @@ impl ChatView {
                 self.daemon_note = note;
             }
             self.sync_tools(cx);
-            self.worktrees_ask(crate::chat::git::Why::TurnEnded, cx);
             cx.notify();
         }
         let catalog = self.source.catalog_generation();
