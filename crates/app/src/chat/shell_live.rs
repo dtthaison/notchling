@@ -14,18 +14,20 @@ pub const GIVE_UP_AFTER: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pending {
-    pub key: String,
+    pub session: String,
+    pub item: String,
     pub command: String,
 }
 
-pub fn pending(conversation: &Conversation) -> Option<Pending> {
+pub fn pending(session: &str, conversation: &Conversation) -> Option<Pending> {
     let item = conversation.items.last()?;
     let ItemKind::User { text, .. } = &item.kind else {
         return None;
     };
     let command = text.strip_prefix("! ")?.trim();
     (!command.is_empty()).then(|| Pending {
-        key: item.id.clone(),
+        session: session.to_owned(),
+        item: item.id.clone(),
         command: command.to_owned(),
     })
 }
@@ -52,6 +54,10 @@ pub fn lines_of(reply: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub fn skipped(reply: &Value) -> bool {
+    reply.get("busy").and_then(Value::as_bool) == Some(true)
+}
+
 pub fn row(lines: &[String]) -> Row {
     Row::ShellLive {
         text: lines.join("\n"),
@@ -60,9 +66,9 @@ pub fn row(lines: &[String]) -> Row {
 
 #[derive(Debug, Default)]
 pub struct Live {
-    key: Option<String>,
+    at: Option<Pending>,
     lines: Vec<String>,
-    busy: bool,
+    reading: Vec<String>,
     next_ms: i64,
     same: u32,
     empty: u32,
@@ -70,31 +76,50 @@ pub struct Live {
 
 impl Live {
     pub fn sync(&mut self, want: Option<&Pending>) -> bool {
-        let key = want.map(|p| p.key.as_str());
-        if self.key.as_deref() == key {
+        if self.at.as_ref() == want {
             return false;
         }
         let shown = !self.lines.is_empty();
         *self = Live {
-            key: key.map(str::to_owned),
+            at: want.cloned(),
+            reading: std::mem::take(&mut self.reading),
             ..Live::default()
         };
         shown
     }
 
+    pub fn reset(&mut self) {
+        *self = Live {
+            reading: std::mem::take(&mut self.reading),
+            ..Live::default()
+        };
+    }
+
     pub fn due(&self, now_ms: i64) -> bool {
-        self.key.is_some() && !self.busy && self.empty < GIVE_UP_AFTER && now_ms >= self.next_ms
+        self.at
+            .as_ref()
+            .is_some_and(|at| !self.reading.contains(&at.session))
+            && self.empty < GIVE_UP_AFTER
+            && now_ms >= self.next_ms
     }
 
     pub fn begin(&mut self) {
-        self.busy = true;
+        if let Some(at) = &self.at {
+            self.reading.push(at.session.clone());
+        }
     }
 
-    pub fn arrived(&mut self, key: &str, lines: Vec<String>, now_ms: i64) -> bool {
-        if self.key.as_deref() != Some(key) {
+    fn done(&mut self, from: &Pending) -> bool {
+        if let Some(n) = self.reading.iter().position(|s| *s == from.session) {
+            self.reading.remove(n);
+        }
+        self.at.as_ref() == Some(from)
+    }
+
+    pub fn arrived(&mut self, from: &Pending, lines: Vec<String>, now_ms: i64) -> bool {
+        if !self.done(from) {
             return false;
         }
-        self.busy = false;
         if lines.is_empty() {
             self.empty += 1;
             self.same += 1;
@@ -112,13 +137,18 @@ impl Live {
         changed
     }
 
-    pub fn failed(&mut self, key: &str, now_ms: i64) {
-        if self.key.as_deref() != Some(key) {
+    pub fn failed(&mut self, from: &Pending, now_ms: i64) {
+        if !self.done(from) {
             return;
         }
-        self.busy = false;
         self.empty += 1;
         self.next_ms = now_ms + FAILED_MS;
+    }
+
+    pub fn skipped(&mut self, from: &Pending, now_ms: i64) {
+        if self.done(from) {
+            self.next_ms = now_ms + EVERY_MS;
+        }
     }
 
     fn delay(&self) -> i64 {
@@ -131,7 +161,6 @@ impl Live {
 
     pub fn row(&self, shown: Option<&Pending>) -> Option<Row> {
         let want = shown?;
-        (self.key.as_deref() == Some(want.key.as_str()) && !self.lines.is_empty())
-            .then(|| row(&self.lines))
+        (self.at.as_ref() == Some(want) && !self.lines.is_empty()).then(|| row(&self.lines))
     }
 }

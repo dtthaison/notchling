@@ -262,6 +262,7 @@ impl ChatView {
         });
         self.mark_used(id);
         self.conversation = Arc::default();
+        self.shell_live.reset();
         self.subagents.clear();
         self.subagent_rows.clear();
         self.subagent_counts = Default::default();

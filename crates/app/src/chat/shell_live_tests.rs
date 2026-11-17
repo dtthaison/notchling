@@ -6,7 +6,8 @@ use serde_json::json;
 use super::data::Tool;
 use super::rows::{rows, Row};
 use super::shell_live::{
-    lines_of, pending, readable, Live, Pending, EVERY_MS, FAILED_MS, STEADY_MS,
+    lines_of, pending, readable, skipped, Live, Pending, EVERY_MS, FAILED_MS, GIVE_UP_AFTER,
+    STEADY_MS,
 };
 
 fn transcript(tag: &str, lines: &[&str]) -> String {
@@ -49,9 +50,10 @@ fn a_command_whose_output_the_transcript_has_not_written_yet_is_pending() {
             .any(|r| matches!(r, Row::CommandOutput { .. })),
         "Chat from the transcript alone shows only the command"
     );
-    let want = pending(&c).expect("the last row is the command");
+    let want = pending("s1", &c).expect("the last row is the command");
     assert_eq!(want.command, LOGIN);
-    assert_eq!(Some(&want.key), c.items.last().map(|i| &i.id));
+    assert_eq!(want.session, "s1");
+    assert_eq!(Some(&want.item), c.items.last().map(|i| &i.id));
 }
 
 #[test]
@@ -66,20 +68,28 @@ fn the_transcripts_output_ends_it() {
             ),
         ],
     );
-    assert_eq!(pending(&conversation::read(&path)), None);
+    assert_eq!(pending("s1", &conversation::read(&path)), None);
 }
 
 #[test]
 fn what_the_person_typed_is_not_a_command() {
     let path = transcript("typed", &[&user("16", "run the tests")]);
-    assert_eq!(pending(&conversation::read(&path)), None);
-    assert_eq!(pending(&Default::default()), None);
+    assert_eq!(pending("s1", &conversation::read(&path)), None);
+    assert_eq!(pending("s1", &Default::default()), None);
 }
 
-fn want(key: &str) -> Pending {
+fn want(item: &str) -> Pending {
     Pending {
-        key: key.into(),
+        session: "s1".into(),
+        item: item.into(),
         command: "ls".into(),
+    }
+}
+
+fn elsewhere(session: &str, item: &str) -> Pending {
+    Pending {
+        session: session.into(),
+        ..want(item)
     }
 }
 
@@ -102,7 +112,7 @@ fn text_that_arrives_is_shown_and_the_next_read_waits() {
     let mut live = Live::default();
     live.sync(Some(&want("a")));
     live.begin();
-    assert!(live.arrived("a", lines(&["link"]), 1_000));
+    assert!(live.arrived(&want("a"), lines(&["link"]), 1_000));
     assert_eq!(
         live.row(Some(&want("a"))),
         Some(Row::ShellLive {
@@ -119,17 +129,17 @@ fn unchanged_text_is_not_a_change_and_is_read_less_often() {
     live.sync(Some(&want("a")));
     let mut at = 0;
     live.begin();
-    assert!(live.arrived("a", lines(&["x"]), at));
+    assert!(live.arrived(&want("a"), lines(&["x"]), at));
     for _ in 0..2 {
         at += EVERY_MS;
         assert!(live.due(at));
         live.begin();
-        assert!(!live.arrived("a", lines(&["x"]), at));
+        assert!(!live.arrived(&want("a"), lines(&["x"]), at));
     }
     assert!(!live.due(at + EVERY_MS));
     assert!(live.due(at + STEADY_MS));
     live.begin();
-    assert!(live.arrived("a", lines(&["x", "y"]), at + STEADY_MS));
+    assert!(live.arrived(&want("a"), lines(&["x", "y"]), at + STEADY_MS));
     assert!(
         live.due(at + STEADY_MS + EVERY_MS),
         "new text is read soon again"
@@ -141,9 +151,9 @@ fn an_empty_read_keeps_what_was_shown() {
     let mut live = Live::default();
     live.sync(Some(&want("a")));
     live.begin();
-    live.arrived("a", lines(&["x"]), 0);
+    live.arrived(&want("a"), lines(&["x"]), 0);
     live.begin();
-    assert!(!live.arrived("a", Vec::new(), 5_000));
+    assert!(!live.arrived(&want("a"), Vec::new(), 5_000));
     assert!(live.row(Some(&want("a"))).is_some());
 }
 
@@ -152,7 +162,7 @@ fn the_text_goes_when_the_command_has_its_output_or_the_session_stops_working() 
     let mut live = Live::default();
     live.sync(Some(&want("a")));
     live.begin();
-    live.arrived("a", lines(&["x"]), 0);
+    live.arrived(&want("a"), lines(&["x"]), 0);
     assert!(live.sync(None), "the row has to be taken away");
     assert_eq!(live.row(Some(&want("a"))), None);
     assert!(!live.due(0));
@@ -165,7 +175,7 @@ fn a_new_command_starts_over_and_a_late_reply_for_the_old_one_is_dropped() {
     live.sync(Some(&want("a")));
     live.begin();
     assert!(!live.sync(Some(&want("b"))));
-    assert!(!live.arrived("a", lines(&["old"]), 0));
+    assert!(!live.arrived(&want("a"), lines(&["old"]), 0));
     assert_eq!(live.row(Some(&want("b"))), None);
     assert!(live.due(0));
 }
@@ -178,7 +188,7 @@ fn a_command_that_prints_nothing_is_given_up_on_after_a_few_reads() {
     let mut reads = 0;
     while live.due(at) {
         live.begin();
-        live.arrived("a", Vec::new(), at);
+        live.arrived(&want("a"), Vec::new(), at);
         reads += 1;
         at += STEADY_MS;
         assert!(reads <= 10);
@@ -192,7 +202,7 @@ fn a_failed_read_waits_longer() {
     let mut live = Live::default();
     live.sync(Some(&want("a")));
     live.begin();
-    live.failed("a", 1_000);
+    live.failed(&want("a"), 1_000);
     assert!(!live.due(1_000 + FAILED_MS - 1));
     assert!(live.due(1_000 + FAILED_MS));
 }
@@ -249,12 +259,12 @@ fn the_link_a_login_prints_is_shown_under_its_row_and_goes_when_the_transcript_h
         &[&user("16", &format!("<bash-input>{LOGIN}</bash-input>"))],
     );
     let c = conversation::read(&start);
-    let want = pending(&c).unwrap();
+    let want = pending("s1", &c).unwrap();
     let mut live = Live::default();
     live.sync(Some(&want));
     live.begin();
     live.arrived(
-        &want.key,
+        &want,
         lines(&[
             "Your browser has been opened to visit:",
             "",
@@ -262,7 +272,7 @@ fn the_link_a_login_prints_is_shown_under_its_row_and_goes_when_the_transcript_h
         ]),
         0,
     );
-    let Some(Row::ShellLive { text }) = live.row(pending(&c).as_ref()) else {
+    let Some(Row::ShellLive { text }) = live.row(pending("s1", &c).as_ref()) else {
         panic!("the live text shows under the command");
     };
     assert!(text.contains(url));
@@ -278,7 +288,7 @@ fn the_link_a_login_prints_is_shown_under_its_row_and_goes_when_the_transcript_h
         ],
     );
     let after = conversation::read(&done);
-    assert_eq!(live.row(pending(&after).as_ref()), None);
+    assert_eq!(live.row(pending("s1", &after).as_ref()), None);
     assert!(rows(&after)
         .iter()
         .any(|r| matches!(r, Row::CommandOutput { text } if text == "Credentials saved")));
@@ -301,4 +311,91 @@ fn links_in_the_text_are_found_whole_without_the_marks_around_them() {
         assert_eq!(&text[range.clone()], url);
     }
     assert!(url_links("no links, only xhttps://nope and https:// x").is_empty());
+}
+
+#[test]
+fn the_same_row_and_command_in_two_sessions_are_two_different_commands() {
+    let path = transcript(
+        "twice",
+        &[&user("16", &format!("<bash-input>{LOGIN}</bash-input>"))],
+    );
+    let c = conversation::read(&path);
+    let (a, b) = (pending("s1", &c).unwrap(), pending("s2", &c).unwrap());
+    assert_eq!(a.item, b.item);
+    assert_ne!(a, b);
+    let mut live = Live::default();
+    live.sync(Some(&a));
+    live.begin();
+    live.arrived(&a, lines(&["link of s1"]), 0);
+    assert!(live.row(Some(&a)).is_some());
+    assert_eq!(live.row(Some(&b)), None, "never under another session");
+    assert!(
+        live.sync(Some(&b)),
+        "the first session's text is taken away"
+    );
+    assert_eq!(live.row(Some(&b)), None);
+}
+
+#[test]
+fn a_late_reply_for_another_session_is_dropped() {
+    let (a, b) = (elsewhere("s1", "i3"), elsewhere("s2", "i3"));
+    let mut live = Live::default();
+    live.sync(Some(&a));
+    live.begin();
+    live.sync(Some(&b));
+    assert!(!live.arrived(&a, lines(&["link of s1"]), 0));
+    assert_eq!(live.row(Some(&b)), None);
+    assert!(live.due(0), "the other session starts its own read");
+}
+
+#[test]
+fn going_away_and_coming_back_never_runs_two_reads_of_one_job() {
+    let a = elsewhere("s1", "i3");
+    let mut live = Live::default();
+    live.sync(Some(&a));
+    live.begin();
+    live.sync(None);
+    live.sync(Some(&a));
+    assert!(!live.due(1_000_000), "the first read is still in flight");
+    live.reset();
+    assert!(!live.due(1_000_000), "a new selection does not forget it");
+    live.sync(Some(&a));
+    assert!(!live.due(1_000_000), "still in flight after the new sync");
+    assert!(live.arrived(&a, lines(&["link"]), 5_000));
+    assert!(live.row(Some(&a)).is_some());
+    assert!(live.due(5_000 + EVERY_MS));
+}
+
+#[test]
+fn a_selection_starts_the_give_up_count_over() {
+    let a = want("a");
+    let mut live = Live::default();
+    live.sync(Some(&a));
+    for n in 0..GIVE_UP_AFTER {
+        assert!(live.due(n as i64 * STEADY_MS), "read {n}");
+        live.begin();
+        live.arrived(&a, Vec::new(), n as i64 * STEADY_MS);
+    }
+    assert!(!live.due(1_000_000), "given up");
+    live.reset();
+    live.sync(Some(&a));
+    assert!(live.due(0), "a new selection reads again");
+}
+
+#[test]
+fn a_read_the_daemon_skipped_is_not_a_miss() {
+    assert!(skipped(&json!({"lines": [], "busy": true})));
+    assert!(!skipped(&json!({"lines": []})));
+    let a = want("a");
+    let mut live = Live::default();
+    live.sync(Some(&a));
+    let mut at = 0;
+    for _ in 0..(GIVE_UP_AFTER * 3) {
+        assert!(live.due(at));
+        live.begin();
+        live.skipped(&a, at);
+        assert!(!live.due(at + EVERY_MS - 1));
+        at += EVERY_MS;
+    }
+    assert!(live.due(at), "still reading after many skips");
 }

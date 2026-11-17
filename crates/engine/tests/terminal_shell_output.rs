@@ -188,3 +188,97 @@ fn a_session_still_waking_has_no_lines() {
     assert!(read_shell_output(&mut pty, "npm run build").is_empty());
     assert!(pty.writes.is_empty());
 }
+
+#[test]
+fn a_link_that_filled_the_row_without_wrapping_does_not_swallow_the_next_line() {
+    let url = format!("https://example.invalid/{}", "a".repeat(150));
+    let first = format!("  ⎿  Visit {url}");
+    let pad = COLS - first.chars().count();
+    let first = format!("{first}{}", "b".repeat(pad));
+    assert_eq!(first.chars().count(), COLS);
+    let screen = rows(&[
+        "! open-login",
+        &first,
+        "     Waiting for browser…",
+        "",
+        "✽ Running…",
+    ]);
+    let out = output_below(&screen, "open-login", COLS);
+    assert_eq!(
+        out,
+        [
+            first
+                .trim_start()
+                .trim_start_matches('⎿')
+                .trim()
+                .to_string(),
+            "Waiting for browser…".to_string()
+        ]
+    );
+}
+
+#[test]
+fn a_spinner_row_straight_under_a_full_link_row_is_never_joined() {
+    let url = format!("https://example.invalid/{}", "a".repeat(120));
+    let first = format!("  ⎿  {url}");
+    let first = format!("{first}{}", "b".repeat(COLS - first.chars().count()));
+    let screen = rows(&["! open-login", &first, "✽ Running… (3s)"]);
+    let out = output_below(&screen, "open-login", COLS);
+    assert_eq!(
+        out,
+        [first
+            .trim_start()
+            .trim_start_matches('⎿')
+            .trim()
+            .to_string()]
+    );
+}
+
+#[test]
+fn an_ink_wrapped_link_continues_only_on_a_row_without_spaces() {
+    let url = format!("https://example.invalid/{}", "a".repeat(300));
+    let (head, tail) = url.split_at(195);
+    let screen = rows(&[
+        "! open-login",
+        &format!("  ⎿  {head}"),
+        &format!("     {tail}"),
+        "     Waiting for browser…",
+    ]);
+    let out = output_below(&screen, "open-login", COLS);
+    assert_eq!(out, [url, "Waiting for browser…".to_string()]);
+}
+
+#[test]
+fn a_first_line_with_its_own_indent_does_not_move_the_text_column() {
+    let screen = rows(&[
+        "! cat notes",
+        "  ⎿      indented first",
+        "     second line",
+        "       third, indented twice",
+    ]);
+    let out = output_below(&screen, "cat notes", COLS);
+    assert_eq!(
+        out,
+        [
+            "    indented first",
+            "second line",
+            "  third, indented twice"
+        ]
+    );
+}
+
+#[test]
+fn a_slow_attach_is_waited_for_a_short_while_only() {
+    use notchling_engine::reply::exec::Pty;
+    use notchling_engine::reply::fake::FakePrompt;
+    use notchling_engine::reply::read::read_shell_output;
+    let screen = shot("running-lines.txt");
+    let refs: Vec<&str> = screen.iter().map(String::as_str).collect();
+    let mut pty = FakePrompt::new(&refs).starting_for(60_000).noisy();
+    assert!(read_shell_output(&mut pty, "npm run build").is_empty());
+    assert!(
+        pty.now_ms() <= 1_500,
+        "the typing lock is held for {} ms",
+        pty.now_ms()
+    );
+}

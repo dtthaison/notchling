@@ -18,7 +18,7 @@ use notchling_engine::reply::question::{
 };
 use notchling_engine::reply::read::{read_question, read_shell_output};
 use notchling_engine::sessions::jobs::config_dir_for_job;
-use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
+use notchling_engine::sessions::{fresh, Agent, AgentGroup, AgentTarget, Probes, Roots};
 use notchling_engine::terminal::input_box;
 use notchling_events::kinds::agents::{AnswerKind, PromptKind};
 use notchling_events::kinds::choices::DoneOrFailed;
@@ -351,16 +351,35 @@ impl ActingOps {
         self.typing_locks().for_job(&typing_key(agent))
     }
 
+    fn fresh_of(&self, current: &Agent) -> Agent {
+        self.agents_now()
+            .into_iter()
+            .find(|a| a.id == current.id)
+            .unwrap_or_else(|| current.clone())
+    }
+
+    fn try_locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> Option<R> {
+        let lock = self.typing_lock(agent);
+        let one = match lock.try_lock() {
+            Ok(one) => one,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        let fresh = self.fresh_of(agent);
+        if typing_key(&fresh) != typing_key(agent) {
+            return None;
+        }
+        let result = then(&fresh);
+        drop(one);
+        Some(result)
+    }
+
     fn locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> R {
         let mut current = agent.clone();
         loop {
             let lock = self.typing_lock(&current);
             let one = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let fresh = self
-                .agents_now()
-                .into_iter()
-                .find(|a| a.id == current.id)
-                .unwrap_or_else(|| current.clone());
+            let fresh = self.fresh_of(&current);
             if typing_key(&fresh) == typing_key(&current) {
                 let result = then(&fresh);
                 drop(one);
@@ -746,20 +765,36 @@ impl ActingOps {
         if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
             return Err(no_terminal());
         }
-        self.locked(&agent, |agent| {
+        let read = self.try_locked(&agent, |agent| {
             let job = match &agent.target {
                 AgentTarget::Job(now) if agent.can_reply() => now.clone(),
                 _ => return Err(no_terminal()),
             };
-            if agent.group != AgentGroup::Working {
-                return Ok(json!({"lines": []}));
+            if !self.running_now(&job) {
+                return Ok(None);
             }
             let config_dir =
                 config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
             let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
             let lines = read_shell_output(pty.as_mut(), command);
-            Ok(json!({ "lines": lines }))
-        })
+            Ok(Some((lines, pty)))
+        });
+        match read {
+            None => Ok(json!({"lines": [], "busy": true})),
+            Some(Err(e)) => Err(e),
+            Some(Ok(None)) => Ok(json!({"lines": []})),
+            Some(Ok(Some((lines, pty)))) => {
+                drop(pty);
+                Ok(json!({ "lines": lines }))
+            }
+        }
+    }
+
+    fn running_now(&self, job: &str) -> bool {
+        matches!(
+            fresh::job_status(&self.roots, &Probes::from_proc(), job).as_deref(),
+            Some("busy" | "shell")
+        )
     }
 }
 

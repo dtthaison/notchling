@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub const NEXT_PAGE_MS: u64 = 2_500;
 pub const BACK_MS: u64 = 2_500;
-pub const SHELL_ATTACH_MS: u64 = 4_000;
+pub const SHELL_ATTACH_MS: u64 = 1_500;
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)

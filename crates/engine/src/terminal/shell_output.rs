@@ -5,6 +5,7 @@ pub const MAX_LINE_CHARS: usize = 4_000;
 
 const CONNECTOR: char = '⎿';
 const CONNECTOR_INDENT: usize = 4;
+const CONNECTOR_PAD: usize = 2;
 const WRAP_SLACK: usize = 4;
 const MARKS: [char; 2] = ['❯', '>'];
 const CHROME: [char; 12] = ['❯', '⏺', '●', '✻', '✽', '✶', '✳', '✢', '✦', '※', '·', '◐'];
@@ -109,6 +110,15 @@ fn continues_link(row: &str, cols: usize, inside: bool) -> bool {
         && (last.contains("://") || (inside && !text.contains(char::is_whitespace)))
 }
 
+fn link_piece(row: &str, columns: usize) -> Option<&str> {
+    let lead = indent(row);
+    if lead != 0 && lead != columns {
+        return None;
+    }
+    let piece = row[lead..].trim_end();
+    (!piece.is_empty() && piece.chars().all(|c| c.is_ascii_graphic())).then_some(piece)
+}
+
 fn strip(row: &str, columns: usize) -> String {
     let drop = indent(row).min(columns);
     row.chars()
@@ -130,40 +140,57 @@ pub fn output_below(screen: &[String], command: &str, cols: usize) -> Vec<String
     };
     let lead = indent(&body[first]);
     let connected = lead <= CONNECTOR_INDENT && body[first].trim_start().starts_with(CONNECTOR);
-    let text_col = if connected {
+    let (pad, text_col) = if connected {
         let after = &body[first].trim_start()[CONNECTOR.len_utf8()..];
-        lead + 1 + after.chars().take_while(|c| *c == ' ').count()
+        let pad = after
+            .chars()
+            .take_while(|c| *c == ' ')
+            .count()
+            .min(CONNECTOR_PAD);
+        (pad, lead + 1 + pad)
     } else {
-        0
+        (0, 0)
     };
     let mut lines: Vec<String> = Vec::new();
-    let mut carry = false;
+    let mut link = false;
     for (n, row) in body[first..].iter().enumerate() {
         if row.trim().is_empty() {
             lines.push(String::new());
-            carry = false;
+            link = false;
             continue;
         }
-        let text = if connected && n == 0 {
-            row.trim_start()[CONNECTOR.len_utf8()..].trim().to_string()
-        } else if carry {
-            strip(row, text_col)
-        } else if connected {
-            if indent(row) < text_col {
-                break;
-            }
-            strip(row, text_col)
+        let piece = if link {
+            link_piece(row, text_col)
         } else {
-            if chrome(row) {
-                break;
-            }
-            strip(row, 0)
+            None
         };
-        match (carry, lines.last_mut()) {
-            (true, Some(last)) => last.push_str(&text),
-            _ => lines.push(text),
+        let joined = piece.is_some();
+        match (piece, lines.last_mut()) {
+            (Some(piece), Some(last)) => last.push_str(piece),
+            _ => {
+                let text = if connected && n == 0 {
+                    let after = &row.trim_start()[CONNECTOR.len_utf8()..];
+                    after
+                        .chars()
+                        .skip(pad)
+                        .collect::<String>()
+                        .trim_end()
+                        .to_string()
+                } else if connected {
+                    if indent(row) < text_col {
+                        break;
+                    }
+                    strip(row, text_col)
+                } else {
+                    if chrome(row) {
+                        break;
+                    }
+                    strip(row, 0)
+                };
+                lines.push(text);
+            }
         }
-        carry = continues_link(row, cols, carry);
+        link = continues_link(row, cols, joined);
     }
     lines.retain(|l| !is_status(l));
     while lines.last().is_some_and(|l| l.is_empty()) {

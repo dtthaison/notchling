@@ -58,9 +58,21 @@ impl FakeRoom {
     }
 }
 
+pub(crate) type CloseHook = Arc<dyn Fn() + Send + Sync>;
+
 struct FakePty {
     prompt: FakePrompt,
     writes: Arc<Mutex<Vec<String>>>,
+    closed: Arc<Mutex<Option<CloseHook>>>,
+}
+
+impl Drop for FakePty {
+    fn drop(&mut self) {
+        let hook = self.closed.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
 }
 
 impl Pty for FakePty {
@@ -98,6 +110,7 @@ struct FakeAttacher {
     deaf: Arc<AtomicBool>,
     starting: Arc<AtomicU64>,
     human: Arc<Mutex<Vec<(u64, String)>>>,
+    closed: Arc<Mutex<Option<CloseHook>>>,
 }
 
 impl Attacher for FakeAttacher {
@@ -122,6 +135,7 @@ impl Attacher for FakeAttacher {
         Ok(Box::new(FakePty {
             prompt,
             writes: self.writes.clone(),
+            closed: self.closed.clone(),
         }))
     }
     fn screen_check(&self) -> &dyn ScreenCheck {
@@ -163,6 +177,7 @@ pub(crate) struct Setup {
     pub starting: Arc<AtomicU64>,
     pub human: Arc<Mutex<Vec<(u64, String)>>>,
     pub screen: Arc<Mutex<Vec<String>>>,
+    pub closed: Arc<Mutex<Option<CloseHook>>>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -190,6 +205,7 @@ pub(crate) fn setup_in(
     let (attached, writes) = (attacher.attached.clone(), attacher.writes.clone());
     let (deaf, starting) = (attacher.deaf.clone(), attacher.starting.clone());
     let human = attacher.human.clone();
+    let closed = attacher.closed.clone();
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -214,6 +230,7 @@ pub(crate) fn setup_in(
         starting,
         human,
         screen: shown,
+        closed,
     }
 }
 
