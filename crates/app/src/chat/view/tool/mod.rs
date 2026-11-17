@@ -87,6 +87,9 @@ fn active_email(view: &ChatView, provider: &str) -> Option<String> {
 mod shell_job_tests;
 
 #[cfg(test)]
+mod codex_remote_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

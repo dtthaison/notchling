@@ -31,7 +31,9 @@ pub fn is_delegated_job(
 }
 
 pub fn mark(used: &mut HashMap<String, f64>, id: &str, now_s: f64) -> bool {
-    let foreign = id.starts_with("codex:") || id.starts_with("agy:");
+    let bare = notchling_engine::cluster::Qualified::parse(id).map(|q| q.id);
+    let bare = bare.as_deref().unwrap_or(id);
+    let foreign = bare.starts_with("codex:") || bare.starts_with("agy:");
     if !foreign {
         return false;
     }
@@ -65,6 +67,19 @@ mod tests {
             used,
             session.agent.since_ms as f64 / 1000.0 + 2.0 * RECENT_S,
         )
+    }
+
+    #[test]
+    fn a_remote_codex_row_the_user_opened_stays_after_an_hour() {
+        let remote = "00000000000000a1/codex:s1";
+        let mut used = HashMap::new();
+        assert!(mark(&mut used, remote, 5_000.0));
+        assert!(!mark(&mut used, remote, 5_001.0), "once a day");
+        assert!(!mark(&mut used, "00000000000000a1/aa11bb22", 5_000.0));
+        assert!(!mark(&mut used, "00000000000000a1/shell:j1", 5_000.0));
+        let row = row(remote, Tool::Codex);
+        assert!(shown_now(&row, &used));
+        assert!(!shown_now(&row, &HashMap::new()));
     }
 
     #[test]

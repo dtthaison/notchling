@@ -26,6 +26,21 @@ pub const SESSION_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub const CODE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 pub const PROMOTE_CALL_TIMEOUT: Duration = Duration::from_secs(90);
 
+pub fn call_timeout_for(op: &str, args: &Value) -> Duration {
+    let forwarded = matches!(
+        op,
+        ops::SESSION_SEND | api_ops::CODEX_SEND | api_ops::CODEX_STOP
+    ) && args
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| notchling_engine::cluster::Qualified::parse(id).is_some());
+    if forwarded {
+        SESSION_CALL_TIMEOUT
+    } else {
+        call_timeout(op)
+    }
+}
+
 pub fn call_timeout(op: &str) -> Duration {
     if op == ops::CLUSTER_DISPATCH
         || op == ops::CLUSTER_RETURN
@@ -52,7 +67,7 @@ pub fn call_timeout(op: &str) -> Duration {
 impl Transport for Socket {
     fn call(&self, op: &str, args: Value) -> Result<Value, ClientError> {
         let options = ConnectOptions {
-            timeout: call_timeout(op),
+            timeout: call_timeout_for(op, &args),
             ..ConnectOptions::default()
         };
         let mut client =
@@ -292,6 +307,20 @@ mod tests {
     use crate::switches::restart::{Area, RestartNotice};
     use notchling_local_api::{ApiError, ErrorCode};
     use std::sync::Arc;
+
+    #[test]
+    fn a_send_or_stop_to_a_row_on_another_machine_waits_for_the_forward() {
+        let remote = serde_json::json!({"id": "fedcba9876543210/codex:abc"});
+        let local = serde_json::json!({"id": "codex:abc"});
+        for op in [ops::SESSION_SEND, api_ops::CODEX_SEND, api_ops::CODEX_STOP] {
+            assert_eq!(call_timeout_for(op, &remote), SESSION_CALL_TIMEOUT, "{op}");
+            assert_eq!(call_timeout_for(op, &local), call_timeout(op), "{op}");
+        }
+        assert_eq!(
+            call_timeout_for(ops::OUTBOX_LIST, &remote),
+            call_timeout(ops::OUTBOX_LIST)
+        );
+    }
 
     #[test]
     fn calls_that_type_into_a_session_wait_longer_than_the_daemon_does() {

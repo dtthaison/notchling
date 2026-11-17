@@ -199,6 +199,20 @@ impl Reporter for NodeReporter {
     }
 }
 
+impl crate::codex_ops::JobLink for NodeReporter {
+    fn session_started(&self, job: &str, session: &str) {
+        let Some(node) = self.node.get().and_then(Weak::upgrade) else {
+            return;
+        };
+        let data = json!({"job": job, "state": JobState::Running, "session": session});
+        node.tell(JOBS_TOPIC, JOB_STATE, data.clone());
+        node.submit().send(LocalCmd::JobEvent {
+            name: JOB_STATE.to_string(),
+            data,
+        });
+    }
+}
+
 pub struct DispatchOps {
     node: Result<Arc<ClusterNode>, String>,
     shells: Arc<ShellJobs>,

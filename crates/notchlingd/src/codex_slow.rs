@@ -127,18 +127,39 @@ impl CodexOps {
         Ok(Some(draft.to_string()))
     }
 
+    pub(super) fn job_arg(args: &Value) -> Result<Option<String>, ApiError> {
+        match args.get("job") {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(job)) if !job.is_empty() && job.len() <= MAX_DRAFT_BYTES => {
+                Ok(Some(job.clone()))
+            }
+            Some(_) => Err(bad("job is the id of a cluster job")),
+        }
+    }
+
     pub(super) fn send_new(
         &self,
         request: Request,
         draft: Option<String>,
+        job: Option<String>,
     ) -> Result<Value, ApiError> {
         let runs = self.runs.clone();
         let room = self.room.clone();
         let named = draft.clone();
+        let link = self.job_link.get().cloned().zip(job);
         let answer = late_reply::run(
             self.reply_wait(),
             move || runs.send(request),
-            move |late| announce_late(room.as_ref(), named.as_deref(), late),
+            move |late| {
+                if let (
+                    Some((link, job)),
+                    Ok(Sent::Started { session } | Sent::Queued { session, .. }),
+                ) = (&link, &late)
+                {
+                    link.session_started(job, &row_id(session));
+                }
+                announce_late(room.as_ref(), named.as_deref(), late)
+            },
             Err(SendError::NotStarted(
                 "Couldn't start a thread to send the message".to_string(),
             )),

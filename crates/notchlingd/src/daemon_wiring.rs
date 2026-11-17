@@ -775,6 +775,7 @@ impl Wired {
             let _ = node_slot.set(node.clone());
         }
         cluster.fence_keeper().set_codex(codex.clone());
+        codex.set_job_link(cluster.reporter.clone());
         bridge.cluster().attach(
             cluster.handler(),
             cluster.remote.clone(),

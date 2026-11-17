@@ -422,6 +422,59 @@ fn a_codex_start_reply_names_the_session_by_its_row_id() {
 }
 
 #[test]
+fn a_codex_start_slower_than_the_reply_wait_gets_its_session_from_a_later_event() {
+    let (mut hub, m5, w1) = pair();
+    let w2 = hub.add("w2", "linux", false);
+    hub.join("m5", "w2", "linux", false);
+    let codex = spec("w1", Tool::Codex, json!({"text": "fix it"}));
+    hub.local(&m5, dispatch_as("k", codex, OriginTier::App));
+    let (call, _, _) = last_run(&hub, "w1");
+    hub.run(
+        &w1,
+        Input::LocalDone {
+            call,
+            result: Ok(json!({"state": "starting", "draft": null})),
+        },
+    );
+    let job = &hub.core(&m5).state().expect("state").jobs[&job_id("k")];
+    assert_eq!(job.state, JobState::Running);
+    assert_eq!(job.session, None);
+    let linked = |session: &str| Msg::Event {
+        topic: "jobs".to_string(),
+        name: "job.state".to_string(),
+        data: json!({"job": job_id("k"), "state": "running", "session": session}),
+    };
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w2.clone(),
+            msg: linked("codex:other"),
+        },
+    );
+    assert_eq!(
+        hub.core(&m5).state().expect("state").jobs[&job_id("k")].session,
+        None
+    );
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: linked("codex:abc"),
+        },
+    );
+    hub.run(
+        &m5,
+        Input::Msg {
+            from: w1.clone(),
+            msg: linked("codex:later"),
+        },
+    );
+    let job = &hub.core(&m5).state().expect("state").jobs[&job_id("k")];
+    assert_eq!(job.state, JobState::Running);
+    assert_eq!(job.session.as_deref(), Some("codex:abc"));
+}
+
+#[test]
 fn a_codex_job_that_asks_for_secrets_is_refused_with_a_reason() {
     let (mut hub, m5, m1) = peer_hub();
     let mut codex = spec("w1", Tool::Codex, json!({"text": "fix it"}));

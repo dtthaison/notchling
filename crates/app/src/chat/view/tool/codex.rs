@@ -11,6 +11,7 @@ use crate::chat::pickers::{self, Menu, MODEL, RESET};
 use crate::chat::view::limit_ring::Shown;
 use crate::chat::view::ChatView;
 use crate::tools::requests::{codex_send_draft, codex_stop, is_draft};
+use notchling_engine::sessions::AgentGroup;
 use notchling_engine::tools::codex::models;
 
 pub(super) struct Codex;
@@ -22,6 +23,10 @@ impl ChatTool for Codex {
 
     fn refusal(&self, _view: &ChatView, _session: &Session) -> Option<&'static str> {
         None
+    }
+
+    fn working(&self, session: &Session) -> bool {
+        crate::chat::remote::is_remote(&session.agent) && session.agent.group == AgentGroup::Working
     }
 
     fn send(&self, view: &ChatView, session: &Session, text: &str) -> Request {

@@ -387,16 +387,34 @@ impl NodeCore {
         else {
             return;
         };
-        if !matches!(
-            state,
-            JobState::Done | JobState::Failed | JobState::Interrupted
-        ) {
-            return;
-        }
         let Some(found) = self.state.as_ref().and_then(|s| s.jobs.get(job)) else {
             return;
         };
-        if found.spec.node != *from || !found.state.may_become(state) {
+        if found.spec.node != *from {
+            return;
+        }
+        if state == JobState::Running {
+            let session = data
+                .get("session")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|s| text::clean(s, SESSION_MAX));
+            if found.state == JobState::Running && found.session.is_none() && session.is_some() {
+                let command = Command::JobState {
+                    id: job.to_string(),
+                    state,
+                    session,
+                    detail: None,
+                };
+                let _ = self.apply(command, out);
+            }
+            return;
+        }
+        if !matches!(
+            state,
+            JobState::Done | JobState::Failed | JobState::Interrupted
+        ) || !found.state.may_become(state)
+        {
             return;
         }
         let detail = data
