@@ -370,7 +370,7 @@ fn migrate_from_v4_keeps_outbox_rows() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 }
 
 #[test]

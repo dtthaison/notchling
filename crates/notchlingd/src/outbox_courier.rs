@@ -13,7 +13,7 @@ use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
 use notchling_engine::terminal::input_box;
-use notchling_engine::transcript::locate::{find_in_folders, project_folders};
+use notchling_engine::transcript::locate::{find_in_folders, find_transcript, project_folders};
 use notchling_engine::transcript::queue_state::{queue_state, QueueState};
 use notchling_engine::transcript::restart;
 use notchling_events::kinds::choices::FailWhy;
@@ -148,7 +148,7 @@ impl JobFiles for LiveFiles {
         let config = config_dirs(&self.roots)
             .into_iter()
             .find(|c| c.lane.as_ref().map(|l| l.path.as_str()) == agent.config_dir.as_deref())?;
-        let cwds: Vec<&str> = [Some(agent.cwd.as_str()), agent.worktree_path.as_deref()]
+        let cwds: Vec<&str> = [agent.worktree_path.as_deref(), Some(agent.cwd.as_str())]
             .into_iter()
             .flatten()
             .collect();
@@ -159,6 +159,12 @@ impl JobFiles for LiveFiles {
         let AgentTarget::Job(short) = &agent.target else {
             return false;
         };
+        let Some(config) = config_dirs(&self.roots)
+            .into_iter()
+            .find(|config| owns(&config.dir.join("projects"), Path::new(path)))
+        else {
+            return true;
+        };
         let Some(folder) = Path::new(path)
             .parent()
             .and_then(Path::file_name)
@@ -166,6 +172,7 @@ impl JobFiles for LiveFiles {
         else {
             return true;
         };
+        let projects = config.dir.join("projects").to_string_lossy().into_owned();
         let text =
             |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(String::from);
         let lands_here = |cwd: Option<String>, worktree: Option<String>, link: Option<String>| {
@@ -179,26 +186,34 @@ impl JobFiles for LiveFiles {
                     .and_then(|link| Path::new(link).parent()?.file_name())
                     .is_some_and(|name| name.to_string_lossy() == folder.as_str())
         };
-        let probes = Probes::from_proc();
-        config_dirs(&self.roots).iter().any(|config| {
-            let job = read_jobs(&config.dir).iter().any(|(id, job)| {
-                id != short
-                    && text(job, "name").as_deref() == Some(agent.name.as_str())
-                    && lands_here(
-                        text(job, "cwd"),
-                        text(job, "worktreePath"),
-                        text(job, "linkScanPath"),
-                    )
-            });
-            job || read_sessions(&config.dir, probes.is_alive)
-                .iter()
-                .any(|session| {
-                    text(session, "jobId").as_deref() != Some(short.as_str())
-                        && text(session, "name").as_deref() == Some(agent.name.as_str())
-                        && lands_here(text(session, "cwd"), None, None)
-                })
+        let job = read_jobs(&config.dir).iter().any(|(id, job)| {
+            id != short
+                && text(job, "name").as_deref() == Some(agent.name.as_str())
+                && lands_here(
+                    text(job, "cwd"),
+                    text(job, "worktreePath"),
+                    text(job, "linkScanPath"),
+                )
+        });
+        job || read_sessions(&config.dir, &|_| true).iter().any(|session| {
+            text(session, "jobId").as_deref() != Some(short.as_str())
+                && text(session, "name").as_deref() == Some(agent.name.as_str())
+                && lands_here(
+                    text(session, "cwd"),
+                    text(session, "worktreePath"),
+                    text(session, "sessionId")
+                        .and_then(|id| find_transcript(&projects, &id, &text(session, "cwd")?)),
+                )
         })
     }
+}
+
+fn owns(projects: &Path, path: &Path) -> bool {
+    path.starts_with(projects)
+        || match (projects.canonicalize(), path.canonicalize()) {
+            (Ok(projects), Ok(path)) => path.starts_with(projects),
+            _ => false,
+        }
 }
 
 pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {

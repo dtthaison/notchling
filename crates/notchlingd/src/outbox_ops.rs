@@ -4,7 +4,7 @@ use crate::acting_ops::{bad, forbidden, now_ms, Room};
 use crate::agy_ops::valid_session;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
-use crate::outbox_anchor::{anchor_of, count_anchored};
+use crate::outbox_anchor::{count_anchored, message_of};
 use crate::outbox_courier::live_files;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
 use crate::outbox_settle::Settle;
@@ -223,13 +223,14 @@ impl OutboxOps {
                 let files = live_files(self.roots.clone());
                 files.row(&row.session).and_then(|agent| {
                     let path = files.transcript(&agent)?;
+                    let message = message_of(row);
                     count_anchored(
                         files.as_ref(),
                         &agent,
                         &path,
                         row,
+                        &message,
                         before.unwrap_or_default(),
-                        anchor_of(&row.id).as_ref(),
                     )
                 })
             }

@@ -4,44 +4,7 @@ use notchling_engine::sessions::Agent;
 use notchling_engine::transcript::locate::{begins_with_clear, successor};
 use notchling_engine::transcript::message::Message;
 use notchling_engine::transcript::sent::{count_since, Seen};
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
-
-pub(crate) const SLACK_MS: i64 = 2_000;
-
-#[derive(Clone)]
-pub(crate) enum Anchor {
-    Nowhere,
-    File(String),
-}
-
-fn anchors() -> &'static Mutex<HashMap<String, Anchor>> {
-    static ANCHORS: OnceLock<Mutex<HashMap<String, Anchor>>> = OnceLock::new();
-    ANCHORS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub(crate) fn remember_anchor(id: &str, anchor: Anchor) {
-    anchors()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(id.to_string(), anchor);
-}
-
-pub(crate) fn anchor_of(id: &str) -> Option<Anchor> {
-    anchors()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(id)
-        .cloned()
-}
-
-pub(crate) fn forget_anchor(id: &str) {
-    anchors()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(id);
-}
 
 pub(crate) fn message_of(row: &Row) -> Message {
     Message::parse(&row.text, Path::is_file)
@@ -75,12 +38,12 @@ pub(crate) fn count_row(
     agent: &Agent,
     path: &str,
     row: &Row,
+    message: &Message,
     slack_ms: i64,
 ) -> Option<Seen> {
     let attempt = row.attempt_ms?;
-    let message = message_of(row);
-    let mut seen = count_since(path, &message, attempt - slack_ms);
-    if is_clear(&message) {
+    let mut seen = count_since(path, message, attempt - slack_ms);
+    if is_clear(message) {
         let now = seen.get_or_insert_with(Seen::default);
         match clear_proof(files, agent, path, attempt) {
             Some(Proof::Own) => now.taken = now.taken.max(1),
@@ -96,24 +59,26 @@ pub(crate) fn count_anchored(
     agent: &Agent,
     path: &str,
     row: &Row,
+    message: &Message,
     before: Seen,
-    anchor: Option<&Anchor>,
 ) -> Option<Seen> {
     let attempt = row.attempt_ms?;
-    let moved = match anchor {
-        Some(Anchor::File(began)) => began != path,
-        Some(Anchor::Nowhere) => true,
-        None => false,
-    };
-    if moved {
-        if !files.born_ms(path).is_some_and(|born| born >= attempt) {
-            return None;
-        }
-        return count_row(files, agent, path, row, 0).map(|now| Seen {
+    let tied = row
+        .anchor
+        .as_ref()
+        .filter(|anchor| anchor.file.as_deref() == Some(path));
+    if let Some(anchor) = tied {
+        return count_row(files, agent, path, row, message, anchor.slack_ms);
+    }
+    if !files.born_ms(path).is_some_and(|born| born >= attempt) {
+        return None;
+    }
+    let now = count_row(files, agent, path, row, message, 0)?;
+    Some(match row.anchor {
+        Some(_) => Seen {
             taken: now.taken + before.taken,
             enqueued: now.enqueued + before.enqueued,
-        });
-    }
-    let slack = if anchor.is_some() { SLACK_MS } else { 0 };
-    count_row(files, agent, path, row, slack)
+        },
+        None => now,
+    })
 }

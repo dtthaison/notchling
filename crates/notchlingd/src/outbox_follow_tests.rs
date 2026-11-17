@@ -7,6 +7,7 @@ struct Elsewhere {
     inner: Arc<FakeFiles>,
     found: Mutex<Option<String>>,
     asked: Mutex<Vec<String>>,
+    born: AtomicUsize,
 }
 
 impl JobFiles for Elsewhere {
@@ -33,6 +34,7 @@ impl JobFiles for Elsewhere {
         self.found.lock().unwrap().clone()
     }
     fn born_ms(&self, path: &str) -> Option<i64> {
+        self.born.fetch_add(1, Ordering::SeqCst);
         self.inner.born_ms(path)
     }
     fn shares_name(&self, agent: &Agent, path: &str) -> bool {
@@ -45,6 +47,7 @@ fn elsewhere(r: &Rig, found: Option<String>) -> Arc<Elsewhere> {
         inner: r.files.clone(),
         found: Mutex::new(found),
         asked: Mutex::new(Vec::new()),
+        born: AtomicUsize::new(0),
     })
 }
 
@@ -470,7 +473,7 @@ fn a_late_look_and_the_queue_watch_never_compare_counts_across_files() {
     let row = e.r.send("job-idle", "ok");
     e.r.ops.store().take(&row.id, T0).unwrap().unwrap();
     let row = e.r.row(&row.id).unwrap();
-    let before = e.verifier.seen(&row).unwrap_or_default();
+    let before = e.verifier.seen(&row).seen;
     let mut agent = e.r.files.row(IDLE).unwrap();
     agent.transcript_path = Some(other.to_string_lossy().into_owned());
     e.r.files.put(IDLE, agent);

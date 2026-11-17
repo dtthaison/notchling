@@ -4,7 +4,7 @@ use crate::acting_ops_tests::{row, sessions, setup_in, FakeRoom, Setup, PROMPT};
 use crate::late_emit::Events;
 use crate::outbox_courier::{ClaudeCourier, Clock, Courier, JobFiles};
 use crate::outbox_ops::{OutboxOps, SendArgs};
-use crate::outbox_postman::{Couriers, Postmen, Verifier};
+use crate::outbox_postman::{Baseline, Couriers, Postmen, Verifier};
 use crate::outbox_verify::SafeModes;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::outbox::{OutboxStore, QueuedVerdict, Row, Verdict, Via};
@@ -114,9 +114,12 @@ pub(crate) struct Script {
 }
 
 impl Verifier for Script {
-    fn seen(&self, _row: &Row) -> Option<Seen> {
+    fn seen(&self, _row: &Row) -> Baseline {
         self.asked.fetch_add(1, Ordering::SeqCst);
-        *self.seen.lock().unwrap()
+        Baseline {
+            seen: self.seen.lock().unwrap().unwrap_or_default(),
+            anchor: None,
+        }
     }
     fn wait(&self, _row: &Row, _before: Seen, _entered_ms: i64) -> Verdict {
         self.asked.fetch_add(1, Ordering::SeqCst);

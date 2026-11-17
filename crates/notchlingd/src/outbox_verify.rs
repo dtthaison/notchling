@@ -1,14 +1,12 @@
-use crate::outbox_anchor::{
-    anchor_of, count_anchored, count_row, forget_anchor, is_clear, message_of, remember_anchor,
-    Anchor,
-};
+use crate::outbox_anchor::{count_anchored, count_row, is_clear, message_of};
 use crate::outbox_courier::{live_files, real_clock, Clock, JobFiles};
-use crate::outbox_postman::Verifier;
+use crate::outbox_postman::{Baseline, Verifier};
 use notchling_engine::outbox::{
-    line_within, queued_verdict, verdict, QueuedVerdict, Row, Verdict, GONE_AFTER_MS,
+    line_within, queued_verdict, verdict, Anchor, QueuedVerdict, Row, Verdict, GONE_AFTER_MS,
     QUEUE_LINE_MS, VERIFY_LOOK_MS, VERIFY_WATCH_MS,
 };
 use notchling_engine::sessions::{Agent, Roots};
+use notchling_engine::transcript::message::Message;
 use notchling_engine::transcript::queue_state::{queue_lists, QueueState};
 use notchling_engine::transcript::sent::Seen;
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
@@ -128,6 +126,7 @@ impl Pause for RealPause {
 struct Watch {
     path: Option<String>,
     agent: Option<Agent>,
+    message: Option<Message>,
     read: Option<(String, u64, Option<SystemTime>)>,
     seen: Option<Seen>,
     listed: bool,
@@ -226,17 +225,11 @@ impl TranscriptVerifier {
                 .and_then(|dir| std::fs::metadata(dir).ok())
                 .and_then(|meta| meta.modified().ok());
             let read = Some((path.clone(), size, folder));
-            if watch.read != read || is_clear(&message_of(row)) {
-                let anchor = anchor_of(&row.id);
-                watch.seen = count_anchored(
-                    self.files.as_ref(),
-                    &agent,
-                    &path,
-                    row,
-                    before,
-                    anchor.as_ref(),
-                );
-                watch.listed = queue_lists(&path, &message_of(row)).unwrap_or(false);
+            if watch.read != read {
+                let message = watch.message.get_or_insert_with(|| message_of(row));
+                watch.seen =
+                    count_anchored(self.files.as_ref(), &agent, &path, row, message, before);
+                watch.listed = queue_lists(&path, message).unwrap_or(false);
                 watch.read = read;
             }
         }
@@ -255,21 +248,32 @@ impl TranscriptVerifier {
 }
 
 impl Verifier for TranscriptVerifier {
-    fn seen(&self, row: &Row) -> Option<Seen> {
+    fn seen(&self, row: &Row) -> Baseline {
         self.take(&row.id);
         let found = self.transcript(row);
-        let anchor = match &found {
-            Some((_, path)) => Anchor::File(path.clone()),
-            None => Anchor::Nowhere,
-        };
-        remember_anchor(&row.id, anchor);
-        let (agent, path) = found?;
-        count_row(self.files.as_ref(), &agent, &path, row, SINCE_BEFORE_MS)
+        let anchor = Some(Anchor {
+            file: found.as_ref().map(|(_, path)| path.clone()),
+            slack_ms: SINCE_BEFORE_MS,
+        });
+        let seen = found
+            .and_then(|(agent, path)| {
+                let message = message_of(row);
+                count_row(
+                    self.files.as_ref(),
+                    &agent,
+                    &path,
+                    row,
+                    &message,
+                    SINCE_BEFORE_MS,
+                )
+            })
+            .unwrap_or_default();
+        Baseline { seen, anchor }
     }
 
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict {
-        let anchor = anchor_of(&row.id);
-        let any_jsonl = is_clear(&message_of(row));
+        let message = message_of(row);
+        let any_jsonl = is_clear(&message);
         let mut found = self.transcript(row);
         let mut waits = found
             .as_ref()
@@ -285,14 +289,7 @@ impl Verifier for TranscriptVerifier {
                 found = Some(current);
             }
             let seen = found.as_ref().and_then(|(agent, path)| {
-                count_anchored(
-                    self.files.as_ref(),
-                    agent,
-                    path,
-                    row,
-                    before,
-                    anchor.as_ref(),
-                )
+                count_anchored(self.files.as_ref(), agent, path, row, &message, before)
             });
             let within = line_within(seen, before);
             if !noted && (within || now - entered_ms >= QUEUE_LINE_MS) {
@@ -355,23 +352,15 @@ impl Verifier for TranscriptVerifier {
     }
 
     fn found_late(&self, row: &Row, before: Seen) -> bool {
-        let anchor = anchor_of(&row.id);
+        let message = message_of(row);
         let seen = self.transcript(row).and_then(|(agent, path)| {
-            count_anchored(
-                self.files.as_ref(),
-                &agent,
-                &path,
-                row,
-                before,
-                anchor.as_ref(),
-            )
+            count_anchored(self.files.as_ref(), &agent, &path, row, &message, before)
         });
         verdict(seen, before, 0) == Verdict::Sent
     }
 
     fn forget(&self, id: &str) {
         self.take(id);
-        forget_anchor(id);
     }
 
     fn close(&self) {

@@ -1,5 +1,5 @@
 use super::model::{
-    new_id, Change, InsertError, Kind, New, Row, State, Tool, Via, Why, MAX_ROWS, MAX_TEXT,
+    new_id, Anchor, Change, InsertError, Kind, New, Row, State, Tool, Via, Why, MAX_ROWS, MAX_TEXT,
 };
 use crate::store;
 use crate::transcript::sent::Seen;
@@ -8,7 +8,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 const COLUMNS: &str = "n, id, session, tool, kind, text, options, via, state, why, clear_box, \
-    queued_ms, updated_ms, attempt_ms, seen_before, queued_before, tries, next_ms, noticed_ms";
+    queued_ms, updated_ms, attempt_ms, seen_before, queued_before, tries, next_ms, noticed_ms, \
+    anchor_file, anchor_slack_ms";
 
 const JOIN: &str = "\n\n";
 
@@ -50,6 +51,8 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     let options: Option<String> = r.get(6)?;
     let why: Option<String> = r.get(9)?;
     let tries: i64 = r.get(16)?;
+    let anchor_file: Option<String> = r.get(19)?;
+    let anchor_slack: Option<i64> = r.get(20)?;
     Ok(Row {
         n: r.get(0)?,
         id: r.get(1)?,
@@ -78,6 +81,10 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         tries: u32::try_from(tries).unwrap_or(0),
         next_ms: r.get(17)?,
         noticed_ms: r.get(18)?,
+        anchor: anchor_slack.map(|slack_ms| Anchor {
+            file: anchor_file,
+            slack_ms,
+        }),
     })
 }
 
@@ -259,7 +266,8 @@ impl OutboxStore {
         let changed = tx
             .execute(
                 "UPDATE outbox SET state = 'sending', attempt_ms = ?2, seen_before = NULL,
-                     queued_before = NULL, tries = tries + 1, why = NULL, updated_ms = ?2
+                     queued_before = NULL, anchor_file = NULL, anchor_slack_ms = NULL,
+                     tries = tries + 1, why = NULL, updated_ms = ?2
                  WHERE id = ?1 AND state IN ('queued', 'waiting')
                    AND (next_ms IS NULL OR next_ms <= ?2)",
                 params![id, now_ms],
@@ -274,12 +282,28 @@ impl OutboxStore {
     }
 
     pub fn set_seen(&self, id: &str, seen: Seen) -> Result<(), String> {
+        self.set_baseline(id, seen, None)
+    }
+
+    pub fn set_baseline(
+        &self,
+        id: &str,
+        seen: Seen,
+        anchor: Option<&Anchor>,
+    ) -> Result<(), String> {
         let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
         self.lock()
             .execute(
-                "UPDATE outbox SET seen_before = ?2, queued_before = ?3
+                "UPDATE outbox SET seen_before = ?2, queued_before = ?3,
+                     anchor_file = ?4, anchor_slack_ms = ?5
                  WHERE id = ?1 AND state = 'sending'",
-                params![id, to_i64(seen.taken), to_i64(seen.enqueued)],
+                params![
+                    id,
+                    to_i64(seen.taken),
+                    to_i64(seen.enqueued),
+                    anchor.and_then(|a| a.file.as_deref()),
+                    anchor.map(|a| a.slack_ms)
+                ],
             )
             .map(|_| ())
             .map_err(db_err)
@@ -407,7 +431,8 @@ impl OutboxStore {
         }
         let sql = format!(
             "UPDATE outbox SET state = 'queued', clear_box = ?2, why = NULL, attempt_ms = NULL,
-                 seen_before = NULL, queued_before = NULL, next_ms = NULL, updated_ms = ?3,
+                 seen_before = NULL, queued_before = NULL, anchor_file = NULL,
+                 anchor_slack_ms = NULL, next_ms = NULL, updated_ms = ?3,
                  tries = COALESCE(?4, tries)
              WHERE id = ?1 AND state IN ({})",
             states(from)
