@@ -304,6 +304,14 @@ impl Input {
     }
 }
 
+pub fn holds_message(typed: &str, text: &str) -> bool {
+    let input = Input {
+        held: typed.lines().map(String::from).collect(),
+        empty: false,
+    };
+    !letters(text).is_empty() && !letters(typed).is_empty() && input.fill(text) == Fill::Whole
+}
+
 pub fn typed_text(lines: &[String], cursor: Option<(usize, usize)>) -> Option<String> {
     let input = read(lines, cursor).filter(|input| !input.empty)?;
     let text = input.typed();

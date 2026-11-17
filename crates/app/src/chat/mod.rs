@@ -63,6 +63,8 @@ pub mod outbox;
 #[cfg(test)]
 mod outbox_box_same_tests;
 #[cfg(test)]
+mod outbox_box_wrap_tests;
+#[cfg(test)]
 mod outbox_confirmed_tests;
 #[cfg(test)]
 mod outbox_unsure_tests;
