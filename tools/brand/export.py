@@ -50,15 +50,16 @@ def render_pngs() -> None:
     for svg, png in RENDERS.items():
         chrome("--hide-scrollbars", "--default-background-color=00000000", "--window-size=1024,1024",
                f"--screenshot={BRAND / png}", (BRAND / svg).as_uri())
-    glyph = (BRAND / "notchling-menubar-template.svg").read_text().replace('width="22" height="16"', 'width="1100" height="800"')
-    with tempfile.TemporaryDirectory() as tmp:
-        big_svg, big_png = Path(tmp) / "glyph.svg", Path(tmp) / "glyph.png"
-        big_svg.write_text(glyph)
-        chrome("--hide-scrollbars", "--default-background-color=00000000", "--window-size=1100,800",
-               f"--screenshot={big_png}", big_svg.as_uri())
-        big = Image.open(big_png).convert("RGBA")
-        big.resize((22, 16), Image.LANCZOS).save(BRAND / "menubarTemplate.png")
-        big.resize((44, 32), Image.LANCZOS).save(BRAND / "menubarTemplate@2x.png")
+    for stem, name in (("notchling-menubar-template", "menubarTemplate"), ("notchling-menubar-template-filled", "menubarTemplateFilled")):
+        glyph = (BRAND / f"{stem}.svg").read_text().replace('width="22" height="16"', 'width="1100" height="800"')
+        with tempfile.TemporaryDirectory() as tmp:
+            big_svg, big_png = Path(tmp) / "glyph.svg", Path(tmp) / "glyph.png"
+            big_svg.write_text(glyph)
+            chrome("--hide-scrollbars", "--default-background-color=00000000", "--window-size=1100,800",
+                   f"--screenshot={big_png}", big_svg.as_uri())
+            big = Image.open(big_png).convert("RGBA")
+            big.resize((22, 16), Image.LANCZOS).save(BRAND / f"{name}.png")
+            big.resize((44, 32), Image.LANCZOS).save(BRAND / f"{name}@2x.png")
 
 
 def build_icns() -> None:
