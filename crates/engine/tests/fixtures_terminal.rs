@@ -136,8 +136,7 @@ fn the_question_recording_is_an_open_dialog_and_the_plugin_one_is_not() {
 }
 
 fn folder() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../legacy/macos/Tests/NotchlingTests/Fixtures/terminal")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notchling/terminal")
 }
 
 fn recordings() -> Vec<PathBuf> {

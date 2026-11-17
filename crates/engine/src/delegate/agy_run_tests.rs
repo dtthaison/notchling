@@ -4,8 +4,7 @@ use crate::tools::acp::fake::{replaying, FakeHandle, FakeSpawner, Responder};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const RECORDING: &str =
-    include_str!("../../../../legacy/macos/Tests/NotchlingTests/Fixtures/acp-agy.jsonl");
+const RECORDING: &str = include_str!("../../tests/fixtures/notchling/acp-agy.jsonl");
 
 fn config() -> Value {
     json!([
