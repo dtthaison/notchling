@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><body><pre id="out"></pre><script src="brand.js"></script><script>
+const mk=(o)=>{const s=document.createElementNS(NB.NS,"svg");NB.build(s,"tri",o);NB.logo(s);s.setAttribute("xmlns",NB.NS);s.setAttribute("width","1024");s.setAttribute("height","1024");return s;};
+const icon=mk({});
+const bg=mk({square:true,noNotch:true});bg.querySelector(".all").remove();
+const fg=mk({square:true,noNotch:true});fg.querySelector("[clip-path] > rect").remove();
+document.getElementById("out").textContent=JSON.stringify({
+ "notchling-icon.svg":icon.outerHTML,
+ "notchling-adaptive-background.svg":bg.outerHTML,
+ "notchling-adaptive-foreground.svg":fg.outerHTML,
+ "notchling-menubar-template.svg":NB.glyph(true).replace(/currentColor/g,"#000000"),
+ "notchling-menubar-color.svg":NB.glyph(false)});
+</script>
