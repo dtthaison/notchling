@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{div, prelude::*, px, Context, Div, FocusHandle, KeyDownEvent, SharedString, Window};
-use notchling_engine::machines::engine_plan::{AdminAnswer, ShownPlan};
 use notchling_engine::machines::node_updates::UpdateRow;
-use notchling_engine::machines::step::FixOutcome;
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SPACE, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -14,9 +13,9 @@ use notchling_locale as t;
 
 use super::add_sheet::AddPassword;
 use super::model::ClusterModel;
-use super::updates::{banner, commands, execute, lines, plan, run_button, Kind, NotNow};
+use super::updates::{banner, commands, execute, lines, Kind};
+use super::updates_state::{Offered, UpdateSession};
 use super::view::ClusterSheetView;
-use crate::machines::runs::{AdminAsks, PendingAdmin};
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
 
@@ -25,23 +24,31 @@ const SHEET_MAX_HEIGHT: f32 = super::HEIGHT - 60.0;
 const EVERY_SECS: u64 = 5;
 const ASK_POLL: Duration = Duration::from_millis(250);
 
-#[derive(Default)]
 pub(super) struct UpdateUi {
-    hidden: NotNow,
+    session: Arc<UpdateSession>,
     pub(super) open: bool,
     anyway: BTreeSet<String>,
-    plan: Option<ShownPlan>,
+    offered: Offered,
     commands: bool,
-    running: bool,
-    pending: Option<PendingAdmin>,
     password: AddPassword,
-    outcome: Option<FixOutcome>,
-    asks: AdminAsks,
     focus: Option<FocusHandle>,
     seen: Option<(u64, Instant, Option<String>, Vec<UpdateRow>)>,
 }
 
 impl UpdateUi {
+    pub(super) fn new(session: Arc<UpdateSession>) -> UpdateUi {
+        UpdateUi {
+            session,
+            open: false,
+            anyway: BTreeSet::new(),
+            offered: Offered::default(),
+            commands: false,
+            password: AddPassword::default(),
+            focus: None,
+            seen: None,
+        }
+    }
+
     fn offer(
         &mut self,
         feed: &super::feed::ClusterFeed,
@@ -59,10 +66,7 @@ impl UpdateUi {
     }
 
     fn password_target(&self) -> String {
-        self.pending
-            .as_ref()
-            .map(|p| p.step.title.clone())
-            .unwrap_or_default()
+        self.session.pending_target().unwrap_or_default()
     }
 }
 
@@ -74,7 +78,7 @@ impl ClusterSheetView {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let (build, rows) = self.update.offer(&self.feed, model);
-        if self.update.hidden.hides(build.as_deref()) && !self.update.open {
+        if self.update.session.hides(build.as_deref()) && !self.update.open {
             return None;
         }
         let shown = banner(&rows)?;
@@ -95,7 +99,7 @@ impl ClusterSheetView {
         )
         .on_click(cx.listener(move |this, _, _, cx| {
             let build = this.update.seen.as_ref().and_then(|s| s.2.clone());
-            this.update.hidden.hide(build.as_deref());
+            this.update.session.hide(build.as_deref());
             cx.notify();
         }));
         Some(
@@ -132,13 +136,17 @@ impl ClusterSheetView {
         }
         self.update.open = true;
         self.update.anyway.clear();
-        self.update.outcome = None;
         self.update.commands = false;
-        self.update.running = false;
-        self.update.pending = None;
         self.update.password.clear();
         self.update.focus = Some(cx.focus_handle());
         self.update.seen = None;
+        let parts = self.feed.add_source().parts();
+        self.update
+            .offered
+            .reset(parts.as_ref().map(|p| &*p.engine));
+        if self.update.session.running() {
+            self.watch_asks(cx);
+        }
         let feed = self.feed.clone();
         if feed.is_live() {
             cx.spawn(async move |this, cx| {
@@ -147,14 +155,12 @@ impl ClusterSheetView {
                     .await;
                 this.update(cx, |view, cx| {
                     view.update.seen = None;
-                    view.replan();
                     cx.notify();
                 })
                 .ok();
             })
             .detach();
         }
-        self.replan();
         cx.notify();
     }
 
@@ -163,106 +169,98 @@ impl ClusterSheetView {
         self.update.offer(&self.feed, &model).1
     }
 
-    fn replan(&mut self) {
-        let rows = self.rows();
-        let parts = self.feed.add_source().parts();
-        if let (Some(old), Some(parts)) = (self.update.plan.take(), parts.as_ref()) {
-            parts.engine.cancel(old.id);
+    fn sync_plan(&mut self, rows: &[UpdateRow]) {
+        if self.update.session.running() {
+            return;
         }
-        self.update.plan = parts.and_then(|p| plan(&p.engine, &rows, &self.update.anyway).ok());
+        if let Some(parts) = self.feed.add_source().parts() {
+            self.update
+                .offered
+                .sync(&parts.engine, rows, &self.update.anyway);
+        }
     }
 
     fn close_update(&mut self, cx: &mut Context<Self>) {
-        if self.update.running {
-            self.update.open = false;
-            cx.notify();
-            return;
-        }
-        if let (Some(plan), Some(parts)) = (self.update.plan.take(), self.feed.add_source().parts())
-        {
-            parts.engine.cancel(plan.id);
+        self.update.session.dismissed();
+        if !self.update.session.running() {
+            let parts = self.feed.add_source().parts();
+            self.update
+                .offered
+                .reset(parts.as_ref().map(|p| &*p.engine));
+            self.update.password.clear();
         }
         self.update.open = false;
-        self.update.password.clear();
         cx.notify();
     }
 
     fn update_anyway(&mut self, machine: &str, cx: &mut Context<Self>) {
-        if self.update.running {
+        if self.update.session.running() {
             return;
         }
         self.update.anyway.insert(machine.to_owned());
-        self.replan();
         cx.notify();
     }
 
     fn start_update(&mut self, cx: &mut Context<Self>) {
-        if self.update.running {
-            return;
-        }
-        let Some(plan) = self.update.plan.take() else {
-            return;
-        };
         let Some(parts) = self.feed.add_source().parts() else {
             return;
         };
-        self.update.running = true;
-        self.update.outcome = None;
-        let asks = self.update.asks.clone();
+        if self.update.session.running() {
+            return;
+        }
+        let Some(plan) = self.update.offered.take() else {
+            return;
+        };
+        if !self.update.session.begin() {
+            return;
+        }
+        let session = self.update.session.clone();
+        let asks = session.asks();
         let engine = parts.engine.clone();
         let feed = self.feed.clone();
         cx.spawn(async move |this, cx| {
-            let outcome = cx
-                .background_executor()
+            cx.background_executor()
                 .spawn(async move {
                     let outcome = execute(&engine, &plan, &asks);
                     feed.refresh();
-                    outcome
+                    session.finish(outcome);
                 })
                 .await;
             this.update(cx, |view, cx| {
-                view.update.running = false;
-                view.update.pending = None;
-                view.update.outcome = Some(outcome);
                 view.update.seen = None;
                 cx.notify();
             })
             .ok();
         })
         .detach();
-        let asks = self.update.asks.clone();
+        self.watch_asks(cx);
+        cx.notify();
+    }
+
+    fn watch_asks(&mut self, cx: &mut Context<Self>) {
+        let session = self.update.session.clone();
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(ASK_POLL).await;
-            let again = this.update(cx, |view, cx| {
-                if !view.update.running {
-                    return false;
+            let (running, changed) = session.pull();
+            let alive = this.update(cx, |view, cx| {
+                if !running {
+                    view.update.seen = None;
                 }
-                if view.update.pending.is_none() {
-                    if let Some(pending) = asks.take() {
-                        view.update.pending = Some(pending);
-                        cx.notify();
-                    }
+                if changed || !running {
+                    cx.notify();
                 }
-                true
             });
-            if !again.unwrap_or(false) {
+            if !running || alive.is_err() {
                 break;
             }
         })
         .detach();
-        cx.notify();
     }
 
     fn answer_update(&mut self, go: bool, cx: &mut Context<Self>) {
-        let Some(pending) = self.update.pending.take() else {
-            return;
-        };
-        let answer = match (go, self.update.password.take()) {
-            (true, Some(password)) => AdminAnswer::Password(password),
-            _ => AdminAnswer::None,
-        };
-        pending.answer(answer);
-        cx.notify();
+        if self.update.session.answer(go, &mut self.update.password) {
+            cx.notify();
+        }
     }
 
     fn update_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -304,6 +302,10 @@ impl ClusterSheetView {
             return None;
         }
         let rows = self.rows();
+        self.sync_plan(&rows);
+        let running = self.update.session.running();
+        let outcome = self.update.session.outcome();
+        let asking = self.update.session.pending_target().is_some();
         let shown = lines(&rows, &self.update.anyway);
         let mut body = div().flex().flex_col().gap(px(SPACE[1])).child(label(
             t::cluster::update_intro(),
@@ -334,7 +336,7 @@ impl ClusterSheetView {
                         SharedString::from(format!("update-anyway-{}", line.machine)),
                         t::cluster::update_anyway(),
                         ButtonKind::Secondary,
-                        if self.update.running {
+                        if running {
                             PartState::Disabled
                         } else {
                             PartState::Rest
@@ -346,7 +348,7 @@ impl ClusterSheetView {
             }
             body = body.child(card(a).p(px(SPACE[1])).child(row));
         }
-        if let Some(plan) = &self.update.plan {
+        if let Some(plan) = self.update.offered.shown() {
             let open = self.update.commands;
             body = body.child(
                 div().flex().child(
@@ -376,7 +378,7 @@ impl ClusterSheetView {
                 body = body.child(mono_lines("update-commands-text", &text, 220.0, a));
             }
         }
-        if self.update.running && self.update.pending.is_none() {
+        if running && !asking {
             body = body.child(
                 div()
                     .flex()
@@ -391,10 +393,10 @@ impl ClusterSheetView {
                     )),
             );
         }
-        if self.update.pending.is_some() {
+        if asking {
             body = body.child(self.update_password(window, a, cx));
         }
-        if let Some(outcome) = &self.update.outcome {
+        if let Some(outcome) = &outcome {
             body = body.child(
                 div()
                     .flex()
@@ -418,11 +420,8 @@ impl ClusterSheetView {
                     ))),
             );
         }
-        let (title, enabled) = run_button(&rows, &self.update.anyway);
-        let can_run = enabled
-            && self.update.plan.is_some()
-            && !self.update.running
-            && self.update.outcome.is_none();
+        let (title, enabled) = self.update.offered.button();
+        let can_run = enabled && !running && outcome.is_none();
         let mut buttons = div()
             .pt(px(SPACE[1]))
             .flex()
@@ -431,7 +430,7 @@ impl ClusterSheetView {
         buttons = buttons.child(
             button(
                 "update-close",
-                if self.update.outcome.is_some() {
+                if outcome.is_some() {
                     t::cluster::add_finish()
                 } else {
                     t::cluster::add_close()

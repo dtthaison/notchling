@@ -57,11 +57,16 @@ fn machine() -> Machine {
 }
 
 fn ask(status: Option<Value>, nodes: &[(&str, &str)]) -> UpdateAsk {
+    ask_failing(status, nodes, &[])
+}
+
+fn ask_failing(status: Option<Value>, nodes: &[(&str, &str)], failed: &[&str]) -> UpdateAsk {
     let nodes: BTreeMap<String, String> = nodes
         .iter()
         .map(|(n, id)| ((*n).to_owned(), (*id).to_owned()))
         .collect();
-    UpdateAsk::new(Arc::new(Status(status)), vec![machine()], nodes)
+    let failed = failed.iter().map(|n| (*n).to_owned()).collect();
+    UpdateAsk::new(Arc::new(Status(status)), vec![machine()], nodes, failed)
 }
 
 #[test]
@@ -80,4 +85,18 @@ fn the_machines_banner_is_empty_when_builds_match_or_there_is_no_cluster() {
     assert_eq!(ask(Some(status(OURS)), &[]).run(Some(OURS)), None);
     assert_eq!(ask(None, &[]).run(Some(OURS)), None);
     assert_eq!(ask(Some(status(OTHER)), &[]).run(None), None);
+}
+
+#[test]
+fn a_dev_build_still_offers_the_machines_whose_notchling_check_fails() {
+    let ask = ask_failing(Some(status(OTHER)), &[("m1", M1)], &["m1"]);
+    let line = ask.run(None).expect("the failing binary check is a reason");
+    assert!(
+        line.starts_with("1 machine runs another Notchling build: m1"),
+        "{line}"
+    );
+    assert_eq!(
+        ask_failing(Some(status(OTHER)), &[("m1", M1)], &[]).run(None),
+        None
+    );
 }

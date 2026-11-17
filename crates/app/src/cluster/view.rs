@@ -152,6 +152,7 @@ impl ClusterSheetView {
                 this.join(cx);
             }
         });
+        let updates = feed.updates();
         ClusterSheetView {
             feed,
             access,
@@ -167,7 +168,7 @@ impl ClusterSheetView {
             removing: None,
             installing: None,
             add: AddUi::default(),
-            update: UpdateUi::default(),
+            update: UpdateUi::new(updates),
             name: editor,
             token,
             busy: false,

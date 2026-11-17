@@ -10,6 +10,7 @@ use serde_json::Value;
 use super::add_runs::AddRuns;
 use super::add_source::AddSource;
 use super::model::ClusterModel;
+use super::updates_state::UpdateSession;
 use super::wire::{self, Request};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -25,6 +26,7 @@ struct Shared {
     generation: Arc<AtomicU64>,
     stop: AtomicBool,
     adds: AddRuns,
+    updates: Arc<UpdateSession>,
 }
 
 impl Shared {
@@ -36,6 +38,7 @@ impl Shared {
             adds: AddRuns::tied_to(generation.clone()),
             generation,
             stop: AtomicBool::new(false),
+            updates: Arc::new(UpdateSession::default()),
         }
     }
 
@@ -208,6 +211,10 @@ impl ClusterFeed {
 
     pub fn adds(&self) -> AddRuns {
         self.shared.adds.clone()
+    }
+
+    pub fn updates(&self) -> Arc<UpdateSession> {
+        self.shared.updates.clone()
     }
 
     pub fn add_source(&self) -> Arc<AddSource> {

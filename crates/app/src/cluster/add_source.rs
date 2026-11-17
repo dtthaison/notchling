@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use notchling_engine::cluster::build_id::build_id;
@@ -100,17 +99,7 @@ impl AddSource {
                 .get(&StepId::NODE_JOINED)
                 .and_then(|r| r.detected.node.clone())
         };
-        let failed: BTreeSet<String> = machines
-            .iter()
-            .filter(|m| {
-                parts
-                    .engine
-                    .results(&m.name)
-                    .get(&StepId::NODE_BINARY)
-                    .is_some_and(|r| r.state.is_fail())
-            })
-            .map(|m| m.name.clone())
-            .collect();
+        let failed = parts.engine.binary_failures();
         let rows = rows_for(
             this_build.as_deref(),
             model,

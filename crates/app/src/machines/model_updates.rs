@@ -14,6 +14,7 @@ pub struct UpdateAsk {
     tokens: Arc<dyn ClusterTokens>,
     machines: Vec<Machine>,
     nodes: BTreeMap<String, String>,
+    failed_binary: BTreeSet<String>,
 }
 
 impl UpdateAsk {
@@ -21,11 +22,13 @@ impl UpdateAsk {
         tokens: Arc<dyn ClusterTokens>,
         machines: Vec<Machine>,
         nodes: BTreeMap<String, String>,
+        failed_binary: BTreeSet<String>,
     ) -> UpdateAsk {
         UpdateAsk {
             tokens,
             machines,
             nodes,
+            failed_binary,
         }
     }
 
@@ -40,7 +43,7 @@ impl UpdateAsk {
             &self.machines,
             &node_of,
             None,
-            &BTreeSet::new(),
+            &self.failed_binary,
         );
         let shown = banner(&rows)?;
         Some(format!(
@@ -70,7 +73,12 @@ impl MachinesModel {
                 Some((m.name.clone(), node))
             })
             .collect();
-        UpdateAsk::new(self.parts.cluster.clone(), self.machines.clone(), nodes)
+        UpdateAsk::new(
+            self.parts.cluster.clone(),
+            self.machines.clone(),
+            nodes,
+            self.parts.engine.binary_failures(),
+        )
     }
 
     pub fn set_update_banner(&mut self, text: Option<String>) {
