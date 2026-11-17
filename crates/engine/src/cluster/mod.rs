@@ -1,5 +1,6 @@
 pub mod ack_book;
 pub mod blob;
+pub mod build_id;
 pub mod claims;
 pub mod core;
 pub mod failover;
@@ -47,6 +48,8 @@ pub use versions::{compat, Compat, Purpose, Versions};
 
 #[cfg(test)]
 mod blob_tests;
+#[cfg(test)]
+mod build_id_tests;
 #[cfg(test)]
 mod claims_tests;
 #[cfg(test)]

@@ -31,6 +31,8 @@ pub struct Versions {
     pub host: Option<HostFacts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<BridgeFacts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

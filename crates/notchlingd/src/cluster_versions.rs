@@ -1,3 +1,4 @@
+use notchling_engine::cluster::build_id::build_id;
 use notchling_engine::cluster::versions::{CLUSTER_SCHEMA, FEATURE_DISPATCH, NODE_PROTO};
 use notchling_engine::cluster::Versions;
 use notchling_engine::versions::mac::{detect, Roots};
@@ -17,6 +18,7 @@ pub fn own() -> Versions {
         own_logins: BTreeMap::new(),
         host: None,
         bridge: None,
+        build: build_id().map(str::to_owned),
     }
 }
 

@@ -16,6 +16,8 @@ if [[ "$IDENTITY" != "-" ]]; then
   fi
 fi
 
+NOTCHLING_BUILD="$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD || echo -dirty)"
+export NOTCHLING_BUILD
 cargo build --release --locked -p notchling-app -p notchling-notchlingd -p notchling-ptyhost
 TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')/release"
 NAME="Notchling"

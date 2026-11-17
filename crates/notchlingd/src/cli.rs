@@ -1,3 +1,4 @@
+use notchling_engine::cluster::build_id::build_id;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +68,14 @@ pub enum Command {
 }
 
 pub fn version_line() -> String {
-    format!("notchling {}", env!("CARGO_PKG_VERSION"))
+    version_line_of(build_id())
+}
+
+fn version_line_of(build: Option<&str>) -> String {
+    match build {
+        Some(build) => format!("notchling {} ({build})", env!("CARGO_PKG_VERSION")),
+        None => format!("notchling {}", env!("CARGO_PKG_VERSION")),
+    }
 }
 
 pub fn usage() -> &'static str {
@@ -471,5 +479,20 @@ mod tests {
             format!("notchling {}", env!("CARGO_PKG_VERSION"))
         );
         assert!(usage().contains("service install"));
+    }
+
+    #[test]
+    fn version_line_names_build_when_set() {
+        assert_eq!(
+            version_line_of(Some("0a32aaca1234-dirty")),
+            format!(
+                "notchling {} (0a32aaca1234-dirty)",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        assert_eq!(
+            version_line_of(None),
+            format!("notchling {}", env!("CARGO_PKG_VERSION"))
+        );
     }
 }
