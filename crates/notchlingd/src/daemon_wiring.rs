@@ -569,7 +569,10 @@ impl Wired {
             .with_cluster_dir(layout.cluster_dir());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         acting.attach_outbox(outbox.clone());
-        let ask = crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox);
+        let node_slot = crate::ask_wiring::Slot::default();
+        let worker = crate::ask_wiring::worker_in(node_slot.clone());
+        let ask =
+            crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox, worker);
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),
@@ -761,6 +764,9 @@ impl Wired {
             events.clone(),
             (sessions.clone(), acting.acting_switch()),
         );
+        if let Ok(node) = &cluster.node {
+            let _ = node_slot.set(node.clone());
+        }
         cluster.fence_keeper().set_codex(codex.clone());
         bridge.cluster().attach(
             cluster.handler(),

@@ -60,6 +60,8 @@ pub(crate) struct Mark {
     pub(crate) by: Option<By>,
 }
 
+pub type Worker = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 pub struct AskOps {
     pub(crate) store: Arc<AskStore>,
     sessions: Arc<Mutex<Value>>,
@@ -69,6 +71,7 @@ pub struct AskOps {
     pub(crate) caller: CallerSession,
     pub(crate) procs: Arc<dyn Processes>,
     clock: Clock,
+    worker: Worker,
     marks: Mutex<HashMap<String, Mark>>,
     pub(crate) link: OnceLock<Link>,
     pub(crate) finder: OnceLock<Finder>,
@@ -150,6 +153,7 @@ impl AskOps {
             caller: CallerSession::new(roots, procs.clone()),
             procs,
             clock: Arc::new(now_ms),
+            worker: Arc::new(|| None),
             marks: Mutex::new(HashMap::new()),
             link: OnceLock::new(),
             finder: OnceLock::new(),
@@ -169,6 +173,11 @@ impl AskOps {
         self
     }
 
+    pub fn with_worker(mut self, worker: Worker) -> AskOps {
+        self.worker = worker;
+        self
+    }
+
     pub fn without_store(mut self) -> AskOps {
         self.saving = false;
         self
@@ -183,7 +192,11 @@ impl AskOps {
     }
 
     fn on_worker(&self) -> bool {
-        false
+        (self.worker)().is_some()
+    }
+
+    pub(crate) fn node_name(&self) -> Option<String> {
+        (self.worker)()
     }
 
     pub(crate) fn agents(&self) -> Vec<Agent> {

@@ -212,6 +212,8 @@ mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
 #[cfg(test)]
+mod ask_cluster_tests;
+#[cfg(test)]
 mod ask_find_tests;
 #[cfg(test)]
 mod ask_inbox_tests;

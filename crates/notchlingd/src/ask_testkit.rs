@@ -1,6 +1,6 @@
 use crate::acting::Acting;
 use crate::acting_ops_tests::{app, FakeRoom, SESSION};
-use crate::ask_ops::AskOps;
+use crate::ask_ops::{AskOps, Worker};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
@@ -137,6 +137,19 @@ pub(crate) fn rig_full(
     store: Option<(Arc<AskStore>, Scratch)>,
     inbox_dir: Option<PathBuf>,
 ) -> Rig {
+    rig_in(list, store, (inbox_dir, None), Arc::new(|| None))
+}
+
+pub(crate) fn rig_on(inbox: Arc<InboxOps>, worker: Worker) -> Rig {
+    rig_in(json!([]), None, (None, Some(inbox)), worker)
+}
+
+fn rig_in(
+    list: Value,
+    store: Option<(Arc<AskStore>, Scratch)>,
+    (inbox_dir, shared): (Option<PathBuf>, Option<Arc<InboxOps>>),
+    worker: Worker,
+) -> Rig {
     let (store, dir) =
         store.unwrap_or_else(|| (Arc::new(AskStore::in_memory_for_tests()), scratch("rig")));
     let main = dir.0.join("claude");
@@ -173,7 +186,7 @@ pub(crate) fn rig_full(
     let list = Arc::new(Mutex::new(list));
     let inbox_dir = inbox_dir.unwrap_or_else(|| dir.0.join("inbox"));
     std::fs::create_dir_all(&inbox_dir).unwrap();
-    let inbox = InboxOps::new(inbox_dir, room.clone());
+    let inbox = shared.unwrap_or_else(|| InboxOps::new(inbox_dir, room.clone()));
     let ops = Arc::new(
         AskOps::new(
             store.clone(),
@@ -184,7 +197,8 @@ pub(crate) fn rig_full(
             Some(Events::fixed(sink.clone(), Salt([1; 32]))),
             tree.clone(),
         )
-        .with_clock(Arc::new(move || ticks.load(Ordering::SeqCst))),
+        .with_clock(Arc::new(move || ticks.load(Ordering::SeqCst)))
+        .with_worker(worker),
     );
     ops.attach(inbox.clone());
     Rig {

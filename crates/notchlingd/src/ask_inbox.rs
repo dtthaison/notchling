@@ -165,7 +165,10 @@ impl AskOps {
             ops: link.me.clone(),
             id: row.id.clone(),
         });
-        let inbox_id = link.inbox.raise(item(row, None, now_ms), Some(responder));
+        let inbox_id = link.inbox.raise(
+            item(row, self.node_name().as_deref(), now_ms),
+            Some(responder),
+        );
         let _ = self.store.set_inbox(&row.id, Some(&inbox_id));
         inbox_id
     }
