@@ -4,6 +4,7 @@ use super::{shown_members, Effect, NodeCore, Target};
 use crate::cluster::failover::Failover;
 use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
+use crate::cluster::invite::Invite;
 use crate::cluster::members::{can_be_master_default, Desired, Member, MemberState, Term};
 use crate::cluster::state::Command;
 use crate::cluster::text::{plain, NAME_MAX};
@@ -143,10 +144,17 @@ impl NodeCore {
             }
             _ => {}
         }
-        let name = super::shown_name(&name, &from);
-        let Some(minter) = self.tokens.take(&secret, self.wall_ms) else {
+        let Some((minter, invite)) = self.tokens.take_open(&secret, self.wall_ms) else {
             self.refuse(&from, "bad token", true, out);
             return;
+        };
+        if invite.as_ref().is_some_and(|i| i.node != from) {
+            self.refuse(&from, "this token was made for another machine", true, out);
+            return;
+        }
+        let name = match &invite {
+            Some(invite) => invite.name.clone(),
+            None => super::shown_name(&name, &from),
         };
         if let Compat::Refuse(text) = compat(&self.versions, &versions, &name, Purpose::Link) {
             self.refuse(&from, &text, true, out);
@@ -182,6 +190,10 @@ impl NodeCore {
             self.refuse(&from, "refused", true, out);
             return;
         }
+        if let Some(invite) = invite {
+            self.admit_invited(&from, invite, minter, &versions, out);
+            return;
+        }
         let can_be_master =
             can_be_master_default(&versions.os) && self.may_hold_primary_role(&minter);
         out.push(Effect::JoinRequest {
@@ -197,6 +209,55 @@ impl NodeCore {
             minter,
         });
         self.send(&from, Msg::JoinPending { item }, out);
+    }
+
+    fn admit_invited(
+        &mut self,
+        from: &NodeId,
+        invite: Invite,
+        minter: NodeId,
+        versions: &Versions,
+        out: &mut Vec<Effect>,
+    ) {
+        let approved = self.apply(
+            Command::Approve {
+                node: from.clone(),
+                client: false,
+                can_be_master: invite.can_be_master,
+            },
+            out,
+        );
+        if approved.is_err() {
+            let _ = self.apply(Command::Deny { node: from.clone() }, out);
+            self.refuse(from, "refused", true, out);
+            return;
+        }
+        let _ = self.apply(
+            Command::SetMember {
+                node: from.clone(),
+                can_be_master: None,
+                client: None,
+                reference: None,
+                accepts_delegation: None,
+                headless: None,
+                desired: Some(Desired {
+                    acting: invite.acting,
+                    bridge: false,
+                    install: false,
+                }),
+            },
+            out,
+        );
+        self.send_join_ok(from, out);
+        self.push_members(None, out);
+        out.push(Effect::InviteJoined {
+            node: from.clone(),
+            name: invite.name,
+            os: versions.os.clone(),
+            arch: versions.arch.clone(),
+            minter_name: self.member_name(&minter),
+            minter,
+        });
     }
 
     pub(super) fn on_join_pending(&mut self, from: NodeId, item: String, out: &mut Vec<Effect>) {

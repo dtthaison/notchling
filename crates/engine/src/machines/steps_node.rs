@@ -8,8 +8,11 @@ use super::step::{
 };
 use super::steps_machine::{cut, is_newline, trim_ws};
 use super::steps_node_binary::binary;
+use super::steps_node_mac::app_closed;
+use super::steps_node_reach::{is_tailscale_ip, reach};
 use super::steps_node_service::service;
 use super::steps_sd::first_line_300;
+use super::steps_tailscale_linux::tagged;
 use crate::cluster::persist::CLUSTER_DIR;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -18,11 +21,8 @@ pub const MAC_BUILD: &str = concat!("notchling ", env!("CARGO_PKG_VERSION"));
 
 pub(super) const BINARY: &str = "~/.local/bin/notchling";
 pub(super) const BINARY_NEW: &str = "~/.local/bin/notchling.new";
-pub(super) const APP_BINARY: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
 pub(super) const APP_DIR: &str = "/Applications/Notchling.app";
-pub(super) const NOT_NEEDED: &str = "Not needed: the Notchling app runs it";
 pub(super) const UNIT: &str = "notchlingd.service";
-pub(super) const LABEL: &str = "dev.notchling.daemon";
 pub(super) const RUNTIME_DIR: &str = r#"export XDG_RUNTIME_DIR="/run/user/$(id -u)""#;
 
 const TAILSCALE_LINUX: &str = "tailscale status --json --peers=false";
@@ -33,7 +33,23 @@ pub fn dist_dir(data: &Path) -> PathBuf {
 }
 
 pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
-    vec![tailscale(m), binary(m), service(m), joined(m)]
+    let mut out = vec![tailscale(m), binary(m), service(m)];
+    if m.runs_app() {
+        out.push(app_closed(m));
+    }
+    out.push(reach(m));
+    out.push(joined(m));
+    out
+}
+
+pub fn is_sd_join_step(id: &StepId) -> bool {
+    *id != StepId::NODE_GIT
+        && (*id == StepId::REACHABLE
+            || *id == StepId::WORKER_USER
+            || *id == StepId::STAYS_AWAKE
+            || *id == StepId::FILEVAULT
+            || id.raw().starts_with("node-")
+            || super::steps_master::is_master_step(id))
 }
 
 fn tailscale(m: &Machine) -> SetupStep {
@@ -58,27 +74,24 @@ fn tailscale(m: &Machine) -> SetupStep {
 }
 
 fn joined(m: &Machine) -> SetupStep {
-    let app = m.runs_app();
+    let mut needs = vec![
+        StepId::NODE_SERVICE,
+        StepId::NODE_TAILSCALE,
+        StepId::NODE_REACH,
+    ];
+    if m.runs_app() {
+        needs.insert(1, StepId::NODE_APP_CLOSED);
+    }
     SetupStep::new(
         StepId::NODE_JOINED,
         "Joined the cluster",
-        vec![StepId::NODE_SERVICE, StepId::NODE_TAILSCALE],
+        needs,
         Cadence::EveryRefresh,
         Probe::remote(
-            format!(
-                "{} cluster status --json",
-                shell::path(if app { APP_BINARY } else { BINARY })
-            ),
+            format!("{} cluster status --json", shell::path(BINARY)),
             parse_joined,
         ),
-        if app {
-            StepFix::HowTo(format!(
-                "On {}, open Cluster in Notchling's Chat and join with a token from Copy Join Token here.",
-                m.name
-            ))
-        } else {
-            StepFix::Run(FixPlan::new(join_display(), false, join_fix))
-        },
+        StepFix::Run(FixPlan::new(join_display(), false, join_fix)),
     )
 }
 
@@ -105,29 +118,28 @@ pub(super) fn first_text_line(text: &str) -> String {
         .unwrap_or_default()
 }
 
-fn tailscale_address(ip: &str) -> bool {
-    let Ok(std::net::IpAddr::V4(v4)) = ip.parse::<std::net::IpAddr>() else {
-        return false;
-    };
-    let o = v4.octets();
-    o[0] == 100 && (o[1] & 0xC0) == 0x40
-}
-
-fn parse_tailscale(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
+fn parse_tailscale(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let Some(v) = json_from(&out.text) else {
+        let linux = ctx.machine.is_linux();
         if out.code == 126 || out.code == 127 {
-            return CheckResult::fail("Tailscale isn't installed there");
+            let missing = CheckResult::fail("Tailscale isn't installed there");
+            return tagged(missing, linux, out.code, None);
         }
         let why = first_text_line(&out.text);
-        return CheckResult::fail(if why.is_empty() {
-            "Tailscale isn't running there".to_string()
-        } else {
-            format!("Tailscale isn't running there: {why}")
-        });
+        return tagged(
+            CheckResult::fail(if why.is_empty() {
+                "Tailscale isn't running there".to_string()
+            } else {
+                format!("Tailscale isn't running there: {why}")
+            }),
+            linux,
+            out.code,
+            None,
+        );
     };
     let state = v["BackendState"].as_str().unwrap_or("");
     if state != "Running" {
-        return CheckResult::fail(format!(
+        let stopped = CheckResult::fail(format!(
             "Tailscale is {}",
             if state.is_empty() {
                 "not running".to_string()
@@ -135,17 +147,33 @@ fn parse_tailscale(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
                 cut(state)
             }
         ));
+        return tagged(stopped, ctx.machine.is_linux(), out.code, Some(state));
     }
     let address = v["Self"]["TailscaleIPs"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .find(|ip| tailscale_address(ip));
-    match address {
-        Some(ip) => CheckResult::pass(format!("running, {}", cut(ip))),
-        None => CheckResult::fail("Tailscale is running but has no 100.x address"),
+        .find(|ip| is_tailscale_ip(ip));
+    let Some(ip) = address else {
+        return CheckResult::fail("Tailscale is running but has no 100.x address");
+    };
+    let local = ctx.tokens.tailnet();
+    let theirs = v["CurrentTailnet"]["Name"].as_str();
+    if let (Some(local), Some(theirs)) = (local, theirs) {
+        if !theirs.trim().eq_ignore_ascii_case(local.trim()) {
+            return CheckResult::fail(format!(
+                "in the tailnet {}, but this Mac is in {}",
+                plain(theirs),
+                plain(&local)
+            ));
+        }
     }
+    CheckResult::pass(format!("running, {}", cut(ip)))
+}
+
+fn plain(text: &str) -> String {
+    cut(&text.chars().filter(|c| !c.is_control()).collect::<String>())
 }
 
 pub(super) fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
@@ -179,37 +207,42 @@ fn parse_joined(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
             format!("the Notchling service there didn't answer: {why}")
         });
     };
+    let node = v["me"]
+        .as_str()
+        .filter(|id| is_node_id(id))
+        .map(str::to_string);
+    let seen = |result: CheckResult| {
+        result.detected(Detected {
+            node: node.clone(),
+            ..Detected::default()
+        })
+    };
     let Some(theirs) = v["cluster"]["id"].as_str() else {
-        return match v["joining"].as_object() {
+        return seen(match v["joining"].as_object() {
             Some(joining) if joining.get("answered").and_then(Value::as_bool) == Some(true) => {
                 CheckResult::cant_tell("waiting for approval on this Mac")
             }
             Some(_) => CheckResult::cant_tell("joining; this Mac hasn't answered yet"),
             None => CheckResult::fail("not in a cluster yet"),
-        };
+        });
     };
     if theirs != want {
         let name = v["cluster"]["name"].as_str().unwrap_or("");
-        return CheckResult::fail(if name.is_empty() {
+        let text = if name.is_empty() {
             "in another cluster".to_string()
         } else {
             format!("in another cluster, {}", cut(name))
-        });
+        };
+        let mut result = seen(CheckResult::fail(text.clone()));
+        result.detected.other_cluster = Some(text);
+        return result;
     }
-    let node = v["me"]
-        .as_str()
-        .filter(|id| is_node_id(id))
-        .map(str::to_string);
     let name = v["cluster"]["name"].as_str().unwrap_or("");
-    CheckResult::pass(if name.is_empty() {
+    seen(CheckResult::pass(if name.is_empty() {
         "in this Mac's cluster".to_string()
     } else {
         format!("in {}", cut(name))
-    })
-    .detected(Detected {
-        node,
-        ..Detected::default()
-    })
+    }))
 }
 
 pub(super) fn os_word(m: &Machine) -> Option<&'static str> {
@@ -250,35 +283,97 @@ fn join_display() -> String {
     )
 }
 
+const ASK_APP: &str = "Use Add Machine or Join Cluster in the app's Cluster sheet.";
+
+fn is_me(text: &str) -> bool {
+    text.len() == 16
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+fn read_me(ctx: &FixContext) -> Result<String, String> {
+    let script = format!("{} cluster status --json", shell::path(BINARY));
+    let ran = ctx.step.runner.run(&Call::secs(
+        shell::ssh_script(&ctx.step.machine, &script),
+        30,
+    ));
+    if ran.code != 0 {
+        return Err(format!(
+            "couldn't read the node id there (exit {}): {}",
+            ran.code,
+            said(ctx, &ran)
+        ));
+    }
+    json_from(&ran.out)
+        .and_then(|v| v["me"].as_str().map(str::to_string))
+        .filter(|me| is_me(me))
+        .ok_or_else(|| "refused: the machine gave no usable node id".to_string())
+}
+
+fn token_for(ctx: &FixContext, me: &str) -> Result<(String, bool), String> {
+    let m = &ctx.step.machine;
+    let choices = m.node.as_ref().map(|n| n.choices).unwrap_or_default();
+    let tokens = &ctx.step.tokens;
+    match tokens.invite(me, &m.name, choices.can_be_master, choices.acting) {
+        Ok(Some(token)) if !token.trim().is_empty() => Ok((token.trim().to_string(), true)),
+        Ok(Some(_)) => Err("this Mac's cluster gave an empty invite".to_string()),
+        Err(why) => Err(ctx.mask(&why)),
+        Ok(None) => match tokens.join_token() {
+            Ok(token) if !token.trim().is_empty() => Ok((token.trim().to_string(), false)),
+            Ok(_) => Err("this Mac's cluster gave an empty join token".to_string()),
+            Err(why) => Err(format!(
+                "{}. {ASK_APP}",
+                ctx.mask(&why).trim().trim_end_matches('.')
+            )),
+        },
+    }
+}
+
+fn token_expired(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    text.contains("expired") || text.contains("bad token")
+}
+
 fn join_fix(ctx: &FixContext) -> FixOutcome {
     if let Some(why) = machine_refusal(&ctx.step.machine) {
         return FixOutcome::fail(why);
     }
-    let token = match ctx.step.tokens.join_token() {
-        Ok(token) if !token.trim().is_empty() => token.trim().to_string(),
-        Ok(_) => return FixOutcome::fail("this Mac's cluster gave an empty join token"),
-        Err(why) => return FixOutcome::fail(ctx.mask(&why)),
+    let me = match read_me(ctx) {
+        Ok(me) => me,
+        Err(why) => return FixOutcome::fail(why),
     };
     let mut masked = ctx.clone();
-    masked.masks.hide("join-token", &token);
-    masked.step.masks.hide("join-token", &token);
-    let call = Call::secs(shell::ssh_script(&ctx.step.machine, &join_script()), 90)
-        .stdin(format!("{token}\n").into_bytes());
-    if masked.masks.leaks_into(&call.argv.join("\n")) {
-        return FixOutcome::fail("refused: the token would have gone on a command line");
-    }
-    let ran = ctx.step.runner.run(&call);
-    if ran.code != 0 {
+    let mut retried = false;
+    loop {
+        let (token, invited) = match token_for(&masked, &me) {
+            Ok(got) => got,
+            Err(why) => return FixOutcome::fail(why),
+        };
+        masked.masks.hide("join-token", &token);
+        masked.step.masks.hide("join-token", &token);
+        let call = Call::secs(shell::ssh_script(&ctx.step.machine, &join_script()), 90)
+            .stdin(format!("{token}\n").into_bytes());
+        if masked.masks.leaks_into(&call.argv.join("\n")) {
+            return FixOutcome::fail("refused: the token would have gone on a command line");
+        }
+        let ran = ctx.step.runner.run(&call);
+        if ran.code == 0 {
+            let line = first_line_300(&ran.out, &|s| masked.mask(s));
+            return FixOutcome::ok(if line.is_empty() {
+                "asked to join".to_string()
+            } else {
+                line
+            });
+        }
+        if invited && !retried && token_expired(&format!("{}\n{}", ran.out, ran.err)) {
+            retried = true;
+            continue;
+        }
         return FixOutcome::fail(format!(
             "couldn't join (exit {}): {}",
             ran.code,
             said(&masked, &ran)
         ));
     }
-    let line = first_line_300(&ran.out, &|s| masked.mask(s));
-    FixOutcome::ok(if line.is_empty() {
-        "asked to join".to_string()
-    } else {
-        line
-    })
 }

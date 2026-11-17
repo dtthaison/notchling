@@ -52,6 +52,7 @@ pub mod cluster_inbox;
 pub mod cluster_inbox_follow;
 #[cfg(test)]
 pub(crate) mod cluster_inbox_testkit;
+pub mod cluster_invite;
 pub mod cluster_join;
 pub mod cluster_logins;
 pub mod cluster_logins_jobs;
@@ -78,6 +79,7 @@ pub mod cluster_prompts;
 mod cluster_prompts_book;
 mod cluster_prompts_clean;
 pub mod cluster_publisher;
+pub mod cluster_reach;
 pub mod cluster_redact;
 pub mod cluster_relay;
 pub mod cluster_relay_wiring;
@@ -282,6 +284,8 @@ mod cluster_promote_reach_tests;
 mod cluster_promote_tests;
 #[cfg(test)]
 mod cluster_promote_watch_tests;
+#[cfg(test)]
+mod cluster_reach_tests;
 #[cfg(test)]
 mod cluster_redact_tests;
 #[cfg(test)]

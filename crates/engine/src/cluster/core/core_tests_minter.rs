@@ -20,7 +20,7 @@ fn joined_with_a_token_from(hub: &mut Hub, minter: &NodeId, name: &str, os: &str
     hub.local(
         &home,
         LocalCmd::IssueToken {
-            secret: secret.clone(),
+            secret: secret.clone().into(),
             minter: minter.clone(),
         },
     );
@@ -99,7 +99,7 @@ fn a_token_whose_maker_was_removed_since_never_defaults_to_can_be_master() {
     hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: secret.clone(),
+            secret: secret.clone().into(),
             minter: w1.clone(),
         },
     );
@@ -144,7 +144,7 @@ fn only_a_member_can_be_named_as_the_maker_of_a_token() {
     let effects = hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: "x".to_string(),
+            secret: "x".to_string().into(),
             minter: id("nobody"),
         },
     );

@@ -14,7 +14,7 @@ pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
 pub const STANDBY_NAME: &str = "mac-mini";
 
-pub const VIEWS: [ViewSpec; 14] = [
+pub const VIEWS: [ViewSpec; 20] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -81,6 +81,36 @@ pub const VIEWS: [ViewSpec; 14] = [
         about: "the cluster sheet while this Mac waits for the Primary to approve its join (made-up data)",
     },
     ViewSpec {
+        name: "cluster-add",
+        size: (WIDTH, HEIGHT),
+        about: "the Add Machine sheet over the cluster sheet: SSH Address typed, the name filled from the host (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-add-plan",
+        size: (WIDTH, 1200.0),
+        about: "the Add Machine sheet at its plan: four steps and a how-to the join doesn't need, the admin password field, Can Be Master off with its reason, Acting on, a how-to to do after it joins, Install and Join (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-add-running",
+        size: (WIDTH, 760.0),
+        about: "the Add Machine sheet while a run goes on: Adding m2 (step 3 of 4), the masked log and the Close button (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-add-stopped",
+        size: (WIDTH, 760.0),
+        about: "the Add Machine sheet after a run stopped: the reason, its how-to, Check Again (made-up data)",
+    },
+    ViewSpec {
+        name: "cluster-not-joined",
+        size: (WIDTH, 820.0),
+        about: "the cluster sheet with the Not in the Cluster section: m1 and vps-sing-1 from Machines with Join Cluster (fixture registry)",
+    },
+    ViewSpec {
+        name: "cluster-update",
+        size: (WIDTH, 720.0),
+        about: "the cluster sheet offering Update 3 Machines, with its sheet open: one machine ready, one waiting for the Linux build, one busy with Update Anyway (made-up data)",
+    },
+    ViewSpec {
         name: "cluster-secrets",
         size: (WIDTH, HEIGHT),
         about: "the Worker's Secrets editor: the vault's names, two allowed, Any Secret off (made-up data)",
@@ -103,6 +133,12 @@ pub enum Shown {
     Promote,
     Unfenced,
     TakeBack,
+    Add,
+    AddPlan,
+    AddRunning,
+    AddStopped,
+    NotJoined,
+    Update,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -121,6 +157,12 @@ pub fn shown(name: &str) -> Option<Shown> {
         "cluster-install" => Some(Shown::Install),
         "cluster-install-off" => Some(Shown::InstallOff),
         "cluster-secrets" => Some(Shown::Secrets),
+        "cluster-add" => Some(Shown::Add),
+        "cluster-add-plan" => Some(Shown::AddPlan),
+        "cluster-add-running" => Some(Shown::AddRunning),
+        "cluster-add-stopped" => Some(Shown::AddStopped),
+        "cluster-not-joined" => Some(Shown::NotJoined),
+        "cluster-update" => Some(Shown::Update),
         _ => None,
     }
 }
@@ -519,8 +561,30 @@ fn install_on() -> Value {
     status
 }
 
+pub fn updating() -> Value {
+    let mut status = status();
+    set_member(&mut status, STANDBY, "name", json!("m1"));
+    set_member(&mut status, WORKER, "name", json!("vps-sing-1"));
+    let mut third = member(
+        STUDIO,
+        "m3",
+        "worker",
+        false,
+        true,
+        versions("macos", "aarch64", Some("2.1.320"), "0.170.0"),
+        json!({"cpu": 4, "memUsedMb": 20480, "memTotalMb": 65536}),
+        false,
+    );
+    third["ready"] = Value::Null;
+    if let Some(members) = status["members"].as_array_mut() {
+        members.push(third);
+    }
+    status
+}
+
 pub fn model_of(which: Shown) -> ClusterModel {
     match which {
+        Shown::Update => ClusterModel::from_status(&updating(), ME),
         Shown::Empty => model(false),
         Shown::Many => ClusterModel::from_status(&many(), ME),
         Shown::Off => ClusterModel::from_status(&off(), ME),
@@ -531,7 +595,15 @@ pub fn model_of(which: Shown) -> ClusterModel {
         Shown::Promote => ClusterModel::from_status(&render_promote(), STANDBY),
         Shown::Unfenced => ClusterModel::from_status(&unfenced("done"), ME),
         Shown::TakeBack => ClusterModel::from_status(&back(), ME),
-        Shown::Full | Shown::Menu | Shown::InstallOff | Shown::Secrets => model(true),
+        Shown::Full
+        | Shown::Menu
+        | Shown::InstallOff
+        | Shown::Secrets
+        | Shown::Add
+        | Shown::AddPlan
+        | Shown::AddRunning
+        | Shown::AddStopped
+        | Shown::NotJoined => model(true),
     }
 }
 

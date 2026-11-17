@@ -18,6 +18,7 @@ pub enum PlanKind {
     Running(bool),
     SendAgain(SecretUsage),
     Update(String),
+    UpdateNotchling(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,6 +205,9 @@ impl SetupEngine {
                     fail(bad.join("\n"))
                 }
             }
+            PlanKind::UpdateNotchling(names) => {
+                self.update_notchling(names, &plan.steps, ask_admin)
+            }
             PlanKind::SetUpAll => fail("Set up all runs on its own"),
         }
     }
@@ -264,6 +268,9 @@ impl SetupEngine {
                 steps,
                 admin: AdminNeed::None,
             });
+        }
+        if let PlanKind::UpdateNotchling(names) = kind {
+            return self.update_notchling_plan(names);
         }
         let m = self
             .machine(machine)
@@ -364,7 +371,7 @@ impl SetupEngine {
                 let a = self.delivery_step(usage, format!("Send {} again", usage.name))?;
                 Ok(shown(&m, a.title.clone(), vec![a], AdminNeed::None))
             }
-            PlanKind::Update(_) => Err("unreachable".into()),
+            PlanKind::Update(_) | PlanKind::UpdateNotchling(_) => Err("unreachable".into()),
         }
     }
 

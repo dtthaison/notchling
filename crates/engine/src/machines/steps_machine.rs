@@ -116,7 +116,7 @@ fn first_line(text: &str) -> String {
         .to_string()
 }
 
-fn outcome(r: &CommandResult, ok: &str, ctx: &FixContext) -> FixOutcome {
+pub(super) fn outcome(r: &CommandResult, ok: &str, ctx: &FixContext) -> FixOutcome {
     if r.code == 0 {
         return FixOutcome::ok(ok);
     }
@@ -435,7 +435,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubc
 apt-get update
 apt-get install -y gh --no-upgrade"#;
 
-const NOT_DETECTED: &str = "OS not detected yet; run Reachable first";
+pub(super) const NOT_DETECTED: &str = "OS not detected yet; run Reachable first";
 
 fn not_settled(now: Option<MachineOs>) -> String {
     if now.is_none() {

@@ -14,6 +14,17 @@ use super::step::{
 use crate::lanes::quote;
 use std::collections::{BTreeMap, BTreeSet};
 
+fn blocked(raw: &BTreeMap<StepId, CheckResult>, id: &StepId, text: String) -> CheckResult {
+    let result = CheckResult::cant_tell(text);
+    match raw.get(id).and_then(|r| r.detected.other_cluster.clone()) {
+        Some(other_cluster) => result.detected(Detected {
+            other_cluster: Some(other_cluster),
+            ..Detected::default()
+        }),
+        None => result,
+    }
+}
+
 pub(super) fn nonce() -> Option<String> {
     use ring::rand::{SecureRandom, SystemRandom};
     let mut b = [0u8; 8];
@@ -29,7 +40,18 @@ impl SetupEngine {
         use_prior: bool,
         masks: &Masks,
     ) -> Evaluation {
-        let first = self.evaluate_once(m, slow, use_prior, masks);
+        self.evaluate_in(m, slow, use_prior, masks, None)
+    }
+
+    pub(super) fn evaluate_in(
+        &self,
+        m: &Machine,
+        slow: bool,
+        use_prior: bool,
+        masks: &Masks,
+        only: Option<fn(&StepId) -> bool>,
+    ) -> Evaluation {
+        let first = self.evaluate_once(m, slow, use_prior, masks, only);
         let build = Detected {
             os: first.detected.os,
             home: first.detected.home.clone(),
@@ -42,13 +64,23 @@ impl SetupEngine {
         if first.unreachable || learned == *m {
             return first;
         }
-        let mut second = self.evaluate_once(&learned, slow, use_prior, masks);
+        let mut second = self.evaluate_once(&learned, slow, use_prior, masks, only);
         second.slow_ran |= first.slow_ran;
         second
     }
 
-    fn evaluate_once(&self, m: &Machine, slow: bool, use_prior: bool, masks: &Masks) -> Evaluation {
-        let list = self.step_list(m);
+    fn evaluate_once(
+        &self,
+        m: &Machine,
+        slow: bool,
+        use_prior: bool,
+        masks: &Masks,
+        only: Option<fn(&StepId) -> bool>,
+    ) -> Evaluation {
+        let mut list = self.step_list(m);
+        if let Some(keep) = only {
+            list.retain(|s| keep(&s.id));
+        }
         let ctx = self.context(m, masks);
         let prior = if use_prior {
             lock(&self.state)
@@ -113,7 +145,7 @@ impl SetupEngine {
                     let need = s.needs.first().map(title).unwrap_or("another step".into());
                     done.insert(
                         s.id.clone(),
-                        CheckResult::cant_tell(format!("waits for {need}")),
+                        blocked(&raw, &s.id, format!("waits for {need}")),
                     );
                 }
                 break;
@@ -128,7 +160,7 @@ impl SetupEngine {
                 if let Some(need) = blocking {
                     done.insert(
                         s.id.clone(),
-                        CheckResult::cant_tell(format!("waits for {}", title(need))),
+                        blocked(&raw, &s.id, format!("waits for {}", title(need))),
                     );
                     continue;
                 }

@@ -4,7 +4,8 @@ use super::masks::{FixLog, Masks};
 use super::registry::{AdminAccess, Machine};
 use super::runner::{Channel, OutputSink};
 use super::shell;
-use super::step::{run, FixContext, FixOutcome, SetupStep, StepFix, StepId};
+use super::step::{run, FixContext, FixOutcome, LinkOffer, SetupStep, StepFix, StepId};
+use super::steps_tailscale_linux::is_sign_in_link;
 use crate::accounts::Secret;
 use crate::versions::{selfupdate_log, Tool};
 use std::sync::Arc;
@@ -155,14 +156,17 @@ impl SetupEngine {
             sink_log.add(c, t);
             append(&state, &name, sink_log.take());
         });
+        let links = self.link_offer(&m.name);
         let ctx = FixContext {
             step: self.context(m, &masks),
             admin_password: password,
             log: sink,
             masks: masks.clone(),
+            links: Some(links),
         };
         let raw = body(&ctx);
         drop(ctx);
+        lock(&self.state).sign_in.remove(&m.name);
         log.end();
         self.append_log(&m.name, log.take());
         let message = masks.apply(&raw.message);
@@ -185,6 +189,29 @@ impl SetupEngine {
             ok: raw.ok,
             message,
         }
+    }
+
+    fn link_offer(&self, machine: &str) -> LinkOffer {
+        let state = self.state.clone();
+        let name = machine.to_string();
+        let notify = self
+            .on_link
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        Arc::new(move |url: &str| {
+            if !is_sign_in_link(url) {
+                return;
+            }
+            {
+                let mut s = lock(&state);
+                s.sign_in.insert(name.clone(), url.to_string());
+                s.revision += 1;
+            }
+            if let Some(notify) = &notify {
+                notify();
+            }
+        })
     }
 
     pub(super) fn set_up_all_steps(&self, m: &Machine) -> Vec<ApprovedStep> {
@@ -381,6 +408,7 @@ impl SetupEngine {
             s.logs.remove(machine);
             s.last_slow.remove(machine);
             s.facts.remove(machine);
+            s.sign_in.remove(machine);
             s.saved_state.remove(machine);
             s.expiry_sent.remove(machine);
             s.shown.retain(|_, r| r.plan.machine != machine);

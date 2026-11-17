@@ -6,6 +6,7 @@ use notchling_engine::cluster::core::{
     LocalCmd, SnapAsk, CALL_MS, DELEGATE_CALL_MS, PEER_STALE_TERM,
 };
 use notchling_engine::cluster::failover::Failover;
+use notchling_engine::cluster::invite::Invite;
 use notchling_engine::cluster::snapshot::Observed;
 use notchling_engine::cluster::wire::{Origin, WireError};
 use notchling_engine::cluster::{ClusterState, Desired, Input, NodeId, Versions};
@@ -46,8 +47,19 @@ pub struct JoinAsk {
     pub minter_name: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteJoin {
+    pub node: NodeId,
+    pub name: String,
+    pub os: String,
+    pub arch: String,
+    pub minter: NodeId,
+    pub minter_name: String,
+}
+
 pub trait Hooks: Send + Sync {
     fn join_request(&self, _ask: JoinAsk, _node: Submit) {}
+    fn invite_joined(&self, _joined: InviteJoin) {}
     fn desired(&self, _desired: Desired) {}
     fn wiped(&self) -> bool {
         true
@@ -102,6 +114,7 @@ pub(crate) enum In {
     Local(LocalCmd, Option<Answer>),
     Create(String, Answer),
     Token(Option<NodeId>, Answer),
+    Invite(Option<NodeId>, Invite, Answer),
     Join(String, bool, Answer),
     Core(Input),
     Link(bool),
@@ -406,6 +419,14 @@ impl ClusterNode {
 
     pub fn join_token_for(&self, minter: NodeId) -> Result<Value, ApiError> {
         self.wait(|answer| In::Token(Some(minter), answer))
+    }
+
+    pub fn invite(&self, invite: Invite) -> Result<Value, ApiError> {
+        self.wait(|answer| In::Invite(None, invite, answer))
+    }
+
+    pub fn invite_for(&self, minter: NodeId, invite: Invite) -> Result<Value, ApiError> {
+        self.wait(|answer| In::Invite(Some(minter), invite, answer))
     }
 
     pub fn join(&self, token: &str, headless: bool) -> Result<Value, ApiError> {

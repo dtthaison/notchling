@@ -288,3 +288,131 @@ fn two_daemons_join_and_run_a_shell_job() {
         "the worker lists its shell job: {rows}"
     );
 }
+
+struct Pair {
+    _dir: common::Dir,
+    _daemon_a: Daemon,
+    _daemon_b: Daemon,
+    root_a: PathBuf,
+    a: notchling_local_api::Client,
+    b: notchling_local_api::Client,
+    worker: String,
+}
+
+fn pair(tag: &str) -> Pair {
+    let dir = common::scratch(tag);
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch");
+    let (root_a, root_b) = (dir.0.join("a"), dir.0.join("b"));
+    common::copy_tree(&fixture, &root_a);
+    common::copy_tree(&fixture, &root_b);
+    let (home_a, home_b) = (dir.0.join("home-a"), dir.0.join("home-b"));
+    for folder in [&home_a, &home_b] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    let daemon_a = node_daemon(&root_a, &home_a);
+    let daemon_b = node_daemon(&root_b, &home_b);
+    let (mut a, mut b) = (app(&root_a), app(&root_b));
+    a.call("cluster.create", serde_json::json!({"name": "e2e"}))
+        .unwrap();
+    a.call(
+        "settings.set_switch",
+        serde_json::json!({"switch": "cluster", "on": true}),
+    )
+    .unwrap();
+    let worker = b.call("cluster.status", serde_json::json!({})).unwrap()["me"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    Pair {
+        _dir: dir,
+        _daemon_a: daemon_a,
+        _daemon_b: daemon_b,
+        root_a,
+        a,
+        b,
+        worker,
+    }
+}
+
+fn items(a: &mut notchling_local_api::Client) -> Vec<Value> {
+    a.call("inbox.list", serde_json::json!({})).unwrap()["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn online(a: &mut notchling_local_api::Client, worker: &str) -> bool {
+    let status = a.call("cluster.status", serde_json::json!({})).unwrap();
+    status["members"].as_array().is_some_and(|members| {
+        members
+            .iter()
+            .any(|m| m["id"] == worker && m["online"] == true && m["state"] == "active")
+    })
+}
+
+#[test]
+fn invite_joins_without_inbox_item() {
+    let mut p = pair("cluster-invite");
+    let made =
+        p.a.call(
+            "cluster.invite",
+            serde_json::json!({"node": p.worker, "name": "box9", "acting": false}),
+        )
+        .unwrap();
+    let token = made["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("nlj1."), "{made}");
+    assert!(made["expiresMs"].as_i64().unwrap() > 0, "{made}");
+    let status = p.a.call("cluster.status", serde_json::json!({})).unwrap();
+    assert_eq!(status["invites"][0]["node"], p.worker, "{status}");
+    assert!(!status.to_string().contains(&token));
+
+    p.b.call("cluster.join", serde_json::json!({"token": token}))
+        .unwrap();
+    let worker = p.worker.clone();
+    eventually("the invited node is active", || online(&mut p.a, &worker));
+
+    let all = items(&mut p.a);
+    assert!(
+        all.iter().all(|i| i["kind"] != "node_join"),
+        "an invite raises no Add item: {all:?}"
+    );
+    let notice = all
+        .iter()
+        .find(|i| i["title"] == "box9 joined the cluster")
+        .unwrap_or_else(|| panic!("no notice in {all:?}"));
+    assert_eq!(notice["kind"], "notice");
+    assert_eq!(notice["actions"].as_array().map(Vec::len), Some(0));
+    let status = p.a.call("cluster.status", serde_json::json!({})).unwrap();
+    assert_eq!(
+        status["invites"].as_array().map(Vec::len),
+        Some(0),
+        "{status}"
+    );
+    let audit = common::audit::raw_lines(&p.root_a).join("\n");
+    assert!(!audit.contains("nlj1."), "no token in the audit log");
+    assert!(!audit.contains(&token));
+}
+
+#[test]
+fn token_without_invite_still_asks() {
+    let mut p = pair("cluster-plain-token");
+    let token =
+        p.a.call("cluster.join.token", serde_json::json!({}))
+            .unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    let joined =
+        p.b.call("cluster.join", serde_json::json!({"token": token}))
+            .unwrap();
+    assert_eq!(joined["state"], "pending", "{joined}");
+    eventually("the Add item", || {
+        items(&mut p.a)
+            .iter()
+            .any(|i| i["kind"] == "node_join" && i["state"] == "open")
+    });
+    assert!(!online(&mut p.a, &p.worker));
+    assert!(items(&mut p.a)
+        .iter()
+        .all(|i| i["title"] != "box9 joined the cluster"));
+}

@@ -240,6 +240,7 @@ fn versions(with_claude: bool, logged_in: bool) -> Versions {
         own_logins: BTreeMap::new(),
         host: None,
         bridge: None,
+        build: None,
     }
 }
 

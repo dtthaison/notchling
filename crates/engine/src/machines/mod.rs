@@ -1,10 +1,13 @@
 pub mod actions;
 mod actions_util;
+pub mod address;
 pub mod catalog;
+pub mod dist_manifest;
 pub mod engine;
 pub mod engine_check;
 pub mod engine_fix;
 pub mod engine_plan;
+mod engine_update;
 pub mod forms;
 pub mod github;
 pub mod mac_facts;
@@ -12,6 +15,7 @@ pub mod masks;
 pub mod merge;
 pub mod merge_ops;
 pub mod morning;
+pub mod node_updates;
 pub mod offers;
 pub mod poller;
 pub mod process;
@@ -24,11 +28,14 @@ pub mod service_files;
 pub mod shell;
 pub mod status;
 pub mod step;
+mod steps_git;
 pub mod steps_machine;
 pub mod steps_master;
 pub mod steps_node;
 mod steps_node_binary;
 mod steps_node_logins;
+mod steps_node_mac;
+pub mod steps_node_reach;
 mod steps_node_service;
 pub mod steps_push;
 pub mod steps_replace;
@@ -38,6 +45,7 @@ pub mod steps_sd_check;
 pub mod steps_sd_service;
 pub mod steps_secret;
 pub mod steps_selfupdate;
+pub mod steps_tailscale_linux;
 mod steps_versions;
 mod steps_xcode;
 pub mod token_creation;
@@ -61,6 +69,10 @@ mod tests_actions_files;
 mod tests_actions_gh;
 #[cfg(test)]
 mod tests_actions_read;
+#[cfg(test)]
+mod tests_address;
+#[cfg(test)]
+mod tests_dist_manifest;
 #[cfg(test)]
 mod tests_engine;
 #[cfg(test)]
@@ -96,11 +108,21 @@ mod tests_node_app;
 #[cfg(test)]
 mod tests_node_final;
 #[cfg(test)]
+mod tests_node_join;
+#[cfg(test)]
+mod tests_node_keychain;
+#[cfg(test)]
 mod tests_node_logins;
+#[cfg(test)]
+mod tests_node_mac;
+#[cfg(test)]
+mod tests_node_profile;
 #[cfg(test)]
 mod tests_node_steps;
 #[cfg(test)]
 mod tests_node_steps_b;
+#[cfg(test)]
+mod tests_node_updates;
 #[cfg(test)]
 mod tests_poller;
 #[cfg(test)]
@@ -149,6 +171,8 @@ mod tests_selfupdate;
 mod tests_shell;
 #[cfg(test)]
 mod tests_status;
+#[cfg(test)]
+mod tests_tailscale_linux;
 #[cfg(test)]
 mod tests_token_scope;
 #[cfg(test)]

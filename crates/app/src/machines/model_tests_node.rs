@@ -4,8 +4,12 @@ use notchling_engine::machines::registry::NodeSettings;
 use notchling_engine::machines::step::{ClusterTokens, StepId};
 use serde_json::{json, Value};
 
+use notchling_local_api::{ApiError, ClientError, ErrorCode};
+
 use super::cluster_feed::{can_be_master_in, cluster_id_in, token_in};
-use super::cluster_feed::{DaemonTokens, NOT_RUNNING};
+use super::cluster_feed::{
+    invite_answer, primary_addr_in, tailnet_in, DaemonTokens, TailscaleRunner, NOT_RUNNING,
+};
 use super::model::MachinesModel;
 use super::model_tests::{lock, mac, scripted_world};
 
@@ -229,4 +233,137 @@ fn one_ask_serves_every_node_machine() {
         model.can_be_master_line(&m3).as_deref(),
         Some("Can Be Master: Yes")
     );
+}
+
+fn forbidden() -> ClientError {
+    ClientError::Api(ApiError::new(
+        ErrorCode::Forbidden,
+        "only the Notchling app makes invites",
+    ))
+}
+
+#[test]
+fn daemon_tokens_forbidden_invite_is_none() {
+    assert_eq!(invite_answer(Err(forbidden())), Ok(None));
+    assert_eq!(
+        invite_answer(Ok(json!({"token": "nlj1.x", "expiresMs": 5}))),
+        Ok(Some("nlj1.x".to_string()))
+    );
+    assert!(invite_answer(Ok(json!({"expiresMs": 5}))).is_err());
+    let failed = ClientError::Api(ApiError::new(ErrorCode::Failed, "no cluster here"));
+    assert_eq!(invite_answer(Err(failed)), Err("no cluster here".into()));
+    assert_eq!(
+        invite_answer(Err(ClientError::Timeout)),
+        Err(NOT_RUNNING.to_string())
+    );
+    let tokens = DaemonTokens::new(std::env::temp_dir().join("notchling-no-such-daemon.sock"));
+    assert_eq!(
+        tokens.invite(NODE_B, "m1", false, true),
+        Err(NOT_RUNNING.to_string())
+    );
+}
+
+#[test]
+fn primary_addr_is_the_primarys_first_tailscale_address() {
+    let mut s = status();
+    s["members"][0]["addrs"] = json!([
+        "192.168.1.4",
+        "fd7a:115c:a1e0::1",
+        "100.101.102.103",
+        "100.64.0.9"
+    ]);
+    s["members"][0]["port"] = json!(47823);
+    s["members"][1]["addrs"] = json!(["100.99.99.99"]);
+    s["members"][1]["port"] = json!(1);
+    assert_eq!(
+        primary_addr_in(&s),
+        Some(("100.101.102.103".to_string(), 47823))
+    );
+}
+
+#[test]
+fn primary_addr_refuses_anything_odd() {
+    for addrs in [
+        json!([]),
+        json!(["192.168.1.4"]),
+        json!(["100.128.0.1"]),
+        json!(["100.101.102.103; reboot"]),
+        json!(["fd7a:115c:a1e0::1"]),
+        json!([7]),
+    ] {
+        let mut s = status();
+        s["members"][0]["addrs"] = addrs;
+        s["members"][0]["port"] = json!(47823);
+        assert_eq!(primary_addr_in(&s), None);
+    }
+    for port in [
+        json!(0),
+        json!(70000),
+        json!("47823"),
+        json!(null),
+        json!(-1),
+    ] {
+        let mut s = status();
+        s["members"][0]["addrs"] = json!(["100.101.102.103"]);
+        s["members"][0]["port"] = port;
+        assert_eq!(primary_addr_in(&s), None);
+    }
+    let mut s = status();
+    s["cluster"]["home"] = json!("cccc");
+    s["members"][0]["addrs"] = json!(["100.101.102.103"]);
+    s["members"][0]["port"] = json!(47823);
+    assert_eq!(primary_addr_in(&s), None);
+    assert_eq!(
+        primary_addr_in(&json!({"cluster": null, "members": []})),
+        None
+    );
+}
+
+#[test]
+fn tailnet_name_is_read_plainly() {
+    let ok = |name: &str| format!(r#"{{"CurrentTailnet":{{"Name":"{name}"}}}}"#);
+    assert_eq!(
+        tailnet_in(&ok("example.ts.net")).as_deref(),
+        Some("example.ts.net")
+    );
+    assert_eq!(
+        tailnet_in(&ok("me@example.com")).as_deref(),
+        Some("me@example.com")
+    );
+    assert_eq!(
+        tailnet_in(&format!("notice\n{}", ok("example.ts.net"))).as_deref(),
+        Some("example.ts.net")
+    );
+    for odd in ["", "two words", "a\\nb", "x;y", "$(id)"] {
+        assert_eq!(tailnet_in(&ok(odd)), None, "{odd}");
+    }
+    let long = "a".repeat(300);
+    assert_eq!(tailnet_in(&ok(&long)), None);
+    assert_eq!(tailnet_in("not json"), None);
+    assert_eq!(tailnet_in(r#"{"CurrentTailnet":null}"#), None);
+    assert_eq!(tailnet_in(r#"{"CurrentTailnet":{"Name":7}}"#), None);
+}
+
+#[test]
+fn tailnet_is_cached_and_never_runs_the_real_tailscale() {
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = runs.clone();
+    let runner: TailscaleRunner = Arc::new(move || {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(r#"{"CurrentTailnet":{"Name":"example.ts.net"}}"#.to_string())
+    });
+    let tokens = DaemonTokens::with_tailscale(
+        std::env::temp_dir().join("notchling-no-such-daemon.sock"),
+        runner,
+    );
+    assert_eq!(tokens.tailnet().as_deref(), Some("example.ts.net"));
+    assert_eq!(tokens.tailnet().as_deref(), Some("example.ts.net"));
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    let silent: TailscaleRunner = Arc::new(|| None);
+    let tokens = DaemonTokens::with_tailscale(
+        std::env::temp_dir().join("notchling-no-such-daemon.sock"),
+        silent,
+    );
+    assert_eq!(tokens.tailnet(), None);
 }

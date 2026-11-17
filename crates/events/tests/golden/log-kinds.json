@@ -36,7 +36,7 @@
     {"name":"attached_ms","type":"millis","optional":false,"list":false,"choices":[]}
   ]},
   {"name":"cluster.step","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
-    {"name":"step","type":"choice","optional":false,"list":false,"choices":["refused","listen","wiped","save","stepped_down","call","rejoined","other"]},
+    {"name":"step","type":"choice","optional":false,"list":false,"choices":["refused","listen","wiped","save","stepped_down","call","rejoined","invited","invite_joined","other"]},
     {"name":"peer","type":"ref:machine","optional":true,"list":false,"choices":[]},
     {"name":"op","type":"op","optional":true,"list":false,"choices":[]}
   ]},

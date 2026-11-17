@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use super::failover::Failover;
 use super::id::{NodeId, Tool};
+use super::invite::Invite;
 use super::jobs::JobSpec;
 use super::join::{JoinToken, Tokens};
 use super::members::{Desired, Member, MemberState, Term};
@@ -75,6 +76,27 @@ pub enum Input {
     },
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct JoinSecret(String);
+
+impl JoinSecret {
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for JoinSecret {
+    fn from(secret: String) -> JoinSecret {
+        JoinSecret(secret)
+    }
+}
+
+impl std::fmt::Debug for JoinSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JoinSecret(<hidden>)")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum LocalCmd {
     Create {
@@ -83,7 +105,12 @@ pub enum LocalCmd {
         me: Member,
     },
     IssueToken {
-        secret: String,
+        secret: JoinSecret,
+        minter: NodeId,
+    },
+    Invite {
+        secret: JoinSecret,
+        invite: Invite,
         minter: NodeId,
     },
     Approve {
@@ -213,6 +240,14 @@ pub enum Effect {
         addr: Option<String>,
         can_be_master: bool,
         headless: bool,
+        minter: NodeId,
+        minter_name: String,
+    },
+    InviteJoined {
+        node: NodeId,
+        name: String,
+        os: String,
+        arch: String,
         minter: NodeId,
         minter_name: String,
     },
@@ -430,6 +465,8 @@ impl NodeCore {
                     "role": role,
                     "canBeMaster": m.can_be_master,
                     "online": m.id == self.me || online.contains(&m.id),
+                    "addrs": m.addrs,
+                    "port": m.port,
                     "client": m.client,
                     "headless": m.headless,
                     "reference": m.reference,
@@ -464,7 +501,7 @@ impl NodeCore {
                 })
             })
             .collect();
-        json!({
+        let mut status = json!({
             "cluster": {
                 "id": state.id,
                 "name": plain(&state.name, NAME_MAX),
@@ -481,7 +518,16 @@ impl NodeCore {
             "failover": self.failover_status(state),
             "claims": state.claims.values().collect::<Vec<_>>(),
             "sideCopies": state.side_copies,
-        })
+        });
+        if self.is_home() {
+            status["invites"] = self
+                .tokens
+                .open_invites(self.wall_ms)
+                .into_iter()
+                .map(|(node, name, expires)| json!({"node": node, "name": name, "expiresMs": expires}))
+                .collect();
+        }
+        status
     }
 
     fn joining_status(&self) -> Value {
@@ -668,6 +714,8 @@ mod core_tests_grants_fix;
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_heal;
+#[cfg(test)]
+mod core_tests_invite;
 #[cfg(test)]
 mod core_tests_jobs;
 #[cfg(test)]

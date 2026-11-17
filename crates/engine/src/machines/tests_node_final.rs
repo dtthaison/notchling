@@ -1,6 +1,7 @@
 use super::fakes_b::*;
 use super::registry::{AdminAccess, Machine};
 use super::step::{CheckState, ClusterTokens, RemoteOutput, StepId};
+use super::steps_node_mac::data_folder_script;
 use super::steps_node_service::log_folder_script;
 use super::tests_node_steps::{fix_of, node_linux, node_mac, probe, step, texts};
 use std::sync::Arc;
@@ -118,7 +119,16 @@ fn the_log_folder_is_made_before_the_service_file_on_a_fresh_machine() {
         assert!(out.ok, "{}", out.message);
         let seen = texts(&rig.calls());
         assert!(seen[0].contains("mkdir -p"), "{seen:?}");
-        assert!(seen[1].contains("service install"), "{seen:?}");
+        if linux {
+            assert!(seen[1].contains("service install"), "{seen:?}");
+        } else {
+            assert!(seen[0].contains("notchlingd.log"), "{seen:?}");
+            assert!(
+                seen[1].contains("install -m 644 -o root -g wheel"),
+                "{seen:?}"
+            );
+            assert!(seen[2].contains("launchctl bootout"), "{seen:?}");
+        }
     }
 }
 
@@ -139,30 +149,26 @@ fn made_by(script: &str, home: &std::path::Path, xdg: Option<&str>) {
 #[test]
 fn the_log_folder_script_makes_the_folder_the_daemon_writes_to() {
     let home = TempDir::new("final-home");
-    made_by(&log_folder_script(true), home.path(), None);
+    made_by(&log_folder_script(), home.path(), None);
     assert!(home.path().join(".local/share/notchling").is_dir());
     let other = TempDir::new("final-xdg");
     let xdg = other.path().join("data");
     made_by(
-        &log_folder_script(true),
+        &log_folder_script(),
         home.path(),
         Some(&xdg.to_string_lossy()),
     );
     assert!(xdg.join("notchling").is_dir());
     let relative = TempDir::new("final-rel-home");
-    made_by(
-        &log_folder_script(true),
-        relative.path(),
-        Some("relative/x"),
-    );
+    made_by(&log_folder_script(), relative.path(), Some("relative/x"));
     assert!(relative.path().join(".local/share/notchling").is_dir());
     assert!(!relative.path().join("relative").exists());
     let mac = TempDir::new("final-mac-home");
-    made_by(&log_folder_script(false), mac.path(), None);
+    made_by(data_folder_script(), mac.path(), None);
     assert!(mac
         .path()
-        .join("Library/Application Support/Notchling")
-        .is_dir());
+        .join("Library/Application Support/Notchling/notchlingd.log")
+        .is_file());
 }
 
 #[test]

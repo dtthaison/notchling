@@ -174,6 +174,9 @@ pub(super) fn answer(reply: Reply, result: Result<Value, WireError>) {
         Reply::Token(tx, token) => {
             let _ = tx.send(result.map(|_| json!({"token": token})));
         }
+        Reply::Invite(tx, token, _) => {
+            let _ = tx.send(super::invite::invited(token, result));
+        }
         Reply::Load(_) => {}
     }
 }

@@ -32,9 +32,12 @@ impl StepId {
     pub const SERVICE: StepId = StepId(Cow::Borrowed("service"));
     pub const SD_CHECK: StepId = StepId(Cow::Borrowed("sd-check"));
     pub const RUNNING: StepId = StepId(Cow::Borrowed("running"));
+    pub const NODE_GIT: StepId = StepId(Cow::Borrowed("node-git"));
     pub const NODE_TAILSCALE: StepId = StepId(Cow::Borrowed("node-tailscale"));
     pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
     pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));
+    pub const NODE_APP_CLOSED: StepId = StepId(Cow::Borrowed("node-app-closed"));
+    pub const NODE_REACH: StepId = StepId(Cow::Borrowed("node-reach"));
     pub const NODE_JOINED: StepId = StepId(Cow::Borrowed("node-joined"));
     pub const MASTER_ENCRYPTED: StepId = StepId(Cow::Borrowed("master-encrypted"));
     pub const MASTER_SAME_HOME: StepId = StepId(Cow::Borrowed("master-same-home"));
@@ -114,6 +117,12 @@ impl SubRow {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TailscaleState {
+    Missing,
+    LoggedOut,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Detected {
     pub os: Option<MachineOs>,
@@ -127,6 +136,8 @@ pub struct Detected {
     pub tools: Option<WorkerTools>,
     pub node: Option<String>,
     pub notchling_app: Option<bool>,
+    pub tailscale: Option<TailscaleState>,
+    pub other_cluster: Option<String>,
 }
 
 impl Detected {
@@ -148,6 +159,8 @@ impl Detected {
         over(&mut d.tools, &new.tools);
         over(&mut d.node, &new.node);
         over(&mut d.notchling_app, &new.notchling_app);
+        over(&mut d.tailscale, &new.tailscale);
+        over(&mut d.other_cluster, &new.other_cluster);
         d
     }
 }
@@ -376,6 +389,25 @@ pub trait ClusterTokens: Send + Sync {
         let _ = node;
         None
     }
+    fn invite(
+        &self,
+        node: &str,
+        name: &str,
+        can_be_master: bool,
+        acting: bool,
+    ) -> Result<Option<String>, String> {
+        let _ = (node, name, can_be_master, acting);
+        Ok(None)
+    }
+    fn primary_addr(&self) -> Option<(String, u16)> {
+        None
+    }
+    fn tailnet(&self) -> Option<String> {
+        None
+    }
+    fn status_json(&self) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 pub struct NoCluster;
@@ -418,6 +450,7 @@ pub struct StepContext {
     pub masks: Masks,
     pub tokens: Arc<dyn ClusterTokens>,
     pub dist_dir: Option<PathBuf>,
+    pub mac_daemon: Option<PathBuf>,
     pub node: Option<String>,
 }
 
@@ -433,11 +466,20 @@ pub struct FixContext {
     pub admin_password: Option<Secret>,
     pub log: Arc<OutputSink>,
     pub masks: Masks,
+    pub links: Option<LinkOffer>,
 }
+
+pub type LinkOffer = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl FixContext {
     pub fn mask(&self, text: &str) -> String {
         self.masks.apply(text)
+    }
+
+    pub fn offer_link(&self, url: &str) {
+        if let Some(offer) = &self.links {
+            offer(url);
+        }
     }
 }
 

@@ -164,6 +164,8 @@ fn the_admin_steps_of_the_real_catalog_are_the_pinned_ones() {
     assert_eq!(
         admin,
         vec![
+            "m1/node-binary",
+            "m1/node-service",
             "m1/stays-awake",
             "vps-sing-1/node-service",
             "vps-sing-1/base-tools",

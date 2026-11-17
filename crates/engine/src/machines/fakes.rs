@@ -272,6 +272,7 @@ impl Ctx {
             masks: self.masks.clone(),
             tokens: Arc::new(NoCluster),
             dist_dir: None,
+            mac_daemon: None,
             node: None,
         }
     }
@@ -283,6 +284,7 @@ impl Ctx {
             admin_password: admin.map(Secret::new),
             log: log.sink(),
             masks: self.masks.clone().with_admin(admin),
+            links: None,
         };
         (ctx, log)
     }

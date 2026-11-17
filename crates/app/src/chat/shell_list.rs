@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use notchling_engine::transcript::model::{BackgroundShell, Conversation};
 use notchling_engine::transcript::shells::lsof_args;
 
+use super::job_fan::merged;
 use super::paging::{Counts, Item, Page, PAGE};
 
 pub const PROBE_CHUNK: usize = 100;
@@ -60,12 +61,23 @@ impl ShellPage {
         more: usize,
         writing: &dyn Fn(&str) -> Option<bool>,
     ) -> Listing {
-        let entries: Vec<Entry> = conversation
-            .shells
+        self.show_with_fan(session, conversation, &[], more, writing)
+    }
+
+    pub fn show_with_fan(
+        &mut self,
+        session: Option<&str>,
+        conversation: &Conversation,
+        fan: &[BackgroundShell],
+        more: usize,
+        writing: &dyn Fn(&str) -> Option<bool>,
+    ) -> Listing {
+        let all = merged(conversation, fan);
+        let entries: Vec<Entry> = all
             .iter()
-            .map(|shell| Entry {
+            .map(|(shell, from_fan)| Entry {
                 id: &shell.id,
-                unfinished: !ended(conversation, shell) && !idle(shell, writing),
+                unfinished: *from_fan || (!ended(conversation, shell) && !idle(shell, writing)),
             })
             .collect();
         let waiting = !self.page.begun(session)

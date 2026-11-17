@@ -45,6 +45,7 @@ pub mod html_preview;
 mod html_preview_tests;
 pub mod image_size;
 pub mod inspector;
+pub mod job_fan;
 pub mod lane_limits;
 pub mod limit_ring;
 pub mod link_target;

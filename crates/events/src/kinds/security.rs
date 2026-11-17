@@ -43,6 +43,8 @@ log_choice! {
         SteppedDown = "stepped_down",
         Call = "call",
         Rejoined = "rejoined",
+        Invited = "invited",
+        InviteJoined = "invite_joined",
     }
 }
 

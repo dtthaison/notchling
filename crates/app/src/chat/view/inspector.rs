@@ -19,13 +19,13 @@ use super::paged_rows::{group_more_row, more_row, subagent_row, More};
 use super::{repo_section, worktrees_ask, ChatView};
 use crate::chat::format::short_path;
 use crate::chat::inspector::{
-    fact_icon, fact_text, inspector_listed, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
+    fact_icon, fact_text, inspector_with_fan, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
 use crate::chat::paging::Counts;
 use crate::chat::remote_control::Action;
 use crate::chat::shell_list::Listing;
 use crate::chat::worktrees::GitSection;
-use notchling_engine::transcript::model::Conversation;
+use notchling_engine::transcript::model::{BackgroundShell, Conversation};
 
 pub(super) const WIDTH: f32 = crate::chat::panels::DETAILS_DEFAULT;
 pub(super) const MARK_BOX: f32 = 14.0;
@@ -59,6 +59,7 @@ pub struct DetailsModel {
     pub git: Option<Arc<GitSection>>,
 }
 
+#[cfg(test)]
 fn model_of(
     conversation: &Conversation,
     subagents: &[SubagentRow],
@@ -68,8 +69,38 @@ fn model_of(
     folder: Option<(String, String)>,
     git: Option<Arc<GitSection>>,
 ) -> DetailsModel {
+    model_with_fan(
+        conversation,
+        &[],
+        subagents,
+        subagent_counts,
+        shells,
+        writers,
+        folder,
+        git,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model_with_fan(
+    conversation: &Conversation,
+    fan: &[BackgroundShell],
+    subagents: &[SubagentRow],
+    subagent_counts: Counts,
+    shells: Option<&Listing>,
+    writers: &dyn Fn(&str) -> Vec<i32>,
+    folder: Option<(String, String)>,
+    git: Option<Arc<GitSection>>,
+) -> DetailsModel {
     DetailsModel {
-        i: inspector_listed(conversation, subagents, subagent_counts, shells, writers),
+        i: inspector_with_fan(
+            conversation,
+            fan,
+            subagents,
+            subagent_counts,
+            shells,
+            writers,
+        ),
         folder,
         reveal: true,
         git,
@@ -81,8 +112,9 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         let full = s.agent.cwd.clone();
         (short_path(&full, &view.root.home), full)
     });
-    let mut model = model_of(
+    let mut model = model_with_fan(
         &view.conversation,
+        &view.fan_shells,
         &view.subagent_rows,
         view.subagent_counts,
         Some(&view.shells),
@@ -411,7 +443,9 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                         label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)
                             .line_height(px(ROW_LINE)),
                     )
-                    .child(output_link(index, s, a, chat.clone())),
+                    .children(
+                        (!s.output_path.is_empty()).then(|| output_link(index, s, a, chat.clone())),
+                    ),
             ),
         )
 }

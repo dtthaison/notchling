@@ -1,5 +1,6 @@
 use crate::acting_ops::{bad, Room};
 use crate::cluster_failover_setting::parse;
+use crate::cluster_invite::parse_invite;
 use crate::cluster_move_run::MoveRunner;
 use crate::cluster_node::{ClusterLog, ClusterNode};
 use crate::cluster_promote::Promoter;
@@ -18,7 +19,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const CLUSTER_OPS: [&str; 15] = [
+pub const CLUSTER_OPS: [&str; 16] = [
     ops::CLUSTER_STATUS,
     ops::CLUSTER_CREATE,
     ops::CLUSTER_JOIN_TOKEN,
@@ -34,6 +35,7 @@ pub const CLUSTER_OPS: [&str; 15] = [
     ops::CLUSTER_TAKE_BACK,
     ops::CLUSTER_CONTINUE_HERE,
     ops::CLUSTER_SIDE_COPY_HIDE,
+    ops::CLUSTER_INVITE,
 ];
 
 const ID_MAX: usize = 200;
@@ -346,6 +348,26 @@ impl ClusterOps {
         node.join_token_for(minter)
     }
 
+    fn invite(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        if caller.tier != Tier::App {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "only the Notchling app makes invites",
+            ));
+        }
+        let invite = parse_invite(args)?;
+        let node = self.node()?;
+        if caller.client != ClientKind::Node {
+            return node.invite(invite);
+        }
+        let usage = "cluster.invite from another node names who asked: {\"minter\": id}";
+        let minter = text(args, "minter", usage)
+            .ok()
+            .and_then(NodeId::parse)
+            .ok_or_else(|| bad(usage))?;
+        node.invite_for(minter, invite)
+    }
+
     fn failover_set(&self, args: &Value) -> Result<Value, ApiError> {
         let usage = "cluster.failover.set takes {\"value\": \"off\", \"30m\" or \"1h\"}";
         let failover = args
@@ -438,7 +460,8 @@ impl OpGroup for ClusterOps {
             | ops::CLUSTER_PROMOTE
             | ops::CLUSTER_TAKE_BACK
             | ops::CLUSTER_CONTINUE_HERE
-            | ops::CLUSTER_SIDE_COPY_HIDE => Some(OpSpec::APP),
+            | ops::CLUSTER_SIDE_COPY_HIDE
+            | ops::CLUSTER_INVITE => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -452,6 +475,7 @@ impl OpGroup for ClusterOps {
             }
             ops::CLUSTER_JOIN_TOKEN => self.join_token(caller, args),
             ops::CLUSTER_JOIN => self.join(caller, args),
+            ops::CLUSTER_INVITE => self.invite(caller, args),
             ops::CLUSTER_MEMBER_SET => self.member_set(args),
             ops::CLUSTER_MAIN_SET => self.main_set(args),
             ops::CLUSTER_MOVE_HOME => self.move_home(args),

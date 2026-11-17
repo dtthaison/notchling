@@ -155,6 +155,7 @@ impl Rig {
             masks: self.masks.clone(),
             tokens: Arc::new(NoCluster),
             dist_dir: None,
+            mac_daemon: None,
             node: None,
         }
     }
@@ -165,6 +166,7 @@ impl Rig {
             admin_password: self.password.map(Secret::new),
             log: Arc::new(|_, _| {}),
             masks: self.masks.clone().with_admin(self.password),
+            links: None,
         }
     }
 
