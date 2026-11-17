@@ -2,7 +2,6 @@ use super::dist_manifest::{self, DistFile, DistManifest};
 use super::runner::{Call, Runner, NOT_FOUND};
 use super::steps_node_binary::hash_file;
 use crate::cluster::build_id;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -158,8 +157,12 @@ fn place(
     if hash_file(&temp).as_deref() != Some(entry.sha256.as_str()) {
         return Err(format!("{file} doesn't match its SHA-256"));
     }
-    std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
+    }
     std::fs::rename(&temp, dist.join(file)).map_err(|e| e.to_string())
 }
 

@@ -9,7 +9,6 @@ use super::steps_node_binary::{binary_fix_on, binary_state_on};
 use super::steps_node_mac::{Host, BUILD_LINUX};
 use super::tests_node_steps::{fix_of, hex, node_linux};
 use std::collections::BTreeSet;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -137,10 +136,14 @@ fn the_fix_downloads_when_the_dist_folder_is_empty_then_copies_as_before() {
     );
     let file = f.dir().join(FILE);
     assert_eq!(std::fs::read(&file).unwrap(), BINARY);
-    assert_eq!(
-        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
-        0o755
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
     let written = dist_manifest::read(&f.dir()).unwrap();
     assert_eq!(written.build, BUILD);
     assert_eq!(written.files[FILE].sha256, hex(BINARY));
