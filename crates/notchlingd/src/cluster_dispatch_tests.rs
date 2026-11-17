@@ -236,17 +236,83 @@ fn an_agent_cannot_start_a_session_or_a_shell_job() {
     assert!(b.calls.calls.lock().unwrap().is_empty());
 }
 
+const WITH_CODEX: [(VTool, &str); 3] = [
+    (VTool::Claude, "2.1.324"),
+    (VTool::Codex, "0.166.0"),
+    (VTool::Agy, "1.5.1"),
+];
+
+fn codex_args(node: &TestNode, key: &str) -> Value {
+    json!({"node": node.id(), "tool": "codex", "cwd": "/srv/repo", "text": "fix it", "key": key})
+}
+
 #[test]
-fn codex_waits_for_a_later_version_and_secrets_need_the_allowlist() {
+fn a_codex_job_starts_codex_send_on_the_worker_as_the_app() {
+    let net = MemNet::new();
+    let (a, b) = pair(
+        &net,
+        home_opts(&WITH_CODEX),
+        worker_opts("linux", &WITH_CODEX),
+    );
+    let (ops, _dir) = ops_of(&a);
+    let mut args = codex_args(&b, "c1");
+    args["model"] = json!("gpt-6.1-sol");
+    args["effort"] = json!("high");
+    let reply = dispatch(&ops, &app(), args).unwrap();
+    assert_eq!(reply["state"], "running");
+    assert_eq!(reply["session"], "s-codex.send");
+    let calls = b.calls.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].0, "codex.send");
+    assert_eq!(calls[0].1["draft_folder"], "/srv/repo");
+    assert_eq!(calls[0].1["text"], "fix it");
+    assert_eq!(calls[0].1["model"], "gpt-6.1-sol");
+    assert_eq!(calls[0].1["effort"], "high");
+    assert_eq!(calls[0].1["job"], reply["job"]);
+    assert_eq!(
+        calls[0].2,
+        Origin {
+            node: a.id(),
+            tier: OriginTier::App
+        }
+    );
+}
+
+#[test]
+fn an_agent_cannot_start_a_codex_job() {
+    let net = MemNet::new();
+    let (a, b) = pair(
+        &net,
+        home_opts(&WITH_CODEX),
+        worker_opts("linux", &WITH_CODEX),
+    );
+    let (ops, _dir) = ops_of(&a);
+    let err = dispatch(&ops, &agent(), codex_args(&b, "c2")).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    assert!(b.calls.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_node_without_codex_refuses_a_codex_job_by_name() {
+    let net = MemNet::new();
+    let (a, b) = pair(&net, home_opts(&WITH_CODEX), worker_opts("linux", &BOTH));
+    let (ops, _dir) = ops_of(&a);
+    let err = dispatch(&ops, &app(), codex_args(&b, "c3")).unwrap_err();
+    assert_eq!(err.message, "Codex isn't installed on worker");
+    assert!(b.calls.calls.lock().unwrap().is_empty());
+    assert!(a.node.status()["jobs"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn a_codex_job_takes_no_secrets_and_the_others_need_the_allowlist() {
     let net = MemNet::new();
     let (a, b) = pair(&net, home_opts(&BOTH), worker_opts("macos", &BOTH));
     let (ops, _dir) = ops_of(&a);
-    let codex = json!({"node": b.id(), "tool": "codex", "cwd": "/srv", "text": "hi", "key": "c"});
+    let mut codex = codex_args(&b, "c");
+    codex["secrets"] = json!(["gh"]);
     let err = dispatch(&ops, &app(), codex).unwrap_err();
-    assert_eq!(
-        err.message,
-        "Codex jobs on another machine come in a later version"
-    );
+    assert_eq!(err.message, "Codex jobs on another machine take no secrets");
+    assert!(b.calls.calls.lock().unwrap().is_empty());
     let mut secret = claude_args(&b, "s");
     secret["secrets"] = json!(["gh"]);
     let err = dispatch(&ops, &app(), secret).unwrap_err();
@@ -276,6 +342,10 @@ fn bad_arguments_are_refused_before_anything_is_sent() {
         with("command", json!("id")),
         json!({"node": node, "tool": "shell", "cwd": "/srv", "key": "k"}),
         json!({"node": node, "tool": "shell", "cwd": "/srv", "key": "k", "command": "id", "model": "x"}),
+        json!({"node": node, "tool": "codex", "cwd": "/srv", "key": "k"}),
+        json!({"node": node, "tool": "codex", "cwd": "/srv", "key": "k", "text": " "}),
+        json!({"node": node, "tool": "codex", "cwd": "/srv", "key": "k", "text": "x", "command": "id"}),
+        json!({"node": node, "tool": "codex", "cwd": "/srv", "key": "k", "text": "x", "secrets": ["gh"]}),
         json!({"node": node, "tool": "agy", "cwd": "/srv", "key": "k"}),
         json!({"node": node, "tool": "agy", "cwd": "/srv", "key": "k", "text": "x", "model": "m"}),
         json!({"node": node, "delegate": "agy", "key": "k"}),

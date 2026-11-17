@@ -63,7 +63,10 @@ pub fn names_other_node(op: &str, args: &Value) -> bool {
 pub fn acting_class(op: &str) -> bool {
     crate::acting_ops::ACTING_OPS.contains(&op)
         || crate::agy_ops::ACTING_OPS.contains(&op)
-        || matches!(op, ops::CODEX_SEND | ops::CODEX_STOP | ops::SHELL_STOP)
+        || matches!(
+            op,
+            ops::SESSION_SEND | ops::CODEX_SEND | ops::CODEX_STOP | ops::SHELL_STOP
+        )
 }
 
 pub fn acting_gated(caller: &Caller, op: &str, args: &Value) -> bool {

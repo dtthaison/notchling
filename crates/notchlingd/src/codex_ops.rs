@@ -40,6 +40,11 @@ pub struct CodexSetup {
     pub fixture: bool,
 }
 
+pub trait JobLink: Send + Sync {
+    fn session_started(&self, job: &str, session: &str);
+    fn start_failed(&self, job: &str, why: &str);
+}
+
 pub type Resolver = Box<dyn Fn() -> Option<(PathBuf, String)> + Send + Sync>;
 
 pub struct CodexOps {
@@ -52,6 +57,7 @@ pub struct CodexOps {
     reply_wait_ms: AtomicU64,
     outbox: OnceLock<Arc<OutboxOps>>,
     fence: OnceLock<CodexFence>,
+    job_link: OnceLock<Arc<dyn JobLink>>,
 }
 
 impl CodexOps {
@@ -81,6 +87,7 @@ impl CodexOps {
             reply_wait_ms: AtomicU64::new(REPLY_WAIT.as_millis() as u64),
             outbox: OnceLock::new(),
             fence: OnceLock::new(),
+            job_link: OnceLock::new(),
         }
     }
 
@@ -104,6 +111,10 @@ impl CodexOps {
         );
         ops.set_fence(CodexFence::real(&layout.cluster_dir()));
         ops
+    }
+
+    pub fn set_job_link(&self, link: Arc<dyn JobLink>) {
+        let _ = self.job_link.set(link);
     }
 
     pub fn set_fence(&self, fence: CodexFence) {
@@ -217,7 +228,7 @@ impl CodexOps {
             pick,
         };
         if request.session.is_none() {
-            return self.send_new(request, draft);
+            return self.send_new(request, draft, Self::job_arg(args)?);
         }
         self.runs.send(request).map(sent_json).map_err(send_error)
     }

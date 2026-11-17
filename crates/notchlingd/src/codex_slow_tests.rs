@@ -46,6 +46,108 @@ fn a_new_session_slow_to_be_named_is_answered_starting_and_named_later_with_its_
     s.idle();
 }
 
+struct Links(std::sync::Mutex<Vec<(String, String)>>);
+
+impl crate::codex_ops::JobLink for Links {
+    fn session_started(&self, job: &str, session: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((job.to_string(), session.to_string()));
+    }
+
+    fn start_failed(&self, job: &str, why: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((job.to_string(), format!("failed: {why}")));
+    }
+}
+
+#[test]
+fn a_cluster_job_that_never_gets_a_thread_is_reported_failed() {
+    let s = setup("failjob", true);
+    s.ops.set_reply_wait(Duration::from_millis(100));
+    s.ops.runs().set_announce_wait(Duration::from_secs(5));
+    let links = Arc::new(Links(Default::default()));
+    s.ops.set_job_link(links.clone());
+    s.spawner.push(FakeRun::gated(&[]).exiting(1));
+    let reply = s
+        .call(
+            ops::CODEX_SEND,
+            json!({"draft_folder": s.work(), "text": "build it", "job": "job-9"}),
+        )
+        .expect("a reply");
+    assert_eq!(reply["state"], "starting");
+    s.spawner.processes()[0].release();
+    let until = Instant::now() + Duration::from_secs(10);
+    while links.0.lock().unwrap().is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let got = links.0.lock().unwrap().clone();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].0, "job-9");
+    assert!(got[0].1.starts_with("failed: "), "{got:?}");
+    s.idle();
+}
+
+#[test]
+fn a_cluster_job_started_slowly_links_its_session_when_the_name_comes_late() {
+    let s = setup("slowjob", true);
+    s.ops.set_reply_wait(Duration::from_millis(100));
+    s.ops.runs().set_announce_wait(Duration::from_secs(5));
+    let links = Arc::new(Links(Default::default()));
+    s.ops.set_job_link(links.clone());
+    s.spawner.push(FakeRun::gated(&[STARTED, DONE]));
+    let reply = s
+        .call(
+            ops::CODEX_SEND,
+            json!({"draft_folder": s.work(), "text": "build it", "job": "job-7"}),
+        )
+        .expect("a reply, though the session has no name yet");
+    assert_eq!(reply["state"], "starting");
+    assert!(links.0.lock().unwrap().is_empty());
+    s.spawner.processes()[0].release();
+    let until = Instant::now() + Duration::from_secs(10);
+    while links.0.lock().unwrap().is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        *links.0.lock().unwrap(),
+        vec![("job-7".to_string(), format!("codex:{NEW_SESSION}"))]
+    );
+    s.idle();
+}
+
+#[test]
+fn a_start_that_answers_in_time_needs_no_late_link() {
+    let s = setup("fastjob", true);
+    let links = Arc::new(Links(Default::default()));
+    s.ops.set_job_link(links.clone());
+    s.spawner.push(FakeRun::ok(&[STARTED, DONE]));
+    let reply = s
+        .call(
+            ops::CODEX_SEND,
+            json!({"draft_folder": s.work(), "text": "build it", "job": "job-8"}),
+        )
+        .expect("a reply");
+    assert_eq!(reply["state"], "started");
+    assert!(links.0.lock().unwrap().is_empty());
+    s.idle();
+}
+
+#[test]
+fn a_job_arg_is_a_short_text() {
+    let s = setup("jobarg", true);
+    let err = s
+        .call(
+            ops::CODEX_SEND,
+            json!({"draft_folder": s.work(), "text": "x", "job": 5}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::BadRequest);
+}
+
 #[test]
 fn a_new_session_that_never_gets_named_says_so_in_an_event_with_its_draft() {
     let s = setup("faildraft", true);

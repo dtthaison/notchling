@@ -305,6 +305,10 @@ fn is_shell(row: &Value) -> bool {
     row.get("tool").and_then(Value::as_str) == Some("shell")
 }
 
+fn is_codex(row: &Value) -> bool {
+    row.get("tool").and_then(Value::as_str) == Some("codex")
+}
+
 pub fn is_client(status: &Value) -> bool {
     let me = status.get("me").and_then(Value::as_str);
     status
@@ -463,10 +467,16 @@ impl RemoteSessions {
         self.rows_where(is_shell)
     }
 
-    pub fn merge_shell(&self, local: &Value) -> Value {
+    pub fn codex_rows(&self) -> Vec<Value> {
+        self.rows_where(is_codex)
+    }
+
+    pub fn merge_kinds(&self, local: &Value, shell: bool, codex: bool) -> Value {
         Self::joined(
             local,
-            self.rows_where(|row| is_claude(row) || is_shell(row)),
+            self.rows_where(|row| {
+                is_claude(row) || (shell && is_shell(row)) || (codex && is_codex(row))
+            }),
         )
     }
 

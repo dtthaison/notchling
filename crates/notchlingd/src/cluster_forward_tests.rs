@@ -1,4 +1,4 @@
-use super::{route, Forward, NodeForward, PromptFollowers};
+use super::{acting_gated, route, Forward, NodeForward, PromptFollowers};
 use crate::acting_ops::Room;
 use crate::acting_ops_tests::{app, caller, sessions, setup, PROMPT};
 use crate::cluster_testkit::{eventually, pair, Opts};
@@ -32,6 +32,25 @@ fn caller_of(tier: Tier, client: ClientKind) -> Caller {
         peer: None,
         pid: None,
     }
+}
+
+#[test]
+fn a_send_or_stop_to_a_remote_row_needs_this_macs_acting_switch() {
+    let remote = format!("{}/codex:abc", other());
+    let gated = |op: &str, id: &str| acting_gated(&app(), op, &json!({"id": id, "text": "hi"}));
+    for op in [ops::SESSION_SEND, ops::CODEX_SEND, ops::CODEX_STOP] {
+        assert!(gated(op, &remote), "{op}");
+        assert!(
+            !gated(op, "codex:abc"),
+            "{op} on a local row is the op's own check"
+        );
+    }
+    let node = caller_of(Tier::App, ClientKind::Node);
+    assert!(!acting_gated(
+        &node,
+        ops::SESSION_SEND,
+        &json!({"id": remote})
+    ));
 }
 
 #[test]

@@ -15,6 +15,7 @@ use crate::notch::requests::HookRequest;
 pub const FOLLOW_EVERY_MS: i64 = 60_000;
 pub const LOG_TAIL_BYTES: u64 = 64 * 1024;
 pub const SHELL_PREFIX: &str = "shell:";
+pub const CODEX_PREFIX: &str = "codex:";
 const SHELL_ITEM: &str = "shell-log";
 
 pub fn is_remote(agent: &Agent) -> bool {
@@ -65,6 +66,10 @@ fn bare_id(agent: &Agent) -> &str {
 
 pub fn is_shell(agent: &Agent) -> bool {
     agent.command.is_some() && bare_id(agent).starts_with(SHELL_PREFIX)
+}
+
+pub fn is_codex(agent: &Agent) -> bool {
+    bare_id(agent).starts_with(CODEX_PREFIX)
 }
 
 pub fn shell_log(agent: &Agent) -> Option<PathBuf> {

@@ -29,6 +29,10 @@ pub struct RowAccount {
     pub lane: bool,
 }
 
+pub fn shows_account(id: &str, tool: Tool) -> bool {
+    tool == Tool::Claude || notchling_engine::cluster::Qualified::parse(id).is_none()
+}
+
 pub fn row_account(tool: Tool, config_dir: Option<&str>, s: &Snapshot) -> Option<RowAccount> {
     let named = |email: &str, lane: bool| {
         (!email.is_empty()).then(|| RowAccount {
@@ -241,7 +245,11 @@ pub fn sidebar_model(
     let accounts: Vec<Option<RowAccount>> = sections
         .iter()
         .flat_map(|s| &s.rows)
-        .map(|r| row_account(r.tool, r.config_dir.as_deref(), snapshot))
+        .map(|r| {
+            shows_account(&r.id, r.tool)
+                .then(|| row_account(r.tool, r.config_dir.as_deref(), snapshot))
+                .flatten()
+        })
         .collect();
     SidebarModel {
         sections,
@@ -255,10 +263,19 @@ pub fn copyable_id(row_id: &str) -> Option<&str> {
     if row_id.starts_with("codex-new:") || row_id.starts_with("agy-new:") {
         return None;
     }
-    let id = row_id
+    let foreign = |id: &str| id.starts_with("codex:") || id.starts_with("agy:");
+    let named = match row_id.split_once('/') {
+        Some((node, id))
+            if notchling_engine::cluster::NodeId::parse(node).is_some() && foreign(id) =>
+        {
+            id
+        }
+        _ => row_id,
+    };
+    let id = named
         .strip_prefix("codex:")
-        .or_else(|| row_id.strip_prefix("agy:"))
-        .unwrap_or(row_id);
+        .or_else(|| named.strip_prefix("agy:"))
+        .unwrap_or(named);
     (!id.is_empty()).then_some(id)
 }
 
@@ -317,6 +334,12 @@ pub(crate) mod tests {
         assert_eq!(copyable_id("codex-new:1234"), None);
         assert_eq!(copyable_id("agy-new:1234"), None);
         assert_eq!(copyable_id("codex:"), None);
+        assert_eq!(
+            copyable_id("00000000000000a1/codex:019a-77"),
+            Some("019a-77")
+        );
+        let qualified = "00000000000000a1/aa11bb22";
+        assert_eq!(copyable_id(qualified), Some(qualified));
     }
 
     #[test]

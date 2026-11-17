@@ -142,6 +142,11 @@ pub fn run_world(seed: u64, steps: usize, plant: Plant) -> (World, Result<(), Vi
                 } else {
                     Vec::new()
                 };
+                let tool = if tool == Tool::Codex && !secrets.is_empty() {
+                    Tool::Agy
+                } else {
+                    tool
+                };
                 dispatch(&mut world, &from, &key, (&node, tool), secrets);
             }
             30..=37 => {

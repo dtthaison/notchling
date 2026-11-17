@@ -7,7 +7,7 @@ use crate::cluster::grants::attachable;
 use crate::cluster::id::{NodeId, Tool};
 use crate::cluster::jobs::{job_id, Job, JobSpec, JobState};
 use crate::cluster::members::MemberState;
-use crate::cluster::shell_job::CODEX_LATER;
+use crate::cluster::shell_job::CODEX_SECRETS;
 use crate::cluster::state::Command;
 use crate::cluster::text;
 use crate::cluster::versions::{compat, Compat, Purpose, Versions};
@@ -363,9 +363,6 @@ impl NodeCore {
         out: &mut Vec<Effect>,
     ) {
         match serde_json::from_value::<DispatchArgs>(args.clone()) {
-            Ok(a) if a.spec.tool == Tool::Codex => {
-                self.finish(target, Err(refusal("refused", CODEX_LATER)), out)
-            }
             Ok(a) => self.dispatch_here(target, a.key, a.spec, origin.tier, out),
             Err(_) => self.finish(target, Err(refusal("bad_args", "not a dispatch")), out),
         }
@@ -390,16 +387,39 @@ impl NodeCore {
         else {
             return;
         };
-        if !matches!(
-            state,
-            JobState::Done | JobState::Failed | JobState::Interrupted
-        ) {
-            return;
-        }
         let Some(found) = self.state.as_ref().and_then(|s| s.jobs.get(job)) else {
             return;
         };
-        if found.spec.node != *from || !found.state.may_become(state) {
+        if found.spec.node != *from {
+            return;
+        }
+        if state == JobState::Running {
+            let session = data
+                .get("session")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|s| text::clean(s, SESSION_MAX));
+            let open = matches!(found.state, JobState::Dispatching | JobState::Running);
+            if found.spec.tool == Tool::Codex
+                && open
+                && found.session.is_none()
+                && session.is_some()
+            {
+                let command = Command::JobState {
+                    id: job.to_string(),
+                    state,
+                    session,
+                    detail: None,
+                };
+                let _ = self.apply(command, out);
+            }
+            return;
+        }
+        if !matches!(
+            state,
+            JobState::Done | JobState::Failed | JobState::Interrupted
+        ) || !found.state.may_become(state)
+        {
             return;
         }
         let detail = data
@@ -425,9 +445,11 @@ impl NodeCore {
     ) -> Result<Value, WireError> {
         let found = self.state.as_ref().and_then(|s| s.jobs.get(&job));
         let delegate = found.is_some_and(|j| j.spec.is_delegate());
+        let found_tool = found.map(|j| j.spec.tool);
         let node = found.map(|j| j.spec.node.clone());
         let current = found.map(|j| j.state);
         let has_session = found.is_some_and(|j| j.session.is_some());
+        let known = found.and_then(|j| j.session.clone());
         let reply = match result {
             Ok(reply) => reply,
             Err(e) => {
@@ -442,12 +464,16 @@ impl NodeCore {
                 return Err(e);
             }
         };
+        let codex = found_tool == Some(Tool::Codex);
+        let first = if codex { "id" } else { "session" };
+        let second = if codex { "session" } else { "id" };
         let session = reply
-            .get("session")
-            .or_else(|| reply.get("id"))
+            .get(first)
+            .or_else(|| reply.get(second))
             .or_else(|| reply.get("jobId"))
             .and_then(|s| s.as_str())
-            .map(|s| text::clean(s, SESSION_MAX));
+            .map(|s| text::clean(s, SESSION_MAX))
+            .or(known);
         if current == Some(JobState::Dispatching) {
             let command = Command::JobState {
                 id: job.clone(),
@@ -529,6 +555,9 @@ fn check_spec(spec: &JobSpec) -> Result<(), WireError> {
             "bad_args",
             "a delegate job runs on Antigravity only",
         ));
+    }
+    if spec.tool == Tool::Codex && !spec.secrets.is_empty() {
+        return Err(refusal("refused", CODEX_SECRETS));
     }
     Ok(())
 }

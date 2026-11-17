@@ -60,7 +60,15 @@ impl ChatView {
         self.sessions
             .iter()
             .map(|s| {
-                crate::chat::sidebar::row_account(s.tool, s.agent.config_dir.as_deref(), &snapshot)
+                crate::chat::sidebar::shows_account(&s.agent.id, s.tool)
+                    .then(|| {
+                        crate::chat::sidebar::row_account(
+                            s.tool,
+                            s.agent.config_dir.as_deref(),
+                            &snapshot,
+                        )
+                    })
+                    .flatten()
                     .map(|a| (a.text, a.lane))
             })
             .collect()

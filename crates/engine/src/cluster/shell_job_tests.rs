@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::shell_job::{scrub, shell_plan, ShellPlan, CODEX_LATER, ENV_PREFIXES, MAX_COMMAND};
+use super::shell_job::{scrub, shell_plan, ShellPlan, CODEX_SECRETS, ENV_PREFIXES, MAX_COMMAND};
 
 fn plan(job: &str, cwd: &str, command: &str) -> Result<ShellPlan, String> {
     shell_plan(job, cwd, command, Path::new("/data"))
@@ -70,9 +70,9 @@ fn scrub_names_every_variable_with_a_listed_prefix() {
 }
 
 #[test]
-fn the_codex_refusal_text_is_the_one_the_maintainer_chose() {
+fn the_codex_secrets_refusal_says_what_is_refused() {
     assert_eq!(
-        CODEX_LATER,
-        "Codex jobs on another machine come in a later version"
+        CODEX_SECRETS,
+        "Codex jobs on another machine take no secrets"
     );
 }

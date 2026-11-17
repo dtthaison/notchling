@@ -83,18 +83,51 @@ fn version_mismatch_is_pickable_with_warning() {
 }
 
 #[test]
-fn codex_on_another_node_is_refused() {
-    let status = status();
+fn codex_on_another_node_runs_under_that_nodes_own_login() {
+    let status = online_linux_worker();
     let rows = run_on(&status).rows(ClusterTool::Codex);
     let mini = rows.iter().find(|r| r.name == "mac-mini").expect("a row");
-    assert!(!mini.pickable());
-    assert_eq!(
-        mini.reason.as_deref(),
-        Some("Codex jobs on another machine come in a later version")
-    );
-    assert!(rows[0].pickable(), "this Mac still runs Codex");
+    assert!(mini.pickable(), "{mini:?}");
+    let worker = rows.iter().find(|r| r.name == "build-box").expect("a row");
+    assert!(worker.pickable(), "Codex runs on Linux: {worker:?}");
     let mut sheet = sheet(&status);
     sheet.pick_remote(Remote::Codex);
+    sheet.pick_node(WORKER);
+    assert_eq!(sheet.target.node.as_deref(), Some(WORKER));
+    sheet.set_path("/srv/api");
+    assert!(!sheet.remote_ready(), "Codex needs a first message");
+    sheet.set_text("fix the failing test");
+    let request = sheet.dispatch_request().expect("a dispatch");
+    let a = args(&request);
+    assert_eq!(a["tool"], "codex");
+    assert_eq!(a["node"], WORKER);
+    assert_eq!(a["cwd"], "/srv/api");
+    assert_eq!(a["text"], "fix the failing test");
+    assert!(a.get("secrets").is_none() && a.get("command").is_none());
+}
+
+#[test]
+fn codex_is_refused_on_a_node_without_it_or_signed_out() {
+    let mut status = online_linux_worker();
+    member(&mut status, WORKER)["versions"]["tools"]
+        .as_object_mut()
+        .expect("tools")
+        .remove("codex");
+    member(&mut status, STANDBY)["versions"]["logins"] = json!({"codex": false});
+    let rows = run_on(&status).rows(ClusterTool::Codex);
+    let worker = rows.iter().find(|r| r.name == "build-box").expect("a row");
+    assert_eq!(
+        worker.reason.as_deref(),
+        Some("Codex isn't installed on build-box")
+    );
+    let mini = rows.iter().find(|r| r.name == "mac-mini").expect("a row");
+    assert_eq!(
+        mini.reason.as_deref(),
+        Some("Codex isn't signed in on mac-mini")
+    );
+    let mut sheet = sheet(&status);
+    sheet.pick_remote(Remote::Codex);
+    sheet.pick_node(WORKER);
     sheet.pick_node(STANDBY);
     assert_eq!(sheet.target.node, None, "a refused node can't be picked");
 }
@@ -211,7 +244,7 @@ fn shell_command_dispatch_carries_command() {
 }
 
 #[test]
-fn antigravity_on_another_node_is_refused_like_codex() {
+fn antigravity_on_another_node_is_still_refused() {
     let status = status();
     let rows = run_on(&status).rows(ClusterTool::Agy);
     let mini = rows.iter().find(|r| r.name == "mac-mini").expect("a row");
@@ -230,7 +263,7 @@ fn antigravity_on_another_node_is_refused_like_codex() {
 #[test]
 fn no_secrets_on_dispatch() {
     let allowed = ["node", "tool", "cwd", "key", "code", "command", "text"];
-    for remote in [Remote::Claude, Remote::Shell] {
+    for remote in [Remote::Claude, Remote::Shell, Remote::Codex] {
         let mut sheet = sheet(&status());
         sheet.pick_remote(remote);
         sheet.pick_node(STANDBY);

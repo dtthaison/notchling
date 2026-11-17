@@ -45,9 +45,10 @@ impl ChatView {
         let asked = self.selected.clone();
         let wanted = self.loader_id(asked.as_deref());
         let view = self.source.view();
-        let shells = view.shells;
+        let (shells, codex) = (view.shells, view.remote_codex);
         let claude = view.agents.map(|mut agents| {
             agents.extend(shells);
+            agents.extend(codex);
             agents
         });
         let live = view.tools;

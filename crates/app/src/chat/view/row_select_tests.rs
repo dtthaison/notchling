@@ -274,11 +274,12 @@ fn fixture_conversations() -> Vec<(String, notchling_engine::transcript::model::
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.is_dir() {
-                    if !p.to_string_lossy().contains("codex") {
+                    if !entry.file_name().to_string_lossy().contains("codex") {
                         stack.push(p);
                     }
                 } else if p.extension().is_some_and(|e| e == "jsonl")
-                    && p.to_string_lossy().contains("/claude/projects/")
+                    && p.strip_prefix(&fixtures)
+                        .is_ok_and(|rel| rel.to_string_lossy().contains("/claude/projects/"))
                 {
                     paths.push(p);
                 }

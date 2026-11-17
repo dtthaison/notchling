@@ -88,6 +88,7 @@ pub enum Link {
 pub struct View {
     pub agents: Option<Vec<Agent>>,
     pub shells: Vec<Agent>,
+    pub remote_codex: Vec<Agent>,
     pub prompts: Option<Vec<Value>>,
     pub tools: ToolLive,
     pub outbox: OutboxFeed,
@@ -118,6 +119,7 @@ pub const DAEMON_UNTRUSTED_NOTE: &str = "Daemon not trusted";
 struct State {
     agents: Option<Vec<Agent>>,
     shells: Vec<Agent>,
+    remote_codex: Vec<Agent>,
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
     outbox: OutboxFeed,
@@ -153,6 +155,14 @@ impl Shared {
         }
     }
 
+    fn set_remote_codex(&self, rows: Vec<Agent>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.remote_codex != rows {
+            state.remote_codex = rows;
+            state.generation += 1;
+        }
+    }
+
     fn set_catalog(&self, tool: CatalogTool, models: Vec<ModelInfo>) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.catalog.get(&tool) != Some(&models) {
@@ -179,6 +189,11 @@ impl Shared {
             topics::SESSIONS_REMOTE_SHELL => {
                 if let Ok(rows) = serde_json::from_value::<Vec<Agent>>(event.data) {
                     self.set_shells(remote_shells(rows));
+                }
+            }
+            topics::SESSIONS_REMOTE_CODEX => {
+                if let Ok(rows) = serde_json::from_value::<Vec<Agent>>(event.data) {
+                    self.set_remote_codex(remote_codex(rows));
                 }
             }
             topics::PROMPT_PENDING | topics::PROMPT_RESOLVED => {
@@ -271,6 +286,7 @@ impl SessionSource {
                 state: Mutex::new(State {
                     agents: None,
                     shells: Vec::new(),
+                    remote_codex: Vec::new(),
                     prompts: None,
                     tools: ToolLive::default(),
                     outbox: OutboxFeed::default(),
@@ -311,6 +327,7 @@ impl SessionSource {
         View {
             agents: state.agents.clone(),
             shells: state.shells.clone(),
+            remote_codex: state.remote_codex.clone(),
             prompts: state.prompts.clone(),
             tools: state.tools.clone(),
             outbox: state.outbox.clone(),
@@ -412,9 +429,10 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents, shells, prompts, outbox, asks)) => {
+            Ok((client, agents, shells, codex, prompts, outbox, asks)) => {
                 shared.set_prompts(prompts);
                 shared.set_shells(shells);
+                shared.set_remote_codex(codex);
                 shared.reseed_outbox(outbox);
                 shared.reseed_asks(asks);
                 shared.set(Link::Daemon, Some(agents));
@@ -432,6 +450,7 @@ fn run(config: SourceConfig, shared: &Shared) {
         }
         shared.set_prompts(None);
         shared.set_shells(Vec::new());
+        shared.set_remote_codex(Vec::new());
         shared.clear_outbox_rows();
         shared.reseed_asks(AskFeed::default());
         shared.reset_tools();
@@ -446,13 +465,31 @@ pub fn remote_shells(rows: Vec<Agent>) -> Vec<Agent> {
         .collect()
 }
 
-pub fn split_shells(rows: Vec<Agent>) -> (Vec<Agent>, Vec<Agent>) {
+pub fn remote_codex(rows: Vec<Agent>) -> Vec<Agent> {
     rows.into_iter()
-        .partition(|a| !(crate::chat::remote::is_remote(a) && crate::chat::remote::is_shell(a)))
+        .filter(|a| crate::chat::remote::is_remote(a) && crate::chat::remote::is_codex(a))
+        .collect()
+}
+
+pub fn split_remote(rows: Vec<Agent>) -> (Vec<Agent>, Vec<Agent>, Vec<Agent>) {
+    let mut claude = Vec::new();
+    let (mut shells, mut codex) = (Vec::new(), Vec::new());
+    for row in rows {
+        let remote = crate::chat::remote::is_remote(&row);
+        if remote && crate::chat::remote::is_shell(&row) {
+            shells.push(row);
+        } else if remote && crate::chat::remote::is_codex(&row) {
+            codex.push(row);
+        } else {
+            claude.push(row);
+        }
+    }
+    (claude, shells, codex)
 }
 
 type Connected = (
     Client,
+    Vec<Agent>,
     Vec<Agent>,
     Vec<Agent>,
     Option<Vec<Value>>,
@@ -491,9 +528,10 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Err(ClientError::Api(_)) => false,
         Err(e) => return Err(e),
     };
-    let (mut agents, mut shells) = split_shells(
-        client.call_as::<Vec<Agent>>(ops::SESSIONS_LIST, serde_json::json!({"remote": "shell"}))?,
-    );
+    let (mut agents, mut shells, mut codex) = split_remote(client.call_as::<Vec<Agent>>(
+        ops::SESSIONS_LIST,
+        serde_json::json!({"remote": ["shell", "codex"]}),
+    )?);
     let mut outbox = OutboxFeed::default();
     if outboxed {
         match client.call(ops::OUTBOX_LIST, serde_json::json!({})) {
@@ -523,6 +561,11 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
                     shells = remote_shells(rows);
                 }
             }
+            topics::SESSIONS_REMOTE_CODEX => {
+                if let Ok(rows) = serde_json::from_value::<Vec<Agent>>(event.data) {
+                    codex = remote_codex(rows);
+                }
+            }
             topics::OUTBOX_CHANGED | topics::OUTBOX_REMOVED => {
                 outbox.apply(&event, now_ms());
             }
@@ -536,7 +579,7 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             }
         }
     }
-    Ok((client, agents, shells, prompts, outbox, asks))
+    Ok((client, agents, shells, codex, prompts, outbox, asks))
 }
 
 fn now_ms() -> i64 {
