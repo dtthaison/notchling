@@ -1,7 +1,7 @@
 # Git branches: every worktree in Details, every branch in a panel
 
 - **Date:** 2026-11-17
-- **Status:** Draft for the maintainer's review. Nothing here is built. The layout is decided (below); the calls only the maintainer can make are in [Needs the maintainer](#needs-the-maintainer), each with a recommendation.
+- **Status:** Approved by the maintainer on 2026-11-17, with every recommendation in [Needs the maintainer](#needs-the-maintainer) taken (the answers are recorded there). Nothing here is built. The plan is `docs/superpowers/plans/2026-11-17-git-branches.md`.
 - **Source:** the mockup `2026-11-17-git-branches-mockup.html` (beside this file), options A, B and C. The maintainer picked **C + B** on 2026-11-17: the Details Panel's Git section becomes numbers only, one line per branch, and a new Branches panel opens where Changes opens. Read-only in v1.
 - **Base:** `origin/agent-run-oss` 02448278.
 - **Touches:** decisions 0004 (the daemon runs `git`, never the app), 0007 (tiers; the local API is additive), 0018 (Chat's state per area). No decision changes, so no new record.
@@ -54,15 +54,22 @@ Each is marked *Builder's call* again in its section.
 
 ## Needs the maintainer
 
-Most important first. Each has a recommendation; the design below follows it.
+Most important first. Each had a recommendation; the design below follows it. **Answered 2026-11-17: every recommendation taken.**
 
 1. **"Running" for lanes run as subagents.** Your lanes are mostly subagents of the main chat, not sessions. v1 matches sessions (by folder) and the selected session's running subagents (by their folder: a Claude Code subagent's newest transcript line's `cwd`, a Codex child's start `cwd`, a delegated job's folder; 7.7). A subagent that works through absolute paths while its `cwd` stays in the main checkout (as this one did) cannot be matched by anything Notchling reads; its row still shows "last 1 m ago" from file times. *Recommendation:* ship that, and ask lanes to start in their worktree (`isolation: "worktree"` or `cd` before starting) if you want the dot.
-2. **What the right-hand numbers mean.** As approved, the current row's right side is its uncommitted work (+52 −9) with "vs main +501 −91" in its sub-line, while the other rows' right side is vs their base. One column then means two things. *Recommendation:* make the right side "vs base" on every row and move the uncommitted part into the current row's sub-line: `5 uncommitted +52 −9 · last 2 m ago · even with origin · vs main`. The spec is written as approved until you say.
+   **Answer (2026-11-17):** ship the running dot by session and subagent folder; lanes start inside their worktree to get it.
+2. **What the right-hand numbers mean.** The first draft put the current row's uncommitted work (+52 −9) on its right side with "vs main +501 −91" in its sub-line, while the other rows' right side is vs their base. One column then meant two things. *Recommendation:* make the right side "vs base" on every row and move the uncommitted part into the current row's sub-line: `5 uncommitted +52 −9 · last 2 m ago · even with origin · vs main`.
+   **Answer (2026-11-17):** yes. Every row's right side is its work against its base; the current row's uncommitted count and lines move into its sub-line. 7.1, 7.2 and the mockup are written that way now.
 3. **Which branch "merged" is measured against.** v1: merged into the branch the main checkout is on (here `agent-run-oss`) or into the default (`origin/main`). Only 2 of 44 remote branches are merged into `main`, 37 into `agent-run-oss`. If the main checkout is switched to a lane for a while, the tabs follow it. *Recommendation:* keep it automatic in v1; add a per-repository "Integration branch" choice later if it bites.
+   **Answer (2026-11-17):** automatic: the main checkout's branch or the default.
 4. **The nearest base also becomes Changes' default.** Today a session in a lane compares with `origin/main` (1,493 commits, the 2,000-file cap). With this design it compares with `agent-run-oss` unless you pick another base in the menu. *Recommendation:* yes.
+   **Answer (2026-11-17):** yes, Changes' default base is the nearest base.
 5. **Changes for a branch with no worktree** (committed work only, against its base). It needs the new `ref` argument on two ops. *Recommendation:* keep in v1: it is how you look inside a Not Merged branch.
+   **Answer (2026-11-17):** in v1, committed work only.
 6. **Actions, later.** v1 is read-only: no merge, delete, push, checkout, worktree add, remove or prune. Which first? *Recommendation:* "Remove Worktree" for a clean, merged worktree (the Merged tab's Worktrees group is exactly that list), behind the `acting` switch and a confirm.
+   **Answer (2026-11-17):** actions later; the first, after v1, is "Remove Worktree". v1 stays read-only.
 7. **The phone.** *Recommendation:* not in v1. The bridge would need new ops and the phone a new screen; nothing here needs it.
+   **Answer (2026-11-17):** no phone in v1.
 
 ## 1. Why
 
@@ -139,12 +146,11 @@ The fix: Details shows every worktree as one short line of numbers, and a Branch
 
 Shown when `git.status` says the folder is in a repository, as today. Rows, top to bottom:
 
-1. **This session's branch.** Branch icon, the branch name (or "Detached at abc1234"), a "this session" pill, and on the right the uncommitted totals (`+52 −9`, the sum of `git.status`'s rows). Sub-line: `5 files changed · last 2 m ago · even with origin · vs main +501 −91`.
-   - "5 files changed": `git.status`'s change count ("500+" when `truncated`).
+1. **This session's branch.** Branch icon, the branch name (or "Detached at abc1234"), a "this session" pill, and on the right its work against its base (`+501 −91`: the branch stat's totals, uncommitted included, the same measure as every other row's right side; answer 2). Sub-line: `5 uncommitted +52 −9 · last 2 m ago · even with origin · vs main`.
+   - "5 uncommitted +52 −9": `git.status`'s change count ("500+" when `truncated`) and the sums of its rows' added and removed lines. Left out when the worktree is clean.
    - "last 2 m ago": the newer of the head commit's time (`committed_at` of the current entry in `git.worktrees`) and the newest change time of the changed files (`changed_at`, a new field on `git.status`). Left out when neither is known.
    - "even with origin": the upstream line, short. "2 to push", "3 behind", "2 to push, 3 behind", "no upstream". The remote name alone when the upstream has the branch's own name, else the upstream (`origin/agent-run-oss`).
-   - "vs main +501 −91": the branch stat, as the old Changes row showed it. Its base is the nearest base unless a base was picked in Changes.
-   - (See question 2: the recommended swap of the two pairs of numbers.)
+   - "vs main": the base the right side is measured against, by its short name. It is the nearest base unless a base was picked in Changes. Until the stat's first answer the right side is empty and this part is left out.
 2. **One row per other worktree.** Branch icon, the branch name, on the right `+N −M` of its work against its base. Sub-line: `23 files · 2 ahead`, then `· running 41 m` with the working dot when a session or subagent works there (7.7), else `· last 6 m ago`. "2 ahead" counts commits on top of its base; "2 ahead, 1 behind" when the base moved on. A worktree whose work was never read yet shows its branch and "2 ahead" with no line counts. A missing folder (prunable) shows "folder missing", faint, and does nothing on click.
 3. **The "›" row.** `main and 39 branches ›`: the default's short name and the count of the other branches with no worktree (local and remote-only, after the dedup in 7.2). "39 other branches ›" when a worktree has the default's short name checked out. With more than 6 other worktrees: `4 more worktrees · main and 39 branches ›`. Left out when the repository has no other branch.
 
@@ -165,7 +171,7 @@ Takes the slot Changes takes: a window-drawn panel at the file panel's width, wi
   - **Merged:** every branch whose commits are all in a base, without a worktree or with a clean one (B20). Never a base. A merged, clean worktree is a finished lane you could remove.
 - **Filter:** a single-line `TextEditor` as in Changes. *Builder's call (B6).*
 - **Groups:** "Worktrees" and "No Worktree", in each tab that has rows for them. Worktrees: this session's first, then running, then by path. No Worktree: newest commit first.
-- **A row:** branch icon (a cloud icon for remote-only), the name, right side `+N −M` against its base (empty for a merged branch, "…" while pending). Sub-line, each part only when known:
+- **A row:** branch icon (a cloud icon for remote-only), the name, right side `+N −M` against its base on every row (answer 2): a worktree's work, uncommitted included, as in Details (its `work`; the branch's `lines` until the work is read); a branch without a worktree its committed `lines`. Empty for a merged branch and for a base, "…" while pending. A worktree with uncommitted work also says "5 uncommitted" in its sub-line. Sub-line, each part only when known:
   - where: "main checkout", the worktree path relative to the main checkout (`.claude/worktrees/lane-ask`) or absolute when outside it, "local", or "GitHub only" (*Builder's call B5*);
   - the session: its name in quotes and "running" or its state;
   - "last commit 6 m ago “ask: store and wait”";
@@ -257,7 +263,7 @@ The base is the candidate with the fewest commits in `candidate..branch`; then t
 
 Why: in this repository `agent/ask` is 12 commits on top of `agent-run-oss` and 1,493 on top of `main`; `agent-run-oss` itself is 1,482 on top of `main`. One base for all would make every lane look like the whole integration branch. The candidates are few and fixed, so the cost is one `for-each-ref %(ahead-behind:<candidate>)` per candidate for all branches at once (*Builder's call B10*). A detached head is no ref, so it takes `rev-list --left-right --count` per candidate. The choice is cached by (head commit, every candidate's commit), so while nothing moved the stat Changes asks every 5 s with `pick: "nearest"` adds only the one `for-each-ref` that reads those commits (about 15 ms).
 
-The same rule picks Changes' default base (`pick: "nearest"`), so the Details row and Changes always agree. A base picked in Changes' menu still wins for that target (question 4).
+The same rule picks Changes' default base (`pick: "nearest"`), so the Details row and Changes always agree. A base picked in Changes' menu still wins for that target (answer 4: the nearest base is Changes' default).
 
 ### 7.6 Merged
 
@@ -283,7 +289,7 @@ Matched in the app, in the model compute, with no I/O:
 - **Running:** a matched session whose group is Working, for `now − since_ms` ("running 41 m"); or a matched running subagent, for `now − started_ms`. Needs Input shows "needs input" instead. Several matches: the one running longest is named, the count follows ("+1").
 - Membership comes from the daemon's paths; state comes from the live session list, so the dot changes as soon as the Sidebar does.
 
-Known limit (question 1): a subagent whose `cwd` stays in the main checkout while it edits a worktree through absolute paths cannot be placed. Its worktree still shows "last 1 m ago".
+Known limit (question 1, answered: shipped as is, and lanes start inside their worktree to get the dot): a subagent whose `cwd` stays in the main checkout while it edits a worktree through absolute paths cannot be placed. Its worktree still shows "last 1 m ago".
 
 ### 7.8 Remote branches without fetching
 
@@ -355,7 +361,7 @@ Two more gates of `Gate`'s shape, one per op, hold the 15 s cadence and one call
 
 ## 9. The phone
 
-Not in v1 (question 7). Nothing in `protocol/` changes. `sessions.list`'s new `worktreePath` is on the local API only; the bridge maps `Agent` to its own `Session` and leaves it out.
+Not in v1 (answer 7). Nothing in `protocol/` changes. `sessions.list`'s new `worktreePath` is on the local API only; the bridge maps `Agent` to its own `Session` and leaves it out.
 
 ## 10. Tests that will prove it
 
@@ -444,7 +450,7 @@ Two passes: the author's own cold read, then Antigravity (gemini-4-argon, high, 
 
 **Minor, decided** (marked *Builder's call*, table at the top): row order and cap, the title, inks, buttons on click, the GitHub label, the filter's fields, session switch, refused names, number format, the `ahead-behind` fallback, caps and cache sizes, the work-read rule, the line-count budget, `worktreePath` over `cwd`, Notchling's own worktrees, names (B1 to B16); and from the second pass: the Git section follows a session into its worktree, nearest-base ties, bases in Working, unread work kept out of Merged, a `ref` reply's fields, the base menu for a `ref`, the `.html` offer's condition, one gate per op, row names (B17 to B25).
 
-**The maintainer's:** the seven in [Needs the maintainer](#needs-the-maintainer). The check raised two more, decided here as builder's calls because they follow from existing behavior and are cheap to change: which worktree is "this session" after EnterWorktree (B17), and where the bases go in the tabs (B19, as the mockup drew `main`).
+**The maintainer's:** the seven in [Needs the maintainer](#needs-the-maintainer), answered on 2026-11-17 with every recommendation taken (answer 2 is now in 7.1, 7.2 and the mockup). The check raised two more, decided here as builder's calls because they follow from existing behavior and are cheap to change: which worktree is "this session" after EnterWorktree (B17), and where the bases go in the tabs (B19, as the mockup drew `main`).
 
 ## Appendix: measurements
 
