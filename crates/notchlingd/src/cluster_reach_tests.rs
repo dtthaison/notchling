@@ -30,6 +30,8 @@ fn parses_reach() {
         &["reach", "100.64.0.1", "70000"],
         &["reach", "100.64.0.1", "x"],
         &["reach", "100.64.0.1", "47823", "extra"],
+        &["reach", "100.64.0.1", "47823", "--json"],
+        &["reach", "100.64.0.1", "47823", "--socket", "/tmp/s"],
     ] {
         assert!(parse(&words(argv)).is_err(), "{argv:?}");
     }

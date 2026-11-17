@@ -56,6 +56,9 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     if stdin && sub != Sub::Join {
         return Err(USAGE.to_string());
     }
+    if matches!(sub, Sub::Reach { .. }) && (json || socket.is_some()) {
+        return Err(USAGE.to_string());
+    }
     Ok(Args { sub, json, socket })
 }
 
