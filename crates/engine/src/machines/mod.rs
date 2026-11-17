@@ -7,6 +7,7 @@ pub mod engine;
 pub mod engine_check;
 pub mod engine_fix;
 pub mod engine_plan;
+mod engine_update;
 pub mod forms;
 pub mod github;
 pub mod mac_facts;
@@ -14,6 +15,7 @@ pub mod masks;
 pub mod merge;
 pub mod merge_ops;
 pub mod morning;
+pub mod node_updates;
 pub mod offers;
 pub mod poller;
 pub mod process;
@@ -118,6 +120,8 @@ mod tests_node_profile;
 mod tests_node_steps;
 #[cfg(test)]
 mod tests_node_steps_b;
+#[cfg(test)]
+mod tests_node_updates;
 #[cfg(test)]
 mod tests_poller;
 #[cfg(test)]
