@@ -32,6 +32,7 @@ impl StepId {
     pub const SERVICE: StepId = StepId(Cow::Borrowed("service"));
     pub const SD_CHECK: StepId = StepId(Cow::Borrowed("sd-check"));
     pub const RUNNING: StepId = StepId(Cow::Borrowed("running"));
+    pub const NODE_GIT: StepId = StepId(Cow::Borrowed("node-git"));
     pub const NODE_TAILSCALE: StepId = StepId(Cow::Borrowed("node-tailscale"));
     pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
     pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));

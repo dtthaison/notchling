@@ -25,6 +25,7 @@ pub mod service_files;
 pub mod shell;
 pub mod status;
 pub mod step;
+mod steps_git;
 pub mod steps_machine;
 pub mod steps_master;
 pub mod steps_node;
@@ -100,6 +101,8 @@ mod tests_node_app;
 mod tests_node_final;
 #[cfg(test)]
 mod tests_node_logins;
+#[cfg(test)]
+mod tests_node_profile;
 #[cfg(test)]
 mod tests_node_steps;
 #[cfg(test)]
