@@ -413,7 +413,12 @@ fn configure(
         let Some(option) = find(id) else {
             continue;
         };
-        if !option.values.iter().any(|v| &v.value == value) {
+        let offered = if *id == "model" {
+            agy_pick::accepted(value, None, &models)
+        } else {
+            option.values.iter().any(|v| &v.value == value)
+        };
+        if !offered {
             let choices: Vec<&str> = option.values.iter().map(|v| v.value.as_str()).collect();
             return Err(Stop::Error(format!(
                 "{flag} {value} isn't offered. Choices: {}.",

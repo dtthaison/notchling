@@ -290,6 +290,16 @@ fn a_model_that_is_not_offered_fails_before_prompting() {
     assert!(h.killed());
 
     let mut options = rig.options(Tool::Agy, "x");
+    options.model = Some("gemini-4-argon-xhigh".into());
+    let (outcome, _) = run_it(&rig, &options);
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some(
+            "--model gemini-4-argon-xhigh isn't offered. Choices: gemini-4-argon, claude-opus-5-5."
+        )
+    );
+
+    let mut options = rig.options(Tool::Agy, "x");
     options.effort = Some("medium".into());
     options.effort = Some("turbo".into());
     let (outcome, _) = run_it(&rig, &options);

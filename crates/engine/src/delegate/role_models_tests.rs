@@ -65,7 +65,10 @@ fn nothing_live_in_the_family_gives_the_clear_message() {
     );
     let (code, text) = pick(&with(None, Some(AGY)), "review-secrets");
     assert_eq!(code, 0);
-    assert_eq!(text, "agy --model gemini-4-argon --effort high\n");
+    assert_eq!(
+        text,
+        "agy --model gemini-4-hydrogen --effort high\nagy --model gemini-4-argon --effort high\n"
+    );
     let other = "gemini-4-argon-high\tA\n";
     assert_eq!(
         pick(&with(Some(CODEX), Some(other)), "review").0,
@@ -405,4 +408,17 @@ fn for_checks_its_arguments_and_can_print_json() {
         .as_str()
         .unwrap()
         .starts_with("no model marked for poetry"));
+}
+
+#[test]
+fn a_listed_variant_that_a_run_would_refuse_is_never_printed() {
+    let agy = "gemini-4-hydrogen-xhigh\tX\ngemini-4-argon-high\tA\nclaude-opus-5-5-high\tC\n";
+    let rig = with(Some(CODEX), Some(agy));
+    for role in ["review", "review-final", "review-secrets", "spec-check"] {
+        let (_, text) = pick(&rig, role);
+        assert!(!text.contains("hydrogen-xhigh"), "{role}: {text}");
+    }
+    let (code, text) = pick(&rig, "review");
+    assert_eq!(code, 1);
+    assert_eq!(text, "no model for review; run delegate-models\n");
 }

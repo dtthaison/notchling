@@ -278,6 +278,9 @@ fn choose(
         let Some(model) = model else {
             continue;
         };
+        if tool == Tool::Agy && !agy_pick::accepted(&model, Some(&effort), &live.models) {
+            continue;
+        }
         let quota = source.and_then(|s| s.load(tool));
         let verdict = quota::verdict(quota.as_ref(), tool, &model, now);
         let cand = Cand {

@@ -170,28 +170,25 @@ fn the_built_in_catalog_gives_each_role_its_fallback_ladder() {
     let hydrogen = &r.tool("antigravity").picks_for("review")[0];
     assert_eq!(
         ladder(hydrogen, "review"),
-        [
-            step("agy", "gemini-4-hydrogen-xhigh", ""),
-            step("codex", "gpt-6-sol", "high")
-        ]
+        [step("codex", "gpt-6-sol", "high")]
     );
     let astra = &r.tool("codex").picks_for("review-final")[0];
     assert_eq!(
         ladder(astra, "review-final"),
         [
-            step("agy", "gemini-4-hydrogen-xhigh", ""),
+            step("agy", "gemini-4-hydrogen", "high"),
             step("agy", "claude-opus-5-5", "high")
         ]
     );
     assert_eq!(
         ladder(astra, "review-secrets"),
-        [step("agy", "gemini-4-hydrogen-xhigh", "")]
+        [step("agy", "gemini-4-hydrogen", "high")]
     );
     let argon = &r.tool("antigravity").picks_for("spec-check")[0];
     assert_eq!(
         ladder(argon, "spec-check"),
         [
-            step("agy", "gemini-4-hydrogen-xhigh", ""),
+            step("agy", "gemini-4-hydrogen", "high"),
             step("agy", "claude-opus-5-5", "high")
         ]
     );

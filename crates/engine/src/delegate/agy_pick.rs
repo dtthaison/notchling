@@ -1,4 +1,11 @@
 const LEVELS: [&str; 3] = ["low", "medium", "high"];
+const NOT_OFFERED: [&str; 4] = ["xhigh", "max", "ultra", "minimal"];
+
+pub fn accepted(model: &str, effort: Option<&str>, offered: &[String]) -> bool {
+    pick(Some(model), effort, offered)
+        .0
+        .is_some_and(|m| offered.contains(&m))
+}
 
 pub fn pick(
     model: Option<&str>,
@@ -42,7 +49,7 @@ pub fn models(listing: &str) -> Vec<(String, Vec<String>)> {
         let Some(id) = line.split('\t').find(|f| !f.is_empty()) else {
             continue;
         };
-        if id.contains(' ') {
+        if id.contains(' ') || NOT_OFFERED.iter().any(|w| id.ends_with(&format!("-{w}"))) {
             continue;
         }
         let mut model = id.to_string();
@@ -105,6 +112,16 @@ mod tests {
     }
 
     #[test]
+    fn accepted_is_what_a_run_would_take() {
+        let m = offered();
+        assert!(accepted("gemini-4-argon", None, &m));
+        assert!(accepted("gemini-4-argon-high", None, &m));
+        assert!(accepted("gpt-oss-120b", None, &m));
+        assert!(!accepted("gemini-4-argon-xhigh", None, &m));
+        assert!(!accepted("nonsense", None, &m));
+    }
+
+    #[test]
     fn levels_are_lower_cased_and_mapped() {
         assert_eq!(level_of("MAX"), "high");
         assert_eq!(level_of("None"), "low");
@@ -121,5 +138,8 @@ mod tests {
         assert_eq!(groups[0].1, ["medium", "high"]);
         assert!(groups[1].1.is_empty());
         assert!(models("").is_empty());
+        let with_xhigh = "gemini-4-hydrogen-high\tH\ngemini-4-hydrogen-xhigh\tX\n";
+        let names: Vec<_> = models(with_xhigh).into_iter().map(|(m, _)| m).collect();
+        assert_eq!(names, ["gemini-4-hydrogen"]);
     }
 }

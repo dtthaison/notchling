@@ -123,7 +123,7 @@ fn argon_out_moves_the_spec_check_and_the_second_secrets_reviewer() {
     put(&rig, "codex", &codex(None));
     assert_eq!(
         pick(&rig, "spec-check"),
-        "agy --model gemini-4-hydrogen-xhigh\nnote: gemini-4-argon: week quota used up, resets in 7d 0h\n"
+        "agy --model gemini-4-hydrogen --effort high\nnote: gemini-4-argon: week quota used up, resets in 7d 0h\n"
     );
     assert_eq!(
         pick(&rig, "review-secrets"),
@@ -142,7 +142,7 @@ fn codex_out_of_credits_moves_the_final_review_to_antigravity() {
     put(&rig, "codex", &codex(Some(Reached::Credits)));
     assert_eq!(
         pick(&rig, "review-final"),
-        "agy --model gemini-4-hydrogen-xhigh\nnote: gpt-6-astra: out of credits\n"
+        "agy --model gemini-4-hydrogen --effort high\nnote: gpt-6-astra: out of credits\n"
     );
 }
 
@@ -153,14 +153,14 @@ fn the_two_secrets_reviewers_come_from_different_families_when_they_can() {
     put(&rig, "codex", &codex(Some(Reached::Credits)));
     assert_eq!(
         pick(&rig, "review-secrets"),
-        "agy --model gemini-4-hydrogen-xhigh\nagy --model claude-opus-5-5 --effort high\nnote: gpt-6-astra: out of credits\n"
+        "agy --model gemini-4-hydrogen --effort high\nagy --model claude-opus-5-5 --effort high\nnote: gpt-6-astra: out of credits\n"
     );
     let mut q = room();
     set(&mut q, "Claude and GPT models", "Week", 99.0);
     put(&rig, "antigravity", &q);
     assert_eq!(
         pick(&rig, "review-secrets"),
-        "agy --model gemini-4-hydrogen-xhigh\nagy --model gemini-4-argon --effort high\nnote: gpt-6-astra: out of credits\n"
+        "agy --model gemini-4-hydrogen --effort high\nagy --model gemini-4-argon --effort high\nnote: gpt-6-astra: out of credits\n"
     );
 }
 
@@ -172,20 +172,20 @@ fn the_claude_and_gpt_five_hour_pool_at_94_has_room_and_at_95_it_does_not() {
     let at_94 = pick(&rig, "review-final");
     assert_eq!(
         at_94,
-        "agy --model gemini-4-hydrogen-xhigh\nnote: gpt-6-astra: out of credits\n"
+        "agy --model gemini-4-hydrogen --effort high\nnote: gpt-6-astra: out of credits\n"
     );
     let mut q = card();
     set(&mut q, "Gemini Models", "Week", 97.0);
     put(&rig, "antigravity", &q);
     assert_eq!(
         pick(&rig, "review-final"),
-        "agy --model claude-opus-5-5 --effort high\nnote: gpt-6-astra: out of credits\nnote: gemini-4-hydrogen-xhigh: week quota used up, resets in 7d 0h\n"
+        "agy --model claude-opus-5-5 --effort high\nnote: gpt-6-astra: out of credits\nnote: gemini-4-hydrogen: week quota used up, resets in 7d 0h\n"
     );
     set(&mut q, "Claude and GPT models", "5h", 95.0);
     put(&rig, "antigravity", &q);
     assert_eq!(
         pick(&rig, "review-final"),
-        "codex --model gpt-6-astra --effort xhigh\nnote: gpt-6-astra: out of credits\nnote: gemini-4-hydrogen-xhigh: week quota used up, resets in 7d 0h\nnote: claude-opus-5-5: 5-hour quota used up, resets in 5h 28m\n"
+        "codex --model gpt-6-astra --effort xhigh\nnote: gpt-6-astra: out of credits\nnote: gemini-4-hydrogen: week quota used up, resets in 7d 0h\nnote: claude-opus-5-5: 5-hour quota used up, resets in 5h 28m\n"
     );
 }
 
@@ -198,7 +198,7 @@ fn a_full_gemini_pool_sends_the_review_to_codex() {
     put(&rig, "codex", &codex(None));
     assert_eq!(
         pick(&rig, "review"),
-        "codex --model gpt-6-sol --effort high\nnote: gemini-4-hydrogen: 5-hour quota used up, resets in 5h 28m\nnote: gemini-4-hydrogen-xhigh: 5-hour quota used up, resets in 5h 28m\n"
+        "codex --model gpt-6-sol --effort high\nnote: gemini-4-hydrogen: 5-hour quota used up, resets in 5h 28m\n"
     );
 }
 
@@ -216,7 +216,7 @@ fn a_tool_that_is_signed_out_is_skipped() {
     );
     assert_eq!(
         pick(&rig, "review-final"),
-        "agy --model gemini-4-hydrogen-xhigh\nnote: gpt-6-astra: codex is signed out\n"
+        "agy --model gemini-4-hydrogen --effort high\nnote: gpt-6-astra: codex is signed out\n"
     );
 }
 
@@ -252,7 +252,7 @@ fn json_has_the_picks_without_an_empty_effort_and_the_notes() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(
         v["picks"],
-        serde_json::json!([{"tool": "agy", "model": "gemini-4-hydrogen-xhigh"}])
+        serde_json::json!([{"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"}])
     );
     assert_eq!(
         v["notes"],
