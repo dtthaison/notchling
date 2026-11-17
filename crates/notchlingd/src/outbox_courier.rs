@@ -188,7 +188,6 @@ impl JobFiles for LiveFiles {
         };
         let job = read_jobs(&config.dir).iter().any(|(id, job)| {
             id != short
-                && text(job, "name").as_deref() == Some(agent.name.as_str())
                 && lands_here(
                     text(job, "cwd"),
                     text(job, "worktreePath"),
@@ -197,7 +196,6 @@ impl JobFiles for LiveFiles {
         });
         job || read_sessions(&config.dir, &|_| true).iter().any(|session| {
             text(session, "jobId").as_deref() != Some(short.as_str())
-                && text(session, "name").as_deref() == Some(agent.name.as_str())
                 && lands_here(
                     text(session, "cwd"),
                     text(session, "worktreePath"),

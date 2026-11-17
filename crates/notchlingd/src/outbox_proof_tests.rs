@@ -93,7 +93,7 @@ fn mine(r: &Rig) -> Agent {
 }
 
 #[test]
-fn a_name_is_shared_by_any_job_session_or_folder_that_could_make_the_file() {
+fn a_file_is_shared_by_any_other_job_or_session_that_could_have_made_it() {
     let r = rig();
     let dir = Folder::new("proof-names");
     let files = crate::outbox_courier::live_files(roots_with(&dir));
@@ -156,7 +156,10 @@ fn a_name_is_shared_by_any_job_session_or_folder_that_could_make_the_file() {
         "bbbb2222",
         json!({"name": "someone", "cwd": "/work/demo", "state": "working"}),
     );
-    assert!(!files.shares_name(&agent, path), "another name");
+    assert!(
+        files.shares_name(&agent, path),
+        "a job named otherwise can be renamed, and the clear's head says only the name it has now"
+    );
 
     let tmp = &in_projects(&dir, "-private-tmp-app", "conv.jsonl");
     write_job(
@@ -171,7 +174,7 @@ fn a_name_is_shared_by_any_job_session_or_folder_that_could_make_the_file() {
 }
 
 #[test]
-fn a_name_is_shared_by_a_live_session_that_is_not_this_job() {
+fn a_file_is_shared_by_a_session_that_is_not_this_job_whatever_it_is_called() {
     let r = rig();
     let dir = Folder::new("proof-sessions");
     let files = crate::outbox_courier::live_files(roots_with(&dir));
@@ -225,9 +228,29 @@ fn a_name_is_shared_by_a_live_session_that_is_not_this_job() {
     );
     write_session(
         &dir,
-        json!({"pid": pid, "name": "someone", "cwd": "/work/demo", "sessionId": "sess-x"}),
+        json!({"pid": pid, "name": "fix-hook", "nameSource": "derived", "cwd": "/work/demo",
+            "sessionId": "sess-y"}),
     );
-    assert!(!files.shares_name(&agent, path), "another name");
+    assert!(
+        files.shares_name(&agent, path),
+        "a terminal session renamed to worker with /rename still says its derived name here"
+    );
+    write_session(
+        &dir,
+        json!({"pid": pid, "cwd": "/work/demo", "sessionId": "sess-y"}),
+    );
+    assert!(
+        files.shares_name(&agent, path),
+        "a session with no name at all"
+    );
+    write_session(
+        &dir,
+        json!({"pid": pid, "name": "worker", "cwd": "/work/elsewhere", "sessionId": "sess-z"}),
+    );
+    assert!(
+        !files.shares_name(&agent, path),
+        "another folder and no conversation of its own in this one"
+    );
 }
 
 #[test]
@@ -510,4 +533,54 @@ fn on_equal_dates_the_worktree_s_file_wins_over_the_cwd_s() {
         Some(in_tree.to_string_lossy().into_owned()),
         "the worktree is where the job works, so it wins a tie with the cwd it was started in"
     );
+}
+
+fn clear_command_line(ms: i64) -> String {
+    clear_head(ms).remove(0)
+}
+
+#[test]
+fn a_clear_already_counted_before_the_try_is_not_proved_again_by_a_successor() {
+    let r = rig();
+    let dir = Folder::new("proof-twice");
+    let old = started_at(&r, &dir, "cwd-folder", "conv.jsonl");
+    r.files.born_at(&old, T0 - 3_600_000);
+    let e = env_over(r.files.clone(), r, dir, old.clone());
+    let row = e.r.send("job-idle", "/clear");
+    e.pass(0);
+    append(&old, &[clear_command_line(2_000)]);
+    let next = old.with_file_name("next.jsonl");
+    e.r.files.born_at(&next, T0 + 3_500);
+    let head = json!({"type": "system", "agentName": "worker", "content": "SessionStart:clear",
+        "timestamp": stamp(5_000)})
+    .to_string();
+    let write: Write = Box::new(move || append(&next, &[head]));
+    e.writes.at.lock().unwrap().push((T0 + 5_000, write));
+    e.pass(3_000);
+    let taken = e.r.row(&row.id);
+    assert_eq!(
+        e.state(&row.id),
+        Some((State::Unsure, Some(Why::NotFound))),
+        "the clear typed 1 s before the try is in the baseline, and the file it made is not a second clear: {taken:?}"
+    );
+}
+
+#[test]
+fn a_clear_with_nothing_before_it_is_still_proved_by_its_successor() {
+    let r = rig();
+    let dir = Folder::new("proof-once-successor");
+    let old = started_at(&r, &dir, "cwd-folder", "conv.jsonl");
+    r.files.born_at(&old, T0 - 3_600_000);
+    let e = env_over(r.files.clone(), r, dir, old.clone());
+    let row = e.r.send("job-idle", "/clear");
+    e.pass(0);
+    let next = old.with_file_name("next.jsonl");
+    e.r.files.born_at(&next, T0 + 3_500);
+    let head = json!({"type": "system", "agentName": "worker", "content": "SessionStart:clear",
+        "timestamp": stamp(5_000)})
+    .to_string();
+    let write: Write = Box::new(move || append(&next, &[head]));
+    e.writes.at.lock().unwrap().push((T0 + 5_000, write));
+    e.pass(3_000);
+    assert_eq!(e.state(&row.id), None, "Sent");
 }

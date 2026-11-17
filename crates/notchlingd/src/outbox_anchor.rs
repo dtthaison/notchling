@@ -47,7 +47,8 @@ pub(crate) fn count_row(
         let now = seen.get_or_insert_with(Seen::default);
         match clear_proof(files, agent, path, attempt) {
             Some(Proof::Own) => now.taken = now.taken.max(1),
-            Some(Proof::Successor) => now.taken += 1,
+            Some(Proof::Successor) if now.taken == 0 => now.taken = 1,
+            Some(Proof::Successor) => {}
             None => {}
         }
     }
