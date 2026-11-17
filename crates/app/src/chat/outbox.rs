@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
 use notchling_engine::sessions::Agent;
+use notchling_engine::terminal::input_box;
 use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
@@ -124,8 +125,10 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         State::InQueue => (Status::QueuedInSession, Vec::new()),
         State::Unsure => (Status::MayBeIn, vec![Button::SendAgain, Button::Drop]),
         State::Box => {
-            let held = squeeze(row.boxed.as_deref().unwrap_or_default());
-            let status = if !held.is_empty() && held == squeeze(&row.text) {
+            let boxed = row.boxed.as_deref().unwrap_or_default();
+            let held = squeeze(boxed);
+            let same = held == squeeze(&row.text) || input_box::holds_message(boxed, &row.text);
+            let status = if !held.is_empty() && same {
                 Status::BoxHoldsThis
             } else {
                 Status::BoxHasText(held)

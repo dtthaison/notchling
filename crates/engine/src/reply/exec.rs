@@ -287,11 +287,19 @@ pub fn execute_clearing(
     Ok(Outcome { taken: run.taken })
 }
 
+#[derive(PartialEq, Eq)]
 enum Shown {
     Dialog,
     Starting,
     Other,
     Input(Input, bool),
+}
+
+fn ready(shown: &Shown, text: &str) -> bool {
+    match shown {
+        Shown::Input(input, _) => matches!(input.fill(text), Fill::Whole | Fill::Folded),
+        Shown::Dialog | Shown::Starting | Shown::Other => false,
+    }
 }
 
 fn cut(row: &str) -> String {
@@ -418,12 +426,35 @@ impl Run<'_> {
             .wait_attached(ms(quiet_ms), ms(timeout_ms), ms(ATTACH_BUSY_MS))
     }
 
+    fn settled(&mut self, mut shown: Shown) -> Shown {
+        for _ in 0..SETTLE_LOOKS {
+            self.pty.sleep(ms(INPUT_POLL_MS));
+            let again = self.shown();
+            if again == shown {
+                return again;
+            }
+            shown = again;
+        }
+        shown
+    }
+
     fn require_free(&mut self) -> Result<(), Failure> {
         let Some(text) = self.intended.clone() else {
             return Ok(());
         };
-        match self.shown() {
-            Shown::Input(input, _) => match input.fill(&text) {
+        let first = self.shown();
+        match self.free(&first, &text) {
+            Err(Failure::NotCleared) => {
+                let shown = self.settled(first);
+                self.free(&shown, &text)
+            }
+            done => done,
+        }
+    }
+
+    fn free(&mut self, shown: &Shown, text: &str) -> Result<(), Failure> {
+        match shown {
+            Shown::Input(input, _) => match input.fill(text) {
                 Fill::Empty | Fill::Whole => Ok(()),
                 _ if self.clearing.any => {
                     self.note("clearing the text the box holds, as asked");
@@ -503,18 +534,15 @@ impl Run<'_> {
         let late = self.watch(timeout_ms, |shown| match shown {
             Shown::Dialog => Err(Failure::Dialog),
             Shown::Starting | Shown::Other => Ok(false),
-            Shown::Input(input, _) => match input.fill(&text) {
-                Fill::Foreign => Err(Failure::Mixed),
-                Fill::Whole | Fill::Folded => {
-                    let settled = last.as_ref() == Some(input);
-                    last = Some(input.clone());
-                    Ok(settled)
+            Shown::Input(input, _) => {
+                let settled = last.as_ref() == Some(input);
+                last = Some(input.clone());
+                match input.fill(&text) {
+                    Fill::Foreign if settled => Err(Failure::Mixed),
+                    Fill::Whole | Fill::Folded => Ok(settled),
+                    Fill::Foreign | Fill::Empty | Fill::Part => Ok(false),
                 }
-                Fill::Empty | Fill::Part => {
-                    last = Some(input.clone());
-                    Ok(false)
-                }
-            },
+            }
         })?;
         match late {
             None => Ok(()),
@@ -530,7 +558,12 @@ impl Run<'_> {
 
     fn submit(&mut self, timeout_ms: u64) -> Result<(), Failure> {
         let text = self.pasted.clone();
-        match self.shown() {
+        let first = self.shown();
+        let shown = match ready(&first, &text) {
+            true => first,
+            false => self.settled(first),
+        };
+        match shown {
             Shown::Dialog => return Err(Failure::Dialog),
             Shown::Starting | Shown::Other => return Err(Failure::NoInput),
             Shown::Input(input, _) => match input.fill(&text) {

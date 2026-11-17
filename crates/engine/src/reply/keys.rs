@@ -64,6 +64,7 @@ pub mod timing {
     pub const PASTE_WAIT_MS: u64 = 10_000;
     pub const SENT_WAIT_MS: u64 = 8_000;
     pub const INPUT_POLL_MS: u64 = 100;
+    pub const SETTLE_LOOKS: usize = 5;
 
     pub const TAKE_BACK_PAUSE_MS: u64 = 300;
     pub const POP_ALL_WAIT_MS: u64 = 3_000;
