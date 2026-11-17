@@ -65,6 +65,7 @@ pub mod cluster_prompts;
 mod cluster_prompts_book;
 mod cluster_prompts_clean;
 pub mod cluster_publisher;
+pub mod cluster_reach;
 pub mod cluster_redact;
 pub mod cluster_relay;
 pub mod cluster_relay_wiring;
@@ -245,6 +246,8 @@ mod cluster_promote_reach_tests;
 mod cluster_promote_tests;
 #[cfg(test)]
 mod cluster_promote_watch_tests;
+#[cfg(test)]
+mod cluster_reach_tests;
 #[cfg(test)]
 mod cluster_redact_tests;
 #[cfg(test)]
