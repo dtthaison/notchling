@@ -475,9 +475,10 @@ mod tests {
     #[test]
     fn the_version_line_names_the_binary() {
         assert_eq!(
-            version_line(),
+            version_line_of(None),
             format!("notchling {}", env!("CARGO_PKG_VERSION"))
         );
+        assert_eq!(version_line(), version_line_of(build_id()));
         assert!(usage().contains("service install"));
     }
 
