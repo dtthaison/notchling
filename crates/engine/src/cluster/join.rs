@@ -125,6 +125,22 @@ impl Tokens {
         }
     }
 
+    pub fn open_invites(&self, now_ms: i64) -> Vec<(NodeId, String, i64)> {
+        let mut open: Vec<(i64, NodeId, String)> = self
+            .issued
+            .values()
+            .filter(|t| now_ms - t.at <= TOKEN_TTL_MS)
+            .filter_map(|t| {
+                let invite = t.invite.as_ref()?;
+                Some((t.at, invite.node.clone(), invite.name.clone()))
+            })
+            .collect();
+        open.sort();
+        open.into_iter()
+            .map(|(at, node, name)| (node, name, at + TOKEN_TTL_MS))
+            .collect()
+    }
+
     pub fn has_open(&self, now_ms: i64) -> bool {
         self.issued.values().any(|t| now_ms - t.at <= TOKEN_TTL_MS)
     }

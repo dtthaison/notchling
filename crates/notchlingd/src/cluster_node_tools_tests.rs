@@ -35,6 +35,9 @@ struct NoCommands;
 
 impl StatusRunner for NoCommands {
     fn run(&self, argv: &[String], _timeout: Duration) -> Option<(i32, String)> {
+        if argv == notchling_engine::cluster::logins::keychain_argv() {
+            return None;
+        }
         panic!("a status command ran: {argv:?}");
     }
 }

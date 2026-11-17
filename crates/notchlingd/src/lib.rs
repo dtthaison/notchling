@@ -39,6 +39,7 @@ pub mod cluster_inbox;
 pub mod cluster_inbox_follow;
 #[cfg(test)]
 pub(crate) mod cluster_inbox_testkit;
+pub mod cluster_invite;
 pub mod cluster_join;
 pub mod cluster_logins;
 pub mod cluster_logins_jobs;

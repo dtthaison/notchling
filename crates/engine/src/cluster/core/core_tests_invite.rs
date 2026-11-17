@@ -440,3 +440,27 @@ fn a_forwarded_invite_is_never_relayed_on() {
         }
     )));
 }
+
+#[test]
+fn status_lists_open_invites_on_the_primary_without_their_secret() {
+    let (mut hub, m5, m1) = pair();
+    let w9 = hub.add("w9", "linux", false);
+    assert_eq!(hub.core(&m5).status()["invites"], json!([]));
+    make(
+        &mut hub,
+        &m5,
+        "secret-for-w9",
+        &m5,
+        invite_for(&w9, "box9", false, true),
+    );
+    let status = hub.core(&m5).status();
+    let invites = status["invites"].as_array().expect("invites");
+    assert_eq!(invites.len(), 1);
+    assert_eq!(invites[0]["node"], json!(w9));
+    assert_eq!(invites[0]["name"], json!("box9"));
+    assert!(invites[0]["expiresMs"].as_i64().unwrap() > 0);
+    assert!(!status.to_string().contains("secret-for-w9"));
+    assert!(hub.core(&m1).status().get("invites").is_none());
+    present(&mut hub, &m5, &w9, "w9", "secret-for-w9");
+    assert_eq!(hub.core(&m5).status()["invites"], json!([]));
+}

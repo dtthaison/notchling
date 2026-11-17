@@ -478,7 +478,7 @@ impl NodeCore {
                 })
             })
             .collect();
-        json!({
+        let mut status = json!({
             "cluster": {
                 "id": state.id,
                 "name": plain(&state.name, NAME_MAX),
@@ -495,7 +495,16 @@ impl NodeCore {
             "failover": self.failover_status(state),
             "claims": state.claims.values().collect::<Vec<_>>(),
             "sideCopies": state.side_copies,
-        })
+        });
+        if self.is_home() {
+            status["invites"] = self
+                .tokens
+                .open_invites(self.wall_ms)
+                .into_iter()
+                .map(|(node, name, expires)| json!({"node": node, "name": name, "expiresMs": expires}))
+                .collect();
+        }
+        status
     }
 
     fn joining_status(&self) -> Value {

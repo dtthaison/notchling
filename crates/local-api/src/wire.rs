@@ -145,6 +145,8 @@ pub mod ops {
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
     pub const OUTBOX_RESEND: &str = "outbox.resend";
     pub const OUTBOX_DISCARD: &str = "outbox.discard";
+
+    pub const CLUSTER_INVITE: &str = "cluster.invite";
 }
 
 pub mod topics {

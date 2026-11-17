@@ -11,6 +11,7 @@ use crate::cluster_fence_keeper::{
 use crate::cluster_forward::{Forward, NoNodeForward, NodeForward};
 use crate::cluster_inbox::{InboxCalls, NetLink, NodeNet, Outbox};
 use crate::cluster_inbox_follow::Follow;
+use crate::cluster_invite::raise_joined;
 use crate::cluster_join::{JoinAsker, JOIN_WAIT};
 use crate::cluster_logins::{LoginCalls, LoginEnv, LoginHold, CLUSTER_LOGIN_ON};
 use crate::cluster_logins_probe::{has_claude_profile, has_content, LoginProbe, SystemStatus};
@@ -22,7 +23,8 @@ use crate::cluster_move_calls::MoveCalls;
 use crate::cluster_move_run::MoveRunner;
 use crate::cluster_move_snaps::RealSnaps;
 use crate::cluster_node::{
-    ClusterLog, ClusterNode, ClusterSetup, Hooks, JoinAsk, LocalCalls, NetSide, Probe, Submit, TICK,
+    ClusterLog, ClusterNode, ClusterSetup, Hooks, InviteJoin, JoinAsk, LocalCalls, NetSide, Probe,
+    Submit, TICK,
 };
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_outbox::{OutboxFollower, RemoteOutbox};
@@ -190,6 +192,10 @@ pub struct ClusterHooks {
 impl Hooks for ClusterHooks {
     fn join_request(&self, ask: JoinAsk, node: Submit) {
         self.asker.ask(ask, node);
+    }
+
+    fn invite_joined(&self, joined: InviteJoin) {
+        raise_joined(&self.inbox, &joined);
     }
 
     fn desired(&self, desired: Desired) {
