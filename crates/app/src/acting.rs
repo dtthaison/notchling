@@ -1,5 +1,5 @@
 use notchling_engine::transcript::snapshot::PendingQuestion;
-use notchling_local_api::{ClientError, ErrorCode};
+use notchling_local_api::{ops as api_ops, ClientError, ErrorCode};
 use serde_json::{json, Value};
 
 pub const OFF_MESSAGE: &str =
@@ -31,6 +31,12 @@ pub mod ops {
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
     pub const OUTBOX_RESEND: &str = "outbox.resend";
     pub const OUTBOX_DISCARD: &str = "outbox.discard";
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AskAnswer<'a> {
+    Choice(u8),
+    Text(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,6 +198,19 @@ impl Request {
 
     pub fn outbox_discard(session: &str) -> Request {
         Request::new(ops::OUTBOX_DISCARD, json!({ "session": session }))
+    }
+
+    pub fn ask_answer(id: &str, answer: AskAnswer) -> Request {
+        let mut args = json!({ "id": id });
+        match answer {
+            AskAnswer::Choice(n) => args["choice"] = json!(n),
+            AskAnswer::Text(text) => args["text"] = json!(text),
+        }
+        Request::new(api_ops::ASK_ANSWER, args)
+    }
+
+    pub fn ask_dismiss(id: &str) -> Request {
+        Request::new(api_ops::ASK_DISMISS, json!({ "id": id }))
     }
 
     pub fn clearing_box(mut self) -> Request {
@@ -363,6 +382,31 @@ mod tests {
             Request {
                 op: "outbox.discard",
                 args: json!({"session": "ab12cd34"})
+            }
+        );
+    }
+
+    #[test]
+    fn the_ask_requests_have_the_wire_shapes() {
+        assert_eq!(
+            Request::ask_answer("q1", AskAnswer::Choice(2)),
+            Request {
+                op: "ask.answer",
+                args: json!({"id": "q1", "choice": 2})
+            }
+        );
+        assert_eq!(
+            Request::ask_answer("q1", AskAnswer::Text("use the second")),
+            Request {
+                op: "ask.answer",
+                args: json!({"id": "q1", "text": "use the second"})
+            }
+        );
+        assert_eq!(
+            Request::ask_dismiss("q1"),
+            Request {
+                op: "ask.dismiss",
+                args: json!({"id": "q1"})
             }
         );
     }
