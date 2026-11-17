@@ -132,6 +132,12 @@ impl Book {
         Some(Change::Updated(item.clone()))
     }
 
+    pub fn remove(&mut self, id: &str) -> Option<Change> {
+        let at = self.items.iter().position(|item| item.id == id)?;
+        self.items.remove(at);
+        Some(Change::Removed(id.to_string()))
+    }
+
     pub fn expire(&mut self, now_ms: i64) -> Vec<Change> {
         self.expire_except(now_ms, &|_| false)
     }

@@ -1,5 +1,6 @@
 use crate::acting_ops::{ActingOps, Room};
 use crate::ask_ops::AskOps;
+use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::vault_caller::SystemProcesses;
@@ -13,6 +14,7 @@ pub fn build(
     acting: &Arc<ActingOps>,
     room: &Arc<dyn Room>,
     events: &Events,
+    inbox: &Arc<InboxOps>,
 ) -> Arc<AskOps> {
     let (store, saving) = match AskStore::open(&layout.data_dir) {
         Ok(store) => (store, true),
@@ -27,5 +29,7 @@ pub fn build(
         Some(events.clone()),
         Arc::new(SystemProcesses),
     );
-    Arc::new(if saving { ops } else { ops.without_store() })
+    let ops = Arc::new(if saving { ops } else { ops.without_store() });
+    ops.attach(inbox.clone());
+    ops
 }

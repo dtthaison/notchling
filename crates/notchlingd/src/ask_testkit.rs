@@ -1,6 +1,7 @@
 use crate::acting::Acting;
 use crate::acting_ops_tests::{app, FakeRoom, SESSION};
 use crate::ask_ops::AskOps;
+use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use crate::vault_caller::Processes;
@@ -86,6 +87,7 @@ pub(crate) struct Rig {
     pub room: Arc<FakeRoom>,
     pub sink: Arc<MemorySink>,
     pub store: Arc<AskStore>,
+    pub inbox: Arc<InboxOps>,
     pub acting: Arc<Acting>,
     pub list: Arc<Mutex<Value>>,
     pub clock: Arc<AtomicI64>,
@@ -98,6 +100,14 @@ pub(crate) fn rig() -> Rig {
 }
 
 pub(crate) fn rig_with(list: Value, store: Option<(Arc<AskStore>, Scratch)>) -> Rig {
+    rig_full(list, store, None)
+}
+
+pub(crate) fn rig_full(
+    list: Value,
+    store: Option<(Arc<AskStore>, Scratch)>,
+    inbox_dir: Option<PathBuf>,
+) -> Rig {
     let (store, dir) =
         store.unwrap_or_else(|| (Arc::new(AskStore::in_memory_for_tests()), scratch("rig")));
     let main = dir.0.join("claude");
@@ -127,6 +137,9 @@ pub(crate) fn rig_with(list: Value, store: Option<(Arc<AskStore>, Scratch)>) -> 
     let clock = Arc::new(AtomicI64::new(T0));
     let ticks = clock.clone();
     let list = Arc::new(Mutex::new(list));
+    let inbox_dir = inbox_dir.unwrap_or_else(|| dir.0.join("inbox"));
+    std::fs::create_dir_all(&inbox_dir).unwrap();
+    let inbox = InboxOps::new(inbox_dir, room.clone());
     let ops = Arc::new(
         AskOps::new(
             store.clone(),
@@ -139,11 +152,13 @@ pub(crate) fn rig_with(list: Value, store: Option<(Arc<AskStore>, Scratch)>) -> 
         )
         .with_clock(Arc::new(move || ticks.load(Ordering::SeqCst))),
     );
+    ops.attach(inbox.clone());
     Rig {
         ops,
         room,
         sink,
         store,
+        inbox,
         acting,
         list,
         clock,
@@ -230,4 +245,17 @@ pub(crate) fn until(what: &str, mut ready: impl FnMut() -> bool) {
         assert!(std::time::Instant::now() < stop, "{what}");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+}
+
+pub(crate) fn item_of(r: &Rig, id: &str) -> notchling_engine::inbox::Item {
+    let inbox_id = r.store.get(id).unwrap().unwrap().inbox_id.unwrap();
+    r.inbox
+        .items()
+        .into_iter()
+        .find(|item| item.id == inbox_id)
+        .unwrap()
+}
+
+pub(crate) fn items(r: &Rig) -> Vec<notchling_engine::inbox::Item> {
+    r.inbox.items()
 }

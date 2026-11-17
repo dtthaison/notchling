@@ -569,7 +569,7 @@ impl Wired {
             .with_cluster_dir(layout.cluster_dir());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         acting.attach_outbox(outbox.clone());
-        let ask = crate::ask_wiring::build(layout, &sessions, &acting, &room, &events);
+        let ask = crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox);
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),

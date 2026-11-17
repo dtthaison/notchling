@@ -2,6 +2,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_events::session_ref;
 use crate::acting_ops::{bad, forbidden, now_ms, Room};
 use crate::ask_events::{emit, Facts};
+use crate::ask_inbox::Link;
 use crate::ask_rows::{key_for, wire};
 use crate::ask_tick::{queue, Msg, NEVER};
 use crate::ask_waiters::Waiters;
@@ -23,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::AtomicI64;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 
 const NO_SESSION: &str = "Notchling can't tell which session is asking.";
@@ -53,21 +54,23 @@ pub enum Taken {
 }
 
 #[derive(Clone, Copy)]
-struct Mark {
-    state: AskState,
-    by: Option<By>,
+pub(crate) struct Mark {
+    pub(crate) state: AskState,
+    pub(crate) by: Option<By>,
 }
 
 pub struct AskOps {
     pub(crate) store: Arc<AskStore>,
     sessions: Arc<Mutex<Value>>,
-    acting: Arc<Acting>,
+    pub(crate) acting: Arc<Acting>,
     pub(crate) room: Arc<dyn Room>,
     events: Option<Events>,
     caller: CallerSession,
     pub(crate) procs: Arc<dyn Processes>,
     clock: Clock,
     marks: Mutex<HashMap<String, Mark>>,
+    pub(crate) link: OnceLock<Link>,
+    pub(crate) raised: Mutex<HashSet<String>>,
     saving: bool,
     pub(crate) waiters: Waiters,
     pub(crate) tx: Sender<Msg>,
@@ -153,6 +156,8 @@ impl AskOps {
             procs,
             clock: Arc::new(now_ms),
             marks: Mutex::new(HashMap::new()),
+            link: OnceLock::new(),
+            raised: Mutex::new(HashSet::new()),
             saving: true,
             waiters: Waiters::default(),
             tx,
@@ -270,6 +275,7 @@ impl AskOps {
         self.publish_changed(row);
         self.emit_then(row, then);
         self.waiters.wake(&row.id);
+        self.resolve_item(row);
     }
 
     fn refuse(&self, hit: Option<&SessionHit>, mode: Mode, args: &Value) {
@@ -290,8 +296,6 @@ impl AskOps {
     }
 
     fn start_find(&self, _row: &Row, _hit: &SessionHit) {}
-
-    fn settled(&self, _id: &str) {}
 
     fn opened(&self, row: &Row, hit: &SessionHit) {
         self.publish_changed(row);
@@ -361,7 +365,7 @@ impl AskOps {
         Ok(json!({"id": row.id, "state": "open"}))
     }
 
-    fn take(&self, id: &str, mark: Mark) -> Option<Mark> {
+    pub(crate) fn take(&self, id: &str, mark: Mark) -> Option<Mark> {
         let mut marks = lock(&self.marks);
         if let Some(taken) = marks.get(id) {
             return Some(*taken);
@@ -370,7 +374,7 @@ impl AskOps {
         None
     }
 
-    fn drop_mark(&self, id: &str) {
+    pub(crate) fn drop_mark(&self, id: &str) {
         lock(&self.marks).remove(id);
     }
 
@@ -417,7 +421,17 @@ impl AskOps {
                 by: taken.by,
             });
         }
-        let wrote = self.store.answer(id, &answer, choice, by, self.now());
+        self.finish_answer(id, &answer, choice, by)
+    }
+
+    pub(crate) fn finish_answer(
+        &self,
+        id: &str,
+        answer: &str,
+        choice: Option<u8>,
+        by: By,
+    ) -> Result<Taken, ApiError> {
+        let wrote = self.store.answer(id, answer, choice, by, self.now());
         self.drop_mark(id);
         match wrote {
             Err(_) => Err(failed(SAVE_ANSWER_FAILED)),
@@ -443,6 +457,10 @@ impl AskOps {
         if self.take(id, mark).is_some() {
             return Ok(false);
         }
+        self.finish_dismiss(id)
+    }
+
+    pub(crate) fn finish_dismiss(&self, id: &str) -> Result<bool, ApiError> {
         let closed = self
             .store
             .close(id, &[AskState::Open], AskState::Dismissed, self.now());

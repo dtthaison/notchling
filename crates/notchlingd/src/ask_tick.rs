@@ -1,5 +1,5 @@
 use crate::ask_ops::AskOps;
-use notchling_engine::ask::{AskState, Mode, Row};
+use notchling_engine::ask::{AskState, By, Mode, Row};
 use notchling_events::kinds::choices::AskThen;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -12,6 +12,13 @@ pub(crate) const SWEEP_EVERY_MS: i64 = 3_600_000;
 pub(crate) const NEVER: i64 = i64::MIN;
 
 pub(crate) enum Msg {
+    Answer {
+        id: String,
+        answer: String,
+        choice: Option<u8>,
+        by: By,
+    },
+    Dismiss(String),
     Stop,
 }
 
@@ -75,6 +82,7 @@ impl AskOps {
         };
         for row in rows {
             self.waiters.release(&row.id);
+            lock(&self.raised).remove(&row.id);
             self.room.publish(
                 notchling_local_api::topics::ASKS,
                 notchling_local_api::topics::ASK_REMOVED,
@@ -89,6 +97,7 @@ impl AskOps {
         };
         for row in &rows {
             self.emit_at(row, AskThen::Restored, now_ms);
+            self.raise_again(row, now_ms);
         }
     }
 
@@ -117,6 +126,7 @@ impl AskOps {
                     };
                     match msg {
                         Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+                        Ok(msg) => ops.apply(msg),
                         Err(RecvTimeoutError::Timeout) => {}
                     }
                     if last.elapsed() >= every {
