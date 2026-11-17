@@ -176,6 +176,7 @@ impl ChatView {
             return;
         };
         let model = git::parse_status(&reply).map(Arc::new);
+        let in_repo = model.is_some();
         let same_folder = self.repo.folder.as_deref() == Some(folder.as_str());
         let stale = base != self.repo.base_choice;
         let rejected = base.is_some() && matches!(stat, Some(Err(_)));
@@ -202,7 +203,13 @@ impl ChatView {
             self.push_branch(cx);
             self.git_diff_again(cx);
         }
-        if stale || rejected || applied == Some(Applied::Retry) {
+        let again = changes_target::needs_ask_again(
+            self.repo.other.as_ref(),
+            applied.as_ref(),
+            in_repo,
+            self.changes_visible(),
+        );
+        if stale || rejected || again {
             self.repo.gate.reset();
             self.git_ask(Why::Opened, cx);
         }

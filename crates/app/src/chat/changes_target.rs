@@ -109,6 +109,22 @@ pub fn asking(other: Option<&TargetState>) -> Option<(Target, Option<String>)> {
         .map(|state| (state.target.clone(), state.base_choice.clone()))
 }
 
+pub fn needs_ask_again(
+    other: Option<&TargetState>,
+    answered: Option<&Applied>,
+    in_repo: bool,
+    visible: bool,
+) -> bool {
+    if asking(other).is_none() {
+        return false;
+    }
+    match answered {
+        Some(Applied::Same | Applied::Changed) => false,
+        Some(Applied::Retry) => true,
+        Some(Applied::Ignored) | None => in_repo && visible,
+    }
+}
+
 pub fn choose_base(state: &mut TargetState, base: String) -> bool {
     if state.base_choice.as_deref() == Some(base.as_str()) {
         return false;

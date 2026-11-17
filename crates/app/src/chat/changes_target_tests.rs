@@ -287,3 +287,49 @@ fn only_a_ref_target_is_committed_only() {
     assert!(!is_ref(Some(&TargetState::new(lane()))));
     assert!(!is_ref(None));
 }
+
+#[test]
+fn answer_without_the_new_target_asks_again() {
+    let other = Some(TargetState::new(lane()));
+    assert!(needs_ask_again(other.as_ref(), None, true, true));
+}
+
+#[test]
+fn answer_for_an_older_target_asks_again() {
+    let mut other = Some(TargetState::new(lane()));
+    let done = apply_stat(
+        &mut other,
+        &Target::Ref("old".into()),
+        None,
+        Ok(reply("old", "main", 5)),
+    );
+    assert_eq!(done, Applied::Ignored);
+    assert!(needs_ask_again(other.as_ref(), Some(&done), true, true));
+    assert!(needs_ask_again(
+        other.as_ref(),
+        Some(&Applied::Retry),
+        true,
+        true
+    ));
+}
+
+#[test]
+fn answered_or_refused_target_does_not_ask_again() {
+    let mut other = Some(TargetState::new(lane()));
+    let done = apply_stat(&mut other, &lane(), None, Ok(reply("lane", "main", 5)));
+    assert_eq!(done, Applied::Changed);
+    assert!(!needs_ask_again(other.as_ref(), Some(&done), true, true));
+    assert!(!needs_ask_again(
+        other.as_ref(),
+        Some(&Applied::Same),
+        true,
+        true
+    ));
+    let mut refused = Some(TargetState::new(lane()));
+    apply_stat(&mut refused, &lane(), None, Err("no".into()));
+    assert!(!needs_ask_again(refused.as_ref(), None, true, true));
+    assert!(!needs_ask_again(None, None, true, true));
+    let waiting = Some(TargetState::new(lane()));
+    assert!(!needs_ask_again(waiting.as_ref(), None, false, true));
+    assert!(!needs_ask_again(waiting.as_ref(), None, true, false));
+}
