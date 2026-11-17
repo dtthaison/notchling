@@ -594,7 +594,7 @@ fn asking_command(command: &'static str, id: Value) -> OnPrompt {
 #[test]
 fn notchling_ask_wait_is_allowed_once_without_write() {
     let rig = rig_with(agent(asking_command(
-        "notchling ask --wait -- 'Keep it?'",
+        "'/fake/notchling' ask --wait -- 'Keep it?'",
         json!("a1"),
     )));
     let (outcome, _) = run_it(&rig, &rig.options(Tool::Agy, "x"));
@@ -624,7 +624,7 @@ fn the_notchling_of_this_process_is_allowed_by_its_path() {
 #[test]
 fn other_commands_are_still_declined_and_listed() {
     let rig = rig_with(agent(asking_command(
-        "notchling ask --wait -- x; rm y",
+        "/fake/notchling ask --wait -- x; rm y",
         json!("a3"),
     )));
     let mut options = rig.options(Tool::Agy, "x");
@@ -635,7 +635,7 @@ fn other_commands_are_still_declined_and_listed() {
         replies_to(&h, &json!("a3"))[0]["result"]["outcome"]["optionId"],
         "deny"
     );
-    assert_eq!(outcome.declined, ["notchling ask --wait -- x; rm y"]);
+    assert_eq!(outcome.declined, ["/fake/notchling ask --wait -- x; rm y"]);
 }
 
 #[test]

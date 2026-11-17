@@ -49,7 +49,7 @@ impl SkillTool {
         match self {
             SkillTool::Claude => "\n## How to run it\n\nRun it with Bash `run_in_background: true`, then end your turn with one short line. Don't call SubagentHandback to wait: it ends your run. The command's exit wakes you; read its output: `Answer:` is the answer. A main session, or `claude -p`, is woken by the exit the same way.\n\nWhen your work is done, deliver your report with SubagentHandback, even if you called it before: plain text at the end of a turn doesn't reach your caller.\n",
             SkillTool::Codex => "\n## How to run it\n\nRun `ask --wait` in the foreground with the longest timeout the tool allows. Under `notchling delegate` it stops by itself before the delegate's limit (exit 124).\n\nIt works only in `--write` delegate jobs: the read-only sandbox blocks Notchling's socket, and the command exits 3. Then report the question to your caller.\n",
-            SkillTool::Antigravity => "\n## How to run it\n\nRun `ask --wait` with the run_command tool and let the tool wait for it; under `notchling delegate` it stops by itself before the delegate's limit (exit 124). Make the command exactly `'<binary>' ask --wait ...`, with no `;`, `&&`, pipe or redirection around it, or the request is declined.\n",
+            SkillTool::Antigravity => "\n## How to run it\n\nRun `ask --wait` with the run_command tool and let the tool wait for it; under `notchling delegate` it stops by itself before the delegate's limit (exit 124). Make the command exactly `'{binary}' ask --wait [--choice '<option>']... -- '<question>'`, with every word in single quotes and nothing around it (no `;`, `&&`, pipe, redirection, `*`, `~` or braces), or the request is declined.\n",
         }
     }
 }

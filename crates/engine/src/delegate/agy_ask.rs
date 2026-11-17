@@ -10,46 +10,48 @@ fn command_line(request: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-fn redirects_or_backgrounds(command: &str) -> bool {
-    let mut chars = command.chars().peekable();
-    let mut previous = ' ';
+fn plain_words(command: &str) -> bool {
+    let mut chars = command.chars();
     while let Some(c) = chars.next() {
         match c {
-            '\'' => {
-                for c in chars.by_ref() {
-                    if c == '\'' {
-                        break;
-                    }
+            '\n' => return false,
+            '\'' => loop {
+                match chars.next() {
+                    None | Some('\n') => return false,
+                    Some('\'') => break,
+                    Some(_) => {}
                 }
-            }
-            '"' => {
-                while let Some(c) = chars.next() {
-                    match c {
-                        '"' => break,
-                        '\\' => {
-                            chars.next();
-                        }
-                        _ => {}
-                    }
+            },
+            '"' => loop {
+                match chars.next() {
+                    None | Some('\n' | '$' | '`' | '!') => return false,
+                    Some('"') => break,
+                    Some('\\') => match chars.next() {
+                        None | Some('\n' | '$' | '`' | '!') => return false,
+                        Some(_) => {}
+                    },
+                    Some(_) => {}
                 }
-            }
-            '\\' => {
-                chars.next();
-            }
-            '<' | '>' => return true,
-            '&' if previous != '&' && chars.peek() != Some(&'&') => return true,
-            _ => {}
+            },
+            '\\' => match chars.next() {
+                None | Some('\n') => return false,
+                Some(_) => {}
+            },
+            c if c.is_ascii_alphanumeric() || " -_./,:@+%".contains(c) => {}
+            _ => return false,
         }
-        previous = c;
     }
-    false
+    true
 }
 
 pub fn allows(request: &Value, binary: &Path) -> bool {
+    let Some(binary) = binary.to_str().filter(|b| b.starts_with('/')) else {
+        return false;
+    };
     let Some(command) = command_line(request) else {
         return false;
     };
-    if redirects_or_backgrounds(command) {
+    if !plain_words(command) {
         return false;
     }
     let Some(commands) = simple_commands(command) else {
@@ -61,7 +63,7 @@ pub fn allows(request: &Value, binary: &Path) -> bool {
     let [program, ask, wait, ..] = words.as_slice() else {
         return false;
     };
-    (Path::new(program) == binary || program == "notchling") && ask == "ask" && wait == "--wait"
+    program == binary && ask == "ask" && wait == "--wait"
 }
 
 #[cfg(test)]

@@ -92,3 +92,14 @@ fn the_description_is_fixed() {
         "Use when you need a decision from the user that you can't make or find out yourself — ask it on its own card in Notchling and get the answer back, instead of stopping or reporting the question to your caller."
     );
 }
+
+#[test]
+fn the_agy_text_holds_the_real_binary_and_the_plain_form() {
+    let text = text("/Apps/N", SkillTool::Antigravity);
+    assert!(!text.contains("<binary>"));
+    assert!(
+        text.contains("exactly `'/Apps/N' ask --wait [--choice '<option>']... -- '<question>'`")
+    );
+    assert!(text.contains("every word in single quotes"));
+    assert!(text.contains("or the request is declined"));
+}
