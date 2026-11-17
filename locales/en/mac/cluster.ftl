@@ -384,3 +384,70 @@ cluster-vault-unreachable = Can't reach the vault. Nothing was saved or removed.
 cluster-vault-moved = The vault changed while this was open, so nothing was saved or removed. Open it again.
 # Tab label while this Mac can't tell which machine holds the vault.
 cluster-vault-tab-unknown = Vault on Another Machine
+
+## Add Machine
+
+# How-to after ssh refused the key; $target is user@host.
+cluster-add-howto-key = Add this Mac's key with ssh-copy-id { $target } in Terminal, then Check Again.
+# How-to when the machine's SSH key isn't known yet; $target is user@host.
+cluster-add-howto-host-key = Run ssh { $target } once in Terminal and compare the key it shows, then Check Again.
+# How-to when the machine didn't answer at all.
+cluster-add-howto-reach = Check the address and that the machine is on and on your network, then Check Again.
+# Reason when the check got no answer from the machine at all.
+cluster-add-no-answer = The machine gave no answer.
+# Reason when macOS there is too old; $version is what it runs.
+cluster-add-unsupported-mac = Notchling needs macOS 13 or newer; this machine runs { $version }.
+# Reason when the chip is not one Notchling is built for; $arch is what the machine reports.
+cluster-add-unsupported-arch = Notchling runs on x86_64 and arm64 machines only; this one reports { $arch }.
+# Reason when the machine is already in another cluster; $detail is the machine's own line.
+cluster-add-other-cluster = The machine says: { $detail }. Leave that cluster first.
+# Reason when nothing is left to set up and the machine isn't in the cluster.
+cluster-add-nothing = Nothing is left to set up, but { $name } isn't in the cluster yet.
+# Reason when machines.json can't be changed.
+cluster-add-save-failed = Couldn't save machines.json.
+# Reason when machines.json can't be read.
+cluster-add-registry-unreadable = machines.json can't be read, so nothing can be added.
+# Reason when another machine already has the name; $name is the name.
+cluster-add-name-taken = A machine named { $name } is already in Machines with another address.
+# Shown by Install and Join when the plan can't run; $name is the machine.
+cluster-add-blocked-tailscale = Tailscale has to be connected on { $name } before Install and Join.
+# Shown when Install and Join is pressed without the admin password.
+cluster-add-needs-password = Type the admin password first.
+# Shown when the machine changed after the plan was shown.
+cluster-add-changed = The plan changed after it was shown. Check Again.
+# Shown when a button is pressed that the flow can't take now.
+cluster-add-not-now = That can't be done at this step.
+# Shown when a plan expired or ran already.
+cluster-add-plan-gone = The plan is no longer valid. Check Again.
+# Line under Can Be Master when it is off by default on Linux.
+cluster-add-master-linux = Needs an encrypted disk; most VPSes can't
+cluster-add-master-filevault-off = FileVault is off
+cluster-add-master-filevault-unknown = Can't tell whether FileVault is on
+cluster-add-master-primary-unknown = Can't tell the primary's account
+cluster-add-master-other-account = Needs the same user and home as the primary
+# Reason a step stopped the run; $step is the step's title, $why what went wrong.
+cluster-add-run-failed = { $step }: { $why }
+# Reason the run stopped at a step that still isn't done; $step is its title, $why the check's line.
+cluster-add-step-not-done = { $step } still isn't done: { $why }
+# Reason when the machine never showed up in the cluster after the join; $name is its name.
+cluster-add-join-timeout = { $name } didn't show up in the cluster in time. Look at the primary's Inbox, then Check Again.
+# Line on the Cluster sheet while a run goes on; $name is the machine, $step the step number, $of how many steps there are.
+cluster-add-running = Adding { $name }… (step { NUMBER($step) } of { NUMBER($of) })
+# Line on the Cluster sheet while a run waits for the machine to appear.
+cluster-add-joining = Waiting for { $name } to join…
+# Line on the Cluster sheet when a run is done; $name is the machine.
+cluster-add-done = { $name } is in the cluster.
+# Why a step is in the plan, one line each.
+cluster-add-why-worker-user = Notchling shouldn't run as root.
+cluster-add-why-stays-awake = A machine that sleeps drops out of the cluster.
+cluster-add-why-git = Jobs and sessions need Git.
+cluster-add-why-tailscale = Machines reach each other over Tailscale.
+cluster-add-why-binary = The Notchling program has to be on the machine.
+cluster-add-why-service = The service keeps Notchling running after a restart.
+cluster-add-why-app-closed = The service can't join while the app is open.
+cluster-add-why-reach = The machine has to reach the primary over the tailnet.
+cluster-add-why-joined = It joins this cluster without asking again, because you started it here.
+cluster-add-why-claude = Sessions and jobs run Claude Code.
+cluster-add-why-other = Needed to join the cluster.
+# Reason when Join Cluster is pressed for a machine Machines doesn't list; $name is the name.
+cluster-add-no-machine = Machines has no machine named { $name }.

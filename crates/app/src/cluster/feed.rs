@@ -7,6 +7,7 @@ use notchling_local_api::{topics, Client, ClientError, ClientKind, ConnectOption
 use notchling_locale as t;
 use serde_json::Value;
 
+use super::add_runs::AddRuns;
 use super::model::ClusterModel;
 use super::wire::{self, Request};
 use crate::actions::{Socket, Transport};
@@ -20,16 +21,19 @@ const MOVE_REFRESH_EVERY: Duration = Duration::from_secs(1);
 struct Shared {
     model: Mutex<ClusterModel>,
     last: Mutex<Value>,
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
     stop: AtomicBool,
+    adds: AddRuns,
 }
 
 impl Shared {
     fn new() -> Shared {
+        let generation = Arc::new(AtomicU64::new(0));
         Shared {
             model: Mutex::default(),
             last: Mutex::new(Value::Null),
-            generation: AtomicU64::new(0),
+            adds: AddRuns::tied_to(generation.clone()),
+            generation,
             stop: AtomicBool::new(false),
         }
     }
@@ -50,6 +54,7 @@ impl Shared {
         self.remember(status);
         let me = status.get("me").and_then(Value::as_str).unwrap_or("");
         let next = ClusterModel::from_status(status, me);
+        self.adds.seen(&next);
         let mut model = self.model();
         if *model != next {
             *model = next;
@@ -181,6 +186,10 @@ impl ClusterFeed {
 
     pub fn generation(&self) -> u64 {
         self.shared.generation.load(Ordering::SeqCst)
+    }
+
+    pub fn adds(&self) -> AddRuns {
+        self.shared.adds.clone()
     }
 
     pub fn snapshot(&self) -> ClusterModel {
