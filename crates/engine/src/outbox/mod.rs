@@ -42,5 +42,8 @@ mod refusal_tests;
 #[path = "store_tests.rs"]
 mod store_tests;
 #[cfg(test)]
+#[path = "store_unsure_tests.rs"]
+mod store_unsure_tests;
+#[cfg(test)]
 #[path = "verdict_tests.rs"]
 mod verdict_tests;

@@ -960,11 +960,12 @@ The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](
 
 `outbox.discard` removes every row of the session except one that is `sending`, `in_queue` ones included.
 
-A row on the wire: `{id, session, tool, kind, text, state, position, queuedMs, updatedMs, via, why?, box?, error?}`.
+A row on the wire: `{id, session, tool, kind, text, state, position, queuedMs, updatedMs, via, why?, attemptMs?, box?, error?}`.
 
 - `tool` is `claude`, `codex` or `antigravity`; `kind` is `prompt` or `command` (a Claude Code message that starts with `/`); `via` is as above; `position` counts from 1 within its session.
 - `state` is `queued`, `waiting`, `sending`, `in_queue` (in Claude Code's own queue; the model has not read it yet), `unsure` (may already be in; the person decides), `box` (the session's input box holds other text), `stopped` or `gone`.
 - `why` is a code for `waiting` (`dialog`, `queue`, `turn`, `retry`), `unsure` (`not_found`, `restart`, `dropped`), `box` (`not_cleared`, `mixed`); there is none for `in_queue`.
+- `attemptMs` (an `unsure` row only) is when its last attempt began; Chat hides the row's bubble once the transcript holds the message dated at or after it. The daemon looks at an `unsure` row's transcript again every 5 s for 10 minutes and, when the message turns up, settles the row as sent (never sends it again).
 - `box` (a `box` row only) is the text the input box holds and `error` (a Codex or Antigravity `retry` row only) is what went wrong. Both live in the daemon's memory, so a restart drops them, and neither is ever written to a log, an event or the audit.
 
 Sent, removed, discarded and dropped rows are deleted, not listed. A row never expires by age; one that has waited 7 days is raised once in the Inbox (kind `outbox_unsent`, Send and Discard).

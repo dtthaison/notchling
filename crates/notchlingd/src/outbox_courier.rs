@@ -9,8 +9,9 @@ use notchling_engine::outbox::{
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
-use notchling_engine::sessions::{fresh, Agent, AgentGroup, Probes, Roots};
+use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
 use notchling_engine::terminal::input_box;
+use notchling_engine::transcript::locate::find_transcript;
 use notchling_engine::transcript::queue_state::{queue_state, QueueState};
 use notchling_engine::transcript::restart;
 use notchling_events::kinds::choices::FailWhy;
@@ -71,6 +72,9 @@ pub(crate) trait JobFiles: Send + Sync {
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
     fn queue(&self, transcript: &str) -> Option<QueueState>;
     fn process(&self, job: &str) -> Option<(u32, Option<i64>)>;
+    fn locate(&self, _agent: &Agent) -> Option<String> {
+        None
+    }
 }
 
 pub(crate) struct LiveFiles {
@@ -103,6 +107,13 @@ impl JobFiles for LiveFiles {
 
     fn process(&self, job: &str) -> Option<(u32, Option<i64>)> {
         fresh::job_process(&self.roots, &Probes::from_proc(), job)
+    }
+
+    fn locate(&self, agent: &Agent) -> Option<String> {
+        config_dirs(&self.roots).into_iter().find_map(|config| {
+            let projects = config.dir.join("projects");
+            find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd)
+        })
     }
 }
 

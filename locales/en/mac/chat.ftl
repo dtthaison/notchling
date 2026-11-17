@@ -209,6 +209,8 @@ chat-outbox-sent = Sent
 chat-outbox-maybe = May already be in the session
 # $text is what the session's terminal box holds, on one line and cut when long.
 chat-outbox-box = Box has other text: { $text }
+# The session's terminal box already holds this very message, typed earlier and not sent.
+chat-outbox-box-same = This message is already in the box
 chat-outbox-stopped = Session stopped
 chat-outbox-gone = Session not found
 # The buttons on those messages.
@@ -223,6 +225,8 @@ chat-outbox-resume-send = Resume and Send
 chat-outbox-editing = Editing a queued message
 # The note when a queued message was taken before its edit went in.
 chat-outbox-already-sent = Already sent
+# Shown when the daemon did not answer in time because the Mac is busy. Nothing was lost; asking again works.
+chat-daemon-busy = Notchling is busy. Try again.
 chat-add-files = Add files or photos
 chat-add-folder = Add folder
 chat-slash-commands = Slash commands
@@ -296,6 +300,8 @@ chat-already-answered = Already answered in the terminal: { $tool }
 chat-already-answered-subject = Already answered in the terminal: { $tool } { $subject }
 # $said is the reason, without its final full stop.
 chat-may-have-reached = { $said }. It may still have reached the session: look before sending again.
+# Shown when an answer to a question or permission got no reply because the Mac is busy.
+chat-busy-may-have-reached = Notchling is busy. Your answer may still have reached the session: look before answering again.
 # Replaces "Answer it in the terminal" when the question card is already on screen.
 chat-answer-above = Answer it above
 chat-not-answered = Not answered

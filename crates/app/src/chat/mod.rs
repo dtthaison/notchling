@@ -51,7 +51,11 @@ pub mod markers;
 pub mod message_meta;
 pub mod outbox;
 #[cfg(test)]
+mod outbox_box_same_tests;
+#[cfg(test)]
 mod outbox_confirmed_tests;
+#[cfg(test)]
+mod outbox_unsure_tests;
 pub mod outgoing;
 pub mod page_panel;
 pub mod paging;
@@ -62,6 +66,8 @@ pub mod paths;
 pub mod pending_child;
 pub mod permission_text;
 pub mod pickers;
+#[cfg(test)]
+mod prompt_busy_tests;
 pub mod prompt_flow;
 pub mod prompts;
 #[cfg(test)]
