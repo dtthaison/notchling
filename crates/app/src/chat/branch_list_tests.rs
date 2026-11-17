@@ -44,7 +44,6 @@ fn work(added: u64, removed: u64, files: u64, uncommitted: u64) -> Option<Work> 
         files,
         uncommitted_files: uncommitted,
         changed_at: None,
-        read_at: NOW,
     })
 }
 
@@ -196,7 +195,6 @@ fn parse_reply_fields() {
         w.work,
         work(10, 2, 3, 1).map(|w| Work {
             changed_at: Some(77),
-            read_at: 88,
             ..w
         })
     );

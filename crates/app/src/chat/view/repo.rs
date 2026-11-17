@@ -11,6 +11,7 @@ use crate::chat::branch::{self, BranchModel};
 use crate::chat::branches_state::Feed as BranchesFeed;
 use crate::chat::changes_target::{self, Applied, DiffVia, Target, TargetState};
 use crate::chat::git::{self, DiffText, Gate, GitModel, Why};
+use crate::chat::git_gates::opened_wanted;
 use crate::chat::remote_control::Action;
 use crate::chat::worktrees;
 use notchling_engine::sessions::Agent;
@@ -199,6 +200,7 @@ impl ChatView {
         let model = git::parse_status(&reply).map(Arc::new);
         let in_repo = model.is_some();
         let same_folder = self.repo.folder.as_deref() == Some(folder.as_str());
+        let have_rows = self.repo.wt.rows_for(Some(folder.as_str())).is_some();
         let stale = base != self.repo.base_choice;
         let rejected = base.is_some() && matches!(stat, Some(Err(_)));
         let wanted = match stat {
@@ -224,7 +226,7 @@ impl ChatView {
             self.push_branch(cx);
             self.git_diff_again(cx);
         }
-        if in_repo {
+        if opened_wanted(in_repo, same_folder, have_rows) {
             self.worktrees_ask(Why::Opened, cx);
         }
         let again = changes_target::needs_ask_again(

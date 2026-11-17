@@ -48,6 +48,29 @@ impl SlowGate {
     }
 }
 
+pub fn opened_wanted(in_repo: bool, same_folder: bool, have_rows: bool) -> bool {
+    in_repo && (!same_folder || !have_rows)
+}
+
+const MINUTE_MS: i64 = 60_000;
+
+#[derive(Debug, Default)]
+pub struct MinuteGate {
+    last: Option<i64>,
+}
+
+impl MinuteGate {
+    pub fn due(&mut self, visible: bool, now_ms: i64) -> bool {
+        if !visible {
+            return false;
+        }
+        let bucket = now_ms.div_euclid(MINUTE_MS);
+        let changed = self.last != Some(bucket);
+        self.last = Some(bucket);
+        changed
+    }
+}
+
 pub fn fresh_after<T: PartialEq>(before: &[(String, T)], after: &[(String, T)]) -> Vec<String> {
     after
         .iter()

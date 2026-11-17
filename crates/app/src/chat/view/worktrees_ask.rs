@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::{now_ms, ChatView};
 use crate::chat::data::Session;
 use crate::chat::git::Why;
-use crate::chat::git_gates::{fresh_after, SlowGate};
+use crate::chat::git_gates::{fresh_after, MinuteGate, SlowGate};
 use crate::chat::inspector::SubagentRow;
 use crate::chat::worktrees::{self, GitSection, Occupancy, Worktrees};
 
@@ -15,6 +15,7 @@ const MINUTE_MS: i64 = 60_000;
 #[derive(Default)]
 pub struct WorktreesState {
     gate: SlowGate,
+    minute: MinuteGate,
     folder: Option<String>,
     rows: Option<Arc<Worktrees>>,
     kinds: Vec<(String, u8)>,
@@ -137,6 +138,10 @@ impl WorktreesState {
         self.folder = Some(folder.to_owned());
         self.rows = parsed;
         true
+    }
+
+    pub fn minute_due(&mut self, visible: bool, now_ms: i64) -> bool {
+        self.minute.due(visible, now_ms)
     }
 
     pub fn done(&mut self, now_ms: i64) {

@@ -21,6 +21,15 @@ pub fn on_switch(before: Option<&str>, after: Option<&str>) -> Switch {
     }
 }
 
+pub fn selection_moved(
+    was: Option<&str>,
+    now: Option<&str>,
+    before: Option<&str>,
+    after: Option<&str>,
+) -> bool {
+    was != now || before != after
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applied {
     Same,

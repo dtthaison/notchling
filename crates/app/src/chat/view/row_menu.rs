@@ -337,6 +337,7 @@ impl ChatView {
         if used::forget(&mut self.used, &ids) {
             self.save_used();
         }
+        let folder_before = self.selected_folder();
         let all = std::mem::take(&mut self.sessions);
         self.sessions = self.open_rows(all);
         let gone = self.selected.as_ref().is_some_and(|sel| ids.contains(sel));
@@ -348,7 +349,10 @@ impl ChatView {
                 .next();
             match next {
                 Some(id) => self.select(&id, cx),
-                None => self.selected = None,
+                None => {
+                    self.selected = None;
+                    self.branches_switched(folder_before, cx);
+                }
             }
         }
         cx.notify();

@@ -127,7 +127,6 @@ fn work(added: u64, removed: u64, files: u64) -> Option<Work> {
         files,
         uncommitted_files: 0,
         changed_at: None,
-        read_at: NOW,
     })
 }
 
@@ -238,7 +237,6 @@ fn parse_reply_fields_and_repo_false() {
             files: 3,
             uncommitted_files: 1,
             changed_at: Some(77),
-            read_at: 88
         })
     );
     let lane = &w.list[1];

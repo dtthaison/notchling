@@ -119,7 +119,7 @@ mod branches {
 
     use crate::chat::branch_list::{panel, PanelInput, PanelState, Tab};
     use crate::chat::branches_state::{
-        hidden_switch, on_switch, Applied, Feed, Received, Shown, Switch,
+        hidden_switch, on_switch, selection_moved, Applied, Feed, Received, Shown, Switch,
     };
     use crate::chat::changes_target::{on_close, Target, TargetState};
     use crate::chat::git::Why;
@@ -180,6 +180,31 @@ mod branches {
     }
 
     #[test]
+    fn a_selection_made_by_the_loader_counts_as_a_switch() {
+        assert!(!selection_moved(
+            Some("a"),
+            Some("a"),
+            Some("/r"),
+            Some("/r")
+        ));
+        assert!(selection_moved(
+            Some("a"),
+            Some("b"),
+            Some("/r"),
+            Some("/r")
+        ));
+        assert!(selection_moved(
+            Some("a"),
+            Some("a"),
+            Some("/r"),
+            Some("/o")
+        ));
+        assert!(selection_moved(Some("a"), None, Some("/r"), None));
+        assert!(selection_moved(None, Some("a"), None, Some("/r")));
+        assert_eq!(on_switch(Some("/r"), None), Switch::Close);
+    }
+
+    #[test]
     fn open_row_and_filter_clear_on_switch() {
         let mut shown = Shown::default();
         shown.set_input(input_of(&{
@@ -213,6 +238,21 @@ mod branches {
         assert!(!shown.set_input(input_of(&feed)));
         let again = parse_equal(&mut feed);
         assert!(!shown.set_input(again));
+    }
+
+    fn with_work(read_at: i64) -> Value {
+        json!({"repo": true, "name": "r", "pending": 0, "branches": [
+            {"name": "a", "ref": "refs/heads/a", "local": true,
+             "worktree": {"path": "/r/a", "work": {"added": 1, "removed": 2, "files": 3,
+                          "uncommitted_files": 0, "changed_at": 5, "read_at": read_at}}}
+        ]})
+    }
+
+    #[test]
+    fn a_reread_with_only_the_read_time_changed_is_the_same() {
+        let mut feed = Feed::default();
+        assert_eq!(feed.apply("/r", Ok(with_work(10)), 0), Applied::Changed);
+        assert_eq!(feed.apply("/r", Ok(with_work(20)), 20_000), Applied::Same);
     }
 
     fn parse_equal(feed: &mut Feed) -> Arc<PanelInput> {

@@ -25,7 +25,6 @@ pub struct Work {
     pub files: u64,
     pub uncommitted_files: u64,
     pub changed_at: Option<i64>,
-    pub read_at: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -71,7 +70,6 @@ pub fn parse_work(value: &Value) -> Option<Work> {
         files: number("files"),
         uncommitted_files: number("uncommitted_files"),
         changed_at: value["changed_at"].as_i64(),
-        read_at: value["read_at"].as_i64().unwrap_or(0),
     })
 }
 
@@ -604,7 +602,6 @@ pub fn preview() -> Worktrees {
             files,
             uncommitted_files: 0,
             changed_at: None,
-            read_at: PREVIEW_NOW_MS,
         })
     };
     let mut missing = lane("old", "agent/old-lane", 0, None, 0);

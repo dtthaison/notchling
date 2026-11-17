@@ -126,3 +126,67 @@ fn reset_lets_the_next_ask_through() {
     gate.reset();
     assert!(gate.ask(Why::Opened, Some("/w"), true, 60));
 }
+
+#[test]
+fn status_answers_every_5s_ask_worktrees_every_15s() {
+    let mut gate = SlowGate::default();
+    let mut asked = Vec::new();
+    let mut have_rows = false;
+    for step in 0..=12_i64 {
+        let now = step * 5_000;
+        if gate.ask(Why::Tick, Some("/w"), true, now) {
+            asked.push(now);
+            gate.done(false, now);
+            have_rows = true;
+        }
+        if opened_wanted(true, step > 0, have_rows) && gate.ask(Why::Opened, Some("/w"), true, now)
+        {
+            asked.push(now);
+            gate.done(false, now);
+            have_rows = true;
+        }
+    }
+    assert_eq!(asked, [0, 15_000, 30_000, 45_000, 60_000]);
+}
+
+#[test]
+fn answers_alone_never_repeat_the_worktrees_call() {
+    let mut gate = SlowGate::default();
+    let mut rows = false;
+    let mut asked = 0;
+    for step in 0..=12_i64 {
+        let now = step * 5_000;
+        if opened_wanted(true, step > 0, rows) && gate.ask(Why::Opened, Some("/w"), true, now) {
+            asked += 1;
+            gate.done(false, now);
+            rows = true;
+        }
+    }
+    assert_eq!(asked, 1);
+}
+
+#[test]
+fn the_first_answer_for_a_folder_asks_at_once() {
+    let mut gate = SlowGate::default();
+    assert!(gate.ask(Why::Tick, Some("/w"), true, 0));
+    gate.done(false, 10);
+    assert!(opened_wanted(true, false, true));
+    assert!(gate.ask(Why::Opened, Some("/other"), true, 20));
+    gate.done(false, 30);
+    assert!(opened_wanted(true, true, false));
+    assert!(!opened_wanted(true, true, true));
+    assert!(!opened_wanted(false, false, false));
+}
+
+#[test]
+fn the_minute_ticks_once() {
+    let mut gate = MinuteGate::default();
+    assert!(!gate.due(false, 0));
+    assert!(gate.due(true, 30_000));
+    assert!(!gate.due(true, 59_999));
+    assert!(gate.due(true, 60_000));
+    assert!(!gate.due(true, 119_999));
+    assert!(!gate.due(false, 180_000));
+    assert!(gate.due(true, 180_001));
+    assert!(!gate.due(true, 181_000));
+}

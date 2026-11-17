@@ -1,4 +1,5 @@
 use super::*;
+use crate::chat::branches_state::selection_moved;
 
 impl ChatView {
     pub(super) fn show_started_job(&mut self, job: &str, cx: &mut Context<Self>) {
@@ -133,6 +134,7 @@ impl ChatView {
         }
         self.conversation_state(cx, |s| s.markdown.get_mut().reloaded());
         let selected_before = self.selected_session().cloned();
+        let folder_before = self.selected_folder();
         let mut conversation_changed = false;
         let mut layout_changed = false;
         self.sessions = self.open_rows(all);
@@ -161,6 +163,15 @@ impl ChatView {
             if self.selected != was {
                 self.open_subagent = None;
                 self.show_draft(cx);
+            }
+            let folder_after = self.selected_folder();
+            if selection_moved(
+                was.as_deref(),
+                self.selected.as_deref(),
+                folder_before.as_deref(),
+                folder_after.as_deref(),
+            ) {
+                self.branches_switched(folder_before, cx);
             }
             let agy = self.selected_session().map(|s| s.tool) == Some(Tool::Antigravity);
             let session_changed = self.take_open_at_end(cx);
@@ -335,6 +346,9 @@ impl ChatView {
             self.redraw_conversation(cx);
         }
         self.refresh_file(cx);
+        if self.repo.wt.minute_due(self.details_visible(), now) {
+            self.refresh_details(cx);
+        }
         self.git_ask(crate::chat::git::Why::Tick, cx);
         self.git_diff_tick(cx);
         if self.gate.due(now_ms()) {

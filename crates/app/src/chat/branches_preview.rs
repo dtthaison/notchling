@@ -35,7 +35,6 @@ fn work(added: u64, removed: u64, files: u64, uncommitted: u64) -> Option<Work> 
         files,
         uncommitted_files: uncommitted,
         changed_at: None,
-        read_at: PREVIEW_NOW_MS,
     })
 }
 
