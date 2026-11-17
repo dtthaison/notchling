@@ -6,6 +6,8 @@ import Foundation
 enum ReplySender {
     enum Failure: Error, LocalizedError {
         case pty, launch(String), timeout, dialog
+        /// `claude attach` couldn't wake a finished job; the text is Claude Code's reason.
+        case wake(String)
         /// A question being answered from Chat: the terminal no longer shows it, or shows another one.
         case questionGone, questionMismatch
 
@@ -15,6 +17,10 @@ enum ReplySender {
             case .launch(let why): return "Couldn't run claude attach: \(why)"
             case .timeout: return "The session didn't open in time."
             case .dialog: return "The session is asking you something. Answer it in the terminal, then send again."
+            case .wake(let why):
+                return why.contains("another terminal")
+                    ? "This conversation is open somewhere else (a terminal or Claude Desktop), so the session can't wake. Close it there, then send again."
+                    : "The session couldn't wake: \(why)"
             case .questionGone: return "That question isn't open in the session any more."
             case .questionMismatch:
                 return "The terminal shows a different question than Chat does, so nothing more was typed. Finish it in the terminal."
@@ -32,6 +38,15 @@ enum ReplySender {
         // The last drawn lines: a short session leaves blank rows under its prompt or dialog.
         let drawn = screen.lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         return drawn.suffix(6).contains { line in dialogMarkers.contains { line.contains($0) } }
+    }
+
+    /// Claude Code 2.1.326 prints "Couldn't wake <id> — <reason>" and exits when a finished job can't start again,
+    /// for one because its conversation is open in another terminal or in Claude Desktop. Typing on would go nowhere.
+    static func wakeFailure(_ screen: TerminalScreen) -> String? {
+        guard let line = screen.lines.first(where: { $0.contains("Couldn't wake") }) else { return nil }
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let dash = trimmed.range(of: " — ") else { return trimmed }
+        return String(trimmed[dash.upperBound...])
     }
 
     static let claudePath: String = {
@@ -262,6 +277,7 @@ enum ReplySender {
         } else {
             guard waitForQuiet(master, quiet: 0.5, timeout: 15, into: screen) else { throw Failure.timeout }
         }
+        if let why = wakeFailure(screen) { throw Failure.wake(why) }
         if refuseDialog, dialogOpen(screen) { throw Failure.dialog }
         try body(master, screen)
         _ = waitForQuiet(master, quiet: 0.4, timeout: 3)

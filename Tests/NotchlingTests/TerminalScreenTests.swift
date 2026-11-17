@@ -15,6 +15,16 @@ final class TerminalScreenTests: XCTestCase {
         return screen
     }
 
+    /// What 2.1.326 printed when the job's conversation was also open in a terminal and Claude Desktop.
+    func testWakeFailureIsReadFromTheScreen() {
+        let screen = TerminalScreen(rows: 10, cols: 120)
+        screen.feed(Array("Waking session 5de74ffd…\r\nCouldn't wake 5de74ffd — Can't open — this session is running in another terminal\r\n".utf8))
+        let why = ReplySender.wakeFailure(screen)
+        XCTAssertEqual(why, "Can't open — this session is running in another terminal")
+        XCTAssertTrue(ReplySender.Failure.wake(why ?? "").errorDescription?.contains("open somewhere else") == true)
+        XCTAssertNil(ReplySender.wakeFailure(TerminalScreen(rows: 3, cols: 20)))
+    }
+
     func testSessionDraws() throws {
         let s = try screen(after: ["plugin-0-attach"])
         let text = s.lines.joined(separator: "\n")
