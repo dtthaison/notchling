@@ -13,6 +13,8 @@ pub mod agy_sink;
 mod ask_events;
 pub mod ask_ops;
 mod ask_rows;
+mod ask_tick;
+mod ask_waiters;
 pub mod ask_wiring;
 pub mod attach;
 pub mod awake_loop;
@@ -203,6 +205,8 @@ mod acting_permission_tests;
 mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
+#[cfg(test)]
+mod ask_load_tests;
 #[cfg(test)]
 mod ask_testkit;
 #[cfg(test)]

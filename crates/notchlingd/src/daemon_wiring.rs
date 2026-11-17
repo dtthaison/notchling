@@ -921,14 +921,17 @@ impl Wired {
         self.codex_children.start();
         self.postmen.begin();
         self.outbox_notice.spawn_loop();
+        self.ask.spawn_loop();
     }
 
     pub fn load(&self) {
         self.inbox.load();
+        self.ask.load(crate::acting_ops::now_ms());
         self.outbox.load(crate::acting_ops::now_ms());
     }
 
     pub fn close(&self) {
+        self.ask.close();
         self.outbox_notice.close();
         self.postmen.stop();
         self.wake.close();

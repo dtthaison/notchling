@@ -3,6 +3,8 @@ use crate::acting_events::session_ref;
 use crate::acting_ops::{bad, forbidden, now_ms, Room};
 use crate::ask_events::{emit, Facts};
 use crate::ask_rows::{key_for, wire};
+use crate::ask_tick::{queue, Msg, NEVER};
+use crate::ask_waiters::Waiters;
 use crate::caller_session::{CallerSession, SessionHit};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
@@ -19,7 +21,10 @@ use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::AtomicI64;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle;
 
 const NO_SESSION: &str = "Notchling can't tell which session is asking.";
 const PERSON_ONLY: &str = "Only the person answers this question.";
@@ -54,16 +59,21 @@ struct Mark {
 }
 
 pub struct AskOps {
-    store: Arc<AskStore>,
+    pub(crate) store: Arc<AskStore>,
     sessions: Arc<Mutex<Value>>,
     acting: Arc<Acting>,
-    room: Arc<dyn Room>,
+    pub(crate) room: Arc<dyn Room>,
     events: Option<Events>,
     caller: CallerSession,
-    procs: Arc<dyn Processes>,
+    pub(crate) procs: Arc<dyn Processes>,
     clock: Clock,
     marks: Mutex<HashMap<String, Mark>>,
     saving: bool,
+    pub(crate) waiters: Waiters,
+    pub(crate) tx: Sender<Msg>,
+    pub(crate) rx: Mutex<Option<Receiver<Msg>>>,
+    pub(crate) thread: Mutex<Option<JoinHandle<()>>>,
+    pub(crate) last_sweep: AtomicI64,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -104,7 +114,7 @@ fn flag(args: &Value, key: &str) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn id_arg(args: &Value) -> Result<&str, ApiError> {
+pub(crate) fn id_arg(args: &Value) -> Result<&str, ApiError> {
     args.get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| bad(ID_NEEDED))
@@ -132,6 +142,7 @@ impl AskOps {
         events: Option<Events>,
         procs: Arc<dyn Processes>,
     ) -> AskOps {
+        let (tx, rx) = queue();
         AskOps {
             store,
             sessions,
@@ -143,6 +154,11 @@ impl AskOps {
             clock: Arc::new(now_ms),
             marks: Mutex::new(HashMap::new()),
             saving: true,
+            waiters: Waiters::default(),
+            tx,
+            rx,
+            thread: Mutex::new(None),
+            last_sweep: AtomicI64::new(NEVER),
         }
     }
 
@@ -229,8 +245,8 @@ impl AskOps {
         }
     }
 
-    fn waiting(&self, _id: &str) -> bool {
-        false
+    fn waiting(&self, id: &str) -> bool {
+        self.waiters.connected(id)
     }
 
     pub fn publish_changed(&self, row: &Row) {
@@ -242,9 +258,18 @@ impl AskOps {
     }
 
     pub fn emit_then(&self, row: &Row, then: AskThen) {
-        let now = self.now();
+        self.emit_at(row, then, self.now());
+    }
+
+    pub(crate) fn emit_at(&self, row: &Row, then: AskThen, now: i64) {
         let facts = Facts::of(row, self.session_ref_of(&row.session), then, now);
         emit(self.events.as_ref(), facts, now);
+    }
+
+    pub(crate) fn moved(&self, row: &Row, then: AskThen) {
+        self.publish_changed(row);
+        self.emit_then(row, then);
+        self.waiters.wake(&row.id);
     }
 
     fn refuse(&self, hit: Option<&SessionHit>, mode: Mode, args: &Value) {
@@ -357,7 +382,7 @@ impl AskOps {
         })
     }
 
-    fn row(&self, id: &str) -> Result<Row, ApiError> {
+    pub(crate) fn row(&self, id: &str) -> Result<Row, ApiError> {
         self.store
             .get(id)
             .map_err(|_| failed(SAVE_ANSWER_FAILED))?
@@ -399,8 +424,7 @@ impl AskOps {
             Ok(false) => self.lost(id),
             Ok(true) => {
                 if let Ok(Some(changed)) = self.store.get(id) {
-                    self.publish_changed(&changed);
-                    self.emit_then(&changed, AskThen::Answered);
+                    self.moved(&changed, AskThen::Answered);
                 }
                 Ok(Taken::Won)
             }
@@ -428,8 +452,7 @@ impl AskOps {
             Ok(false) => Ok(false),
             Ok(true) => {
                 if let Ok(Some(changed)) = self.store.get(id) {
-                    self.publish_changed(&changed);
-                    self.emit_then(&changed, AskThen::Dismissed);
+                    self.moved(&changed, AskThen::Dismissed);
                 }
                 Ok(true)
             }
@@ -487,7 +510,7 @@ impl AskOps {
 impl OpGroup for AskOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::ASK_OPEN | ops::ASK_ANSWER => Some(OpSpec::AGENT),
+            ops::ASK_OPEN | ops::ASK_WAIT | ops::ASK_ANSWER => Some(OpSpec::AGENT),
             ops::ASK_DISMISS | ops::ASK_LIST => Some(OpSpec::APP),
             _ => None,
         }
@@ -496,6 +519,9 @@ impl OpGroup for AskOps {
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if op == ops::ASK_LIST {
             return self.list_op(caller, args);
+        }
+        if op == ops::ASK_WAIT {
+            return self.wait_op(caller, args);
         }
         if !self.acting.is_on() {
             return Err(forbidden(ACTING_OFF));

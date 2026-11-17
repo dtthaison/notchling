@@ -9,7 +9,7 @@ use notchling_engine::sessions::Roots;
 use notchling_events::{MemorySink, Salt};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, Tier};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,11 +24,26 @@ pub(crate) const T0: i64 = 1_794_697_060_000;
 pub(crate) struct Tree {
     parents: HashMap<u32, u32>,
     cwds: HashMap<u32, PathBuf>,
-    starts: HashMap<u32, u64>,
+    starts: Mutex<HashMap<u32, u64>>,
+    ended: Mutex<HashSet<u32>>,
+}
+
+impl Tree {
+    pub(crate) fn end(&self, pid: u32) {
+        self.ended.lock().unwrap().insert(pid);
+        self.starts.lock().unwrap().remove(&pid);
+    }
+
+    pub(crate) fn restarted(&self, pid: u32, start: u64) {
+        self.starts.lock().unwrap().insert(pid, start);
+    }
 }
 
 impl Processes for Tree {
     fn parent(&self, pid: u32) -> Option<u32> {
+        if self.ended.lock().unwrap().contains(&pid) {
+            return None;
+        }
         self.parents.get(&pid).copied()
     }
     fn name(&self, _pid: u32) -> Option<String> {
@@ -41,7 +56,7 @@ impl Processes for Tree {
         Some(path.to_path_buf())
     }
     fn start_time(&self, pid: u32) -> Option<u64> {
-        self.starts.get(&pid).copied()
+        self.starts.lock().unwrap().get(&pid).copied()
     }
 }
 
@@ -74,6 +89,7 @@ pub(crate) struct Rig {
     pub acting: Arc<Acting>,
     pub list: Arc<Mutex<Value>>,
     pub clock: Arc<AtomicI64>,
+    pub tree: Arc<Tree>,
     pub dir: Scratch,
 }
 
@@ -97,8 +113,10 @@ pub(crate) fn rig_with(list: Value, store: Option<(Arc<AskStore>, Scratch)>) -> 
     let tree = Tree {
         parents: HashMap::from([(ASKER, SHELL), (SHELL, CLAUDE), (CLAUDE, 1), (STRANGER, 1)]),
         cwds: HashMap::from([(ASKER, work)]),
-        starts: HashMap::from([(ASKER, 4242)]),
+        starts: Mutex::new(HashMap::from([(ASKER, 4242)])),
+        ended: Mutex::new(HashSet::new()),
     };
+    let tree = Arc::new(tree);
     let roots = Roots {
         main_dir: main,
         lanes_file: PathBuf::from("/nonexistent/lanes.json"),
@@ -117,7 +135,7 @@ pub(crate) fn rig_with(list: Value, store: Option<(Arc<AskStore>, Scratch)>) -> 
             acting.clone(),
             room.clone(),
             Some(Events::fixed(sink.clone(), Salt([1; 32]))),
-            Arc::new(tree),
+            tree.clone(),
         )
         .with_clock(Arc::new(move || ticks.load(Ordering::SeqCst))),
     );
@@ -129,6 +147,7 @@ pub(crate) fn rig_with(list: Value, store: Option<(Arc<AskStore>, Scratch)>) -> 
         acting,
         list,
         clock,
+        tree,
         dir,
     }
 }
@@ -161,6 +180,10 @@ pub(crate) fn person(r: &Rig, op: &str, args: Value) -> Result<Value, ApiError> 
     r.ops.call(&app(), op, &args)
 }
 
+pub(crate) fn person_on(ops: &Arc<AskOps>, op: &str, args: Value) -> Result<Value, ApiError> {
+    ops.call(&app(), op, &args)
+}
+
 pub(crate) fn changes(r: &Rig) -> Vec<Value> {
     r.room
         .events
@@ -186,5 +209,25 @@ pub(crate) fn new_row(session: &str, key: &str, pid: u32) -> New {
         main_may_answer: false,
         mode: Mode::Background,
         deadline_ms: None,
+    }
+}
+
+pub(crate) fn wait_as(r: &Rig, pid: u32, id: &str, ms: i64) -> Result<Value, ApiError> {
+    r.ops.call(
+        &asker_at(pid),
+        ops::ASK_WAIT,
+        &json!({"id": id, "waitMs": ms}),
+    )
+}
+
+pub(crate) fn state_of(r: &Rig, id: &str) -> String {
+    r.store.get(id).unwrap().unwrap().state.as_str().to_string()
+}
+
+pub(crate) fn until(what: &str, mut ready: impl FnMut() -> bool) {
+    let stop = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready() {
+        assert!(std::time::Instant::now() < stop, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
