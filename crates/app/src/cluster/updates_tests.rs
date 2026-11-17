@@ -294,6 +294,7 @@ fn ready_rows(
 #[test]
 fn run_goes_one_at_a_time_and_stops_at_failure() {
     let rig = world(&["m1", "m2", "m3"]);
+    rig.world.set_done(&["service"]);
     let rows = ready_rows(&rig, &["m1", "m2", "m3"]);
     let shown = plan(&rig.engine, &rows, &BTreeSet::new()).expect("one plan for all three");
     assert_eq!(shown.steps.len(), 3);

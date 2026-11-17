@@ -241,6 +241,92 @@ fn update_plan_stops_at_first_failure() {
     assert_eq!(lock(&seen).clone(), ["v2", "v1"]);
 }
 
+fn checked_world(broken: (&'static str, &'static str), seen: &Arc<Mutex<Vec<String>>>) -> World {
+    let seen = seen.clone();
+    let mut setup = Setup::new(move |m, _| {
+        let name = m.name.clone();
+        let seen = seen.clone();
+        let check = move |id: &'static str| {
+            StepBuilder::new(id).parse(move |_, ctx| {
+                if (ctx.machine.name.as_str(), id) == broken {
+                    super::step::CheckResult::fail("the daemon exited right away")
+                } else {
+                    super::step::CheckResult::pass("fine")
+                }
+            })
+        };
+        vec![
+            check("node-binary")
+                .fix(super::step::StepFix::Run(super::step::FixPlan::new(
+                    format!("update {name}"),
+                    false,
+                    move |_| {
+                        lock(&seen).push(name.clone());
+                        super::step::FixOutcome::ok("restarted")
+                    },
+                )))
+                .build(),
+            check("node-service").needs(&["node-binary"]).build(),
+        ]
+    });
+    setup.machines = vec![linux("v1"), linux("v2"), linux("v3")];
+    setup.build()
+}
+
+fn update_with(broken: (&'static str, &'static str)) -> (super::step::FixOutcome, Vec<String>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let w = checked_world(broken, &seen);
+    let plan = w
+        .engine
+        .plan("", PlanKind::UpdateNotchling(names(&["v2", "v1", "v3"])))
+        .unwrap();
+    let out = w
+        .engine
+        .run(w.engine.confirm(plan.id, AdminAnswer::None).unwrap());
+    let ran = lock(&seen).clone();
+    (out, ran)
+}
+
+#[test]
+fn update_stops_when_the_service_fails_after_a_machines_update() {
+    let (out, ran) = update_with(("v1", "node-service"));
+    assert!(!out.ok);
+    assert!(out.message.starts_with("v1: "), "{}", out.message);
+    assert!(out.message.contains("NODE-SERVICE"), "{}", out.message);
+    assert!(
+        out.message.contains("the daemon exited right away"),
+        "{}",
+        out.message
+    );
+    assert!(
+        out.message.ends_with("1 machine(s) updated before it"),
+        "{}",
+        out.message
+    );
+    assert_eq!(ran, ["v2", "v1"]);
+}
+
+#[test]
+fn update_stops_when_the_binary_check_fails_after_a_machines_update() {
+    let (out, ran) = update_with(("v2", "node-binary"));
+    assert!(!out.ok);
+    assert!(out.message.starts_with("v2: "), "{}", out.message);
+    assert!(out.message.contains("NODE-BINARY"), "{}", out.message);
+    assert!(
+        out.message.ends_with("0 machine(s) updated before it"),
+        "{}",
+        out.message
+    );
+    assert_eq!(ran, ["v2"]);
+}
+
+#[test]
+fn update_goes_on_when_every_check_passes_after_each_update() {
+    let (out, ran) = update_with(("nobody", "node-service"));
+    assert!(out.ok, "{}", out.message);
+    assert_eq!(ran, ["v2", "v1", "v3"]);
+}
+
 #[test]
 fn update_plan_refuses_when_a_display_changed() {
     let display = Arc::new(Mutex::new("update v1".to_string()));

@@ -61,6 +61,21 @@ impl SetupEngine {
         })
     }
 
+    fn failing_after_update(&self, name: &str) -> Option<String> {
+        let m = self.machine(name)?;
+        let results = self.results(name);
+        [StepId::NODE_BINARY, StepId::NODE_SERVICE]
+            .iter()
+            .find_map(|id| {
+                let step = self.find_step(&m, id).ok()?;
+                match results.get(id) {
+                    Some(r) if r.state.is_pass() => None,
+                    Some(r) => Some(format!("{}: {}", step.title, r.state.text())),
+                    None => Some(format!("{}: not checked after the update", step.title)),
+                }
+            })
+    }
+
     pub(super) fn update_notchling(
         &self,
         names: &[String],
@@ -87,6 +102,11 @@ impl SetupEngine {
                 return fail(format!(
                     "{name}: {}; {done} machine(s) updated before it",
                     outcome.message
+                ));
+            }
+            if let Some(line) = self.failing_after_update(name) {
+                return fail(format!(
+                    "{name}: {line}; {done} machine(s) updated before it"
                 ));
             }
             done += 1;
