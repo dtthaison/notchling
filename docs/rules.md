@@ -18,12 +18,6 @@ Existing violations sit in `tools/guard/lint-baseline.json`, which can only shri
 
 | ID | Rule | Why | Check |
 | --- | --- | --- | --- |
-| LINT-CORE-NO-NOTCHLING | ConsoleCore does not import Notchling | ConsoleCore is shared with hostd and must stay free of app types | `python3 -m guard lint` |
-| LINT-CORE-MACOS13 | ConsoleCore uses no `@Observable` and no macOS 14+ checks | Notchling's minimum is macOS 13 | `python3 -m guard lint` |
-| LINT-NO-FORCE-UNWRAP | No force-unwraps, `try!` or `as!` in Sources | A crash in an always-on menu bar app is worse than a handled nil | `python3 -m guard lint` |
-| LINT-KIT-TOKENS | Chat and notch views use `Kit*` tokens, not raw colors or font sizes | One design kit keeps every view looking the same | `python3 -m guard lint` |
-| LINT-DEFAULTS-MIGRATED | Every UserDefaults key is in `AppDelegate.migrateFromAwake`'s list | A key missing there is lost for users coming from the old app | `python3 -m guard lint` |
-| LINT-POINTER-CURSOR | Clickable views show the pointing hand | A clickable view with the arrow cursor looks broken | `python3 -m guard lint` |
 | LINT-NO-APPLESCRIPT | No NSAppleScript or osascript | Its notifications show Script Editor's name and icon | `python3 -m guard lint` |
 | LINT-GPUI-MACOS-ONLY | In the root `Cargo.toml` and `crates/**/Cargo.toml`, `gpui` is a dependency only under `[target.'cfg(target_os = "macos")'.dependencies]` (or its dev and build forms), never under a plain `[dependencies]` or `[workspace.dependencies]`, by any spelling: a dotted key (`gpui.workspace = true`), a quoted key, a `[dependencies.gpui]` table, or a rename (`ui = { package = "gpui" }`); the manifest is read as TOML, not matched line by line | GPUI builds only on macOS for now: Linux needs system libraries CI doesn't install yet and Windows is unverified, so a plain entry breaks the Rust matrix; the other systems get a stub `main` instead | `python3 -m guard lint` |
 | LINT-LOCALE-LITERAL | In an area `tools/locale/areas.json` marks as moved, no string literal that reads as words (two letters or more and a space, or a capital then lowercase) outside tests, renders and lines that name an element id, a part name, a log or an attribute | Once an area's words live in `locales/`, a literal added later shows English to every other language | `python3 -m guard lint` |
@@ -46,7 +40,6 @@ A new use of a powerful API sends the pull request to the maintainer, wherever t
 | CAP-NETWORK | Network access needs the maintainer | Data leaves the machine | `python3 -m guard gate` |
 | CAP-KEYCHAIN | Keychain and keyring access need the maintainer | Logins and the Secret Vault live there | `python3 -m guard gate` |
 | CAP-FILEWRITE | Writing, moving or deleting files needs the maintainer | A write can reach the user's real config or data | `python3 -m guard gate` |
-| CAP-PROTECTED-TYPE | Using a protected type outside its own file needs the maintainer | These types wrap processes, ptys and credentials | `python3 -m guard gate` |
 | CAP-BINARY | A binary change to a code file needs the maintainer | A binary file hides its lines from review | `python3 -m guard gate` |
 | CAP-OBSCURE | A line with more `*/` than any real one has needs the maintainer | It can hide code from the check that reads comments | `python3 -m guard gate` |
 

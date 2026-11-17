@@ -10,7 +10,7 @@ How the Mac and the phone talk. This folder is the written spec; the code on bot
 
 Generated from the schema by `python3 tools/protocol/gen.py`: `crates/protocol/src/generated.rs` (serde structs) and `apps/flutter/lib/core/protocol/generated.dart` (plain classes with `fromJson` and `toJson`). The phone app still reads the wire with its hand-written `apps/flutter/lib/core/protocol/models.dart`; a test pins the two to the same wire, and switching the app to the generated types is a separate change.
 
-The protocol's name is `agentconsole.v1` because it began as the Agent Console app. Its Mac side is `ConsoleCore`'s `BridgeRouter`, `BridgeHub` and `BridgeProtocol` (under `legacy/macos/Sources/ConsoleCore/Bridge/`), and its phone side is `apps/flutter/lib/core/net/bridge_client.dart`.
+The protocol's name is `agentconsole.v1` because it began as the Agent Console app. Its Mac side is the engine's bridge (`crates/engine/src/bridge/`: `router.rs`, `hub.rs`, `wire.rs`), and its phone side is `apps/flutter/lib/core/net/bridge_client.dart`.
 
 ## Transport
 
@@ -98,7 +98,7 @@ WebSocket binary frames, always 4 bytes of magic, a big-endian `uint32`, then a 
 
 Three things hold the schema to the real wire:
 
-1. `legacy/macos/Tests/ConsoleCoreTests/ProtocolFixturesTests.swift` runs the real router, hub and encoders against a canned backend and compares every answer and event with its fixture. It feeds every phone-sent fixture to the router, which must accept it. To rewrite the fixtures after a change on the Mac: `PROTOCOL_FIXTURES_WRITE=1 swift test --filter ProtocolFixturesTests`, then read the diff.
+1. `crates/engine/src/bridge/fixtures_tests.rs` runs the real router, hub and encoders against a canned backend and compares every answer and event with its fixture. It feeds every phone-sent fixture to the router, which must accept it.
 2. `tools/protocol/tests/` validates every fixture against the schema with a small validator, checks that every op the router handles and every event the hub sends is in the schema, and tests the generator.
 3. The generated types are tested on every fixture: `cargo test -p notchling-protocol` (parse and write back the same JSON) and `flutter test test/protocol_conformance_test.dart` (the same, and also through `models.dart`).
 

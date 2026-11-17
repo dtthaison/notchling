@@ -1,7 +1,7 @@
 # Privacy policy
 
 What data leaves a computer running Notchling: where it goes, when, and why. It was checked against the
-code on 2026-11-07: the Swift app in `legacy/macos/Sources/` and the phone app in `apps/flutter/`. Changing this file is a
+code on 2026-11-07: the Swift app (retired since, and removed from the tree; the git history has it) and the phone app in `apps/flutter/`. Changing this file is a
 protected change: it waits for the maintainer. A pull request that adds a network call updates this
 page in the same pull request.
 

@@ -29,7 +29,7 @@ Replies containing an end-of-paste escape sequence are no longer typed into the 
 
 ## Which pull requests need one
 
-A pull request that changes `legacy/macos/Sources/**`, `apps/flutter/lib/**` or `crates/**/src/**` must add
+A pull request that changes `apps/flutter/lib/**` or `crates/**/src/**` must add
 a fragment. Docs, tests, workflows and tools need none. When a change to app code really needs no entry,
 the maintainer puts the label `no-changelog` on the pull request.
 `python3 tools/release/fragments.py check --base main --head HEAD` fails when yours is missing one.

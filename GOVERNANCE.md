@@ -55,27 +55,20 @@ Then a week of sampling comes before anything widens.
 [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what turns each part
 on, in order; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the steps on each worker.
 
-## Releases in Phase 6
+## Releases
 
-The Beta and Promote workflows are built and off. Every job stops at its first step until the
-repository variable `NOTCHLING_RELEASES` is `on`. Until then releases are cut by hand with
-`legacy/macos/release.sh` ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)).
+Releases are cut by hand with `tools/release/release.py` and published by `release.yml`
+([CONTRIBUTING.md](CONTRIBUTING.md#releasing)). The daily Beta and one-click Stable workflows built the
+retired Swift app and were removed; they are in the git history.
 
-- **A Beta** is cut by the daily schedule, or by a click from anyone with write access. Only a
-  maintainer may allow a breaking change in one, and only to start a new major line: the workflow checks
-  the account against `MAINTAINERS`. Later Betas on that line need no approval.
-- **Promoting a Beta to Stable** is for a maintainer only. `promote.yml` refuses any account not in
-  `MAINTAINERS`, and any run not started from `main`.
-- **The keys and the switch are the maintainer's:** the kill switch, the `release` environment (only
-  the `sign` job uses it), its signing secrets and the offline backup of the update signing key. In a personal account's
-  repository only the owner can set Actions variables, secrets and environments.
-- **Agents never touch the release path.** The build job runs repository code with no secrets, and
-  the signing job runs none.
+- **The keys are the maintainer's:** the signing secrets and the offline backup of the update signing
+  key. In a personal account's repository only the owner can set Actions variables, secrets and
+  environments.
+- **Agents never touch the release path.** The release workflow uses no secrets but its own token.
 - Anyone with write access can replace the update feed (an asset of the `appcast` release); Sparkle's
   signature check is what protects what installs ([automation.md](docs/policies/automation.md#ruling-the-feed-stays-on-the-appcast-release)).
 - Anyone with write access can delete a release; the `release-tags` ruleset, once applied, protects
-  only the `v*` tags. Never delete the `appcast` release or a promoted Beta's release: installed copies would lose
-  the feed or the download.
+  only the `v*` tags. Never delete the `appcast` release: installed copies would lose the feed.
 
 [docs/policies/automation.md](docs/policies/automation.md#releases-so-far) says what turns each part
 on, in order, and what isn't built yet.
