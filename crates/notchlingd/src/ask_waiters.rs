@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+pub(crate) const ANY: &str = "*";
 const NOT_YOURS: &str = "Only the command that asked can wait for this answer.";
 
 #[derive(Default)]

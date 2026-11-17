@@ -6,7 +6,7 @@ use crate::ask_find::Finder;
 use crate::ask_inbox::Link;
 use crate::ask_rows::{key_for, wire};
 use crate::ask_tick::{queue, Msg, NEVER};
-use crate::ask_waiters::Waiters;
+use crate::ask_waiters::{Waiters, ANY};
 use crate::caller_session::{CallerSession, SessionHit};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
@@ -28,8 +28,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 
-const NO_SESSION: &str = "Notchling can't tell which session is asking.";
-const PERSON_ONLY: &str = "Only the person answers this question.";
+pub(crate) const NO_SESSION: &str = "Notchling can't tell which session is asking.";
+pub(crate) const PERSON_ONLY: &str = "Only the person answers this question.";
 const NO_QUESTION: &str = "No such question.";
 const NEEDS_QUESTION: &str = "Ask a question first.";
 const QUESTION_TOO_LONG: &str = "That question is over 2,000 characters.";
@@ -66,7 +66,7 @@ pub struct AskOps {
     pub(crate) acting: Arc<Acting>,
     pub(crate) room: Arc<dyn Room>,
     events: Option<Events>,
-    caller: CallerSession,
+    pub(crate) caller: CallerSession,
     pub(crate) procs: Arc<dyn Processes>,
     clock: Clock,
     marks: Mutex<HashMap<String, Mark>>,
@@ -123,14 +123,6 @@ pub(crate) fn id_arg(args: &Value) -> Result<&str, ApiError> {
     args.get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| bad(ID_NEEDED))
-}
-
-fn lost_reply(state: AskState, by: Option<By>) -> Value {
-    let mut out = json!({"answered": false, "state": state.as_str()});
-    if let Some(by) = by {
-        out["by"] = json!(by.as_str());
-    }
-    out
 }
 
 fn path_text(path: &Path) -> String {
@@ -258,6 +250,7 @@ impl AskOps {
     }
 
     pub fn publish_changed(&self, row: &Row) {
+        self.waiters.wake(ANY);
         self.room.publish(
             topics::ASKS,
             topics::ASK_CHANGED,
@@ -400,8 +393,19 @@ impl AskOps {
         choice: Option<u8>,
         by: By,
     ) -> Result<Taken, ApiError> {
+        self.answer_as(id, text, choice, by, &Who::Person)
+    }
+
+    pub(crate) fn answer_as(
+        &self,
+        id: &str,
+        text: Option<&str>,
+        choice: Option<u8>,
+        by: By,
+        who: &Who,
+    ) -> Result<Taken, ApiError> {
         let row = self.row(id)?;
-        match may_answer(&row, &Who::Person) {
+        match may_answer(&row, who) {
             Ok(()) => {}
             Err(Refused::NotOpen(state)) => return Ok(Taken::Lost { state, by: row.by }),
             Err(Refused::PersonOnly) => return Err(forbidden(PERSON_ONLY)),
@@ -492,22 +496,6 @@ impl AskOps {
         }
     }
 
-    fn answer_op(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        if caller.tier == Tier::Agent {
-            return Err(forbidden(PERSON_ONLY));
-        }
-        let id = id_arg(args)?;
-        let text = args.get("text").and_then(Value::as_str);
-        let choice = args
-            .get("choice")
-            .and_then(Value::as_u64)
-            .map(|n| u8::try_from(n).unwrap_or(0));
-        Ok(match self.answer(id, text, choice, By::Mac)? {
-            Taken::Won => json!({"answered": true}),
-            Taken::Lost { state, by } => lost_reply(state, by),
-        })
-    }
-
     fn dismiss_op(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         if caller.tier == Tier::Agent {
             return Err(forbidden(PERSON_ONLY));
@@ -548,7 +536,7 @@ impl AskOps {
 impl OpGroup for AskOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::ASK_OPEN | ops::ASK_WAIT | ops::ASK_ANSWER => Some(OpSpec::AGENT),
+            ops::ASK_OPEN | ops::ASK_WAIT | ops::ASK_MINE | ops::ASK_ANSWER => Some(OpSpec::AGENT),
             ops::ASK_DISMISS | ops::ASK_LIST => Some(OpSpec::APP),
             _ => None,
         }
@@ -560,6 +548,9 @@ impl OpGroup for AskOps {
         }
         if op == ops::ASK_WAIT {
             return self.wait_op(caller, args);
+        }
+        if op == ops::ASK_MINE {
+            return self.mine_op(caller, args);
         }
         if !self.acting.is_on() {
             return Err(forbidden(ACTING_OFF));

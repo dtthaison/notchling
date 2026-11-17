@@ -13,6 +13,7 @@ pub mod agy_sink;
 mod ask_events;
 mod ask_find;
 mod ask_inbox;
+mod ask_main;
 pub mod ask_ops;
 mod ask_rows;
 mod ask_tick;
@@ -213,6 +214,8 @@ mod ask_find_tests;
 mod ask_inbox_tests;
 #[cfg(test)]
 mod ask_load_tests;
+#[cfg(test)]
+mod ask_main_tests;
 #[cfg(test)]
 mod ask_marks_tests;
 #[cfg(test)]

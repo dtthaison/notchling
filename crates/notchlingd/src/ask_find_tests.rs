@@ -16,26 +16,28 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const MAIN: &str = include_str!("../../engine/tests/fixtures/ask/main.jsonl");
-const A1: &str = include_str!("../../engine/tests/fixtures/ask/subagents/agent-a1.jsonl");
+pub(crate) const MAIN: &str = include_str!("../../engine/tests/fixtures/ask/main.jsonl");
+pub(crate) const A1: &str =
+    include_str!("../../engine/tests/fixtures/ask/subagents/agent-a1.jsonl");
 const A1_META: &str = include_str!("../../engine/tests/fixtures/ask/subagents/agent-a1.meta.json");
-const A2: &str = include_str!("../../engine/tests/fixtures/ask/subagents/agent-a2.jsonl");
+pub(crate) const A2: &str =
+    include_str!("../../engine/tests/fixtures/ask/subagents/agent-a2.jsonl");
 const A2_META: &str = include_str!("../../engine/tests/fixtures/ask/subagents/agent-a2.meta.json");
 
-const EXE: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
+pub(crate) const EXE: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
 const TASKS: &str =
     "/private/tmp/claude-501/-Users-dev-work/11111111-2222-4333-8444-555555555555/tasks";
 const CODEX: u32 = 1010;
 const DELEGATE: u32 = 1011;
 
-struct Lab {
-    r: Rig,
+pub(crate) struct Lab {
+    pub(crate) r: Rig,
     senders: Arc<Mutex<Vec<Sender<Batch>>>>,
     held: Arc<AtomicBool>,
     reads: Arc<AtomicUsize>,
 }
 
-fn at(stamp: &str) -> i64 {
+pub(crate) fn at(stamp: &str) -> i64 {
     parse_iso_ms(stamp).unwrap()
 }
 
@@ -48,7 +50,7 @@ fn before_result(text: &str) -> String {
     kept.join("\n")
 }
 
-fn bash_line(stamp: &str, id: &str, command: &str) -> String {
+pub(crate) fn bash_line(stamp: &str, id: &str, command: &str) -> String {
     let line = json!({
         "type": "assistant",
         "timestamp": stamp,
@@ -59,23 +61,23 @@ fn bash_line(stamp: &str, id: &str, command: &str) -> String {
     format!("{line}\n")
 }
 
-fn projects(r: &Rig) -> PathBuf {
+pub(crate) fn projects(r: &Rig) -> PathBuf {
     r.dir.0.join("claude/projects/-Users-dev-work")
 }
 
-fn put(path: PathBuf, text: &str) {
+pub(crate) fn put(path: PathBuf, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
 }
 
-fn subagent_file(r: &Rig, name: &str) -> PathBuf {
+pub(crate) fn subagent_file(r: &Rig, name: &str) -> PathBuf {
     projects(r)
         .join(SESSION)
         .join("subagents")
         .join(format!("agent-{name}.jsonl"))
 }
 
-fn lab(a1: &str, a2: &str) -> Lab {
+pub(crate) fn lab(a1: &str, a2: &str) -> Lab {
     let r = rig();
     put(projects(&r).join(format!("{SESSION}.jsonl")), MAIN);
     put(subagent_file(&r, "a1"), a1);
@@ -143,7 +145,7 @@ impl Lab {
         until("the first read", || self.reads.load(Ordering::SeqCst) >= 3);
     }
 
-    fn row(&self, id: &str) -> notchling_engine::ask::Row {
+    pub(crate) fn row(&self, id: &str) -> notchling_engine::ask::Row {
         self.r.store.get(id).unwrap().unwrap()
     }
 

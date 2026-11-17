@@ -53,7 +53,6 @@ pub(crate) struct Seams {
     pub read: Reader,
     pub watch: Watching,
     pub exe: PathBuf,
-    #[allow(dead_code)]
     pub main_find_ms: i64,
 }
 
@@ -117,9 +116,7 @@ enum Attempt {
 pub(crate) struct Finder {
     tx: Sender<Cmd>,
     thread: Mutex<Option<JoinHandle<()>>>,
-    #[allow(dead_code)]
     seams: Arc<Seams>,
-    #[allow(dead_code)]
     ops: Weak<AskOps>,
 }
 
@@ -163,7 +160,10 @@ impl Finder {
         }
     }
 
-    #[allow(dead_code)]
+    pub(crate) fn find_main(&self, hit: &SessionHit, pid: u32) -> Option<Found> {
+        self.find_now(hit, pid, self.seams.main_find_ms)
+    }
+
     pub(crate) fn find_now(&self, hit: &SessionHit, pid: u32, within_ms: i64) -> Option<Found> {
         let ops = self.ops.upgrade()?;
         let stop = Instant::now() + Duration::from_millis(within_ms.max(0) as u64);
@@ -412,6 +412,10 @@ impl AskOps {
         };
         finder.start(row.id.clone(), hit.clone(), row.pid, row.created_ms);
         true
+    }
+
+    pub(crate) fn session_of(&self, pid: u32) -> Option<SessionHit> {
+        self.caller.session_of(pid)
     }
 
     pub(crate) fn session_name(&self, session_id: &str) -> String {
