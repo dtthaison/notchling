@@ -35,8 +35,8 @@ impl JobFiles for Elsewhere {
     fn born_ms(&self, path: &str) -> Option<i64> {
         self.inner.born_ms(path)
     }
-    fn shares_name(&self, agent: &Agent) -> bool {
-        self.inner.shares_name(agent)
+    fn shares_name(&self, agent: &Agent, path: &str) -> bool {
+        self.inner.shares_name(agent, path)
     }
 }
 
@@ -481,3 +481,6 @@ fn a_late_look_and_the_queue_watch_never_compare_counts_across_files() {
         "the ok in the other file is not this row's"
     );
 }
+
+#[path = "outbox_proof_tests.rs"]
+mod proof;

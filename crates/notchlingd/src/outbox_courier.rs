@@ -9,15 +9,16 @@ use notchling_engine::outbox::{
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
-use notchling_engine::sessions::jobs::read_jobs;
+use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
 use notchling_engine::terminal::input_box;
-use notchling_engine::transcript::locate::find_in_folders;
+use notchling_engine::transcript::locate::{find_in_folders, project_folders};
 use notchling_engine::transcript::queue_state::{queue_state, QueueState};
 use notchling_engine::transcript::restart;
 use notchling_events::kinds::choices::FailWhy;
 use notchling_local_api::{ApiError, ErrorCode};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -89,7 +90,7 @@ pub(crate) trait JobFiles: Send + Sync {
     fn born_ms(&self, path: &str) -> Option<i64> {
         made_ms(path)
     }
-    fn shares_name(&self, _agent: &Agent) -> bool {
+    fn shares_name(&self, _agent: &Agent, _path: &str) -> bool {
         false
     }
 }
@@ -154,18 +155,48 @@ impl JobFiles for LiveFiles {
         find_in_folders(&config.dir.join("projects").to_string_lossy(), &ids, &cwds)
     }
 
-    fn shares_name(&self, agent: &Agent) -> bool {
+    fn shares_name(&self, agent: &Agent, path: &str) -> bool {
         let AgentTarget::Job(short) = &agent.target else {
             return false;
         };
+        let Some(folder) = Path::new(path)
+            .parent()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+        else {
+            return true;
+        };
+        let text =
+            |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(String::from);
+        let lands_here = |cwd: Option<String>, worktree: Option<String>, link: Option<String>| {
+            [cwd, worktree]
+                .into_iter()
+                .flatten()
+                .filter(|dir| !dir.is_empty())
+                .any(|dir| project_folders(&dir).contains(&folder))
+                || link
+                    .as_deref()
+                    .and_then(|link| Path::new(link).parent()?.file_name())
+                    .is_some_and(|name| name.to_string_lossy() == folder.as_str())
+        };
+        let probes = Probes::from_proc();
         config_dirs(&self.roots).iter().any(|config| {
-            read_jobs(&config.dir).iter().any(|(id, job)| {
-                let text = |key: &str| job.get(key).and_then(|v| v.as_str());
+            let job = read_jobs(&config.dir).iter().any(|(id, job)| {
                 id != short
-                    && text("name") == Some(agent.name.as_str())
-                    && text("cwd") == Some(agent.cwd.as_str())
-                    && text("state") != Some("stopped")
-            })
+                    && text(job, "name").as_deref() == Some(agent.name.as_str())
+                    && lands_here(
+                        text(job, "cwd"),
+                        text(job, "worktreePath"),
+                        text(job, "linkScanPath"),
+                    )
+            });
+            job || read_sessions(&config.dir, probes.is_alive)
+                .iter()
+                .any(|session| {
+                    text(session, "jobId").as_deref() != Some(short.as_str())
+                        && text(session, "name").as_deref() == Some(agent.name.as_str())
+                        && lands_here(text(session, "cwd"), None, None)
+                })
         })
     }
 }

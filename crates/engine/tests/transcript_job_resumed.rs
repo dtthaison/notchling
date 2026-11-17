@@ -222,3 +222,48 @@ fn a_file_that_opens_with_a_clear_says_so() {
     ])));
     assert!(!begins_with_clear(&s(&scratch.path("missing.jsonl"))));
 }
+
+#[test]
+fn the_newest_file_wins_in_the_folder_lookup() {
+    let scratch = Scratch::new("newest-folder");
+    let projects = s(&scratch.path("projects"));
+    let old = s(&scratch.write("projects/-work-demo/conv.jsonl", "{}\n"));
+    std::thread::sleep(Duration::from_millis(30));
+    let moved = s(&scratch.write(
+        "projects/-work-demo--claude-worktrees-music/conv.jsonl",
+        "{}\n",
+    ));
+    let ids = ["conv".to_string()];
+    let cwds = ["/work/demo", "/work/demo/.claude/worktrees/music"];
+    assert_eq!(
+        find_in_folders(&projects, &ids, &cwds).as_deref(),
+        Some(moved.as_str()),
+        "a job that moved into its worktree is read there, not in the cwd's old file ({old})"
+    );
+}
+
+#[test]
+fn the_private_counterpart_of_a_temp_cwd_is_a_candidate() {
+    let dir = "/h/.claude/projects/-private-tmp-app/resume-conv.jsonl";
+    let job = JobPaths {
+        link_scan_path: Some("/h/.claude/projects/-tmp-app/old-conv.jsonl"),
+        session_id: Some("old-conv"),
+        resume_session_id: Some("resume-conv"),
+        worktree_path: None,
+        cwd: Some("/tmp/app"),
+    };
+    let found = job_transcript_live(&job, |p| (p == dir).then_some(9.0));
+    assert_eq!(found.as_deref(), Some(dir));
+}
+
+#[test]
+fn on_equal_dates_the_resumed_conversation_wins_over_the_link() {
+    let dates = |p: &str| match p {
+        LINK | CWD_FILE => Some(9.0),
+        _ => None,
+    };
+    assert_eq!(
+        job_transcript_live(&live(Some("resume-conv"), None), dates).as_deref(),
+        Some(CWD_FILE)
+    );
+}

@@ -13,7 +13,7 @@ pub fn project_folder(cwd: &str) -> String {
         .collect()
 }
 
-fn folders_of(cwd: &str) -> Vec<String> {
+pub fn project_folders(cwd: &str) -> Vec<String> {
     let mut cwds = vec![cwd.to_string()];
     if let Some(rest) = cwd.strip_prefix("/private") {
         cwds.push(rest.to_string());
@@ -28,7 +28,7 @@ fn folders_of(cwd: &str) -> Vec<String> {
 
 pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Option<String> {
     let file = format!("{session_id}.jsonl");
-    for folder in folders_of(cwd) {
+    for folder in project_folders(cwd) {
         let guess = Path::new(projects_dir).join(folder).join(&file);
         if guess.is_file() {
             return Some(guess.to_string_lossy().into_owned());
@@ -50,18 +50,25 @@ pub fn find_in_folders(projects_dir: &str, ids: &[String], cwds: &[&str]) -> Opt
     let folders: Vec<String> = cwds
         .iter()
         .filter(|c| !c.is_empty())
-        .flat_map(|c| folders_of(c))
+        .flat_map(|c| project_folders(c))
         .collect();
-    ids.iter().filter(|id| !id.is_empty()).find_map(|id| {
-        folders.iter().find_map(|folder| {
+    let mut best: Option<(String, Timestamp)> = None;
+    for id in ids.iter().filter(|id| !id.is_empty()) {
+        for folder in &folders {
             let guess = Path::new(projects_dir)
                 .join(folder)
-                .join(format!("{id}.jsonl"));
-            guess
-                .is_file()
-                .then(|| guess.to_string_lossy().into_owned())
-        })
-    })
+                .join(format!("{id}.jsonl"))
+                .to_string_lossy()
+                .into_owned();
+            let Some(date) = modified_secs(&guess) else {
+                continue;
+            };
+            if best.as_ref().is_none_or(|(_, d)| *d < date) {
+                best = Some((guess, date));
+            }
+        }
+    }
+    best.map(|(path, _)| path)
 }
 
 pub fn job_transcript(
@@ -107,11 +114,14 @@ fn newest_of(
     link: &str,
     ids: &[Option<&str>],
     cwds: &[&str],
-    own_folder: bool,
+    live: bool,
     modified: impl Fn(&str) -> Option<Timestamp>,
 ) -> Option<String> {
-    let mut candidates = vec![link.to_string()];
-    if !cwds.is_empty() || own_folder {
+    let mut candidates = Vec::new();
+    if !live {
+        candidates.push(link.to_string());
+    }
+    if !cwds.is_empty() || live {
         let projects = Path::new(link)
             .parent()
             .and_then(Path::parent)
@@ -127,25 +137,27 @@ fn newest_of(
             }
         }
         let mut folders: Vec<String> = Vec::new();
-        if own_folder {
+        if live {
             if let Some(own) = Path::new(link).parent().and_then(Path::file_name) {
                 folders.push(own.to_string_lossy().into_owned());
             }
         }
-        for cwd in cwds {
-            let folder = project_folder(cwd);
+        for folder in cwds.iter().flat_map(|cwd| project_folders(cwd)) {
             if !folders.contains(&folder) {
                 folders.push(folder);
             }
         }
-        for folder in &folders {
-            for id in &named {
+        for id in &named {
+            for folder in &folders {
                 let guess = format!("{projects}/{folder}/{id}.jsonl");
                 if !candidates.contains(&guess) {
                     candidates.push(guess);
                 }
             }
         }
+    }
+    if live && !candidates.iter().any(|c| c == link) {
+        candidates.push(link.to_string());
     }
     let mut best: Option<(String, Timestamp)> = None;
     for path in candidates {

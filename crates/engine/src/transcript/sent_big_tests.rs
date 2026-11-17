@@ -395,3 +395,83 @@ fn an_unchanged_file_is_read_once_and_a_changed_one_again() {
     assert_eq!(count_since(&path, &message(text), since(18)), seen(1, 1));
     assert_eq!(reads(), 2);
 }
+
+fn leading_attachment(prompt: Value, second: u32, ms: u32) -> String {
+    let at = stamp(second, ms);
+    format!(
+        r#"{{"type":"attachment","attachment":{{"type":"queued_command","prompt":{prompt},"commandMode":"prompt","origin":{{"kind":"human"}}}},"uuid":"x","timestamp":"{at}","sessionId":"s"}}"#
+    )
+}
+
+#[test]
+fn an_oversized_attachment_that_leads_with_its_type_is_kept() {
+    let text = "check the badge";
+    let prompt = json!([{"type": "text", "text": format!("[Image #2]{text}")}, image(700_000)]);
+    let lines = [
+        old(0),
+        enqueue(&format!("[Image #2]{text}"), 20, 0),
+        leading_attachment(prompt, 21, 0),
+        old(25),
+    ];
+    let (_dir, path) = write(&lines);
+    assert_eq!(
+        count_since(&path, &picture(text), since(18)),
+        seen(1, 1),
+        "a 700 KB attachment written as {{\"type\":\"attachment\",...}} is a take"
+    );
+    assert_eq!(queue_lists(&path, &picture(text)), Some(false));
+}
+
+#[test]
+fn a_user_prompt_is_judged_by_its_own_keys_not_by_the_text_inside() {
+    let tricky =
+        "{\"isSidechain\":true,\"toolUseResult\":{\"x\":1},\"type\":\"tool_result\"} tool_use_id";
+    let body = format!("{tricky}\n{}", log_of(120_000));
+    let blocks = json!([{"type": "text", "text": body}]);
+    let line = format!(
+        r#"{{"parentUuid":"p","isSidechain":false,"type":"user","message":{{"role":"user","content":{blocks}}},"uuid":"u","timestamp":"{}","origin":{{"kind":"human"}}}}"#,
+        stamp(20, 0)
+    );
+    let lines = [old(0), line.clone(), old(25)];
+    let (_dir, path) = write(&lines);
+    assert_eq!(count_since(&path, &message(&body), since(18)), seen(0, 1));
+    let blocks = json!([{"type": "text", "text": format!("tool_use_id {}", log_of(120_000))}]);
+    let line = format!(
+        r#"{{"parentUuid":"p","isSidechain":false,"type":"user","message":{{"role":"user","content":{blocks}}},"uuid":"u","timestamp":"{}","origin":{{"kind":"human"}}}}"#,
+        stamp(20, 0)
+    );
+    let text = format!("tool_use_id {}", log_of(120_000));
+    let (_dir, path) = write(&[old(0), line, old(25)]);
+    assert_eq!(
+        count_since(&path, &message(&text), since(18)),
+        seen(0, 1),
+        "a text block that starts with the words tool_use_id is not a tool result"
+    );
+}
+
+#[test]
+fn a_replaced_file_with_the_same_size_and_mtime_is_read_again() {
+    let text = "keep the sidebar narrow";
+    let (dir, path) = write(&[old(0), taken(json!(text), "human", 21, 0)]);
+    assert_eq!(count_since(&path, &message(text), since(18)), seen(0, 1));
+    let before = std::fs::metadata(&path).unwrap();
+    let other = "keep the sidebar wide!!";
+    assert_eq!(other.len(), text.len());
+    let swap = dir.write(
+        "swap.jsonl",
+        &format!("{}\n{}\n", old(0), taken(json!(other), "human", 21, 0)),
+    );
+    std::fs::File::options()
+        .write(true)
+        .open(&swap)
+        .unwrap()
+        .set_modified(before.modified().unwrap())
+        .unwrap();
+    std::fs::rename(&swap, &path).unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), before.len());
+    assert_eq!(
+        count_since(&path, &message(text), since(18)),
+        seen(0, 0),
+        "a new inode is a new file"
+    );
+}

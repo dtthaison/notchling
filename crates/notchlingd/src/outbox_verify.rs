@@ -1,3 +1,7 @@
+use crate::outbox_anchor::{
+    anchor_of, count_anchored, count_row, forget_anchor, is_clear, message_of, remember_anchor,
+    Anchor,
+};
 use crate::outbox_courier::{live_files, real_clock, Clock, JobFiles};
 use crate::outbox_postman::Verifier;
 use notchling_engine::outbox::{
@@ -5,17 +9,15 @@ use notchling_engine::outbox::{
     QUEUE_LINE_MS, VERIFY_LOOK_MS, VERIFY_WATCH_MS,
 };
 use notchling_engine::sessions::{Agent, Roots};
-use notchling_engine::transcript::locate::{begins_with_clear, successor};
-use notchling_engine::transcript::message::Message;
 use notchling_engine::transcript::queue_state::{queue_lists, QueueState};
-use notchling_engine::transcript::sent::{count_since, Seen};
+use notchling_engine::transcript::sent::Seen;
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 pub const SINCE_BEFORE_MS: i64 = 2_000;
 const SLICE_MS: i64 = 250;
@@ -122,50 +124,11 @@ impl Pause for RealPause {
     }
 }
 
-fn message_of(row: &Row) -> Message {
-    Message::parse(&row.text, Path::is_file)
-}
-
-fn is_clear(message: &Message) -> bool {
-    message
-        .command
-        .as_ref()
-        .is_some_and(|(name, _)| name == "clear")
-}
-
-fn cleared(files: &dyn JobFiles, agent: &Agent, path: &str, since_ms: i64) -> bool {
-    let born_after = |file: &str| files.born_ms(file).is_some_and(|born| born >= since_ms);
-    (born_after(path) && begins_with_clear(path))
-        || (successor(path, &agent.name).is_some_and(|next| born_after(&next))
-            && !files.shares_name(agent))
-}
-
-pub(crate) fn count_row(
-    files: &dyn JobFiles,
-    agent: &Agent,
-    path: &str,
-    row: &Row,
-) -> Option<Seen> {
-    let since = row.attempt_ms? - SINCE_BEFORE_MS;
-    let message = message_of(row);
-    let mut seen = count_since(path, &message, since);
-    if is_clear(&message) && cleared(files, agent, path, since) {
-        seen.get_or_insert_with(Seen::default).taken += 1;
-    }
-    seen
-}
-
-#[derive(Clone)]
-enum Anchor {
-    Nowhere,
-    File(String),
-}
-
 #[derive(Default)]
 struct Watch {
     path: Option<String>,
     agent: Option<Agent>,
-    read: Option<(String, u64)>,
+    read: Option<(String, u64, Option<SystemTime>)>,
     seen: Option<Seen>,
     listed: bool,
     process: Option<(u32, Option<i64>)>,
@@ -181,7 +144,6 @@ pub struct TranscriptVerifier {
     safe: Arc<SafeModes>,
     closed: Arc<AtomicBool>,
     watches: Mutex<HashMap<String, Watch>>,
-    anchors: Mutex<HashMap<String, Anchor>>,
 }
 
 impl TranscriptVerifier {
@@ -210,7 +172,6 @@ impl TranscriptVerifier {
             safe,
             closed: Arc::new(AtomicBool::new(false)),
             watches: Mutex::new(HashMap::new()),
-            anchors: Mutex::new(HashMap::new()),
         }
     }
 
@@ -218,37 +179,6 @@ impl TranscriptVerifier {
         let agent = self.files.row(&row.session)?;
         let path = self.files.transcript(&agent)?;
         Some((agent, path))
-    }
-
-    fn anchor(&self, id: &str) -> Option<Anchor> {
-        lock(&self.anchors).get(id).cloned()
-    }
-
-    fn counted(
-        &self,
-        row: &Row,
-        anchor: Option<&Anchor>,
-        agent: &Agent,
-        path: &str,
-        before: Seen,
-    ) -> Option<Seen> {
-        let seen = count_row(self.files.as_ref(), agent, path, row);
-        let moved = match anchor {
-            Some(Anchor::File(began)) => began != path,
-            Some(Anchor::Nowhere) => true,
-            None => false,
-        };
-        if !moved {
-            return seen;
-        }
-        let since = row.attempt_ms? - SINCE_BEFORE_MS;
-        if !self.files.born_ms(path).is_some_and(|born| born >= since) {
-            return None;
-        }
-        seen.map(|now| Seen {
-            taken: now.taken + before.taken,
-            enqueued: now.enqueued + before.enqueued,
-        })
     }
 
     fn put(&self, id: &str, watch: Watch) {
@@ -291,10 +221,21 @@ impl TranscriptVerifier {
         let changed = watch.changed;
         if let (Some(path), Some(agent)) = (watch.path.clone(), watch.agent.clone()) {
             let size = std::fs::metadata(&path).map_or(0, |m| m.len());
-            let read = Some((path.clone(), size));
-            if watch.read != read {
-                let anchor = self.anchor(&row.id);
-                watch.seen = self.counted(row, anchor.as_ref(), &agent, &path, before);
+            let folder = Path::new(&path)
+                .parent()
+                .and_then(|dir| std::fs::metadata(dir).ok())
+                .and_then(|meta| meta.modified().ok());
+            let read = Some((path.clone(), size, folder));
+            if watch.read != read || is_clear(&message_of(row)) {
+                let anchor = anchor_of(&row.id);
+                watch.seen = count_anchored(
+                    self.files.as_ref(),
+                    &agent,
+                    &path,
+                    row,
+                    before,
+                    anchor.as_ref(),
+                );
                 watch.listed = queue_lists(&path, &message_of(row)).unwrap_or(false);
                 watch.read = read;
             }
@@ -321,13 +262,13 @@ impl Verifier for TranscriptVerifier {
             Some((_, path)) => Anchor::File(path.clone()),
             None => Anchor::Nowhere,
         };
-        lock(&self.anchors).insert(row.id.clone(), anchor);
+        remember_anchor(&row.id, anchor);
         let (agent, path) = found?;
-        count_row(self.files.as_ref(), &agent, &path, row)
+        count_row(self.files.as_ref(), &agent, &path, row, SINCE_BEFORE_MS)
     }
 
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict {
-        let anchor = self.anchor(&row.id);
+        let anchor = anchor_of(&row.id);
         let any_jsonl = is_clear(&message_of(row));
         let mut found = self.transcript(row);
         let mut waits = found
@@ -343,9 +284,16 @@ impl Verifier for TranscriptVerifier {
                 waits = Some(self.pause.watch(Path::new(&current.1), any_jsonl));
                 found = Some(current);
             }
-            let seen = found
-                .as_ref()
-                .and_then(|(agent, path)| self.counted(row, anchor.as_ref(), agent, path, before));
+            let seen = found.as_ref().and_then(|(agent, path)| {
+                count_anchored(
+                    self.files.as_ref(),
+                    agent,
+                    path,
+                    row,
+                    before,
+                    anchor.as_ref(),
+                )
+            });
             let within = line_within(seen, before);
             if !noted && (within || now - entered_ms >= QUEUE_LINE_MS) {
                 self.safe.note(&row.session, within);
@@ -407,16 +355,23 @@ impl Verifier for TranscriptVerifier {
     }
 
     fn found_late(&self, row: &Row, before: Seen) -> bool {
-        let anchor = self.anchor(&row.id);
-        let seen = self
-            .transcript(row)
-            .and_then(|(agent, path)| self.counted(row, anchor.as_ref(), &agent, &path, before));
+        let anchor = anchor_of(&row.id);
+        let seen = self.transcript(row).and_then(|(agent, path)| {
+            count_anchored(
+                self.files.as_ref(),
+                &agent,
+                &path,
+                row,
+                before,
+                anchor.as_ref(),
+            )
+        });
         verdict(seen, before, 0) == Verdict::Sent
     }
 
     fn forget(&self, id: &str) {
         self.take(id);
-        lock(&self.anchors).remove(id);
+        forget_anchor(id);
     }
 
     fn close(&self) {

@@ -38,24 +38,26 @@ fn opens_with_a_result(head: &[u8]) -> bool {
     let Some(at) = find(head, key) else {
         return false;
     };
-    let from = at + key.len();
-    let after = &head[from..head.len().min(from + 120)];
-    has(after, br#""type":"tool_result""#) || has(after, b"tool_use_id")
+    let block = &head[at + key.len()..];
+    block.starts_with(br#""type":"tool_result""#) || block.starts_with(br#""tool_use_id":""#)
 }
 
 fn carries_a_prompt(head: &[u8]) -> bool {
     if has(head, br#""isSidechain":true"#) {
         return false;
     }
+    let queued = has(head, br#""attachment":{"type":"queued_command""#);
     match leading_type(head) {
-        Some(b"queue-operation") => return true,
-        Some(b"user") | None => {}
-        Some(_) => return false,
+        Some(b"queue-operation") => true,
+        Some(b"attachment") => queued,
+        Some(b"user") | None => {
+            queued
+                || (has(head, br#""type":"user""#)
+                    && !has(head, br#""toolUseResult":"#)
+                    && !opens_with_a_result(head))
+        }
+        Some(_) => false,
     }
-    has(head, br#""attachment":{"type":"queued_command""#)
-        || (has(head, br#""type":"user""#)
-            && !has(head, br#""toolUseResult":"#)
-            && !opens_with_a_result(head))
 }
 
 #[derive(Clone, Copy)]
@@ -188,7 +190,24 @@ fn read_spans(file: &mut File, spans: &[Span]) -> io::Result<Vec<String>> {
     Ok(lines)
 }
 
-type Cache = HashMap<String, (u64, SystemTime, Arc<Window>)>;
+type Cache = HashMap<String, (Stamp, Arc<Window>)>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: SystemTime,
+    inode: u64,
+}
+
+#[cfg(unix)]
+fn inode_of(meta: &std::fs::Metadata) -> u64 {
+    std::os::unix::fs::MetadataExt::ino(meta)
+}
+
+#[cfg(not(unix))]
+fn inode_of(_meta: &std::fs::Metadata) -> u64 {
+    0
+}
 
 fn cache() -> &'static Mutex<Cache> {
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
@@ -215,14 +234,19 @@ pub(super) fn reads_of(path: &str) -> usize {
 pub(super) fn read_window(path: &str) -> io::Result<Arc<Window>> {
     let mut file = File::open(path)?;
     let meta = file.metadata()?;
-    let (size, modified) = (meta.len(), meta.modified().ok());
-    if let Some(modified) = modified {
+    let size = meta.len();
+    let stamp = meta.modified().ok().map(|modified| Stamp {
+        len: size,
+        modified,
+        inode: inode_of(&meta),
+    });
+    if let Some(stamp) = stamp {
         let hit = cache()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(path)
-            .filter(|(len, stamp, _)| *len == size && *stamp == modified)
-            .map(|(_, _, window)| window.clone());
+            .filter(|(seen, _)| *seen == stamp)
+            .map(|(_, window)| window.clone());
         if let Some(window) = hit {
             return Ok(window);
         }
@@ -237,12 +261,12 @@ pub(super) fn read_window(path: &str) -> io::Result<Arc<Window>> {
         lines: read_spans(&mut file, &spans)?,
         whole,
     });
-    if let Some(modified) = modified.filter(|_| weight(&window) <= CACHED_BYTES) {
+    if let Some(stamp) = stamp.filter(|_| weight(&window) <= CACHED_BYTES) {
         let mut cached = cache().lock().unwrap_or_else(|e| e.into_inner());
         if cached.len() >= CACHED_FILES && !cached.contains_key(path) {
             cached.clear();
         }
-        cached.insert(path.to_string(), (size, modified, window.clone()));
+        cached.insert(path.to_string(), (stamp, window.clone()));
     }
     Ok(window)
 }

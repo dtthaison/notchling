@@ -72,7 +72,7 @@ impl JobFiles for FakeFiles {
         let set = self.born.lock().unwrap().get(path).copied();
         set.or_else(|| crate::outbox_courier::made_ms(path))
     }
-    fn shares_name(&self, _agent: &Agent) -> bool {
+    fn shares_name(&self, _agent: &Agent, _path: &str) -> bool {
         self.shared_name.load(Ordering::SeqCst)
     }
 }
