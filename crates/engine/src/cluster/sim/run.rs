@@ -201,6 +201,9 @@ impl World {
                     self.answers.push((n.clone(), local, result));
                 }
                 Effect::JoinRequest { node, .. } => self.join_requests.push((n.clone(), node)),
+                Effect::InviteJoined { node, .. } => {
+                    self.approved.insert(node);
+                }
             }
         }
         if let Some(node) = self.nodes.get_mut(n) {
@@ -364,6 +367,7 @@ fn summary(effect: &Effect) -> String {
         Effect::RunLocal { op, .. } => format!("run {op}"),
         Effect::Answer { local, result } => format!("answer {local} ok={}", result.is_ok()),
         Effect::JoinRequest { node, .. } => format!("join_request {}", &node.as_str()[..4]),
+        Effect::InviteJoined { node, .. } => format!("invite_joined {}", &node.as_str()[..4]),
         Effect::SteppedDown { term, .. } => format!("stepped_down {term}"),
         Effect::Wipe => "wipe".to_string(),
         Effect::AdoptStaged => "adopt_staged".to_string(),

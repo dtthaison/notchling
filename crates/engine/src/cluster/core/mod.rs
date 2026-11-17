@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use super::failover::Failover;
 use super::id::{NodeId, Tool};
+use super::invite::Invite;
 use super::jobs::JobSpec;
 use super::join::{JoinToken, Tokens};
 use super::members::{Desired, Member, MemberState, Term};
@@ -84,6 +85,11 @@ pub enum LocalCmd {
     },
     IssueToken {
         secret: String,
+        minter: NodeId,
+    },
+    Invite {
+        secret: String,
+        invite: Invite,
         minter: NodeId,
     },
     Approve {
@@ -213,6 +219,14 @@ pub enum Effect {
         addr: Option<String>,
         can_be_master: bool,
         headless: bool,
+        minter: NodeId,
+        minter_name: String,
+    },
+    InviteJoined {
+        node: NodeId,
+        name: String,
+        os: String,
+        arch: String,
         minter: NodeId,
         minter_name: String,
     },
@@ -668,6 +682,8 @@ mod core_tests_grants_fix;
 mod core_tests_headless;
 #[cfg(test)]
 mod core_tests_heal;
+#[cfg(test)]
+mod core_tests_invite;
 #[cfg(test)]
 mod core_tests_jobs;
 #[cfg(test)]

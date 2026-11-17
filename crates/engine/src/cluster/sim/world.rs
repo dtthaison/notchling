@@ -11,8 +11,9 @@ use super::snaps::Snaps;
 use super::Rng;
 use crate::cluster::core::{Input, LocalCmd, NodeCore};
 use crate::cluster::id::NodeId;
+use crate::cluster::invite::Invite;
 use crate::cluster::join::JoinToken;
-use crate::cluster::members::Term;
+use crate::cluster::members::{MemberState, Term};
 use crate::cluster::state::ClusterState;
 use crate::cluster::testkit::{fp, id, member, versions};
 use crate::cluster::wire::{Msg, WireError};
@@ -88,6 +89,7 @@ pub struct World {
     pub(super) next_local: u64,
     pub(super) answers: Vec<(NodeId, u64, Result<Value, WireError>)>,
     pub(super) join_requests: Vec<(NodeId, NodeId)>,
+    pub(super) approved: BTreeSet<NodeId>,
     pub(super) seen: BTreeMap<NodeId, Term>,
     pub(super) violation: Option<Violation>,
     pub(super) first_home: Option<NodeId>,
@@ -111,6 +113,7 @@ impl World {
             next_local: 1,
             answers: Vec::new(),
             join_requests: Vec::new(),
+            approved: BTreeSet::new(),
             seen: BTreeMap::new(),
             violation: None,
             first_home: None,
@@ -354,6 +357,67 @@ impl World {
         self.run_for(1_500);
     }
 
+    pub fn join_invited(&mut self, joiner: &NodeId, can_be_master: bool, acting: bool) {
+        self.invite_join(joiner, joiner, (can_be_master, acting));
+    }
+
+    pub fn invite_join(
+        &mut self,
+        joiner: &NodeId,
+        invited: &NodeId,
+        (can_be_master, acting): (bool, bool),
+    ) {
+        let Some(home) = self.first_home.clone() else {
+            return;
+        };
+        let (name, os, client) = match self.nodes.get(joiner) {
+            Some(n) => (n.name.clone(), n.os.clone(), n.client),
+            None => return,
+        };
+        let home_name = self.name_of(&home);
+        let secret = format!("invite-{name}-{}", self.name_of(invited));
+        self.local(
+            &home,
+            LocalCmd::Invite {
+                secret: secret.clone(),
+                invite: Invite {
+                    node: invited.clone(),
+                    name: self.name_of(invited),
+                    can_be_master,
+                    acting,
+                },
+                minter: home.clone(),
+            },
+        );
+        let token = JoinToken {
+            cluster: "sim-cluster".to_string(),
+            home: home.clone(),
+            fingerprint: fp(&home_name),
+            addrs: vec!["100.64.0.1".to_string()],
+            port: 47823,
+            secret,
+        };
+        let me = member(&name, &os, client);
+        self.local(joiner, LocalCmd::JoinWith { token, me });
+        self.run_for(2_100);
+    }
+
+    pub fn is_active_member(&self, node: &NodeId) -> bool {
+        self.states().iter().any(|(_, s)| {
+            s.members
+                .get(node)
+                .is_some_and(|m| m.state == MemberState::Active)
+        })
+    }
+
+    pub fn forget_approvals(&mut self) {
+        self.approved.clear();
+    }
+
+    pub fn is_approved(&self, node: &NodeId) -> bool {
+        self.approved.contains(node)
+    }
+
     pub fn partition(&mut self, a: &NodeId, b: &NodeId) {
         self.net.partition(a, b);
         self.drop_link(a, b);
@@ -473,6 +537,15 @@ impl World {
     pub fn local(&mut self, n: &NodeId, cmd: LocalCmd) -> u64 {
         let call = self.next_local;
         self.next_local += 1;
+        match &cmd {
+            LocalCmd::Approve { node, .. } => {
+                self.approved.insert(node.clone());
+            }
+            LocalCmd::Create { me, .. } => {
+                self.approved.insert(me.id.clone());
+            }
+            _ => {}
+        }
         if self.is_up(n) {
             self.step(n, Input::Local { id: call, cmd });
         }

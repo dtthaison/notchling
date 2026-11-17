@@ -57,6 +57,8 @@ impl Rng {
 #[cfg(test)]
 mod move_tests;
 #[cfg(test)]
+mod sim_invite_tests;
+#[cfg(test)]
 mod sim_secrets_more_tests;
 #[cfg(test)]
 mod sim_secrets_tests;
