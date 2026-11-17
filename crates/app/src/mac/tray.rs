@@ -2,14 +2,43 @@ use std::cell::RefCell;
 
 use objc2::rc::Retained;
 use objc2::runtime::NSObject;
-use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{
+    define_class, msg_send, sel, AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
+};
 use objc2_app_kit::{
-    NSControlStateValueOn, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
+    NSBitmapImageRep, NSControlStateValueOn, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
     NSSquareStatusItemLength, NSStatusBar, NSStatusItem,
 };
-use objc2_foundation::{ns_string, NSString};
+use objc2_foundation::{ns_string, NSData, NSSize, NSString};
 
-use crate::menu::{tray_menu, tray_symbol, Command, Entry, MenuState};
+use crate::menu::{tray_glyph, tray_menu, Command, Entry, MenuState, TrayGlyph};
+
+const GLYPH_SIZE: NSSize = NSSize::new(22.0, 16.0);
+const OUTLINE: [&[u8]; 2] = [
+    include_bytes!("../../../../assets/brand/menubarTemplate.png"),
+    include_bytes!("../../../../assets/brand/menubarTemplate@2x.png"),
+];
+const FILLED: [&[u8]; 2] = [
+    include_bytes!("../../../../assets/brand/menubarTemplateFilled.png"),
+    include_bytes!("../../../../assets/brand/menubarTemplateFilled@2x.png"),
+];
+
+fn glyph_image(glyph: TrayGlyph) -> Retained<NSImage> {
+    let reps = match glyph {
+        TrayGlyph::Outline => OUTLINE,
+        TrayGlyph::Filled => FILLED,
+    };
+    let image = NSImage::initWithSize(NSImage::alloc(), GLYPH_SIZE);
+    for png in reps {
+        if let Some(rep) = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(png)) {
+            rep.setSize(GLYPH_SIZE);
+            image.addRepresentation(&rep);
+        }
+    }
+    image.setTemplate(true);
+    image.setAccessibilityDescription(Some(ns_string!("Notchling")));
+    image
+}
 
 pub struct TargetIvars {
     commands: RefCell<Vec<Command>>,
@@ -72,11 +101,7 @@ impl Tray {
 
     pub fn update(&self, state: &MenuState) {
         if let Some(button) = self.item.button(self.mtm) {
-            let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-                &NSString::from_str(tray_symbol(state)),
-                Some(ns_string!("Notchling")),
-            );
-            button.setImage(image.as_deref());
+            button.setImage(Some(&glyph_image(tray_glyph(state))));
         }
         let mut commands = self.target.ivars().commands.borrow_mut();
         commands.clear();

@@ -125,11 +125,17 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
     entries
 }
 
-pub fn tray_symbol(state: &MenuState) -> &'static str {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrayGlyph {
+    Outline,
+    Filled,
+}
+
+pub fn tray_glyph(state: &MenuState) -> TrayGlyph {
     if state.holding {
-        "cup.and.saucer.fill"
+        TrayGlyph::Filled
     } else {
-        "cup.and.saucer"
+        TrayGlyph::Outline
     }
 }
 
@@ -238,16 +244,16 @@ mod tests {
             })
             .collect();
         assert_eq!(keys, [Some('o'), Some(','), Some('q')]);
-        assert_eq!(tray_symbol(&MenuState::default()), "cup.and.saucer");
+        assert_eq!(tray_glyph(&MenuState::default()), TrayGlyph::Outline);
         let chosen = MenuState {
             awake: AwakeMode::On,
             ..MenuState::default()
         };
-        assert_eq!(tray_symbol(&chosen), "cup.and.saucer");
+        assert_eq!(tray_glyph(&chosen), TrayGlyph::Outline);
         let held = MenuState {
             holding: true,
             ..chosen
         };
-        assert_eq!(tray_symbol(&held), "cup.and.saucer.fill");
+        assert_eq!(tray_glyph(&held), TrayGlyph::Filled);
     }
 }

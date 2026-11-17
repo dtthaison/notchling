@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::menu::{tray_symbol, AwakeMode, MenuState};
+use crate::menu::{tray_glyph, AwakeMode, MenuState, TrayGlyph};
 
 fn chosen(awake: AwakeMode) -> MenuState {
     MenuState {
@@ -11,13 +11,13 @@ fn chosen(awake: AwakeMode) -> MenuState {
 }
 
 #[test]
-fn the_cup_is_filled_only_while_the_daemon_holds_the_assertion() {
+fn the_glyph_is_filled_only_while_the_daemon_holds_the_assertion() {
     let on = chosen(AwakeMode::On);
-    assert_eq!(tray_symbol(&on), "cup.and.saucer", "chosen is not held");
+    assert_eq!(tray_glyph(&on), TrayGlyph::Outline, "chosen is not held");
     let held = holding(&on, true).unwrap();
-    assert_eq!(tray_symbol(&held), "cup.and.saucer.fill");
+    assert_eq!(tray_glyph(&held), TrayGlyph::Filled);
     let let_go = holding(&held, false).unwrap();
-    assert_eq!(tray_symbol(&let_go), "cup.and.saucer");
+    assert_eq!(tray_glyph(&let_go), TrayGlyph::Outline);
     assert_eq!(let_go.awake, AwakeMode::On, "the choice stays");
 }
 

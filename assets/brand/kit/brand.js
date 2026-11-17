@@ -78,10 +78,17 @@ const NB = (() => {
 
   function logo(svg) { draw(svg, N, DOTS_N.map(d => [d[0], d[1], 30])); }
 
-  function glyph(mono) {
+  function glyph(mono, filled) {
     const f = mono ? "currentColor" : C.ink;
     const dot = i => mono ? "currentColor" : DOTS[i];
-    return `<svg xmlns="${NS}" viewBox="0 0 22 16" width="22" height="16"><g fill="none" stroke="${f}" stroke-width="1.6"><rect x="3.2" y="2.2" width="3.6" height="11.6" rx="1.8"/><rect x="15.2" y="2.2" width="3.6" height="11.6" rx="1.8"/><rect x="9.2" y="1.4" width="3.6" height="13.2" rx="1.8" transform="rotate(-37 11 8)"/></g><circle cx="5" cy="12" r="1.3" fill="${dot(0)}"/><circle cx="11" cy="8" r="1.3" fill="${dot(1)}"/><circle cx="17" cy="4" r="1.3" fill="${dot(2)}"/></svg>`;
+    const pills = `<rect x="3.2" y="2.2" width="3.6" height="11.6" rx="1.8"/><rect x="15.2" y="2.2" width="3.6" height="11.6" rx="1.8"/><rect x="9.2" y="1.4" width="3.6" height="13.2" rx="1.8" transform="rotate(-37 11 8)"/>`;
+    const dots = [[5, 12], [11, 8], [17, 4]];
+    if (filled) {
+      const m = `nbm${uid++}`;
+      const holes = dots.map(d => `<circle cx="${d[0]}" cy="${d[1]}" r="1.3" fill="#000000"/>`).join("");
+      return `<svg xmlns="${NS}" viewBox="0 0 22 16" width="22" height="16"><defs><mask id="${m}" maskUnits="userSpaceOnUse" x="0" y="0" width="22" height="16"><rect x="0" y="0" width="22" height="16" fill="#ffffff"/>${holes}</mask></defs><g mask="url(#${m})" fill="${f}" stroke="${f}" stroke-width="1.6">${pills}</g></svg>`;
+    }
+    return `<svg xmlns="${NS}" viewBox="0 0 22 16" width="22" height="16"><g fill="none" stroke="${f}" stroke-width="1.6">${pills}</g>${dots.map((d, i) => `<circle cx="${d[0]}" cy="${d[1]}" r="1.3" fill="${dot(i)}"/>`).join("")}</svg>`;
   }
 
   const SHAPES = [
