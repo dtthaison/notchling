@@ -478,7 +478,7 @@ New:
 - `crates/notchlingd/src/ask_ops.rs`, `ask_rows.rs`, `ask_waiters.rs`, `ask_find.rs`, `ask_main.rs`, `ask_inbox.rs`, `ask_tick.rs`, `ask_wiring.rs`, `ask_cli.rs`, `caller_session.rs` (from `hook_ops.rs::session_of`), `process_facts.rs` (start time, command line, fd 1, executable), and their `*_tests.rs`; `crates/notchlingd/tests/ask_e2e.rs`
 - `crates/app/src/chat/asks.rs` (the feed and the card model, beside `chat/outbox.rs`) and its tests, `crates/app/src/chat/view/ask_cards.rs`, `crates/app/src/notch/ask.rs`
 - `crates/engine/src/delegate/agy_ask.rs` (M3's exact match)
-- `docs/decisions/XXXX-ask.md`, `changes/ask.md`
+- `docs/decisions/0022-ask.md`, `changes/ask.md`
 
 Changed: `engine/src/store.rs`, `store_class.rs`, `inbox/model.rs`, `delegate/codex_run.rs`, `delegate/agy_run.rs`; `crates/events/src/kinds/agents.rs`, `kinds/choices.rs`; `crates/local-api/src/wire.rs`; `notchlingd/src/vault_caller.rs` (`Processes`), `hook_ops.rs`, `cli.rs`, `lib.rs`, `op_kinds.rs`, `daemon_wiring.rs` (one call into `ask_wiring`), `install_ops.rs`; `app/src/session_source.rs`, `actions.rs`, `chat/view/prompts.rs`, `chat/sidebar.rs`, `inbox/model.rs`, `notch/`; `locales/en/mac/{chat,notch,inbox}.ftl`; `protocol/agentconsole.v1.schema.json` (two descriptions); `docs/local-api-ops.md`, `docs/feature-map.md`, the crates' `AGENTS.md`, `docs/notes/inbox.md`, a new `docs/notes/ask.md` and its index line, `docs/policies/privacy.md` (M2).
 

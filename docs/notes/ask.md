@@ -2,7 +2,7 @@
 
 An agent asks you a question with `notchling ask` and gets your answer back, without the main model relaying it.
 
-Part of the Rust app's notes; the index is in the root `AGENTS.md`. Keep it true: change the note with the code, and add what bites you under Things that bit before. The ops, arguments and exact refusal words are in [local-api-ops.md](../local-api-ops.md#ask_opsrs); why it is built this way is [the decision](../decisions/XXXX-ask.md) and [the design](../superpowers/specs/2026-11-16-ask-design.md); the probes behind the rulings below are `crates/engine/tests/fixtures/ask/`.
+Part of the Rust app's notes; the index is in the root `AGENTS.md`. Keep it true: change the note with the code, and add what bites you under Things that bit before. The ops, arguments and exact refusal words are in [local-api-ops.md](../local-api-ops.md#ask_opsrs); why it is built this way is [the decision](../decisions/0022-ask.md) and [the design](../superpowers/specs/2026-11-16-ask-design.md); the probes behind the rulings below are `crates/engine/tests/fixtures/ask/`.
 
 - **What it is.** `notchling ask [--choice <text>]... -- <question>` saves a row in the `asks` table of `notchling.db` (class Node, schema 5; `engine/src/ask/store.rs`, the daemon its only reader and writer) and waits. The question shows as a card under the asking session in Chat, in the notch and in the Inbox (so on the phone), naming the agent, its branch and how long it has waited. Your answer goes to the waiting command, which prints `Answer: <text>` and exits; the model is not involved. A waiting agent spends no tokens.
 - **The three rules** (decided in the source design, not reopened).

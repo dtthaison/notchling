@@ -165,7 +165,7 @@ closes every session, which cancels what was waiting.
 
 ## `ask_ops.rs`
 
-Ask ([design](superpowers/specs/2026-11-16-ask-design.md), [decision](decisions/XXXX-ask.md), [note](notes/ask.md)): an agent saves a question in the daemon's `asks` table with `notchling ask`, the person answers on a card, and the answer goes to the command that waits. Served by `AskOps` (`ask_ops.rs`, `ask_main.rs`, `ask_waiters.rs`). `ask.open`, `ask.answer` and `ask.dismiss` are refused with `forbidden` and [`ACTING_OFF`] while the `acting` switch is off; `ask.wait`, `ask.mine` and `ask.list` are not, and open questions keep waiting while it is off.
+Ask ([design](superpowers/specs/2026-11-16-ask-design.md), [decision](decisions/0022-ask.md), [note](notes/ask.md)): an agent saves a question in the daemon's `asks` table with `notchling ask`, the person answers on a card, and the answer goes to the command that waits. Served by `AskOps` (`ask_ops.rs`, `ask_main.rs`, `ask_waiters.rs`). `ask.open`, `ask.answer` and `ask.dismiss` are refused with `forbidden` and [`ACTING_OFF`] while the `acting` switch is off; `ask.wait`, `ask.mine` and `ask.list` are not, and open questions keep waiting while it is off.
 
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
