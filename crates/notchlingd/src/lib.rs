@@ -92,6 +92,7 @@ pub mod daemon;
 pub mod daemon_wiring;
 pub mod delegate_cli;
 pub mod every_session;
+pub mod git_args;
 pub mod git_ops;
 pub mod grant_broker;
 pub mod grant_calls;
@@ -281,6 +282,8 @@ mod event_assert;
 mod every_session_cap_tests;
 #[cfg(test)]
 mod every_session_tests;
+#[cfg(test)]
+mod git_args_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;
 #[cfg(test)]
