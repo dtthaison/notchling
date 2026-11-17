@@ -70,6 +70,20 @@ fn send(r: &Rig, id: &str, text: &str) -> Value {
     call(r, ops::SESSION_SEND, json!({"id": id, "text": text})).unwrap()
 }
 
+fn send_apart(r: &Rig, id: &str, text: &str) -> Value {
+    let row = r
+        .ops
+        .send(&crate::outbox_ops::SendArgs {
+            id: id.to_string(),
+            text: text.to_string(),
+            clear_box: false,
+            options: None,
+            via: notchling_engine::outbox::Via::Chat,
+        })
+        .unwrap();
+    json!({"outboxId": row.id, "session": row.session, "position": r.ops.position(&row)})
+}
+
 fn id_of(sent: &Value) -> String {
     sent["outboxId"].as_str().unwrap().to_string()
 }
@@ -92,7 +106,7 @@ fn send_saves_and_answers_at_once() {
     assert_eq!(changed[0]["row"]["id"], json!(rows[0].id));
     assert_eq!(changed[0]["row"]["text"], "hello there");
     assert_eq!(changed[0]["row"]["position"], 1);
-    let second = send(&r, "job-idle", "and more");
+    let second = send_apart(&r, "job-idle", "and more");
     assert_eq!(second["position"], 2);
 }
 
@@ -318,7 +332,7 @@ fn antigravity_alias_is_keyed_as_agy() {
     let r = rig();
     let sent = send(&r, "antigravity:c9", "to agy");
     assert_eq!(sent["session"], "agy:c9");
-    send(&r, "agy:c9", "again");
+    send_apart(&r, "agy:c9", "again");
     assert_eq!(r.store.list(Some("agy:c9")).unwrap().len(), 2);
     assert!(r.store.list(Some("antigravity:c9")).unwrap().is_empty());
 }
@@ -403,7 +417,7 @@ fn send_refuses_with_exact_words() {
     }
     assert!(r.store.list(None).unwrap().is_empty());
     for n in 0..200 {
-        send(&r, "job-idle", &format!("m{n}"));
+        send_apart(&r, "job-idle", &format!("m{n}"));
     }
     assert_eq!(
         refuse(json!({"id": "job-idle", "text": "one more"})),
@@ -681,7 +695,7 @@ fn resend_try_now_on_a_retry_wait() {
 fn discard_removes_all_but_sending() {
     let r = rig();
     let ids: Vec<String> = (0..4)
-        .map(|n| id_of(&send(&r, "job-idle", &format!("m{n}"))))
+        .map(|n| id_of(&send_apart(&r, "job-idle", &format!("m{n}"))))
         .collect();
     send(&r, "job-a", "other session");
     r.store.take(&ids[0], 10).unwrap().unwrap();
@@ -884,3 +898,6 @@ fn no_text_in_events() {
         assert!(text(event, "chars").is_some());
     }
 }
+
+#[path = "outbox_combine_tests.rs"]
+mod combine;

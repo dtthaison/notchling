@@ -126,6 +126,7 @@ pub enum Change {
     Done,
     Busy,
     Missing,
+    Stale,
 }
 
 pub fn new_id() -> String {

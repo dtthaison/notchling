@@ -2,7 +2,7 @@ use super::*;
 use crate::acting::ops;
 use crate::chat::outbox::{bubble, OutboxRow};
 use crate::chat::rows::{tail_rows, Row};
-use notchling_engine::outbox::{BEING_SENT, IN_QUEUE, NO_MESSAGE};
+use notchling_engine::outbox::{BEING_SENT, CHANGED, IN_QUEUE, NO_MESSAGE};
 
 fn editing() -> Editing {
     Editing {
@@ -10,6 +10,7 @@ fn editing() -> Editing {
         outbox_id: "o7".into(),
         session: "ab12cd34".into(),
         before: "a half-typed line".into(),
+        was: "the queued text".into(),
         round: 1,
         sending: false,
     }
@@ -53,6 +54,7 @@ fn edit_mode_sends_outbox_edit() {
     assert_eq!(begun.request.args["id"], "o7");
     assert_eq!(begun.request.args["session"], "ab12cd34");
     assert_eq!(begun.request.args["text"], "new words");
+    assert_eq!(begun.request.args["from"], "the queued text");
     assert_eq!(begun.draft_after, None);
     assert!(!begun.shows_queued);
     let end = editing.finished(Ok(()), "new words");
@@ -227,4 +229,39 @@ fn every_render_state_makes_its_bubbles() {
     assert!(crate::chat::renders::outbox_preview("nothing").is_none());
     let three = crate::chat::renders::outbox_preview("three").unwrap_or_default();
     assert_eq!(three.len(), 3);
+}
+
+#[test]
+fn an_edit_refused_because_the_message_changed_stays_open_and_asks_for_the_current_text() {
+    let end = editing().finished(Err(CHANGED), "my words");
+    assert!(!end.leave);
+    assert_eq!(end.draft, None);
+    assert!(end.refresh);
+    let note = end.note.expect("a note");
+    assert!(note.contains("changed"), "{note}");
+    for end in [
+        editing().finished(Ok(()), "x"),
+        editing().finished(Err("boom"), "x"),
+        editing().finished(Err(NO_MESSAGE), "x"),
+    ] {
+        assert!(!end.refresh);
+    }
+}
+
+#[test]
+fn the_current_text_of_a_changed_row_is_read_from_the_feed() {
+    let mut joined = queued_row("the queued text\n\nand more");
+    joined.id = "o7".into();
+    let rows = [queued_row("other"), joined];
+    assert_eq!(
+        editing().current_text(&rows),
+        Some("the queued text\n\nand more")
+    );
+    let unchanged = {
+        let mut row = queued_row("the queued text");
+        row.id = "o7".into();
+        [row]
+    };
+    assert_eq!(editing().current_text(&unchanged), None);
+    assert_eq!(editing().current_text(&[queued_row("x")]), None);
 }

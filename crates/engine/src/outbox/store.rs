@@ -10,6 +10,8 @@ use std::sync::{Mutex, MutexGuard};
 const COLUMNS: &str = "n, id, session, tool, kind, text, options, via, state, why, clear_box, \
     queued_ms, updated_ms, attempt_ms, seen_before, queued_before, tries, next_ms, noticed_ms";
 
+const JOIN: &str = "\n\n";
+
 const EDITABLE: &[State] = &[
     State::Queued,
     State::Waiting,
@@ -166,6 +168,62 @@ impl OutboxStore {
         row.ok_or_else(|| InsertError::Db("row missing after insert".to_string()))
     }
 
+    pub fn combine(&self, new: &New, now_ms: i64) -> Result<Option<Row>, String> {
+        self.combine_except(new, now_ms, &|_| false)
+    }
+
+    pub fn combine_except(
+        &self,
+        new: &New,
+        now_ms: i64,
+        apart: &dyn Fn(&str) -> bool,
+    ) -> Result<Option<Row>, String> {
+        if new.clear_box || Kind::of(new.tool, &new.text) != Kind::Prompt {
+            return Ok(None);
+        }
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let last = select(
+            &tx,
+            "WHERE session = ?1 ORDER BY n DESC LIMIT 1",
+            &[&new.session],
+        )?;
+        let Some(last) = last.into_iter().next() else {
+            return Ok(None);
+        };
+        let joined = last.text.len() + JOIN.len() + new.text.len();
+        let open = match last.state {
+            State::Queued => last.next_ms.is_none(),
+            State::Waiting => matches!(last.why, Some(Why::Turn | Why::Dialog)),
+            _ => false,
+        };
+        if !open
+            || apart(&last.id)
+            || last.tool != new.tool
+            || last.kind != Kind::Prompt
+            || last.options != new.options
+            || joined > MAX_TEXT
+        {
+            return Ok(None);
+        }
+        let changed = tx
+            .execute(
+                "UPDATE outbox SET text = text || ?2 || ?3, updated_ms = ?4
+                 WHERE id = ?1
+                   AND (state = 'queued' OR (state = 'waiting' AND why IN ('turn', 'dialog')))",
+                params![last.id, JOIN, new.text, now_ms],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        let row = fetch(&tx, &last.id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(row)
+    }
+
     pub fn list(&self, session: Option<&str>) -> Result<Vec<Row>, String> {
         let db = self.lock();
         match session {
@@ -252,6 +310,16 @@ impl OutboxStore {
     }
 
     pub fn edit(&self, id: &str, text: &str, now_ms: i64) -> Result<Change, String> {
+        self.edit_from(id, text, None, now_ms)
+    }
+
+    pub fn edit_from(
+        &self,
+        id: &str,
+        text: &str,
+        from: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Change, String> {
         let mut db = self.lock();
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -259,6 +327,9 @@ impl OutboxStore {
         let Some(row) = fetch(&tx, id)? else {
             return Ok(Change::Missing);
         };
+        if from.is_some_and(|from| from != row.text) && EDITABLE.contains(&row.state) {
+            return Ok(Change::Stale);
+        }
         let sql = format!(
             "UPDATE outbox SET text = ?2, kind = ?3, tries = 0, next_ms = NULL, clear_box = 0,
                  why = NULL, state = 'queued', updated_ms = ?4

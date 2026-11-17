@@ -240,6 +240,7 @@ fn session_outbox_has_no_text_fields() {
     let then = outbox.fields.iter().find(|f| f.name == "then").unwrap();
     assert!(then.desc.choices.contains(&"in_queue"));
     assert!(then.desc.choices.contains(&"restored_unsure"));
+    assert!(then.desc.choices.contains(&"combined"));
     assert_eq!(outbox.durability, Durability::Push);
     assert_eq!(outbox.keep_days, 30);
     assert_eq!(outbox.emitters, &[Proc::Daemon]);

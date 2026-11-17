@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use notchling_engine::outbox::is_settled;
+use notchling_engine::outbox::{is_settled, CHANGED};
 use notchling_locale as t;
 use serde_json::{json, Value};
 
@@ -88,6 +88,7 @@ pub struct Editing {
     pub outbox_id: String,
     pub session: String,
     pub before: String,
+    pub was: String,
     pub round: u64,
     pub sending: bool,
 }
@@ -102,7 +103,7 @@ pub struct Begin {
 pub fn begin(editing: Option<&Editing>, send: Request, text: &str) -> Begin {
     match editing {
         Some(editing) => Begin {
-            request: Request::outbox_edit(&editing.outbox_id, &editing.session, text),
+            request: Request::outbox_edit(&editing.outbox_id, &editing.session, text, &editing.was),
             draft_after: None,
             shows_queued: false,
         },
@@ -119,6 +120,7 @@ pub struct EditEnd {
     pub leave: bool,
     pub draft: Option<String>,
     pub note: Option<String>,
+    pub refresh: bool,
 }
 
 impl Editing {
@@ -128,18 +130,34 @@ impl Editing {
                 leave: true,
                 draft: Some(self.before.clone()),
                 note: None,
+                refresh: false,
+            },
+            Err(CHANGED) => EditEnd {
+                leave: false,
+                draft: None,
+                note: Some(t::chat::outbox_changed().to_owned()),
+                refresh: true,
             },
             Err(message) if is_settled(message) => EditEnd {
                 leave: true,
                 draft: Some(text.to_owned()),
                 note: Some(t::chat::outbox_already_sent().to_owned()),
+                refresh: false,
             },
             Err(message) => EditEnd {
                 leave: false,
                 draft: None,
                 note: Some(message.to_owned()),
+                refresh: false,
             },
         }
+    }
+
+    pub fn current_text<'a>(&self, rows: &'a [OutboxRow]) -> Option<&'a str> {
+        rows.iter()
+            .find(|row| row.id == self.outbox_id)
+            .map(|row| row.text.as_str())
+            .filter(|text| *text != self.was)
     }
 
     pub fn cancelled(&self) -> String {
