@@ -5,6 +5,7 @@ pub mod guard;
 pub mod porcelain;
 pub mod read;
 pub mod sandbox;
+pub mod worktrees;
 
 pub use branch::{read_branch_stat, read_branches};
 pub use branch_file::read_branch_diff;
@@ -29,3 +30,5 @@ mod read_hardening_tests;
 mod read_tests;
 #[cfg(test)]
 mod sandbox_tests;
+#[cfg(test)]
+mod worktrees_tests;
