@@ -23,6 +23,18 @@ pub fn choice_of(action: ActionId) -> Option<u8> {
         .map(|at| at as u8 + 1)
 }
 
+pub fn job_label(tool: Asker, delegator: Option<&str>) -> String {
+    let base = if tool == Asker::Antigravity {
+        "Antigravity job"
+    } else {
+        "Codex job"
+    };
+    match delegator {
+        Some(by) => format!("{base} · delegated by «{by}»"),
+        None => base.to_string(),
+    }
+}
+
 fn label(row: &Row) -> String {
     let named = |fallback: &str| row.label.clone().unwrap_or_else(|| fallback.to_string());
     match row.asker {

@@ -2,6 +2,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_events::session_ref;
 use crate::acting_ops::{bad, forbidden, now_ms, Room};
 use crate::ask_events::{emit, Facts};
+use crate::ask_find::Finder;
 use crate::ask_inbox::Link;
 use crate::ask_rows::{key_for, wire};
 use crate::ask_tick::{queue, Msg, NEVER};
@@ -70,6 +71,7 @@ pub struct AskOps {
     clock: Clock,
     marks: Mutex<HashMap<String, Mark>>,
     pub(crate) link: OnceLock<Link>,
+    pub(crate) finder: OnceLock<Finder>,
     pub(crate) raised: Mutex<HashSet<String>>,
     saving: bool,
     pub(crate) waiters: Waiters,
@@ -157,6 +159,7 @@ impl AskOps {
             clock: Arc::new(now_ms),
             marks: Mutex::new(HashMap::new()),
             link: OnceLock::new(),
+            finder: OnceLock::new(),
             raised: Mutex::new(HashSet::new()),
             saving: true,
             waiters: Waiters::default(),
@@ -189,7 +192,7 @@ impl AskOps {
         false
     }
 
-    fn agents(&self) -> Vec<Agent> {
+    pub(crate) fn agents(&self) -> Vec<Agent> {
         let list = lock(&self.sessions);
         list.as_array()
             .map(|rows| {
@@ -295,13 +298,12 @@ impl AskOps {
         emit(self.events.as_ref(), facts, self.now());
     }
 
-    fn start_find(&self, _row: &Row, _hit: &SessionHit) {}
-
     fn opened(&self, row: &Row, hit: &SessionHit) {
         self.publish_changed(row);
         self.emit_then(row, AskThen::Asked);
-        self.start_find(row, hit);
-        self.settled(&row.id);
+        if !self.start_find(row, hit) {
+            self.settled(&row.id);
+        }
     }
 
     fn open(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {

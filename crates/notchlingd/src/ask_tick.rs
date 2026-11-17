@@ -141,6 +141,9 @@ impl AskOps {
 
     pub fn close(&self) {
         self.waiters.close();
+        if let Some(finder) = self.finder.get() {
+            finder.stop();
+        }
         let thread = lock(&self.thread).take();
         if let Some(handle) = thread {
             let _ = self.tx.send(Msg::Stop);

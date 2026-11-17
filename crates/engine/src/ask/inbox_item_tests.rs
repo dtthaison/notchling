@@ -146,3 +146,17 @@ fn choice_actions_round_trip_as_choice_n() {
         Kind::Question
     );
 }
+
+#[test]
+fn job_label_names_the_tool_and_its_delegator() {
+    assert_eq!(
+        job_label(Asker::Codex, Some("Review Task 3")),
+        "Codex job · delegated by «Review Task 3»"
+    );
+    assert_eq!(
+        job_label(Asker::Antigravity, Some("Port the parser")),
+        "Antigravity job · delegated by «Port the parser»"
+    );
+    assert_eq!(job_label(Asker::Codex, None), "Codex job");
+    assert_eq!(job_label(Asker::Antigravity, None), "Antigravity job");
+}

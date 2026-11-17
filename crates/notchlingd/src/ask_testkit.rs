@@ -23,13 +23,33 @@ pub(crate) const T0: i64 = 1_794_697_060_000;
 
 #[derive(Default)]
 pub(crate) struct Tree {
-    parents: HashMap<u32, u32>,
+    parents: Mutex<HashMap<u32, u32>>,
     cwds: HashMap<u32, PathBuf>,
     starts: Mutex<HashMap<u32, u64>>,
     ended: Mutex<HashSet<u32>>,
+    argvs: Mutex<HashMap<u32, Vec<String>>>,
+    stdouts: Mutex<HashMap<u32, PathBuf>>,
+    exes: Mutex<HashMap<u32, PathBuf>>,
 }
 
 impl Tree {
+    pub(crate) fn child_of(&self, pid: u32, parent: u32) {
+        self.parents.lock().unwrap().insert(pid, parent);
+    }
+
+    pub(crate) fn runs(&self, pid: u32, argv: &[&str]) {
+        let words = argv.iter().map(|w| w.to_string()).collect();
+        self.argvs.lock().unwrap().insert(pid, words);
+    }
+
+    pub(crate) fn writes_to(&self, pid: u32, path: &Path) {
+        self.stdouts.lock().unwrap().insert(pid, path.to_path_buf());
+    }
+
+    pub(crate) fn binary(&self, pid: u32, path: &Path) {
+        self.exes.lock().unwrap().insert(pid, path.to_path_buf());
+    }
+
     pub(crate) fn end(&self, pid: u32) {
         self.ended.lock().unwrap().insert(pid);
         self.starts.lock().unwrap().remove(&pid);
@@ -45,7 +65,7 @@ impl Processes for Tree {
         if self.ended.lock().unwrap().contains(&pid) {
             return None;
         }
-        self.parents.get(&pid).copied()
+        self.parents.lock().unwrap().get(&pid).copied()
     }
     fn name(&self, _pid: u32) -> Option<String> {
         None
@@ -58,6 +78,15 @@ impl Processes for Tree {
     }
     fn start_time(&self, pid: u32) -> Option<u64> {
         self.starts.lock().unwrap().get(&pid).copied()
+    }
+    fn argv(&self, pid: u32) -> Option<Vec<String>> {
+        self.argvs.lock().unwrap().get(&pid).cloned()
+    }
+    fn stdout_path(&self, pid: u32) -> Option<PathBuf> {
+        self.stdouts.lock().unwrap().get(&pid).cloned()
+    }
+    fn exe(&self, pid: u32) -> Option<PathBuf> {
+        self.exes.lock().unwrap().get(&pid).cloned()
     }
 }
 
@@ -121,10 +150,15 @@ pub(crate) fn rig_full(
     std::fs::create_dir_all(work.join(".git")).unwrap();
     std::fs::write(work.join(".git/HEAD"), "ref: refs/heads/agent/ask\n").unwrap();
     let tree = Tree {
-        parents: HashMap::from([(ASKER, SHELL), (SHELL, CLAUDE), (CLAUDE, 1), (STRANGER, 1)]),
+        parents: Mutex::new(HashMap::from([
+            (ASKER, SHELL),
+            (SHELL, CLAUDE),
+            (CLAUDE, 1),
+            (STRANGER, 1),
+        ])),
         cwds: HashMap::from([(ASKER, work)]),
         starts: Mutex::new(HashMap::from([(ASKER, 4242)])),
-        ended: Mutex::new(HashSet::new()),
+        ..Tree::default()
     };
     let tree = Arc::new(tree);
     let roots = Roots {

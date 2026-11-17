@@ -11,6 +11,7 @@ pub mod agy_ops;
 pub mod agy_phone;
 pub mod agy_sink;
 mod ask_events;
+mod ask_find;
 mod ask_inbox;
 pub mod ask_ops;
 mod ask_rows;
@@ -206,6 +207,8 @@ mod acting_permission_tests;
 mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
+#[cfg(test)]
+mod ask_find_tests;
 #[cfg(test)]
 mod ask_inbox_tests;
 #[cfg(test)]

@@ -31,5 +31,6 @@ pub fn build(
     );
     let ops = Arc::new(if saving { ops } else { ops.without_store() });
     ops.attach(inbox.clone());
+    ops.attach_finder();
     ops
 }
