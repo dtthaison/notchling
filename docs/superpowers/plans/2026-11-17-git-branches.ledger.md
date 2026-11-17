@@ -30,3 +30,15 @@ Append-only: add new rulings and log lines at the end of their section; never ed
 - git: Task 4: dispatched (sonnet high).
 - git: Task 3 review (agy hydrogen high): Approved.
 - git: Task 4: complete e1087e1e (reader_real_tests 20, 6 reader hardening traps, the sandbox trap test; git:: 209; engine suite green). Accepted deviations: `remotes` reads `^remote\..*\.url$` so a remote named with a dot is kept; `commit_facts` adds `--no-show-signature` (no gpg). The implementer's "duplicated line in parse_left_right" does not hold (checked).
+- git: Task 9: merged origin/agent-run-oss first; dispatched (sonnet high).
+- git: Task 4 review (agy hydrogen high): Approved.
+- git: Task 9: complete d1807546 (git_args_tests 11, red seen with todo! stubs; notchlingd lib 2102 pass, two timing tests failed under load and pass alone: codex_children a_rollout_written_after_start_is_found, outbox_verify a_real_clear_waiter_wakes_on_the_successor_file). `FRESH_READS` lives in git_args.rs; Task 8 uses it from there. `fresh_args` drops duplicates.
+- git: Task 13: dispatched (sonnet high).
+- git: Task 9 review (agy hydrogen high): Needs fixes, 1 finding, verified: `git_args_tests` call `std::os::unix::fs::symlink` with only `#[cfg(test)]`, so the Windows CI leg would not compile. Fixed by the coordinator (one line): the module is `#[cfg(all(test, unix))]`, as `reader_real_tests` is.
+- git: Task 13: complete 37e04b67 (worktrees 31, changes_target 5, git 25; app lib 1613; gen.py --check ok). Accepted: `GUARD-LOCALE-SUBSET` needs a select to be the whole value, so `chat-git-default-and` and `chat-git-more-worktrees` wrap the whole text in the select (ids and variables as planned). `SubPart` joins with one space, `Faint("·")` separators, needs input is a `Running` string; occupancy kind priority Running, then NeedsInput, then Idle.
+- git: Task 8: dispatched (sonnet high).
+- git: Task 13 review (agy hydrogen high; the first run failed to start, the retry ran): Approved. Coordinator finding: with more than 6 other worktrees and no branch without a worktree, the "›" row is left out, so the hidden worktrees are counted nowhere (B1 says the rest are counted in the "›" row). Ruling R4: then the row reads "M more worktrees" alone (a new word), and still opens Branches; a fix round follows Task 8.
+- git: Task 8: complete 682b0105 (git_cache_tests 19; notchlingd all integration targets pass, lib's two known timing tests flaked under load and pass alone). Noted for Task 10: `Budget::new(start, duration)`; `pick_reads` does not filter `fresh` against `eligible`, so the op passes only non-current, non-missing fresh paths. `SLOW_EVERY_MS`/`PENDING_AGAIN_MS` are also defined in git_cache.rs (app values); harmless.
+- git: Task 13 fix round (R4): dispatched (sonnet high).
+- git: Task 8 review (agy hydrogen high): Approved.
+- git: Task 13 fix round: f168556b (R4; new word chat-git-more-worktrees-only; worktrees 32 pass). Approved by the coordinator (one-function change, test red then green).
