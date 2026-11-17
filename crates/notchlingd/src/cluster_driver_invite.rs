@@ -63,14 +63,14 @@ impl Driver {
             port: self.port.unwrap_or(self.setup.port),
             secret: secret.clone(),
         });
-        let node = invite.node.to_string();
-        let id = self.reply_id(Reply::Invite(answer, token, node));
+        let minter = minter.unwrap_or_else(|| self.me.clone());
+        let id = self.reply_id(Reply::Invite(answer, token, minter.to_string()));
         self.step(Input::Local {
             id,
             cmd: LocalCmd::Invite {
                 secret: secret.into(),
                 invite,
-                minter: minter.unwrap_or_else(|| self.me.clone()),
+                minter,
             },
         });
     }

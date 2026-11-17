@@ -629,13 +629,13 @@ impl Driver {
                     self.loads.insert(node, value);
                 }
             }
-            Reply::Invite(answer, token, node) => {
+            Reply::Invite(answer, token, maker) => {
                 if result.is_ok() {
                     self.audit
-                        .step(ClusterStep::Invited, Some(&node), None, Outcome::Ok);
+                        .step(ClusterStep::Invited, Some(&maker), None, Outcome::Ok);
                 }
                 self.later
-                    .push((Reply::Invite(answer, token, node), result));
+                    .push((Reply::Invite(answer, token, maker), result));
             }
             other => self.later.push((other, result)),
         }

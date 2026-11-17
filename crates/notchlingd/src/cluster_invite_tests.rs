@@ -307,6 +307,57 @@ fn events_carry_no_token() {
     }
 }
 
+fn invited_peers(n: &TestNode) -> Vec<String> {
+    n.audit_text()
+        .lines()
+        .filter(|l| l.contains("step=invited "))
+        .map(|l| {
+            l.split(' ')
+                .find_map(|f| f.strip_prefix("peer="))
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn invited_event_names_the_primary_for_its_own_app() {
+    let w = invited_world("invhome12", "invbox12");
+    eventually("the invited event", || !invited_peers(&w.home).is_empty());
+    assert_eq!(invited_peers(&w.home), vec![w.home.id().to_string()]);
+    join(&w);
+    eventually("the invite_joined event", || {
+        w.home.audit_text().contains("step=invite_joined")
+    });
+    let line = w
+        .home
+        .audit_text()
+        .lines()
+        .find(|l| l.contains("step=invite_joined"))
+        .unwrap()
+        .to_string();
+    assert!(line.contains(&format!("peer={}", w.joiner.id())), "{line}");
+}
+
+#[test]
+fn invited_event_names_the_client_that_forwarded() {
+    let net = MemNet::new();
+    let (home, worker) = pair(&net, Opts::named("invhome13"), Opts::named("invbox13"));
+    let c = client_of(&net, &home);
+    let mut args = args_for(&worker.id(), "box9");
+    args["minter"] = json!(c.id());
+    ops_of(&home)
+        .call(
+            &caller(Tier::App, ClientKind::Node),
+            ops::CLUSTER_INVITE,
+            &args,
+        )
+        .unwrap();
+    eventually("the invited event", || !invited_peers(&home).is_empty());
+    assert_eq!(invited_peers(&home), vec![c.id().to_string()]);
+    assert_ne!(invited_peers(&home), vec![worker.id().to_string()]);
+}
+
 fn notices(inbox: &InboxOps) -> Vec<Item> {
     inbox
         .items()
