@@ -138,6 +138,12 @@ pub const HOMES: &[(&str, Home)] = &[
     (LIMITS_USAGE, Home::Quiet),
     (LIMITS_SET_MODE, Home::Called),
     (COST_SUMMARY, Home::Quiet),
+    (ops::ASK_OPEN, Home::Kind("session.ask")),
+    (ops::ASK_WAIT, Home::Called),
+    (ops::ASK_MINE, Home::Called),
+    (ops::ASK_ANSWER, Home::Kind("session.ask")),
+    (ops::ASK_DISMISS, Home::Kind("session.ask")),
+    (ops::ASK_LIST, Home::Called),
 ];
 
 pub fn home(op: &str) -> OpHome {

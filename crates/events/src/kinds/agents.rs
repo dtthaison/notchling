@@ -1,4 +1,4 @@
-use super::choices::{DoneOrFailed, FailWhy, ToolName};
+use super::choices::{Answerer, AskMode, AskThen, AskerKind, DoneOrFailed, FailWhy, ToolName};
 use crate::field::{Count, Millis, Tokens, Tool, Version};
 use crate::field_ref::{Account, Device, Folder, Model, Page, Ref, Session};
 use crate::spec::{AgentsRead, Durability, Group, Level, Lock, Proc};
@@ -200,6 +200,30 @@ kinds! {
             then: OutboxThen,
             chars: Count,
             via: ReplyVia,
+        }
+    }
+    SessionAsk = "session.ask", kv 1 {
+        title: "Questions Asked",
+        records: "An agent asked a question and what happened to it, without any text.",
+        why: "Shows that a question waited, was answered or was lost, and who answered.",
+        default: On,
+        lock: Lock::Toggle,
+        sinks: ACTIVITY | DIAG,
+        durability: Durability::Push,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::Own,
+        keep_days: 30,
+        fields {
+            session: Ref<Session>,
+            then: AskThen,
+            asker: AskerKind,
+            by: Answerer,
+            mode: AskMode,
+            chars: Count,
+            choices: Count,
+            answer_chars: Count,
+            waited: Millis,
         }
     }
     SessionQueueStuck = "session.queue_stuck", kv 1 {
