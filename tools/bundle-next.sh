@@ -3,6 +3,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
+INSTALL=0
+NODES=0
+for arg in "$@"; do
+  case "$arg" in
+    --install) INSTALL=1 ;;
+    --nodes) NODES=1 ;;
+  esac
+done
+
 IDENTITY="${NOTCHLING_SIGN_IDENTITY:--}"
 KEYCHAIN=()
 if [[ -n "${NOTCHLING_SIGN_KEYCHAIN:-}" ]]; then
@@ -67,7 +76,11 @@ else
   fi
 fi
 
-if [[ "${1:-}" == "--install" ]]; then
+if [[ $NODES -eq 1 ]]; then
+  tools/build-node.sh
+fi
+
+if [[ $INSTALL -eq 1 ]]; then
   if grep -q "<string>local.notchling</string>" "/Applications/$NAME.app/Contents/Info.plist" 2>/dev/null; then
     echo "/Applications/$NAME.app is still the Swift app; retire it first (it is never replaced here)" >&2
     exit 1

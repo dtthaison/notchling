@@ -1,6 +1,7 @@
 pub mod actions;
 mod actions_util;
 pub mod catalog;
+pub mod dist_manifest;
 pub mod engine;
 pub mod engine_check;
 pub mod engine_fix;
@@ -61,6 +62,8 @@ mod tests_actions_files;
 mod tests_actions_gh;
 #[cfg(test)]
 mod tests_actions_read;
+#[cfg(test)]
+mod tests_dist_manifest;
 #[cfg(test)]
 mod tests_engine;
 #[cfg(test)]
