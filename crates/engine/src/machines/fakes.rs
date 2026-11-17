@@ -1,6 +1,7 @@
 use super::github::{allows, GitHubHttp, HttpAnswer};
 use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
+use super::release_download::NoDownloads;
 use super::runner::{Channel, OutputSink, ScriptedRunner};
 use super::shell;
 use super::step::{FixContext, MacFacts, NoCluster, Opener, SecretSource, StepContext};
@@ -265,6 +266,7 @@ impl Ctx {
             runner: self.runner.clone(),
             secrets: self.secrets.clone(),
             http: self.http.clone(),
+            downloads: Arc::new(NoDownloads),
             opener: self.opener.clone(),
             mac: MacFacts::default(),
             now: self.now,

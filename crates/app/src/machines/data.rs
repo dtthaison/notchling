@@ -10,6 +10,7 @@ use notchling_engine::machines::merge::MergePlan;
 use notchling_engine::machines::poller::MachinePoller;
 use notchling_engine::machines::process::ProcessRunner;
 use notchling_engine::machines::registry::RegistryFiles;
+use notchling_engine::machines::release_download::CurlDownloads;
 use notchling_engine::machines::roots::{MachineRoots, VaultSecrets};
 use notchling_engine::machines::runner::{Call, Refusing, Runner, OFF};
 use notchling_engine::machines::step::{ClusterTokens, NoCluster, NoSecrets, Opener, SecretSource};
@@ -154,7 +155,8 @@ impl Setup {
         let engine = Arc::new(
             SetupEngine::new(deps, catalog::standard())
                 .with_cluster(cluster.clone(), Some(dist_dir(&self.data_dir)))
-                .with_mac_daemon(mac_daemon),
+                .with_mac_daemon(mac_daemon)
+                .with_downloads(Arc::new(CurlDownloads::new(runner.clone()))),
         );
         let for_poller = registry.clone();
         let poller = Arc::new(MachinePoller::new(

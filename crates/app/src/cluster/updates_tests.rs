@@ -64,7 +64,15 @@ fn rows(
     model: &ClusterModel,
     machines: &[Machine],
 ) -> Vec<notchling_engine::machines::node_updates::UpdateRow> {
-    rows_for(Some(OURS), model, machines, &none, None, &BTreeSet::new())
+    rows_for(
+        Some(OURS),
+        model,
+        machines,
+        &none,
+        None,
+        &BTreeSet::new(),
+        false,
+    )
 }
 
 fn two_old() -> ClusterModel {
@@ -152,6 +160,7 @@ fn needs_build_row_says_build_nodes_first() {
         &none,
         Some(&manifest(OURS)),
         &BTreeSet::new(),
+        false,
     );
     assert_eq!(listed[0].state, UpdateState::Ready);
 }
@@ -255,6 +264,7 @@ fn a_member_is_matched_to_its_machine_by_node_id_then_name() {
         &none,
         None,
         &BTreeSet::new(),
+        false,
     );
     assert_eq!(got[0].state, UpdateState::NotInMachines);
     let line = lines(&got, &BTreeSet::new());

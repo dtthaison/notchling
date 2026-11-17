@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use notchling_engine::cluster::build_id::build_id;
 use notchling_engine::machines::dist_manifest;
 use notchling_engine::machines::node_updates::UpdateRow;
+use notchling_engine::machines::release_download::this_release;
 use notchling_engine::machines::step::StepId;
 use notchling_engine::machines::steps_node::dist_dir;
 
@@ -107,6 +108,7 @@ impl AddSource {
             &node_of,
             manifest.as_ref(),
             &failed,
+            this_release().is_some(),
         );
         (this_build, rows)
     }

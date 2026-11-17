@@ -72,9 +72,17 @@ pub fn rows_for(
     node_of: &dyn Fn(&str) -> Option<String>,
     manifest: Option<&DistManifest>,
     failed_binary: &BTreeSet<String>,
+    can_download: bool,
 ) -> Vec<UpdateRow> {
     let members = members(model, machines, node_of);
-    offer(this_build, &members, machines, manifest, failed_binary)
+    offer(
+        this_build,
+        &members,
+        machines,
+        manifest,
+        failed_binary,
+        can_download,
+    )
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

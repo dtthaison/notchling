@@ -1,6 +1,7 @@
 use super::github::GitHubHttp;
 use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs};
+use super::release_download::ReleaseDownloads;
 use super::runner::{Call, Channel, CommandResult, OutputSink, Runner};
 use super::shell;
 use crate::accounts::Secret;
@@ -443,6 +444,7 @@ pub struct StepContext {
     pub runner: Arc<dyn Runner>,
     pub secrets: Arc<dyn SecretSource>,
     pub http: Arc<dyn GitHubHttp>,
+    pub downloads: Arc<dyn ReleaseDownloads>,
     pub opener: Arc<dyn Opener>,
     pub mac: MacFacts,
     pub now: f64,

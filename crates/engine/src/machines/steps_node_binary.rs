@@ -1,4 +1,6 @@
 use super::registry::Machine;
+use super::release_download::download_linux;
+use super::runner::Channel;
 use super::shell;
 use super::step::{
     run, Cadence, CheckResult, Detected, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput,
@@ -8,8 +10,8 @@ use super::steps_node::{
     arch_word, first_text_line, machine_refusal, os_word, said, value_of, APP_DIR, MAC_BUILD,
 };
 use super::steps_node_mac::{
-    binary_new, binary_path, copy_heading, mac_restart, mac_restart_text, place_script,
-    prepare_script, source_for, where_word, Host,
+    binary_new, binary_path, copy_heading, downloadable, mac_restart, mac_restart_text,
+    place_script, prepare_script, source_for, where_word, Host, Source, BUILD_LINUX,
 };
 use super::steps_node_service::{restart_command, stops_work};
 use sha2::{Digest, Sha256};
@@ -48,7 +50,7 @@ fn probe_script(m: &Machine) -> String {
 
 const MAX_HASHED: u64 = 512 * 1024 * 1024;
 
-fn hash_file(path: &Path) -> Option<String> {
+pub(super) fn hash_file(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = file.take(MAX_HASHED + 1);
     let mut hasher = Sha256::new();
@@ -110,6 +112,10 @@ fn parse_binary(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
 }
 
 fn binary_state(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
+    binary_state_on(out, ctx, Host::this())
+}
+
+pub(super) fn binary_state_on(out: &RemoteOutput, ctx: &StepContext, host: Host) -> CheckResult {
     let line = first_text_line(&out.text);
     let have = value_of(&out.text, "sha256=").unwrap_or("");
     let place = where_word(&ctx.machine);
@@ -128,7 +134,6 @@ fn binary_state(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     {
         return CheckResult::cant_tell("Checking the machine's architecture first");
     }
-    let host = Host::this();
     let source = source_for(
         &ctx.machine,
         ctx.dist_dir.as_deref(),
@@ -142,7 +147,14 @@ fn binary_state(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
             .or_else(|| file_hash(&found.path))
             .map(|digest| (digest, found.what.clone())),
         Err(why) if host.build.is_some() && ctx.machine.is_linux() => {
-            return CheckResult::fail(why.clone());
+            return CheckResult::fail(
+                match downloadable(&ctx.machine, ctx.dist_dir.as_deref(), host) {
+                    Some((version, _)) => format!(
+                        "No Linux build of Notchling {version} in this Mac's dist folder yet; Fix downloads it from the {version} release."
+                    ),
+                    None => why.clone(),
+                },
+            );
         }
         Err(_) => None,
     };
@@ -230,16 +242,40 @@ fn display(m: &Machine) -> String {
 }
 
 fn binary_fix(ctx: &FixContext) -> FixOutcome {
+    binary_fix_on(ctx, Host::this())
+}
+
+fn from_release(ctx: &FixContext, host: Host, why: String) -> Result<Source, String> {
+    let step = &ctx.step;
+    let dist = step.dist_dir.as_deref();
+    let (Some((version, file)), Some(dist), Some(build)) =
+        (downloadable(&step.machine, dist, host), dist, host.build)
+    else {
+        return Err(why);
+    };
+    let log = &ctx.log;
+    log(
+        Channel::Stdout,
+        &format!("Downloading {file} from the {version} release\n"),
+    );
+    download_linux(&*step.downloads, dist, &file, version, build).map_err(|e| {
+        format!("couldn't download {file} from the {version} release: {e}. {BUILD_LINUX}")
+    })?;
+    source_for(&step.machine, Some(dist), step.mac_daemon.as_ref(), host)
+}
+
+pub(super) fn binary_fix_on(ctx: &FixContext, host: Host) -> FixOutcome {
     let m = &ctx.step.machine;
     if let Some(why) = machine_refusal(m) {
         return FixOutcome::fail(why);
     }
-    let source = match source_for(
+    let first = source_for(
         m,
         ctx.step.dist_dir.as_deref(),
         ctx.step.mac_daemon.as_ref(),
-        Host::this(),
-    ) {
+        host,
+    );
+    let source = match first.or_else(|why| from_release(ctx, host, why)) {
         Ok(found) => found,
         Err(why) => return FixOutcome::fail(why),
     };

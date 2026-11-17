@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use notchling_engine::cluster::build_id::build_id;
 use notchling_engine::machines::registry::Machine;
+use notchling_engine::machines::release_download::this_release;
 use notchling_engine::machines::step::{ClusterTokens, StepId};
 use notchling_locale as t;
 
@@ -44,6 +45,7 @@ impl UpdateAsk {
             &node_of,
             None,
             &self.failed_binary,
+            this_release().is_some(),
         );
         let shown = banner(&rows)?;
         Some(format!(

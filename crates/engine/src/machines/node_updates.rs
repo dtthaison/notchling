@@ -48,6 +48,7 @@ fn needs_build(
     this_build: Option<&str>,
     member: &MemberBuild,
     manifest: Option<&DistManifest>,
+    can_download: bool,
 ) -> Option<String> {
     let arch = arch_word(&member.arch);
     let Some(file) = dist_file(&member.os, arch) else {
@@ -61,7 +62,7 @@ fn needs_build(
     let listed = manifest
         .filter(|m| m.build == build)
         .is_some_and(|m| m.files.contains_key(&file));
-    if listed {
+    if listed || (can_download && member.os == "linux") {
         return None;
     }
     Some(
@@ -92,6 +93,7 @@ pub fn offer(
     machines: &[Machine],
     manifest: Option<&DistManifest>,
     failed_binary: &BTreeSet<String>,
+    can_download: bool,
 ) -> Vec<UpdateRow> {
     let mut rows = Vec::new();
     for member in members {
@@ -111,7 +113,7 @@ pub fn offer(
         if !different(this_build, member, machine, failed_binary) {
             continue;
         }
-        let state = if let Some(why) = needs_build(this_build, member, manifest) {
+        let state = if let Some(why) = needs_build(this_build, member, manifest, can_download) {
             UpdateState::NeedsBuild(why)
         } else if member.moving {
             UpdateState::Busy("a move to another primary is running".into())

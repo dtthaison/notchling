@@ -1,6 +1,7 @@
 use super::engine_plan::ShownRecord;
 use super::github::GitHubHttp;
 use super::masks::Masks;
+use super::release_download::{NoDownloads, ReleaseDownloads};
 
 use super::registry::{Machine, RegistryFiles};
 use super::runner::Runner;
@@ -103,6 +104,7 @@ pub struct SetupEngine {
     pub(super) tokens: Arc<dyn ClusterTokens>,
     pub(super) dist_dir: Option<PathBuf>,
     pub(super) mac_daemon: Option<PathBuf>,
+    pub(super) downloads: Arc<dyn ReleaseDownloads>,
 }
 
 #[derive(Default)]
@@ -179,6 +181,7 @@ impl SetupEngine {
             tokens: Arc::new(NoCluster),
             dist_dir: None,
             mac_daemon: None,
+            downloads: Arc::new(NoDownloads),
         };
         engine.load_offers();
         engine
@@ -196,6 +199,11 @@ impl SetupEngine {
 
     pub fn with_mac_daemon(mut self, mac_daemon: Option<PathBuf>) -> SetupEngine {
         self.mac_daemon = mac_daemon;
+        self
+    }
+
+    pub fn with_downloads(mut self, downloads: Arc<dyn ReleaseDownloads>) -> SetupEngine {
+        self.downloads = downloads;
         self
     }
 
@@ -335,6 +343,7 @@ impl SetupEngine {
             runner: self.deps.runner.clone(),
             secrets: self.deps.secrets.clone(),
             http: self.deps.http.clone(),
+            downloads: self.downloads.clone(),
             opener: self.deps.opener.clone(),
             mac: (self.deps.mac)(),
             now: (self.deps.clock)(),
