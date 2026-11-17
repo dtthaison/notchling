@@ -119,23 +119,34 @@ fn refs_cut_at_300() {
 
 #[test]
 fn ahead_behind_atom_lines() {
-    let text = "refs/heads/feat\x002 0\nrefs/heads/main\x000 0\nrefs/heads/orph\x001 1\nbad line\nrefs/heads/x\0a b\n";
-    let counts = parse_ahead_behind(text);
+    let a = "a".repeat(40);
+    let b = "b".repeat(40);
+    let c = "c".repeat(40);
+    let text = format!(
+        "refs/heads/feat\0{a}\x002 0\nrefs/heads/main\0{b}\x000 0\nrefs/heads/orph\0{c}\x001 1\nbad line\nrefs/heads/x\0{a}\0a b\nrefs/heads/old\x002 1\n"
+    );
+    let counts = parse_ahead_behind(&text);
     assert_eq!(counts.len(), 3);
     assert_eq!(
         counts["refs/heads/feat"],
-        Counts {
-            ahead: 2,
-            behind: 0
-        }
+        (
+            a,
+            Counts {
+                ahead: 2,
+                behind: 0
+            }
+        )
     );
-    assert_eq!(counts["refs/heads/main"], Counts::default());
+    assert_eq!(counts["refs/heads/main"], (b, Counts::default()));
     assert_eq!(
         counts["refs/heads/orph"],
-        Counts {
-            ahead: 1,
-            behind: 1
-        }
+        (
+            c,
+            Counts {
+                ahead: 1,
+                behind: 1
+            }
+        )
     );
 }
 
@@ -155,9 +166,9 @@ fn left_right_prints_behind_first() {
 
 #[test]
 fn both_count_forms_agree_for_one_pair() {
-    let atom = parse_ahead_behind("refs/heads/feat\x002 1\n");
+    let atom = parse_ahead_behind(&format!("refs/heads/feat\0{}\x002 1\n", "a".repeat(40)));
     let left_right = parse_left_right("1\t2\n");
-    assert_eq!(Some(atom["refs/heads/feat"]), left_right);
+    assert_eq!(Some(atom["refs/heads/feat"].1), left_right);
 }
 
 #[test]

@@ -293,6 +293,27 @@ fn prunable_folder_is_missing_without_numbers() {
 }
 
 #[test]
+fn a_locked_worktree_whose_folder_is_gone_is_missing_and_never_read() {
+    let rig = RepoRig::new("wt-locked-gone");
+    let dir = rig.lane("locked-gone", &["-b", "lk"], &["int"]);
+    git(&rig.repo, &["worktree", "lock", dir.to_str().unwrap()]);
+    std::fs::remove_dir_all(&dir).unwrap();
+    let key = key_of(&rig);
+    let got = reply(&rig);
+    idle(&rig, &key);
+    let row = entry(&got, "locked-gone");
+    assert_eq!(row["locked"], true, "{row}");
+    assert_eq!(row["missing"], true, "{row}");
+    assert_eq!(row["base"], Value::Null);
+    assert_eq!(row["work"], Value::Null);
+    let again = reply(&rig);
+    idle(&rig, &key);
+    assert_eq!(entry(&again, "locked-gone")["missing"], true);
+    assert_eq!(rig.launcher.count_at("status", "locked-gone"), 0);
+    assert_eq!(rig.launcher.count_at("diff", "locked-gone"), 0);
+}
+
+#[test]
 fn bare_main_left_out_without_integration() {
     let rig = RepoRig::new("wt-bare");
     let bare = rig.t.path("bare.git");

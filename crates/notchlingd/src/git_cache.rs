@@ -14,6 +14,7 @@ pub const READ_STOP_MS: i64 = 1_500;
 pub const LINES_BUDGET_MS: i64 = 1_000;
 pub const SLOW_EVERY_MS: i64 = 15_000;
 pub const PENDING_AGAIN_MS: i64 = 2_000;
+pub const FAILED_FOR_MS: i64 = 60_000;
 
 type Pair = (String, String);
 
@@ -120,6 +121,39 @@ impl Numbers {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    Counts,
+    Lines,
+}
+
+#[derive(Default)]
+pub struct Failures {
+    at: HashMap<(Kind, Pair), i64>,
+}
+
+impl Failures {
+    pub fn mark(&mut self, kind: Kind, base: &str, head: &str, now_ms: i64) {
+        self.at.retain(|_, at| now_ms - *at < FAILED_FOR_MS);
+        if self.at.len() >= NUMBERS_CAP {
+            self.at.clear();
+        }
+        self.at.insert((kind, pair(base, head)), now_ms);
+    }
+
+    pub fn has(&mut self, kind: Kind, base: &str, head: &str, now_ms: i64) -> bool {
+        let key = (kind, pair(base, head));
+        match self.at.get(&key) {
+            Some(at) if now_ms - *at < FAILED_FOR_MS => true,
+            Some(_) => {
+                self.at.remove(&key);
+                false
+            }
+            None => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Listed {
     pub worktrees: Vec<WorktreeEntry>,
@@ -133,6 +167,7 @@ pub struct Listed {
 pub struct RepoCache {
     pub listed: Option<(i64, Listed)>,
     pub numbers: Numbers,
+    pub failed: Failures,
     pub work: HashMap<String, Work>,
     pub facts: HashMap<String, (Option<i64>, String)>,
     pub reading: HashSet<String>,

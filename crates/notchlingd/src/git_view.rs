@@ -1,5 +1,5 @@
 use crate::acting_ops::now_ms;
-use crate::git_cache::{Budget, Listed, READ_STOP_MS};
+use crate::git_cache::{Budget, Kind, Listed, READ_STOP_MS};
 use crate::git_ops::{lock, GitOps};
 use notchling_engine::git::branch_list::Bases;
 use notchling_engine::git::nearest::{candidates, pick, short_name, Candidate};
@@ -27,6 +27,13 @@ pub struct Snapshot<'a> {
     reader: &'a Reader<'a>,
     key: PathBuf,
     budget: Budget,
+}
+
+fn folder_gone(path: &str) -> bool {
+    matches!(
+        std::fs::symlink_metadata(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 fn commit_in(refs: &[RefRow], rev: &str) -> Option<String> {
@@ -114,6 +121,12 @@ impl GitOps {
                 listed
             }
         };
+        let mut listed = listed;
+        for entry in listed.worktrees.iter_mut() {
+            if !entry.bare && !entry.prunable && folder_gone(&entry.path) {
+                entry.prunable = true;
+            }
+        }
         let bases = bases_of(&listed, &refs);
         Ok(Snapshot {
             listed,
@@ -163,6 +176,24 @@ impl Snapshot<'_> {
             .counts(base, head)
     }
 
+    fn failed(&self, base: &str, head: &str) -> bool {
+        lock(&self.ops.cache).repo(&self.key, now_ms()).failed.has(
+            Kind::Counts,
+            base,
+            head,
+            now_ms(),
+        )
+    }
+
+    fn fail(&self, base: &str, head: &str) {
+        lock(&self.ops.cache).repo(&self.key, now_ms()).failed.mark(
+            Kind::Counts,
+            base,
+            head,
+            now_ms(),
+        );
+    }
+
     fn store(&self, base: &str, head: &str, counts: Counts) {
         lock(&self.ops.cache)
             .repo(&self.key, now_ms())
@@ -194,6 +225,7 @@ impl Snapshot<'_> {
                 heads
                     .iter()
                     .filter(|head| snap.lookup(&base.commit, head).is_none())
+                    .filter(|head| !snap.failed(&base.commit, head))
                     .cloned()
                     .collect()
             };
@@ -204,8 +236,8 @@ impl Snapshot<'_> {
                 match self.reader.ahead_behind_all(&base.commit) {
                     Ok(Some(found)) => {
                         for row in &self.refs {
-                            if let Some(counts) = found.get(&row.refname) {
-                                self.store(&base.commit, &row.commit, *counts);
+                            if let Some((commit, counts)) = found.get(&row.refname) {
+                                self.store(&base.commit, commit, *counts);
                             }
                         }
                     }
@@ -217,8 +249,9 @@ impl Snapshot<'_> {
                 if !self.may_start() {
                     break;
                 }
-                if let Ok(Some(counts)) = self.reader.left_right(&base.commit, &head) {
-                    self.store(&base.commit, &head, counts);
+                match self.reader.left_right(&base.commit, &head) {
+                    Ok(Some(counts)) => self.store(&base.commit, &head, counts),
+                    _ => self.fail(&base.commit, &head),
                 }
             }
         }
@@ -264,12 +297,22 @@ impl Snapshot<'_> {
         if let Some(known) = self.lookup(&base.commit, head) {
             return Some(known);
         }
+        if self.failed(&base.commit, head) {
+            return Some(None);
+        }
         if !self.may_start() {
             return None;
         }
-        let found = self.reader.left_right(&base.commit, head).ok().flatten()?;
-        self.store(&base.commit, head, found);
-        self.lookup(&base.commit, head)
+        match self.reader.left_right(&base.commit, head) {
+            Ok(Some(found)) => {
+                self.store(&base.commit, head, found);
+                self.lookup(&base.commit, head)
+            }
+            _ => {
+                self.fail(&base.commit, head);
+                Some(None)
+            }
+        }
     }
 
     fn confirm(&self, base: &str, head: &str) -> Option<bool> {

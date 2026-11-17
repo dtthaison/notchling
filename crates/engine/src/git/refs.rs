@@ -113,14 +113,25 @@ fn two_numbers(text: &str) -> Option<(u64, u64)> {
     words.next().is_none().then_some((first, second))
 }
 
-pub fn parse_ahead_behind(text: &str) -> HashMap<String, Counts> {
+pub type CountsByRef = HashMap<String, (String, Counts)>;
+
+pub fn parse_ahead_behind(text: &str) -> CountsByRef {
     let mut counts = HashMap::new();
     for line in text.lines() {
-        let Some((refname, numbers)) = line.split_once('\0') else {
+        let mut fields = line.splitn(3, '\0');
+        let (Some(refname), Some(commit), Some(numbers)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
             continue;
         };
+        if commit.is_empty() {
+            continue;
+        }
         if let Some((ahead, behind)) = two_numbers(numbers) {
-            counts.insert(refname.to_string(), Counts { ahead, behind });
+            counts.insert(
+                refname.to_string(),
+                (commit.to_string(), Counts { ahead, behind }),
+            );
         }
     }
     counts

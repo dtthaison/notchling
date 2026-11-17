@@ -1,5 +1,5 @@
 use crate::acting_ops::now_ms;
-use crate::git_cache::{Budget, LINES_BUDGET_MS};
+use crate::git_cache::{Budget, Kind, LINES_BUDGET_MS};
 use crate::git_ops::{lock, GitOps};
 use crate::git_view::Snapshot;
 use crate::git_work_reads::await_reads;
@@ -77,10 +77,13 @@ impl GitOps {
             detached_facts: &snap.facts,
         };
         let counts = |base: &Candidate, head: &str| {
-            let known = lock(&self.cache)
-                .repo(key, now_ms())
-                .numbers
-                .counts(&base.commit, head);
+            let mut cache = lock(&self.cache);
+            let repo = cache.repo(key, now_ms());
+            let mut known = repo.numbers.counts(&base.commit, head);
+            if known.is_none() && repo.failed.has(Kind::Counts, &base.commit, head, now_ms()) {
+                known = Some(None);
+            }
+            drop(cache);
             if known.is_none() {
                 if let Some(gaps) = gaps {
                     gaps.counts
@@ -91,10 +94,13 @@ impl GitOps {
             known
         };
         let lines = |base: &Candidate, head: &str| {
-            let known = lock(&self.cache)
-                .repo(key, now_ms())
-                .numbers
-                .lines(&base.commit, head);
+            let mut cache = lock(&self.cache);
+            let repo = cache.repo(key, now_ms());
+            let mut known = repo.numbers.lines(&base.commit, head);
+            if known.is_none() && repo.failed.has(Kind::Lines, &base.commit, head, now_ms()) {
+                known = Some(None);
+            }
+            drop(cache);
             if known.is_none() {
                 if let Some(gaps) = gaps {
                     gaps.lines
@@ -150,12 +156,12 @@ impl GitOps {
                     return;
                 }
                 tried.insert(pair.clone());
-                if let Ok(found) = reader.lines(&pair.0, &pair.1) {
-                    let found: Option<Lines> = found;
-                    lock(&self.cache)
-                        .repo(key, now_ms())
-                        .numbers
-                        .put_lines(&pair.0, &pair.1, found);
+                let found: Result<Option<Lines>, _> = reader.lines(&pair.0, &pair.1);
+                let mut cache = lock(&self.cache);
+                let repo = cache.repo(key, now_ms());
+                match found {
+                    Ok(found) => repo.numbers.put_lines(&pair.0, &pair.1, found),
+                    Err(_) => repo.failed.mark(Kind::Lines, &pair.0, &pair.1, now_ms()),
                 }
             }
         }

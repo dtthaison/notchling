@@ -4,6 +4,7 @@ use crate::git_testkit::{git, git_out, RepoRig};
 use crate::inbox_ops_tests::app;
 use crate::op_group::OpGroup;
 use notchling_engine::git::reader::Reader;
+use notchling_engine::git::refs::Counts;
 use notchling_local_api::{ops, ApiError, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -14,18 +15,18 @@ fn ask(rig: &RepoRig, cwd: &str) -> Result<Value, ApiError> {
         .call(&app(), ops::GIT_BRANCH_LIST, &json!({ "cwd": cwd }))
 }
 
-fn reply(rig: &RepoRig) -> Value {
+pub(crate) fn reply(rig: &RepoRig) -> Value {
     ask(rig, &rig.cwd()).unwrap()
 }
 
-fn key_of(rig: &RepoRig) -> PathBuf {
+pub(crate) fn key_of(rig: &RepoRig) -> PathBuf {
     let reader = Reader::open(&rig.cwd(), &*rig.launcher).unwrap();
     let key = reader.common_dir().unwrap();
     rig.launcher.clear();
     key
 }
 
-fn idle(rig: &RepoRig, key: &Path) {
+pub(crate) fn idle(rig: &RepoRig, key: &Path) {
     let end = Instant::now() + Duration::from_secs(30);
     loop {
         let reading = lock(&rig.ops.cache).repo(key, now_ms()).reading.len();
@@ -37,7 +38,7 @@ fn idle(rig: &RepoRig, key: &Path) {
     }
 }
 
-fn branches(reply: &Value) -> &Vec<Value> {
+pub(crate) fn branches(reply: &Value) -> &Vec<Value> {
     reply["branches"].as_array().unwrap()
 }
 
@@ -67,7 +68,7 @@ fn settled(rig: &RepoRig) -> Value {
     panic!("never settled");
 }
 
-fn shortstats(rig: &RepoRig) -> usize {
+pub(crate) fn shortstats(rig: &RepoRig) -> usize {
     rig.launcher
         .seen()
         .iter()
@@ -453,4 +454,74 @@ fn remote_url_never_in_reply_or_audit() {
             assert!(!text.contains(secret), "{secret} in {text}");
         }
     }
+}
+
+fn counts_of(rig: &RepoRig, key: &Path, base: &str, head: &str) -> Option<Option<Counts>> {
+    lock(&rig.ops.cache)
+        .repo(key, now_ms())
+        .numbers
+        .counts(base, head)
+}
+
+#[test]
+fn a_ref_moved_between_the_two_reads_stores_nothing_under_the_old_commit() {
+    let rig = RepoRig::new("bl-moved");
+    let int = git_out(&rig.repo, &["rev-parse", "int"]);
+    let old = git_out(&rig.repo, &["rev-parse", "lane-a"]);
+    let repo = rig.repo.clone();
+    let target = int.clone();
+    rig.launcher.before_once("ahead-behind", move || {
+        git(&repo, &["update-ref", "refs/heads/lane-a", &target]);
+    });
+    let key = key_of(&rig);
+    reply(&rig);
+    idle(&rig, &key);
+    assert_eq!(
+        counts_of(&rig, &key, &int, &old),
+        Some(Some(Counts {
+            ahead: 2,
+            behind: 0
+        }))
+    );
+}
+
+#[test]
+fn a_failing_lines_read_is_remembered_and_the_row_settles_without_numbers() {
+    let rig = RepoRig::new("bl-lines-fail");
+    rig.launcher.fail("diff", Some("--shortstat"));
+    let key = key_of(&rig);
+    let first = reply(&rig);
+    idle(&rig, &key);
+    assert_eq!(row(&first, "lane-a")["pending"], false, "{first}");
+    let before = shortstats(&rig);
+    assert!(before >= 1);
+    let second = reply(&rig);
+    idle(&rig, &key);
+    assert_eq!(shortstats(&rig), before, "the failed diff ran again");
+    let lane = row(&second, "lane-a");
+    assert_eq!(lane["pending"], false, "{second}");
+    assert_eq!(lane["lines"], Value::Null);
+    assert_eq!(second["pending"], 0, "{second}");
+}
+
+#[test]
+fn a_failing_count_read_is_remembered_and_the_row_settles_without_numbers() {
+    let rig = RepoRig::new("bl-counts-fail");
+    rig.launcher.old_git(true);
+    rig.launcher.fail("rev-list", Some("--left-right"));
+    let key = key_of(&rig);
+    let first = reply(&rig);
+    idle(&rig, &key);
+    assert_eq!(row(&first, "lane-a")["pending"], false, "{first}");
+    rig.launcher.clear();
+    let second = reply(&rig);
+    idle(&rig, &key);
+    assert_eq!(
+        rig.launcher.count("rev-list"),
+        0,
+        "the failed count ran again"
+    );
+    assert_eq!(row(&second, "lane-a")["pending"], false, "{second}");
+    assert_eq!(row(&second, "lane-a")["ahead"], Value::Null);
+    assert_eq!(second["pending"], 0, "{second}");
 }

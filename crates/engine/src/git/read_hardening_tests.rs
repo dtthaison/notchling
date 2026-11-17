@@ -298,7 +298,7 @@ fn the_reader_runs_nothing(rig: &Rig, control: &[&str]) {
     assert_eq!(reader.worktrees().unwrap().0.len(), 2);
     assert!(reader.refs().unwrap().0.len() >= 2);
     let all = reader.ahead_behind_all("main").unwrap().unwrap();
-    assert_eq!(all["refs/heads/feat"].ahead, 1);
+    assert_eq!(all["refs/heads/feat"].1.ahead, 1);
     assert_eq!(reader.left_right("main", &feat).unwrap().unwrap().ahead, 1);
     let lines = reader.lines("main", &feat).unwrap().unwrap();
     assert_eq!((lines.added, lines.files), (1, 1));

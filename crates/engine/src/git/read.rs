@@ -78,6 +78,7 @@ pub(crate) fn command(cwd: &str, drivers: &[String], args: &[&str]) -> Command {
     }
     command
         .with_env("GIT_TERMINAL_PROMPT", Some("0"))
+        .with_env("GIT_NO_LAZY_FETCH", Some("1"))
         .with_env("GIT_PAGER", Some("cat"))
         .with_env("LC_ALL", Some("C"))
 }

@@ -25,7 +25,11 @@ pub struct Recorded {
     seen: Mutex<Vec<Seen>>,
     delay: Mutex<Option<(String, Duration)>>,
     old_git: AtomicBool,
+    hook: Mutex<Option<(String, Hook)>>,
+    failing: Mutex<Option<(String, String)>>,
 }
+
+type Hook = Box<dyn FnOnce() + Send>;
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -49,11 +53,21 @@ impl Recorded {
             seen: Mutex::new(Vec::new()),
             delay: Mutex::new(None),
             old_git: AtomicBool::new(false),
+            hook: Mutex::new(None),
+            failing: Mutex::new(None),
         })
     }
 
     pub fn delay(&self, sub: &str, by: Option<Duration>) {
         *lock(&self.delay) = by.map(|by| (sub.to_owned(), by));
+    }
+
+    pub fn before_once(&self, arg: &str, hook: impl FnOnce() + Send + 'static) {
+        *lock(&self.hook) = Some((arg.to_owned(), Box::new(hook)));
+    }
+
+    pub fn fail(&self, sub: &str, arg: Option<&str>) {
+        *lock(&self.failing) = arg.map(|arg| (sub.to_owned(), arg.to_owned()));
     }
 
     pub fn old_git(&self, on: bool) {
@@ -112,6 +126,29 @@ impl Launcher for Recorded {
             .map(|(_, by)| *by);
         if let Some(by) = wait {
             std::thread::sleep(by);
+        }
+        let fire = {
+            let mut held = lock(&self.hook);
+            match held.take() {
+                Some((arg, hook)) if command.argv.iter().any(|a| a.contains(&arg)) => Some(hook),
+                other => {
+                    *held = other;
+                    None
+                }
+            }
+        };
+        if let Some(hook) = fire {
+            hook();
+        }
+        let broken = lock(&self.failing)
+            .as_ref()
+            .is_some_and(|(name, arg)| *name == sub && command.argv.iter().any(|a| a == arg));
+        if broken {
+            return Ok(LaunchOutput {
+                code: 2,
+                output: String::new(),
+                stderr: "fatal: scripted failure\n".to_owned(),
+            });
         }
         let asks_ahead_behind = command.argv.iter().any(|a| a.contains("ahead-behind"));
         if self.old_git.load(Ordering::SeqCst) && sub == "for-each-ref" && asks_ahead_behind {

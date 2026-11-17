@@ -1,7 +1,7 @@
 use crate::git_args::FRESH_READS;
 use crate::git_cache::{
-    pick_reads, Budget, GitCache, Listed, Numbers, IDLE_DROP_MS, LIST_FOR_MS, MISSING_READS,
-    NUMBERS_CAP, READ_STOP_MS, STALE_MS,
+    pick_reads, Budget, Failures, GitCache, Kind, Listed, Numbers, FAILED_FOR_MS, IDLE_DROP_MS,
+    LIST_FOR_MS, MISSING_READS, NUMBERS_CAP, READ_STOP_MS, STALE_MS,
 };
 use notchling_engine::git::branch_list::Work;
 use notchling_engine::git::refs::{Counts, Lines};
@@ -258,4 +258,18 @@ fn constants_match_the_spec() {
     assert_eq!(MISSING_READS, 4);
     assert_eq!(FRESH_READS, 2);
     assert_eq!(READ_STOP_MS, 1_500);
+}
+
+#[test]
+fn a_failed_pair_is_remembered_for_a_while_per_kind() {
+    let mut failed = Failures::default();
+    let (base, head) = (commit(1), commit(2));
+    assert!(!failed.has(Kind::Lines, &base, &head, 0));
+    failed.mark(Kind::Lines, &base, &head, 1_000);
+    assert!(failed.has(Kind::Lines, &base, &head, 1_000));
+    assert!(failed.has(Kind::Lines, &base, &head, 1_000 + FAILED_FOR_MS - 1));
+    assert!(!failed.has(Kind::Counts, &base, &head, 1_000));
+    assert!(!failed.has(Kind::Lines, &base, &commit(3), 1_000));
+    assert!(!failed.has(Kind::Lines, &base, &head, 1_000 + FAILED_FOR_MS));
+    assert!(!failed.has(Kind::Lines, &base, &head, 1_000));
 }

@@ -5,11 +5,10 @@ use super::read::{
 };
 use super::refs::{
     parse_ahead_behind, parse_left_right, parse_refs, parse_shortstat, plain_label, remote_hosts,
-    Counts, Lines, RefRow, REF_FORMAT, SUBJECT_CHARS,
+    Counts, CountsByRef, Lines, RefRow, REF_FORMAT, SUBJECT_CHARS,
 };
 use super::worktrees::{parse_worktrees, WorktreeEntry};
 use crate::control::{LaunchOutput, Launcher};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const GITHUB: &str = "github.com";
@@ -121,12 +120,9 @@ impl<'a> Reader<'a> {
         Ok((rows, listed_cut || cut))
     }
 
-    pub fn ahead_behind_all(
-        &self,
-        base_rev: &str,
-    ) -> Result<Option<HashMap<String, Counts>>, Failure> {
+    pub fn ahead_behind_all(&self, base_rev: &str) -> Result<Option<CountsByRef>, Failure> {
         let base = rev_arg(base_rev)?;
-        let format = format!("--format=%(refname)%00%(ahead-behind:{base})");
+        let format = format!("--format=%(refname)%00%(objectname)%00%(ahead-behind:{base})");
         let (out, cut) = self.run_list(&["for-each-ref", &format, "refs/heads", "refs/remotes"])?;
         if out.code != 0 {
             return Ok(None);
@@ -152,7 +148,7 @@ impl<'a> Reader<'a> {
         let out = self.run(&args)?;
         match out.code {
             0 => Ok(Some(parse_shortstat(&out.output))),
-            128 => Ok(None),
+            128 if out.stderr.contains("no merge base") => Ok(None),
             _ => Err(refusal(self.launcher, &self.cwd, &out)),
         }
     }

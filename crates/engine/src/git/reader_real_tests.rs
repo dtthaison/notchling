@@ -255,7 +255,10 @@ fn ahead_behind_matches_rev_list() {
     let (refs, _) = reader.refs().unwrap();
     assert!(refs.len() >= 6);
     for row in &refs {
-        let got = all.get(&row.refname).copied();
+        let got = all.get(&row.refname).map(|(commit, counts)| {
+            assert_eq!(*commit, row.commit);
+            *counts
+        });
         assert_eq!(
             got,
             Some(rev_list_counts(&rig, "int", &row.refname)),
@@ -270,14 +273,14 @@ fn ahead_behind_matches_rev_list() {
         );
     }
     assert_eq!(
-        all["refs/heads/main"],
+        all["refs/heads/main"].1,
         Counts {
             ahead: 0,
             behind: 3
         }
     );
     assert_eq!(
-        all["refs/heads/lane-a"],
+        all["refs/heads/lane-a"].1,
         Counts {
             ahead: 2,
             behind: 0
@@ -322,6 +325,37 @@ fn unrelated_history_has_no_lines() {
     let l = launcher();
     let reader = open(&rig.cwd(), &*l);
     assert_eq!(reader.lines("main", &rig.rev("orphan")), Ok(None));
+}
+
+#[test]
+fn lines_take_128_as_unrelated_only_with_no_merge_base() {
+    let good = "0123456789abcdef0123456789abcdef01234567";
+    let fake = FakeLauncher::new();
+    scripted(&fake);
+    let reader = Reader::open("/w", &fake).unwrap();
+    fake.push_output(Ok(LaunchOutput {
+        code: 128,
+        output: String::new(),
+        stderr: format!("fatal: main...{good}: no merge base\n"),
+    }));
+    assert_eq!(reader.lines("main", good), Ok(None));
+    fake.push_output(Ok(LaunchOutput {
+        code: 128,
+        output: String::new(),
+        stderr: format!("fatal: bad object {good}\n"),
+    }));
+    assert!(matches!(
+        reader.lines("main", good),
+        Err(Failure::Failed(_))
+    ));
+}
+
+#[test]
+fn lines_for_a_missing_object_is_an_error_not_unrelated() {
+    let rig = rig("reader-lines-missing");
+    let l = launcher();
+    let reader = open(&rig.cwd(), &*l);
+    assert!(reader.lines("main", &"1".repeat(40)).is_err());
 }
 
 #[test]

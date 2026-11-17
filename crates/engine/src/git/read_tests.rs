@@ -648,3 +648,12 @@ fn existing_stat_and_diff_unchanged() {
     };
     assert_eq!(serde_json::to_value(with).unwrap()["changed_at"], 7);
 }
+
+#[test]
+fn every_read_never_fetches_a_missing_object() {
+    let command = super::read::command("/w", &[], &["status"]);
+    assert_eq!(
+        command.env.get("GIT_NO_LAZY_FETCH"),
+        Some(&Some("1".to_owned()))
+    );
+}
