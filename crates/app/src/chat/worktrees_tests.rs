@@ -541,18 +541,31 @@ fn more_row_three_forms_and_absent() {
     assert_eq!(more(&wt).as_deref(), Some("39 other branches"));
     wt.no_worktree = 1;
     assert_eq!(more(&wt).as_deref(), Some("1 other branch"));
-    let mut past = many(7);
+    let past = many(7);
     assert_eq!(
         more(&past).as_deref(),
         Some("1 more worktree \u{b7} main and 39 branches")
     );
-    past.no_worktree = 0;
-    assert_eq!(more(&past), None);
     wt.no_worktree = 0;
     assert_eq!(more(&wt), None);
     let mut no_default = many(1);
     no_default.default = None;
     assert_eq!(more(&no_default).as_deref(), Some("39 other branches"));
+}
+
+#[test]
+fn more_worktrees_alone_when_no_other_branch() {
+    let more =
+        |wt: &Worktrees| section(&status("int"), None, Some(wt), &none(wt.list.len()), NOW).more;
+    let mut past = many(7);
+    past.no_worktree = 0;
+    assert_eq!(more(&past).as_deref(), Some("1 more worktree"));
+    let mut wider = many(9);
+    wider.no_worktree = 0;
+    assert_eq!(more(&wider).as_deref(), Some("3 more worktrees"));
+    let mut shown = many(6);
+    shown.no_worktree = 0;
+    assert_eq!(more(&shown), None);
 }
 
 #[test]

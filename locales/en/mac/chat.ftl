@@ -469,6 +469,11 @@ chat-git-more-worktrees = { $count ->
     [one] { $text } more worktree · { $rest }
    *[other] { $text } more worktrees · { $rest }
 }
+# Alone when no other branch is left to count.
+chat-git-more-worktrees-only = { $count ->
+    [one] { $text } more worktree
+   *[other] { $text } more worktrees
+}
 
 ## Window
 

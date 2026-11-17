@@ -519,7 +519,10 @@ fn other_row(entry: &Worktree, held: Option<&Occupancy>, minute_ms: i64) -> Othe
 
 fn more_line(worktrees: &Worktrees, hidden: usize) -> Option<String> {
     if worktrees.no_worktree == 0 {
-        return None;
+        return match hidden {
+            0 => None,
+            n => Some(t::chat::git_more_worktrees_only(n as u64, &n.to_string())),
+        };
     }
     let count = worktrees.no_worktree;
     let text = count.to_string();
