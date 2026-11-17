@@ -4,9 +4,10 @@ use crate::acting_ops::{bad, forbidden, now_ms, Room};
 use crate::agy_ops::valid_session;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
+use crate::outbox_anchor::{count_anchored, message_of};
+use crate::outbox_courier::live_files;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
 use crate::outbox_settle::Settle;
-use crate::outbox_verify::count_row;
 use notchling_engine::cluster::Qualified;
 use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
@@ -210,17 +211,30 @@ impl OutboxOps {
     }
 
     pub(crate) fn settle_sending(&self, row: &Row, now_ms: i64) -> bool {
-        let seen = match row.tool {
-            Tool::Claude => fresh::job_row(&self.roots, &Probes::from_proc(), &row.session)
-                .and_then(|agent| count_row(agent.transcript_path.as_deref()?, &agent.name, row)),
-            Tool::Codex | Tool::Antigravity => None,
-        };
         let before = match (row.seen_before, row.queued_before) {
             (Some(taken), Some(enqueued)) => Some(Seen {
                 taken: usize::try_from(taken).unwrap_or(0),
                 enqueued: usize::try_from(enqueued).unwrap_or(0),
             }),
             _ => None,
+        };
+        let seen = match row.tool {
+            Tool::Claude => {
+                let files = live_files(self.roots.clone());
+                files.row(&row.session).and_then(|agent| {
+                    let path = files.transcript(&agent)?;
+                    let message = message_of(row);
+                    count_anchored(
+                        files.as_ref(),
+                        &agent,
+                        &path,
+                        row,
+                        &message,
+                        before.unwrap_or_default(),
+                    )
+                })
+            }
+            Tool::Codex | Tool::Antigravity => None,
         };
         let judged = before.map_or(Verdict::Unsure, |b| verdict(seen, b, VERIFY_LOOK_MS));
         let (to, why, then) = match judged {

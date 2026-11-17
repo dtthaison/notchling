@@ -9,14 +9,18 @@ use notchling_engine::outbox::{
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
+use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
+use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
 use notchling_engine::terminal::input_box;
-use notchling_engine::transcript::locate::find_transcript;
+use notchling_engine::transcript::locate::{find_in_folders, find_transcript, project_folders};
 use notchling_engine::transcript::queue_state::{queue_state, QueueState};
 use notchling_engine::transcript::restart;
 use notchling_events::kinds::choices::FailWhy;
 use notchling_local_api::{ApiError, ErrorCode};
+use serde_json::Value;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -75,6 +79,27 @@ pub(crate) trait JobFiles: Send + Sync {
     fn locate(&self, _agent: &Agent) -> Option<String> {
         None
     }
+    fn transcript(&self, agent: &Agent) -> Option<String> {
+        agent
+            .transcript_path
+            .clone()
+            .filter(|path| Path::new(path).is_file())
+            .or_else(|| self.locate(agent))
+            .or_else(|| agent.transcript_path.clone())
+    }
+    fn born_ms(&self, path: &str) -> Option<i64> {
+        made_ms(path)
+    }
+    fn shares_name(&self, _agent: &Agent, _path: &str) -> bool {
+        false
+    }
+}
+
+pub(crate) fn made_ms(path: &str) -> Option<i64> {
+    let meta = std::fs::metadata(path).ok()?;
+    let at = meta.created().or_else(|_| meta.modified()).ok()?;
+    let ms = at.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+    i64::try_from(ms).ok()
 }
 
 pub(crate) struct LiveFiles {
@@ -95,10 +120,8 @@ impl JobFiles for LiveFiles {
     }
 
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool {
-        agent
-            .transcript_path
-            .as_deref()
-            .is_some_and(|path| restart::restarted(path, now_ms))
+        self.transcript(agent)
+            .is_some_and(|path| restart::restarted(&path, now_ms))
     }
 
     fn queue(&self, transcript: &str) -> Option<QueueState> {
@@ -110,11 +133,85 @@ impl JobFiles for LiveFiles {
     }
 
     fn locate(&self, agent: &Agent) -> Option<String> {
-        config_dirs(&self.roots).into_iter().find_map(|config| {
-            let projects = config.dir.join("projects");
-            find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd)
+        let stem = agent
+            .transcript_path
+            .as_deref()
+            .and_then(|path| Path::new(path).file_stem())
+            .map(|stem| stem.to_string_lossy().into_owned());
+        let ids: Vec<String> = agent
+            .resume_session_id
+            .clone()
+            .into_iter()
+            .chain(stem)
+            .chain(Some(agent.id.clone()))
+            .collect();
+        let config = config_dirs(&self.roots)
+            .into_iter()
+            .find(|c| c.lane.as_ref().map(|l| l.path.as_str()) == agent.config_dir.as_deref())?;
+        let cwds: Vec<&str> = [agent.worktree_path.as_deref(), Some(agent.cwd.as_str())]
+            .into_iter()
+            .flatten()
+            .collect();
+        find_in_folders(&config.dir.join("projects").to_string_lossy(), &ids, &cwds)
+    }
+
+    fn shares_name(&self, agent: &Agent, path: &str) -> bool {
+        let AgentTarget::Job(short) = &agent.target else {
+            return false;
+        };
+        let Some(config) = config_dirs(&self.roots)
+            .into_iter()
+            .find(|config| owns(&config.dir.join("projects"), Path::new(path)))
+        else {
+            return true;
+        };
+        let Some(folder) = Path::new(path)
+            .parent()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+        else {
+            return true;
+        };
+        let projects = config.dir.join("projects").to_string_lossy().into_owned();
+        let text =
+            |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(String::from);
+        let lands_here = |cwd: Option<String>, worktree: Option<String>, link: Option<String>| {
+            [cwd, worktree]
+                .into_iter()
+                .flatten()
+                .filter(|dir| !dir.is_empty())
+                .any(|dir| project_folders(&dir).contains(&folder))
+                || link
+                    .as_deref()
+                    .and_then(|link| Path::new(link).parent()?.file_name())
+                    .is_some_and(|name| name.to_string_lossy() == folder.as_str())
+        };
+        let job = read_jobs(&config.dir).iter().any(|(id, job)| {
+            id != short
+                && lands_here(
+                    text(job, "cwd"),
+                    text(job, "worktreePath"),
+                    text(job, "linkScanPath"),
+                )
+        });
+        job || read_sessions(&config.dir, &|_| true).iter().any(|session| {
+            text(session, "jobId").as_deref() != Some(short.as_str())
+                && lands_here(
+                    text(session, "cwd"),
+                    text(session, "worktreePath"),
+                    text(session, "sessionId")
+                        .and_then(|id| find_transcript(&projects, &id, &text(session, "cwd")?)),
+                )
         })
     }
+}
+
+fn owns(projects: &Path, path: &Path) -> bool {
+    path.starts_with(projects)
+        || match (projects.canonicalize(), path.canonicalize()) {
+            (Ok(projects), Ok(path)) => path.starts_with(projects),
+            _ => false,
+        }
 }
 
 pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
@@ -336,8 +433,8 @@ impl Courier for ClaudeCourier {
         let (job, missing) = self.job_of(row, fresh.as_ref(), now_ms);
         let queue = fresh
             .as_ref()
-            .and_then(|agent| agent.transcript_path.as_deref())
-            .and_then(|path| self.files.queue(path))
+            .and_then(|agent| self.files.transcript(agent))
+            .and_then(|path| self.files.queue(&path))
             .unwrap_or_default();
         let safe = self.safe.is_safe(&row.session, &queue);
         let reading = (row.kind == Kind::Command || safe || !queue.waiting.is_empty()).then(|| {

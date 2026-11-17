@@ -2,7 +2,7 @@ use crate::acting::Acting;
 use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
-    after, gate, After, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd, Verdict, Why,
+    after, gate, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd, Verdict, Why,
     ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
 };
 use notchling_engine::transcript::sent::Seen;
@@ -20,8 +20,14 @@ pub const UNSURE_LOOK_FOR_MS: i64 = 600_000;
 const LAND_TRIES: u32 = 3;
 const LAND_BACKOFF_MS: u64 = 40;
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Baseline {
+    pub seen: Seen,
+    pub anchor: Option<Anchor>,
+}
+
 pub trait Verifier: Send + Sync {
-    fn seen(&self, row: &Row) -> Option<Seen>;
+    fn seen(&self, row: &Row) -> Baseline;
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict;
     fn watch(&self, row: &Row, before: Seen, now_ms: i64) -> QueuedVerdict;
     fn next_look_ms(&self, row: &Row) -> Option<i64>;
@@ -38,8 +44,8 @@ pub trait Verifier: Send + Sync {
 pub struct NoVerify;
 
 impl Verifier for NoVerify {
-    fn seen(&self, _row: &Row) -> Option<Seen> {
-        None
+    fn seen(&self, _row: &Row) -> Baseline {
+        Baseline::default()
     }
 
     fn wait(&self, _row: &Row, _before: Seen, _entered_ms: i64) -> Verdict {
@@ -568,7 +574,7 @@ impl Postman {
 
     fn try_row(&mut self, row: &Row, guarded: bool, now: i64) -> Option<i64> {
         let store = self.inner.ops.store();
-        let taken = match store.take(&row.id, now) {
+        let mut taken = match store.take(&row.id, now) {
             Ok(Some(taken)) => taken,
             Ok(None) => return None,
             Err(_) => return Some(now + TICK_MS),
@@ -588,9 +594,10 @@ impl Postman {
         let courier = self.courier();
         let verifies = courier.verifies();
         let before = if verifies {
-            let seen = self.inner.verifier.seen(&taken).unwrap_or_default();
-            let _ = store.set_seen(&taken.id, seen);
-            seen
+            let based = self.inner.verifier.seen(&taken);
+            let _ = store.set_baseline(&taken.id, based.seen, based.anchor.as_ref());
+            taken.anchor = based.anchor;
+            based.seen
         } else {
             Seen::default()
         };

@@ -1,7 +1,7 @@
 use super::agent::{Agent, AgentGroup, AgentTarget};
 use super::iso::parse_iso_ms;
 use super::lanes::{config_dirs, Roots};
-use crate::transcript::locate::job_transcript;
+use crate::transcript::locate::{job_transcript_live, JobPaths};
 use crate::transcript::model::Timestamp;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -96,6 +96,16 @@ pub fn agent_from_job(
         since_ms = since_ms.max(ms as i64);
     }
     let session_id = str_field(job, "sessionId");
+    let transcript_path = job_transcript_live(
+        &JobPaths {
+            link_scan_path: str_field(job, "linkScanPath"),
+            session_id,
+            resume_session_id: str_field(job, "resumeSessionId"),
+            worktree_path: str_field(job, "worktreePath"),
+            cwd: Some(cwd.as_str()),
+        },
+        modified,
+    );
 
     Agent {
         id: session_id.unwrap_or(short_id).to_string(),
@@ -108,12 +118,7 @@ pub fn agent_from_job(
         since_ms,
         target: AgentTarget::Job(short_id.to_string()),
         suggested_reply: str_field(job, "suggestedReply").map(String::from),
-        transcript_path: job_transcript(
-            str_field(job, "linkScanPath"),
-            session_id,
-            str_field(job, "worktreePath"),
-            modified,
-        ),
+        transcript_path,
         host: "Background".to_string(),
         headless: false,
         config_dir: None,

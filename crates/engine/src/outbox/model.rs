@@ -80,6 +80,12 @@ impl Kind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Anchor {
+    pub file: Option<String>,
+    pub slack_ms: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     pub n: i64,
@@ -101,6 +107,7 @@ pub struct Row {
     pub tries: u32,
     pub next_ms: Option<i64>,
     pub noticed_ms: Option<i64>,
+    pub anchor: Option<Anchor>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

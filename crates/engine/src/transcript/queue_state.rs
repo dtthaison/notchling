@@ -1,11 +1,11 @@
 use super::message::Message;
-use super::restart::{carries_result, flag, WINDOW_BYTES};
+use super::restart::{carries_result, flag};
 use super::sent::{
     attachment_text, entry_matches, image_blocks, names, said, squeezed, took_prompt, Queue,
 };
-use super::tail::read_lines;
 use super::typed::typed_prompt;
 use super::util::{parse_object, str_of};
+use super::window::read_window;
 use serde_json::Value;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -68,11 +68,11 @@ fn is_known_operation(obj: &Value) -> bool {
     )
 }
 
-pub fn queue_state(path: &str) -> Option<QueueState> {
-    let lines = read_lines(path, WINDOW_BYTES).ok()?;
+fn replay(path: &str) -> Option<(Queue, u32)> {
+    let window = read_window(path).ok()?;
     let mut queue = Queue::default();
     let mut unknown = 0;
-    for line in &lines {
+    for line in &window.lines {
         let Some(map) = parse_object(line.as_bytes()) else {
             continue;
         };
@@ -110,12 +110,27 @@ pub fn queue_state(path: &str) -> Option<QueueState> {
             _ => {}
         }
     }
+    Some((queue, unknown))
+}
+
+pub fn queue_state(path: &str) -> Option<QueueState> {
+    let (queue, unknown) = replay(path)?;
     let waiting = queue
         .waiting
         .into_iter()
         .filter(|entry| prompt_like(entry))
         .collect();
     Some(QueueState { waiting, unknown })
+}
+
+pub fn queue_lists(path: &str, message: &Message) -> Option<bool> {
+    let (queue, _) = replay(path)?;
+    Some(
+        queue
+            .waiting
+            .iter()
+            .any(|entry| entry_matches(message, entry)),
+    )
 }
 
 #[cfg(test)]

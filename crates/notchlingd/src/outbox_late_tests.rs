@@ -1,7 +1,7 @@
 use super::*;
 use crate::event_assert::{of, text};
 use crate::outbox_courier::Courier;
-use crate::outbox_postman::{Couriers, Next, Postmen};
+use crate::outbox_postman::{Baseline, Couriers, Next, Postmen};
 use crate::outbox_testkit::{rig, Rig, IDLE, T0};
 use notchling_engine::bridge::net::files::iso8601;
 use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
@@ -126,7 +126,7 @@ struct Racing {
 }
 
 impl Verifier for Racing {
-    fn seen(&self, row: &Row) -> Option<Seen> {
+    fn seen(&self, row: &Row) -> Baseline {
         self.inner.seen(row)
     }
 
@@ -301,9 +301,10 @@ fn a_job_with_no_link_path_yet_is_found_by_its_session_id() {
         tries: 1,
         next_ms: None,
         noticed_ms: None,
+        anchor: None,
     };
-    let seen = verifier.seen(&row);
-    assert_eq!(seen.map(|s| s.taken), Some(1), "{seen:?}");
+    let based = verifier.seen(&row);
+    assert_eq!(based.seen.taken, 1, "{based:?}");
 }
 
 #[test]

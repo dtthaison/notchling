@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 pub const DB_NAME: &str = "notchling.db";
 
-const SCHEMA: i64 = 5;
+const SCHEMA: i64 = 6;
 
 const BUSY: Duration = Duration::from_secs(5);
 
@@ -132,7 +132,9 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              queued_before INTEGER,
              tries INTEGER NOT NULL DEFAULT 0,
              next_ms INTEGER,
-             noticed_ms INTEGER
+             noticed_ms INTEGER,
+             anchor_file TEXT,
+             anchor_slack_ms INTEGER
          );
          CREATE INDEX IF NOT EXISTS outbox_session ON outbox(session, n);
          CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
@@ -167,11 +169,43 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              closed_ms INTEGER
          );
          CREATE INDEX IF NOT EXISTS asks_session ON asks(session, n);
-         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);
-         PRAGMA user_version = 5;
-         COMMIT;",
+         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);",
         )
-    })
+    })?;
+    let finished = add_missing_columns(db).and_then(|()| {
+        db.execute_batch(&format!("PRAGMA user_version = {SCHEMA}; COMMIT;"))
+            .map_err(|e| e.to_string())
+    });
+    if finished.is_err() {
+        let _ = db.execute_batch("ROLLBACK");
+    }
+    finished
+}
+
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
+    ("outbox", "anchor_file", "TEXT"),
+    ("outbox", "anchor_slack_ms", "INTEGER"),
+];
+
+fn add_missing_columns(db: &Connection) -> Result<(), String> {
+    for (table, column, kind) in ADDED_COLUMNS {
+        let mut query = db
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(|e| e.to_string())?;
+        let present = query
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .any(|name| name == column);
+        drop(query);
+        if !present {
+            db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {kind}"))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 pub fn meta(db: &Connection, key: &str) -> Result<Option<String>, String> {

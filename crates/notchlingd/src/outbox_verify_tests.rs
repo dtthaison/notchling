@@ -804,3 +804,6 @@ fn a_closed_verifier_stops_waiting_and_leaves_the_verdict_open() {
         Verdict::Pending
     );
 }
+
+#[path = "outbox_follow_tests.rs"]
+mod follow;

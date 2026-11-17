@@ -23,3 +23,4 @@ pub mod tally;
 pub mod text;
 pub mod typed;
 pub mod util;
+mod window;
