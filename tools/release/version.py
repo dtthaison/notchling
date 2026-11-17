@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""The tag and build-number formulas of a release.
-
-`vX.Y.Z` is a Stable tag and `vX.Y.Z-beta.N` a Beta tag; anything else is not a version. release.py takes the
-version from `[workspace.package] version` in Cargo.toml, bundle-next.sh and release.yml write it into the
-bundle, and the Sparkle build number is X*1000000 + Y*10000 + Z*100 + N, with N 99 for a Stable.
-"""
-
 from __future__ import annotations
 
 import re
