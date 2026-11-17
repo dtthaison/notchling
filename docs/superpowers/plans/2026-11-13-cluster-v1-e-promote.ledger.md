@@ -288,3 +288,5 @@ e3: Re-review fixes (coordinator): ea54d766 — the takeover starts from the sna
 e3: Ruling R233: inbox notices of a promote carry the term and, where one term can see several, the run or the outage (`promote-failed:<term>:<run>`, `promote-start:<term>:<since>`), so a later failure is never dropped as a repeat.
 e3: Re-review of ea54d766 (agy gemini-4-hydrogen high, file reads only, 130 s): both fixed, nothing else found. Approved.
 e3: Wave 3 done: Tasks 8, 10 (a, b), 12, 13, 14, the final review and its fixes, and the maintainer decisions of 2026-11-16 (R201 failover not offered, the join token app-only). Left out on purpose: the rest of Task 7 (not in v1). The lane's target dir is deleted.
+
+e3: 2026-11-17 maintainer: R230 approved (Standby may send cluster.promote at app origin; protected policy test rename accepted). Removal of `notchling cluster token` CLI kept: a join token comes only from the app.
