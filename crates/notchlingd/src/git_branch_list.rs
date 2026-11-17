@@ -1,0 +1,132 @@
+use crate::acting_ops::now_ms;
+use crate::git_cache::{Budget, LINES_BUDGET_MS};
+use crate::git_ops::{lock, GitOps};
+use crate::git_view::Snapshot;
+use crate::git_work_reads::await_reads;
+use crate::git_worktrees::{absent, places, repo_name, Row};
+use notchling_engine::git::branch_list::{rows, BranchRow, ListInput, Work};
+use notchling_engine::git::nearest::Candidate;
+use notchling_engine::git::reader::Reader;
+use notchling_engine::git::refs::Lines;
+use notchling_engine::git::worktrees::WorktreeEntry;
+use notchling_local_api::ApiError;
+use serde_json::{json, Value};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+type Pair = (String, String);
+type Places = Vec<(
+    WorktreeEntry,
+    notchling_engine::git::branch_list::WorktreeOf,
+)>;
+
+impl GitOps {
+    pub(crate) fn branch_list(&self, cwd: &str) -> Result<Value, ApiError> {
+        let start = now_ms();
+        let Some((reader, key)) = self.open_repo(cwd)? else {
+            return Ok(json!({"repo": false}));
+        };
+        let Some(snap) = absent(self.snapshot(&reader, &key, start))? else {
+            return Ok(json!({"repo": false}));
+        };
+        let rows_in = self.rows_of(&snap, cwd);
+        let readable: Vec<&Row> = rows_in
+            .iter()
+            .filter(|row| !row.entry.prunable && row.base.is_some())
+            .collect();
+        let jobs = self.pick_jobs(&key, &readable, &[], start);
+        let reads = self.spawn_reads(&key, jobs, start);
+        let lines_budget = Budget::new(now_ms(), LINES_BUDGET_MS);
+        let bare = places(&rows_in, None);
+        self.read_lines(&snap, &reader, &key, &bare, &lines_budget);
+        await_reads(reads, start);
+        let work: HashMap<String, Work> = lock(&self.cache).repo(&key, now_ms()).work.clone();
+        let list = self.compute(&snap, &key, &places(&rows_in, Some(&work)), None);
+        let pending = list.iter().filter(|row| row.pending).count();
+        Ok(json!({
+            "repo": true,
+            "name": repo_name(&snap, &key),
+            "default": snap.listed.default,
+            "integration": snap.bases.integration.as_ref().map(|c| c.rev.clone()),
+            "fetched_at": snap.listed.fetched_at,
+            "truncated": snap.listed.truncated || snap.refs_truncated,
+            "pending": pending,
+            "branches": list,
+        }))
+    }
+
+    fn compute(
+        &self,
+        snap: &Snapshot,
+        key: &Path,
+        places: &Places,
+        missing: Option<&RefCell<Vec<Pair>>>,
+    ) -> Vec<BranchRow> {
+        let input = ListInput {
+            refs: &snap.refs,
+            worktrees: places,
+            remotes: &snap.listed.remotes,
+            bases: &snap.bases,
+            detached_facts: &snap.facts,
+        };
+        let counts = |base: &Candidate, head: &str| {
+            lock(&self.cache)
+                .repo(key, now_ms())
+                .numbers
+                .counts(&base.commit, head)
+        };
+        let lines = |base: &Candidate, head: &str| {
+            let known = lock(&self.cache)
+                .repo(key, now_ms())
+                .numbers
+                .lines(&base.commit, head);
+            if known.is_none() {
+                if let Some(missing) = missing {
+                    missing
+                        .borrow_mut()
+                        .push((base.commit.clone(), head.to_owned()));
+                }
+            }
+            known
+        };
+        rows(&input, &counts, &lines)
+    }
+
+    fn read_lines(
+        &self,
+        snap: &Snapshot,
+        reader: &Reader,
+        key: &Path,
+        places: &Places,
+        budget: &Budget,
+    ) {
+        let mut tried: HashSet<Pair> = HashSet::new();
+        loop {
+            let missing = RefCell::new(Vec::new());
+            self.compute(snap, key, places, Some(&missing));
+            let mut todo: Vec<Pair> = Vec::new();
+            for pair in missing.into_inner() {
+                if !tried.contains(&pair) && !todo.contains(&pair) {
+                    todo.push(pair);
+                }
+            }
+            if todo.is_empty() {
+                return;
+            }
+            for pair in todo {
+                if !budget.may_start(now_ms()) {
+                    return;
+                }
+                tried.insert(pair.clone());
+                if let Ok(found) = reader.lines(&pair.0, &pair.1) {
+                    let found: Option<Lines> = found;
+                    lock(&self.cache)
+                        .repo(key, now_ms())
+                        .numbers
+                        .put_lines(&pair.0, &pair.1, found);
+                }
+            }
+        }
+    }
+}

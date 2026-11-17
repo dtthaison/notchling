@@ -106,6 +106,7 @@ pub mod ops {
     pub const GIT_BRANCH_DIFF_FILE: &str = "git.branch_diff_file";
     pub const GIT_BRANCHES: &str = "git.branches";
     pub const GIT_WORKTREES: &str = "git.worktrees";
+    pub const GIT_BRANCH_LIST: &str = "git.branch_list";
 
     pub const ACTIVITY_LIST: &str = "activity.list";
     pub const LOG_VERIFY: &str = "log.verify";

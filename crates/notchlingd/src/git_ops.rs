@@ -14,13 +14,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const GIT_OPS: [&str; 6] = [
+pub const GIT_OPS: [&str; 7] = [
     ops::GIT_STATUS,
     ops::GIT_DIFF,
     ops::GIT_BRANCH_DIFF_STAT,
     ops::GIT_BRANCH_DIFF_FILE,
     ops::GIT_BRANCHES,
     ops::GIT_WORKTREES,
+    ops::GIT_BRANCH_LIST,
 ];
 
 const KNOWN_FOR: Duration = Duration::from_secs(5);
@@ -227,6 +228,7 @@ impl OpGroup for GitOps {
             ),
             ops::GIT_BRANCHES => self.branches(&real),
             ops::GIT_WORKTREES => self.worktrees(&real, args),
+            ops::GIT_BRANCH_LIST => self.branch_list(&real),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

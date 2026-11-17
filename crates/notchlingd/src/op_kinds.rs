@@ -105,6 +105,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::GIT_BRANCH_DIFF_FILE, Home::Quiet),
     (ops::GIT_BRANCHES, Home::Quiet),
     (ops::GIT_WORKTREES, Home::Quiet),
+    (ops::GIT_BRANCH_LIST, Home::Quiet),
     (ops::ACTIVITY_LIST, Home::Quiet),
     (ops::VERSIONS_GET, Home::Called),
     (ops::VERSIONS_WORKERS, Home::Quiet),

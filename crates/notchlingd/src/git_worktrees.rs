@@ -1,34 +1,30 @@
 use crate::acting_ops::now_ms;
 use crate::git_args::fresh_args;
-use crate::git_cache::{pick_reads, Budget, GitCache, READ_STOP_MS};
 use crate::git_ops::{failed, lock, GitOps};
 use crate::git_view::{Placed, Snapshot};
-use notchling_engine::control::Launcher;
+use crate::git_work_reads::{await_reads, Job};
 use notchling_engine::git::branch_list::{rows, ListInput, Work, WorktreeOf};
 use notchling_engine::git::nearest::short_name;
 use notchling_engine::git::reader::Reader;
 use notchling_engine::git::refs::{Counts, Lines, RefRow};
 use notchling_engine::git::worktrees::WorktreeEntry;
-use notchling_engine::git::{read_branch_stat, Failure};
+use notchling_engine::git::Failure;
 use notchling_local_api::ApiError;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 const HEAD_CHARS: usize = 7;
 
-struct Row {
-    entry: WorktreeEntry,
-    real: String,
-    main: bool,
-    current: bool,
-    head: Option<String>,
-    refrow: Option<RefRow>,
-    base: Option<(String, Counts)>,
-    unrelated: bool,
+pub(crate) struct Row {
+    pub entry: WorktreeEntry,
+    pub real: String,
+    pub main: bool,
+    pub current: bool,
+    pub head: Option<String>,
+    pub refrow: Option<RefRow>,
+    pub base: Option<(String, Counts)>,
+    pub unrelated: bool,
 }
 
 fn prefix_len(cwd: &Path, entry: &WorktreeEntry, real: &str) -> Option<usize> {
@@ -39,7 +35,9 @@ fn prefix_len(cwd: &Path, entry: &WorktreeEntry, real: &str) -> Option<usize> {
         .max()
 }
 
-fn absent(result: Result<Snapshot<'_>, Failure>) -> Result<Option<Snapshot<'_>>, ApiError> {
+pub(crate) fn absent(
+    result: Result<Snapshot<'_>, Failure>,
+) -> Result<Option<Snapshot<'_>>, ApiError> {
     match result {
         Ok(snap) => Ok(Some(snap)),
         Err(Failure::NotRepo) => Ok(None),
@@ -47,7 +45,7 @@ fn absent(result: Result<Snapshot<'_>, Failure>) -> Result<Option<Snapshot<'_>>,
     }
 }
 
-fn repo_name(snap: &Snapshot, key: &Path) -> String {
+pub(crate) fn repo_name(snap: &Snapshot, key: &Path) -> String {
     let main = snap.listed.worktrees.first().filter(|entry| !entry.bare);
     let folder = match main {
         Some(entry) => Path::new(&entry.path).file_name(),
@@ -61,83 +59,36 @@ fn repo_name(snap: &Snapshot, key: &Path) -> String {
     }
 }
 
-struct Job {
-    real: String,
-    base: String,
-}
-
-struct Reads {
-    cache: Arc<Mutex<GitCache>>,
-    key: PathBuf,
-    pending: Vec<String>,
-}
-
-impl Reads {
-    fn done(&mut self, path: &str, work: Option<Work>) {
-        self.pending.retain(|held| held != path);
-        let mut cache = lock(&self.cache);
-        let repo = cache.repo(&self.key, now_ms());
-        if let Some(work) = work {
-            repo.work.insert(path.to_owned(), work);
-        }
-        repo.reading.remove(path);
-    }
-}
-
-impl Drop for Reads {
-    fn drop(&mut self) {
-        let mut cache = lock(&self.cache);
-        let repo = cache.repo(&self.key, now_ms());
-        for path in &self.pending {
-            repo.reading.remove(path);
-        }
-    }
-}
-
-fn read_work(launcher: &dyn Launcher, budget: &Budget, jobs: Vec<Job>, reads: &mut Reads) {
-    for job in jobs {
-        let stat = budget
-            .may_start(now_ms())
-            .then(|| read_branch_stat(&job.real, Some(&job.base), launcher));
-        let work = match stat {
-            Some(Ok(stat)) => Some(Work {
-                added: stat.added,
-                removed: stat.removed,
-                files: stat.file_count,
-                uncommitted_files: stat.uncommitted_files,
-                changed_at: stat.changed_at,
-                read_at: now_ms(),
-            }),
-            _ => None,
-        };
-        reads.done(&job.real, work);
-    }
-}
-
 impl GitOps {
-    pub(crate) fn worktrees(&self, cwd: &str, args: &Value) -> Result<Value, ApiError> {
-        let start = now_ms();
+    pub(crate) fn open_repo(&self, cwd: &str) -> Result<Option<(Reader<'_>, PathBuf)>, ApiError> {
         let reader = match Reader::open(cwd, self.launcher.as_ref()) {
             Ok(reader) => reader,
-            Err(Failure::NotRepo) => return Ok(json!({"repo": false})),
+            Err(Failure::NotRepo) => return Ok(None),
             Err(other) => return Err(failed(other)),
         };
-        let key = match reader.common_dir() {
-            Ok(key) => key,
-            Err(Failure::NotRepo) => return Ok(json!({"repo": false})),
-            Err(other) => return Err(failed(other)),
+        match reader.common_dir() {
+            Ok(key) => Ok(Some((reader, key))),
+            Err(Failure::NotRepo) => Ok(None),
+            Err(other) => Err(failed(other)),
+        }
+    }
+
+    pub(crate) fn worktrees(&self, cwd: &str, args: &Value) -> Result<Value, ApiError> {
+        let start = now_ms();
+        let Some((reader, key)) = self.open_repo(cwd)? else {
+            return Ok(json!({"repo": false}));
         };
         let Some(snap) = absent(self.snapshot(&reader, &key, start))? else {
             return Ok(json!({"repo": false}));
         };
         let rows_in = self.rows_of(&snap, cwd);
         let jobs = self.start_reads(&snap, &key, &rows_in, args, start);
-        self.wait_reads(&key, jobs, start);
+        await_reads(self.spawn_reads(&key, jobs, start), start);
         let work: HashMap<String, Work> = lock(&self.cache).repo(&key, now_ms()).work.clone();
         Ok(reply(&snap, &key, &rows_in, &work))
     }
 
-    fn rows_of(&self, snap: &Snapshot, cwd: &str) -> Vec<Row> {
+    pub(crate) fn rows_of(&self, snap: &Snapshot, cwd: &str) -> Vec<Row> {
         let cwd = Path::new(cwd);
         let mut out: Vec<Row> = Vec::new();
         for (index, entry) in snap.listed.worktrees.iter().enumerate() {
@@ -208,53 +159,11 @@ impl GitOps {
             .iter()
             .filter(|row| !row.current && !row.entry.prunable && row.base.is_some())
             .collect();
-        let eligible: Vec<String> = readable.iter().map(|row| row.real.clone()).collect();
         let fresh: Vec<String> = fresh_args(args.get("fresh"), &snap.listed.worktrees)
             .into_iter()
             .map(|path: PathBuf| path.to_string_lossy().into_owned())
-            .filter(|path| eligible.contains(path))
             .collect();
-        let picked = {
-            let mut cache = lock(&self.cache);
-            let repo = cache.repo(key, start);
-            let picked = pick_reads(&eligible, &repo.work, &repo.reading, &fresh, now_ms());
-            for path in &picked {
-                repo.reading.insert(path.clone());
-            }
-            picked
-        };
-        picked
-            .into_iter()
-            .filter_map(|real| {
-                let row = readable.iter().find(|row| row.real == real)?;
-                let base = row.base.as_ref()?.0.clone();
-                Some(Job { real, base })
-            })
-            .collect()
-    }
-
-    fn wait_reads(&self, key: &Path, jobs: Vec<Job>, start: i64) {
-        if jobs.is_empty() {
-            return;
-        }
-        let (done, finished) = channel::<()>();
-        let launcher = Arc::clone(&self.launcher);
-        let mut reads = Reads {
-            cache: Arc::clone(&self.cache),
-            key: key.to_path_buf(),
-            pending: jobs.iter().map(|job| job.real.clone()).collect(),
-        };
-        let spawned = std::thread::Builder::new()
-            .name("git-worktree-reads".to_owned())
-            .spawn(move || {
-                let _done = done;
-                let budget = Budget::new(start, READ_STOP_MS);
-                read_work(launcher.as_ref(), &budget, jobs, &mut reads);
-            });
-        let left = (start + READ_STOP_MS - now_ms()).max(0) as u64;
-        if spawned.is_ok() {
-            let _ = finished.recv_timeout(Duration::from_millis(left));
-        }
+        self.pick_jobs(key, &readable, &fresh, start)
     }
 }
 
@@ -306,8 +215,11 @@ fn worktree_json(snap: &Snapshot, row: &Row, work: &HashMap<String, Work>) -> Va
     })
 }
 
-fn no_worktree_count(snap: &Snapshot, rows_in: &[Row]) -> u64 {
-    let places: Vec<(WorktreeEntry, WorktreeOf)> = rows_in
+pub(crate) fn places(
+    rows_in: &[Row],
+    work: Option<&HashMap<String, Work>>,
+) -> Vec<(WorktreeEntry, WorktreeOf)> {
+    rows_in
         .iter()
         .map(|row| {
             (
@@ -318,11 +230,18 @@ fn no_worktree_count(snap: &Snapshot, rows_in: &[Row]) -> u64 {
                     main: row.main,
                     current: row.current,
                     missing: row.entry.prunable,
-                    work: None,
+                    work: work
+                        .filter(|_| !row.entry.prunable)
+                        .and_then(|held| held.get(&row.real))
+                        .cloned(),
                 },
             )
         })
-        .collect();
+        .collect()
+}
+
+fn no_worktree_count(snap: &Snapshot, rows_in: &[Row]) -> u64 {
+    let places = places(rows_in, None);
     let input = ListInput {
         refs: &snap.refs,
         worktrees: &places,
