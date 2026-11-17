@@ -1,6 +1,6 @@
 use crate::acting_ops::now_ms;
 use crate::git_ops::lock;
-use crate::git_testkit::{git_out, RepoRig};
+use crate::git_testkit::{git, git_out, RepoRig};
 use crate::inbox_ops_tests::app;
 use crate::op_group::OpGroup;
 use notchling_engine::git::reader::Reader;
@@ -110,6 +110,55 @@ fn pick_nearest_skips_an_unrelated_candidate() {
     let got = stat(&rig, &lane(&rig), json!({"pick": "nearest"}));
     assert_eq!(got["base"], "main");
     assert!(paths(&got).contains(&"i1.txt".to_owned()));
+}
+
+fn mark_unrelated(rig: &RepoRig, branch: &str) {
+    let key = key_of(rig);
+    let head = git_out(&rig.repo, &["rev-parse", branch]);
+    for base in ["main", "int"] {
+        let rev = git_out(&rig.repo, &["rev-parse", base]);
+        lock(&rig.ops.cache)
+            .repo(&key, now_ms())
+            .numbers
+            .put_related(&rev, &head, false);
+    }
+}
+
+#[test]
+fn pick_nearest_all_unrelated_has_no_base() {
+    let rig = RepoRig::new("tg-all-unrelated");
+    mark_unrelated(&rig, "lane-a");
+    let got = stat(&rig, &lane(&rig), json!({"pick": "nearest"}));
+    assert_eq!(got["repo"], true);
+    assert_eq!(got["base"], Value::Null);
+    assert!(paths(&got).is_empty());
+}
+
+#[test]
+fn pick_nearest_ref_all_unrelated_has_no_base() {
+    let rig = RepoRig::new("tg-ref-all-unrelated");
+    mark_unrelated(&rig, "lane-a");
+    let got = stat(
+        &rig,
+        &rig.cwd(),
+        json!({"ref": "refs/heads/lane-a", "pick": "nearest"}),
+    );
+    assert_eq!(got["repo"], true);
+    assert_eq!(got["base"], Value::Null);
+    assert!(paths(&got).is_empty());
+}
+
+#[test]
+fn pick_nearest_on_the_default_branch_keeps_todays_rule() {
+    let rig = RepoRig::new("tg-default-branch");
+    git(&rig.repo, &["checkout", "-q", "main"]);
+    let got = stat(&rig, &rig.cwd(), json!({"pick": "nearest"}));
+    let plain = stat(&rig, &rig.cwd(), json!({}));
+    assert_eq!(got["repo"], true);
+    assert_eq!(got["branch"], "main");
+    assert_eq!(got["base"], plain["base"]);
+    assert_ne!(got["base"], Value::Null);
+    assert_eq!(got, plain);
 }
 
 #[test]

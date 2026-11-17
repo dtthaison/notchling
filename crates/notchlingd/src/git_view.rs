@@ -329,16 +329,4 @@ impl Snapshot<'_> {
             }
         }
     }
-
-    pub fn base_for(
-        &self,
-        head_commit: &str,
-        own: Option<&str>,
-        upstream: Option<&str>,
-    ) -> Option<(String, Counts)> {
-        match self.place(head_commit, own, upstream) {
-            Placed::Picked(candidate, counts) => Some((candidate.rev, counts)),
-            _ => None,
-        }
-    }
 }

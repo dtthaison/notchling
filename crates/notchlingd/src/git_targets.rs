@@ -1,7 +1,7 @@
 use crate::acting_ops::now_ms;
 use crate::git_args::{ref_arg, worktree_arg};
 use crate::git_ops::{failed, lock, optional_arg, text_arg, GitOps};
-use crate::git_view::Snapshot;
+use crate::git_view::{Placed, Snapshot};
 use crate::git_worktrees::{absent, prefix_len};
 use notchling_engine::git::branch_list::Work;
 use notchling_engine::git::nearest::short_name;
@@ -97,10 +97,34 @@ fn head_of(snap: &Snapshot, entry: &WorktreeEntry) -> Option<(String, Option<Str
     Some((commit, row.and_then(|row| row.upstream.clone())))
 }
 
-fn nearest_of_tree(snap: &Snapshot, entry: &WorktreeEntry) -> Option<String> {
-    let (commit, upstream) = head_of(snap, entry)?;
-    snap.base_for(&commit, entry.branch.as_deref(), upstream.as_deref())
-        .map(|(rev, _)| rev)
+enum Pick {
+    Rule,
+    Base(String),
+    NoBase,
+}
+
+impl Pick {
+    fn of(placed: Placed) -> Pick {
+        match placed {
+            Placed::Picked(candidate, _) => Pick::Base(candidate.rev),
+            Placed::Unrelated => Pick::NoBase,
+            Placed::Pending | Placed::Nothing => Pick::Rule,
+        }
+    }
+
+    fn base(self) -> Option<String> {
+        match self {
+            Pick::Base(rev) => Some(rev),
+            Pick::Rule | Pick::NoBase => None,
+        }
+    }
+}
+
+fn nearest_of_tree(snap: &Snapshot, entry: &WorktreeEntry) -> Pick {
+    let Some((commit, upstream)) = head_of(snap, entry) else {
+        return Pick::Rule;
+    };
+    Pick::of(snap.place(&commit, entry.branch.as_deref(), upstream.as_deref()))
 }
 
 fn nearest_of_ref(snap: &Snapshot, name: &str) -> Option<String> {
@@ -112,8 +136,17 @@ fn nearest_of_ref(snap: &Snapshot, name: &str) -> Option<String> {
             (short_name(rest, &snap.names()).to_owned(), None)
         }
     };
-    snap.base_for(&row.commit, Some(&own), upstream.as_deref())
-        .map(|(rev, _)| rev)
+    Pick::of(snap.place(&row.commit, Some(&own), upstream.as_deref())).base()
+}
+
+fn unbased(snap: &Snapshot, entry: &WorktreeEntry) -> BranchStat {
+    let head = head_of(snap, entry).map(|(commit, _)| commit.chars().take(7).collect());
+    BranchStat {
+        branch: entry.branch.clone().filter(|_| !entry.detached),
+        head,
+        detached: entry.detached,
+        ..BranchStat::default()
+    }
 }
 
 impl GitOps {
@@ -157,12 +190,16 @@ impl GitOps {
         let placed = entry_at(&snap, &at);
         let picked = match (&placed, nearest && base.is_none()) {
             (Some((entry, _)), true) => nearest_of_tree(&snap, entry),
-            _ => None,
+            _ => Pick::Rule,
         };
+        if let (Pick::NoBase, Some((entry, _))) = (&picked, &placed) {
+            return stat_reply(&unbased(&snap, entry), true);
+        }
         let run_in = match worktree {
             Some(_) => at.to_string_lossy().into_owned(),
             None => cwd.to_owned(),
         };
+        let picked = picked.base();
         let chosen = base.map(str::to_owned).or_else(|| picked.clone());
         let result = read_branch_stat(&run_in, chosen.as_deref(), self.launcher.as_ref());
         let Some(stat) = settle(result)? else {
