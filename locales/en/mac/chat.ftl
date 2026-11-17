@@ -227,6 +227,10 @@ chat-outbox-resume-send = Resume and Send
 chat-outbox-editing = Editing a queued message
 # The note when a queued message was taken before its edit went in.
 chat-outbox-already-sent = Already sent
+# The note when a queued message got more text (another message joined it) while it was being edited. The box then shows its current text.
+chat-outbox-changed = It changed while you edited it. Check the text, then press Return again.
+# The same note when the box was reset to the message's current text, so the typed edit is gone.
+chat-outbox-changed-shown = It changed while you edited it. Your edit was not saved; the box shows its current text.
 # Shown when the daemon did not answer in time because the Mac is busy. Nothing was lost; asking again works.
 chat-daemon-busy = Notchling is busy. Try again.
 chat-add-files = Add files or photos

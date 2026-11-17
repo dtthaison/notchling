@@ -139,7 +139,7 @@ fn take_and_edit_race_one_wins() {
         match editor.join().unwrap() {
             Change::Busy => assert_eq!(taken.text, "original"),
             Change::Done => assert_eq!(taken.text, "changed"),
-            Change::Missing => panic!("round {round}: row vanished"),
+            Change::Missing | Change::Stale => panic!("round {round}: row vanished"),
         }
         assert_eq!(stored.text, taken.text, "round {round}");
         assert_eq!(stored.state, State::Sending);

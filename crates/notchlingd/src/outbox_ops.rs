@@ -12,7 +12,7 @@ use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
 use notchling_engine::outbox::{
     verdict, Change, InsertError, New, OutboxStore, Row, State, Tool, Verdict, Via, Why,
-    BEING_SENT, IN_QUEUE, MAX_TEXT, NO_MESSAGE, VERIFY_LOOK_MS,
+    BEING_SENT, CHANGED, IN_QUEUE, MAX_TEXT, NO_MESSAGE, VERIFY_LOOK_MS,
 };
 use notchling_engine::sessions::{fresh, Agent, Probes, Roots};
 use notchling_engine::tools::codex::plan::valid_session_id;
@@ -586,14 +586,16 @@ impl OutboxOps {
         check_text(text)?;
         let row = self.row(args)?;
         refuse_menu(row.tool, text)?;
+        let from = args.get("from").and_then(Value::as_str);
         match self
             .store
-            .edit(&row.id, text, now_ms())
+            .edit_from(&row.id, text, from, now_ms())
             .map_err(|_| save_failed())?
         {
             Change::Done => {}
             Change::Busy => return Err(self.busy_refusal(&row.id)),
             Change::Missing => return Err(bad(NO_MESSAGE)),
+            Change::Stale => return Err(failed(CHANGED)),
         }
         if let Ok(Some(edited)) = self.store.get(&row.id) {
             self.publish_changed(&edited);
@@ -609,6 +611,7 @@ impl OutboxOps {
             (Change::Done, _) => {}
             (Change::Busy, _) => return Err(self.busy_refusal(&row.id)),
             (Change::Missing, _) => return Err(bad(NO_MESSAGE)),
+            (Change::Stale, _) => return Err(failed(CHANGED)),
         }
         self.publish_removed(&row.id, &row.session, "removed");
         self.emit_then(&row, OutboxThen::Removed);
@@ -645,7 +648,7 @@ impl OutboxOps {
             .map_err(|_| save_failed())?
         {
             Change::Done => {}
-            Change::Busy => return Err(failed("The message changed; try again.")),
+            Change::Busy | Change::Stale => return Err(failed("The message changed; try again.")),
             Change::Missing => return Err(bad(NO_MESSAGE)),
         }
         if let Ok(Some(queued)) = self.store.get(&row.id) {

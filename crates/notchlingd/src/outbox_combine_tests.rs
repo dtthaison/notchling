@@ -263,3 +263,110 @@ fn a_reply_does_not_join_a_queued_row() {
     assert_eq!(r.store.list(None).unwrap().len(), 2);
     assert_eq!(sent.text, "from a reply");
 }
+
+#[test]
+fn a_send_joins_a_row_waiting_for_the_turn_and_wakes_the_postman() {
+    let r = rig();
+    let first = id_of(&send(&r, "job-idle", "first"));
+    r.store
+        .set_state(
+            &first,
+            &[State::Queued],
+            State::Waiting,
+            Some(Why::Turn),
+            Some(99),
+            5,
+        )
+        .unwrap();
+    let woken = Arc::new(Mutex::new(0));
+    let seen = woken.clone();
+    r.ops
+        .set_wake(Arc::new(move |_| *seen.lock().unwrap() += 1));
+    let second = send(&r, "job-idle", "second");
+    assert_eq!(id_of(&second), first);
+    assert_eq!(second["combined"], true);
+    let row = r.store.get(&first).unwrap().unwrap();
+    assert_eq!((row.state, row.why), (State::Waiting, Some(Why::Turn)));
+    assert_eq!(row.text, "first\n\nsecond");
+    assert_eq!(*woken.lock().unwrap(), 1);
+    let changed = r.room.named("outbox.changed");
+    assert_eq!(changed.last().unwrap()["row"]["why"], "turn");
+    assert_eq!(changed.last().unwrap()["row"]["text"], "first\n\nsecond");
+}
+
+#[test]
+fn a_send_does_not_join_a_row_waiting_to_retry() {
+    let r = rig();
+    let first = id_of(&send(&r, "job-idle", "first"));
+    r.store
+        .set_state(
+            &first,
+            &[State::Queued],
+            State::Waiting,
+            Some(Why::Retry),
+            Some(99),
+            5,
+        )
+        .unwrap();
+    let second = send(&r, "job-idle", "second");
+    assert_ne!(id_of(&second), first);
+    assert_eq!(second["position"], 2);
+}
+
+#[test]
+fn an_edit_from_the_text_it_started_with_saves_and_a_stale_one_is_refused() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "first"));
+    send(&r, "job-idle", "second");
+    let stale = call(
+        &r,
+        ops::OUTBOX_EDIT,
+        json!({"id": id, "text": "first, edited", "from": "first"}),
+    );
+    assert_eq!(
+        code(stale),
+        (ErrorCode::Failed, "It changed while you edited it.".into())
+    );
+    assert_eq!(r.store.get(&id).unwrap().unwrap().text, "first\n\nsecond");
+    let before = r.room.named("outbox.changed").len();
+    let fresh = call(
+        &r,
+        ops::OUTBOX_EDIT,
+        json!({"id": id, "text": "both, edited", "from": "first\n\nsecond"}),
+    );
+    assert_eq!(fresh.unwrap(), json!({"edited": true}));
+    assert_eq!(r.store.get(&id).unwrap().unwrap().text, "both, edited");
+    assert_eq!(r.room.named("outbox.changed").len(), before + 1);
+    let old_client = call(&r, ops::OUTBOX_EDIT, json!({"id": id, "text": "no from"}));
+    assert!(old_client.is_ok());
+    assert_eq!(r.store.get(&id).unwrap().unwrap().text, "no from");
+}
+
+#[test]
+fn a_stale_edit_publishes_nothing_and_logs_no_edit() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "first"));
+    send(&r, "job-idle", "second");
+    let changed = r.room.named("outbox.changed").len();
+    let events = of(&r.sink, "session.outbox").len();
+    let _ = call(
+        &r,
+        ops::OUTBOX_EDIT,
+        json!({"id": id, "text": "x", "from": "first"}),
+    );
+    assert_eq!(r.room.named("outbox.changed").len(), changed);
+    assert_eq!(of(&r.sink, "session.outbox").len(), events);
+}
+
+#[test]
+fn a_sending_row_is_refused_as_being_sent_even_with_a_stale_from() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "first"));
+    r.store.take(&id, 10).unwrap().unwrap();
+    let refused = call(
+        &r,
+        ops::OUTBOX_EDIT,
+        json!({"id": id, "text": "x", "from": "something else"}),
+    );
+    assert_eq!(code(refused).1, notchling_engine::outbox::BEING_SENT);
+}

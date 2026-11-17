@@ -199,10 +199,10 @@ impl Request {
         self
     }
 
-    pub fn outbox_edit(id: &str, session: &str, text: &str) -> Request {
+    pub fn outbox_edit(id: &str, session: &str, text: &str, from: &str) -> Request {
         Request::new(
             ops::OUTBOX_EDIT,
-            json!({ "id": id, "session": session, "text": text }),
+            json!({ "id": id, "session": session, "text": text, "from": from }),
         )
     }
 
@@ -377,10 +377,10 @@ mod tests {
             json!({"id": "s1", "text": "go", "options": {"model": "m"}})
         );
         assert_eq!(
-            Request::outbox_edit("o1", "ab12cd34", "new"),
+            Request::outbox_edit("o1", "ab12cd34", "new", "old"),
             Request {
                 op: "outbox.edit",
-                args: json!({"id": "o1", "session": "ab12cd34", "text": "new"})
+                args: json!({"id": "o1", "session": "ab12cd34", "text": "new", "from": "old"})
             }
         );
         assert_eq!(

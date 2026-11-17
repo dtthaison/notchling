@@ -194,12 +194,16 @@ impl OutboxStore {
             return Ok(None);
         };
         let joined = last.text.len() + JOIN.len() + new.text.len();
-        if last.state != State::Queued
+        let open = match last.state {
+            State::Queued => last.next_ms.is_none(),
+            State::Waiting => matches!(last.why, Some(Why::Turn | Why::Dialog)),
+            _ => false,
+        };
+        if !open
             || apart(&last.id)
             || last.tool != new.tool
             || last.kind != Kind::Prompt
             || last.options != new.options
-            || last.next_ms.is_some()
             || joined > MAX_TEXT
         {
             return Ok(None);
@@ -207,7 +211,8 @@ impl OutboxStore {
         let changed = tx
             .execute(
                 "UPDATE outbox SET text = text || ?2 || ?3, updated_ms = ?4
-                 WHERE id = ?1 AND state = 'queued'",
+                 WHERE id = ?1
+                   AND (state = 'queued' OR (state = 'waiting' AND why IN ('turn', 'dialog')))",
                 params![last.id, JOIN, new.text, now_ms],
             )
             .map_err(db_err)?;
@@ -305,6 +310,16 @@ impl OutboxStore {
     }
 
     pub fn edit(&self, id: &str, text: &str, now_ms: i64) -> Result<Change, String> {
+        self.edit_from(id, text, None, now_ms)
+    }
+
+    pub fn edit_from(
+        &self,
+        id: &str,
+        text: &str,
+        from: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Change, String> {
         let mut db = self.lock();
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -312,6 +327,9 @@ impl OutboxStore {
         let Some(row) = fetch(&tx, id)? else {
             return Ok(Change::Missing);
         };
+        if from.is_some_and(|from| from != row.text) && EDITABLE.contains(&row.state) {
+            return Ok(Change::Stale);
+        }
         let sql = format!(
             "UPDATE outbox SET text = ?2, kind = ?3, tries = 0, next_ms = NULL, clear_box = 0,
                  why = NULL, state = 'queued', updated_ms = ?4

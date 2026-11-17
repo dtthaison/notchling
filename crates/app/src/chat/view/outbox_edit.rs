@@ -1,6 +1,7 @@
 use gpui::Context;
 use notchling_engine::outbox::NO_MESSAGE;
 use notchling_engine::sessions::Agent;
+use notchling_locale as t;
 
 use super::outbox_rows::{settle_edit, EditEnd, Editing};
 use super::ChatView;
@@ -64,6 +65,7 @@ impl ChatView {
             outbox_id: row.id,
             session: row.session,
             before,
+            was: row.text.clone(),
             round: self.tools.edit_round,
             sending: false,
         });
@@ -117,10 +119,34 @@ impl ChatView {
         } else if let Some(open) = self.tools.editing.as_mut() {
             open.sending = false;
         }
+        let shown = end.refresh && self.show_current_text(editing, cx);
         if let Some(draft) = end.draft {
             self.put_draft(&editing.chat_row, draft, cx);
         }
-        self.tools.error = end.note;
+        self.tools.error = if shown {
+            Some(t::chat::outbox_changed_shown().to_owned())
+        } else {
+            end.note
+        };
+    }
+
+    fn show_current_text(&mut self, editing: &Editing, cx: &mut Context<Self>) -> bool {
+        let Some(agent) = self
+            .selected_session()
+            .map(|s| s.agent.clone())
+            .filter(|agent| agent.id == editing.chat_row)
+        else {
+            return false;
+        };
+        let rows = self.source.outbox_rows(&agent);
+        let Some(current) = editing.current_text(&rows).map(str::to_owned) else {
+            return false;
+        };
+        if let Some(open) = self.tools.editing.as_mut() {
+            open.was = current.clone();
+        }
+        self.put_draft(&editing.chat_row, current, cx);
+        true
     }
 
     pub(super) fn leave_lost_edit(&mut self, agent: &Agent, cx: &mut Context<Self>) {
