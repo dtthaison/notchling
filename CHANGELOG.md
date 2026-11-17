@@ -45,6 +45,7 @@ Notchling 2.0 is a new app, written in Rust, and it replaces the Swift app, whic
 - The Artifact pages library saves again. Since the Rust app replaced the Swift one, published pages were no longer copied to `~/Library/Application Support/Notchling/pages`, reads of a saved link no longer came from the local copy, and a failed read no longer pointed at it. `notchling hook` now handles the Artifact tool's events itself, with or without the app running.
 - A background shell stopped with `TaskStop` or `KillShell` now shows as Stopped in Chat's Details Panel instead of being counted as still running.
 - Chat showed almost nothing of a long session that had read pictures (a Read of a .jpg writes megabytes of base64 into the transcript, which filled the part Chat reads). Pictures no longer count toward what is read, so the conversation before them is back, the Read steps finish instead of showing as running, and the notch and Search read around them too.
+- A reply you sent from Chat that Claude Code had already taken no longer stays shown as Sending, Queued or Needs You. Notchling now finds the take when the transcript is full of pictures or big tool results, when the text starts with a tag or is a long paste, and when the session was continued in another folder or by `/clear`.
 
 ## [1.2.0] - 2026-11-07
 

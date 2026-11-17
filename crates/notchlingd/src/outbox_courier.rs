@@ -17,6 +17,7 @@ use notchling_engine::transcript::restart;
 use notchling_events::kinds::choices::FailWhy;
 use notchling_local_api::{ApiError, ErrorCode};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -110,9 +111,21 @@ impl JobFiles for LiveFiles {
     }
 
     fn locate(&self, agent: &Agent) -> Option<String> {
-        config_dirs(&self.roots).into_iter().find_map(|config| {
-            let projects = config.dir.join("projects");
-            find_transcript(&projects.to_string_lossy(), &agent.id, &agent.cwd)
+        let stem = agent
+            .transcript_path
+            .as_deref()
+            .and_then(|path| Path::new(path).file_stem())
+            .map(|stem| stem.to_string_lossy().into_owned());
+        let ids = stem
+            .into_iter()
+            .chain(agent.resume_session_id.clone())
+            .chain(Some(agent.id.clone()));
+        let dirs = config_dirs(&self.roots);
+        ids.filter(|id| !id.is_empty()).find_map(|id| {
+            dirs.iter().find_map(|config| {
+                let projects = config.dir.join("projects");
+                find_transcript(&projects.to_string_lossy(), &id, &agent.cwd)
+            })
         })
     }
 }

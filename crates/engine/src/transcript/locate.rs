@@ -50,19 +50,27 @@ pub fn job_transcript(
 ) -> Option<String> {
     let link = link_scan_path?;
     let mut candidates = vec![link.to_string()];
-    if let (Some(session), Some(worktree)) = (
-        session_id.filter(|s| !s.is_empty()),
-        worktree_path.filter(|w| !w.is_empty()),
-    ) {
+    if let Some(worktree) = worktree_path.filter(|w| !w.is_empty()) {
         let projects = Path::new(link)
             .parent()
             .and_then(Path::parent)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
-        candidates.push(format!(
-            "{projects}/{}/{session}.jsonl",
-            project_folder(worktree)
-        ));
+        let stem = Path::new(link)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned());
+        let mut ids: Vec<String> = Vec::new();
+        for id in session_id.map(String::from).into_iter().chain(stem) {
+            if !id.is_empty() && !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        for id in ids {
+            let guess = format!("{projects}/{}/{id}.jsonl", project_folder(worktree));
+            if !candidates.contains(&guess) {
+                candidates.push(guess);
+            }
+        }
     }
     let mut best: Option<(String, Timestamp)> = None;
     for path in candidates {

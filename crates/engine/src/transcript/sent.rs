@@ -2,8 +2,9 @@ use super::message::{cut_chips, Message};
 use super::restart::{carries_result, flag, WINDOW_BYTES};
 use super::tail::read_lines;
 use super::text::between;
-use super::typed::typed_prompt;
+use super::typed::human_prompt;
 use super::util::{parse_object, str_of};
+use super::window::read_window;
 use crate::sessions::iso::parse_iso_ms;
 use serde_json::Value;
 
@@ -93,10 +94,37 @@ pub(super) struct Queue {
     credit: Vec<String>,
 }
 
+fn unpasted(text: &str) -> String {
+    if !text.contains("<pasted_content") {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('<') {
+        let tag = &rest[at..];
+        let mark = tag.starts_with("<pasted_content") || tag.starts_with("</pasted_content");
+        match tag.find('>').filter(|_| mark) {
+            Some(end) => {
+                out.push_str(&rest[..at]);
+                rest = &tag[end + 1..];
+            }
+            None => {
+                out.push_str(&rest[..=at]);
+                rest = &rest[at + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn plain(text: &str) -> String {
+    squeezed(&cut_chips(&unpasted(text)))
+}
+
 pub(super) fn names(entry: &str, line: &str) -> bool {
     let bash = between(line, "<bash-input>", "</bash-input>", true);
-    squeezed(&cut_chips(entry)) == squeezed(&cut_chips(line))
-        || bash.is_some_and(|command| squeezed(&command) == squeezed(entry))
+    plain(entry) == plain(line) || bash.is_some_and(|command| squeezed(&command) == squeezed(entry))
 }
 
 impl Queue {
@@ -212,7 +240,7 @@ pub(super) fn entry_matches(message: &Message, content: &str) -> bool {
     if !wants_something(message) {
         return false;
     }
-    let text = squeezed(&cut_chips(content));
+    let text = plain(content);
     text == message.text || message.bash.as_deref() == Some(text.as_str())
 }
 
@@ -228,7 +256,7 @@ fn line_matches(message: &Message, text: &str, images: usize) -> bool {
             return true;
         }
     }
-    squeezed(&cut_chips(text)) == message.text && images >= message.pictures
+    plain(text) == message.text && images >= message.pictures
 }
 
 fn command_matches(message: &Message, text: &str) -> bool {
@@ -243,7 +271,7 @@ fn command_matches(message: &Message, text: &str) -> bool {
 }
 
 pub(super) fn took_prompt(obj: &Value, text: &str, images: usize) -> bool {
-    typed_prompt(obj, text) || (text.trim().is_empty() && images > 0 && !carries_result(obj))
+    human_prompt(obj, text) || (text.trim().is_empty() && images > 0 && !carries_result(obj))
 }
 
 pub(super) fn joined(batch: &[String], text: &str) -> bool {
@@ -290,12 +318,11 @@ pub(super) fn attachment_text(obj: &Value) -> Option<(String, usize)> {
 }
 
 pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen> {
-    let size = std::fs::metadata(path).ok()?.len();
-    let lines = read_lines(path, WINDOW_BYTES).ok()?;
-    let mut reaches_back = size <= WINDOW_BYTES;
+    let window = read_window(path).ok()?;
+    let mut reaches_back = window.whole;
     let mut seen = Seen::default();
     let mut queue = Queue::default();
-    for line in &lines {
+    for line in &window.lines {
         let Some(map) = parse_object(line.as_bytes()) else {
             continue;
         };
@@ -358,12 +385,18 @@ pub fn count_since(path: &str, message: &Message, since_ms: i64) -> Option<Seen>
             _ => {}
         }
     }
-    reaches_back.then_some(seen)
+    (reaches_back || seen != Seen::default()).then_some(seen)
 }
 
 #[cfg(test)]
+#[path = "sent_big_tests.rs"]
+mod big_tests;
+#[cfg(test)]
 #[path = "sent_count_tests.rs"]
 mod count_tests;
+#[cfg(test)]
+#[path = "sent_human_tests.rs"]
+mod human_tests;
 #[cfg(test)]
 #[path = "sent_tests.rs"]
 mod tests;

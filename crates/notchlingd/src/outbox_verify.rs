@@ -4,10 +4,10 @@ use notchling_engine::outbox::{
     line_within, queued_verdict, verdict, QueuedVerdict, Row, Verdict, GONE_AFTER_MS,
     QUEUE_LINE_MS, VERIFY_LOOK_MS, VERIFY_WATCH_MS,
 };
-use notchling_engine::sessions::Roots;
+use notchling_engine::sessions::{Agent, Roots};
 use notchling_engine::transcript::locate::successor;
 use notchling_engine::transcript::message::Message;
-use notchling_engine::transcript::queue_state::{queue_state, QueueState};
+use notchling_engine::transcript::queue_state::{queue_lists, QueueState};
 use notchling_engine::transcript::sent::{count_since, Seen};
 use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use std::collections::{HashMap, HashSet};
@@ -146,6 +146,17 @@ fn cleared_after(path: &str, name: &str, since_ms: i64) -> bool {
         .is_some_and(|made| made >= since_ms)
 }
 
+fn stem(path: &str) -> Option<&std::ffi::OsStr> {
+    Path::new(path).file_stem()
+}
+
+fn continued_elsewhere(began: Option<&str>, now: Option<&(String, String)>) -> bool {
+    match (began, now) {
+        (Some(began), Some((path, _))) => stem(began) != stem(path) && Path::new(path).is_file(),
+        _ => false,
+    }
+}
+
 pub(crate) fn count_row(path: &str, name: &str, row: &Row) -> Option<Seen> {
     let since = row.attempt_ms? - SINCE_BEFORE_MS;
     let message = message_of(row);
@@ -176,6 +187,7 @@ pub struct TranscriptVerifier {
     safe: Arc<SafeModes>,
     closed: Arc<AtomicBool>,
     watches: Mutex<HashMap<String, Watch>>,
+    began: Mutex<HashMap<String, String>>,
 }
 
 impl TranscriptVerifier {
@@ -204,16 +216,22 @@ impl TranscriptVerifier {
             safe,
             closed: Arc::new(AtomicBool::new(false)),
             watches: Mutex::new(HashMap::new()),
+            began: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn path_of(&self, agent: &Agent) -> Option<String> {
+        agent
+            .transcript_path
+            .clone()
+            .filter(|path| Path::new(path).is_file())
+            .or_else(|| self.files.locate(agent))
+            .or_else(|| agent.transcript_path.clone())
     }
 
     fn transcript(&self, row: &Row) -> Option<(String, String)> {
         let agent = self.files.row(&row.session)?;
-        let path = match agent.transcript_path.clone() {
-            Some(path) => path,
-            None => self.files.locate(&agent)?,
-        };
-        Some((path, agent.name))
+        Some((self.path_of(&agent)?, agent.name))
     }
 
     fn put(&self, id: &str, watch: Watch) {
@@ -233,8 +251,8 @@ impl TranscriptVerifier {
         let agent = self.files.row(&row.session);
         let state = self.files.state(&row.session);
         if let Some(agent) = &agent {
-            if agent.transcript_path.is_some() {
-                watch.path = agent.transcript_path.clone();
+            if let Some(path) = self.path_of(agent) {
+                watch.path = Some(path);
             }
             watch.name = agent.name.clone();
         }
@@ -259,7 +277,7 @@ impl TranscriptVerifier {
             let read = Some((path.clone(), size));
             if watch.read != read {
                 watch.seen = count_row(&path, &watch.name, row);
-                watch.listed = queue_state(&path).is_some_and(|q| q.listed(&message_of(row)) > 0);
+                watch.listed = queue_lists(&path, &message_of(row)).unwrap_or(false);
                 watch.read = read;
             }
         }
@@ -280,11 +298,15 @@ impl TranscriptVerifier {
 impl Verifier for TranscriptVerifier {
     fn seen(&self, row: &Row) -> Option<Seen> {
         self.take(&row.id);
+        lock(&self.began).remove(&row.id);
         let (path, name) = self.transcript(row)?;
+        lock(&self.began).insert(row.id.clone(), path.clone());
         count_row(&path, &name, row)
     }
 
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict {
+        let began = lock(&self.began).remove(&row.id);
+        let clear = is_clear(&message_of(row));
         let mut found = self.transcript(row);
         let mut waits = found.as_ref().map(|(path, _)| {
             self.pause
@@ -293,18 +315,19 @@ impl Verifier for TranscriptVerifier {
         let mut noted = false;
         loop {
             let now = (self.clock)();
-            if found.is_none() {
-                found = self.transcript(row);
-                if let Some((path, _)) = &found {
-                    waits = Some(
-                        self.pause
-                            .watch(Path::new(path), is_clear(&message_of(row))),
-                    );
-                }
+            if let Some(current) = self.transcript(row).filter(|c| Some(c) != found.as_ref()) {
+                waits = Some(
+                    self.pause
+                        .watch(Path::new(&current.0), is_clear(&message_of(row))),
+                );
+                found = Some(current);
             }
-            let seen = found
+            let mut seen = found
                 .as_ref()
                 .and_then(|(path, name)| count_row(path, name, row));
+            if clear && continued_elsewhere(began.as_deref(), found.as_ref()) {
+                seen.get_or_insert_with(Seen::default).taken += 1;
+            }
             let within = line_within(seen, before);
             if !noted && (within || now - entered_ms >= QUEUE_LINE_MS) {
                 self.safe.note(&row.session, within);
@@ -377,6 +400,7 @@ impl Verifier for TranscriptVerifier {
 
     fn forget(&self, id: &str) {
         self.take(id);
+        lock(&self.began).remove(id);
     }
 
     fn close(&self) {
