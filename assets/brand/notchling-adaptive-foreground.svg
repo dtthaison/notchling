@@ -1,0 +1,8 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><defs><clipPath id="nbc2"><rect x="0" y="0" width="1024" height="1024"></rect></clipPath><linearGradient id="nbg2" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#ff9a5a"></stop><stop offset="0.5" stop-color="#7fd68b"></stop><stop offset="1" stop-color="#6fb5ff"></stop></linearGradient>
+      <filter id="nbd2" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#0a0f22" flood-opacity=".28"></feDropShadow></filter>
+      <filter id="nbw2" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="8" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter></defs>
+      <g clip-path="url(#nbc2)">
+      
+      <g class="extra"></g>
+      <g class="all" transform=""><g filter="url(#nbd2)"><rect class="L" x="250" y="320" width="120" height="520" rx="60" transform="rotate(0 310 580)" fill="#ffffff" stroke="#0a0f22" stroke-width="12"></rect><rect class="R" x="654" y="320" width="120" height="520" rx="60" transform="rotate(0 714 580)" fill="#ffffff" stroke="#0a0f22" stroke-width="12"></rect><rect class="D" x="452" y="300" width="120" height="580" rx="60" transform="rotate(-37 512 590)" fill="#ffffff" stroke="#0a0f22" stroke-width="12"></rect></g>
+      <g filter="url(#nbw2)"><circle class="d0" cx="310" cy="780" r="30" opacity="1" fill="#ff9a5a"></circle><circle class="d1" cx="512" cy="580" r="30" opacity="1" fill="#7fd68b"></circle><circle class="d2" cx="714" cy="380" r="30" opacity="1" fill="#6fb5ff"></circle></g></g></g></svg>
