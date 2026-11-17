@@ -7,6 +7,8 @@ use notchling_kit::{Appearance, Icon, IconSize};
 
 use super::page_panel::{home, FileState};
 use super::ChatView;
+use crate::chat::branch::ChangedFile;
+use crate::chat::changes_target::{self, Target};
 use crate::chat::file_panel;
 use crate::chat::html_preview::{self, HtmlView, Look};
 use crate::mac::gate;
@@ -136,20 +138,32 @@ impl ChatView {
         }
     }
 
-    pub(super) fn offer_page(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(folder), Some(model)) = (self.selected_folder(), self.git_for_details()) else {
-            return;
-        };
-        let Some(file) = model.files.iter().find(|f| f.path == path) else {
-            return;
-        };
-        if !html_preview::git_offers(&file.status) {
-            return;
+    pub(super) fn offer_page(
+        &mut self,
+        file: &ChangedFile,
+        target: &Target,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if changes_target::offers_page(target, file) {
+            self.attach_page(&file.path, &file.status, window, cx);
         }
+    }
+
+    fn attach_page(
+        &mut self,
+        path: &str,
+        status: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(folder) = self.selected_folder() else {
+            return;
+        };
         let Some(found) = html_preview::git_file(Path::new(&folder), path) else {
             return;
         };
-        let look = html_preview::git_look(&file.status);
+        let look = html_preview::git_look(status);
         self.page
             .attach_html(HtmlView::git(found, look, home().as_deref()));
         if look == Look::Page && !self.page.render_only {
@@ -160,7 +174,18 @@ impl ChatView {
 
     pub(super) fn open_git_row(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.open_git_diff(path, cx);
-        self.offer_page(path, window, cx);
+        let status = self
+            .git_for_details()
+            .and_then(|m| {
+                m.files
+                    .iter()
+                    .find(|f| f.path == path)
+                    .map(|f| f.status.clone())
+            })
+            .filter(|status| html_preview::git_offers(status));
+        if let Some(status) = status {
+            self.attach_page(path, &status, window, cx);
+        }
     }
 
     pub fn preview_html(&mut self, how: &str, window: &mut Window, cx: &mut Context<Self>) {

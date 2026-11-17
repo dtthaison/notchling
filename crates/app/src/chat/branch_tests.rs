@@ -196,3 +196,46 @@ fn the_preview_model_adds_up() {
     assert!(m.find(PREVIEW_PATH).is_some());
     assert!(!m.is_large());
 }
+
+fn listing() -> Branches {
+    Branches {
+        current: Some("main".into()),
+        default: Some("main".into()),
+        remote_default: Some("origin/main".into()),
+        local: vec!["main".into(), "feature".into(), "other".into()],
+    }
+}
+
+#[test]
+fn no_target_is_todays_rule() {
+    let b = listing();
+    assert_eq!(b.choices_for(None), b.choices());
+    assert_eq!(b.choices(), vec!["origin/main", "feature", "other"]);
+}
+
+#[test]
+fn ref_base_menu_leaves_out_the_ref_not_cwds_branch() {
+    let b = listing();
+    assert_eq!(
+        b.choices_for(Some("feature")),
+        vec!["origin/main", "main", "other"]
+    );
+}
+
+#[test]
+fn remote_ref_leaves_out_the_remote_default() {
+    let b = listing();
+    assert_eq!(
+        b.choices_for(Some("origin/main")),
+        vec!["main", "feature", "other"]
+    );
+}
+
+#[test]
+fn a_branch_without_a_folder_says_committed_work_only() {
+    assert_eq!(
+        model(0, 0, 3).counts_line_for(true),
+        "3 files \u{b7} Committed work only"
+    );
+    assert_eq!(model(0, 0, 3).counts_line_for(false), "3 files");
+}

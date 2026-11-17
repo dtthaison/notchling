@@ -11,6 +11,7 @@ use super::render_map::WindowRegion;
 use super::ChatView;
 use crate::chat::branch::{self, Branches, Summary};
 use crate::chat::branch_rows::Slot;
+use crate::chat::changes_target::{self, DiffVia, Target, TargetState};
 use crate::chat::git::{self, DiffText, Why};
 use crate::chat::page_panel::panel_width;
 
@@ -29,10 +30,17 @@ impl ChatView {
     }
 
     pub(super) fn push_branch(&mut self, cx: &mut Context<Self>) {
-        let model = self.repo.branch_for(self.selected_folder().as_deref());
-        let again = self
-            .changes_panel()
-            .update(cx, |panel, pcx| panel.set_model(model, pcx));
+        let own = self.repo.branch_for(self.selected_folder().as_deref());
+        let other = self.repo.other.as_ref();
+        let model = changes_target::shown_branch(own.as_ref(), other).cloned();
+        let (ref_target, reason) = (
+            changes_target::is_ref(other),
+            other.and_then(|state| state.refused.clone()),
+        );
+        let again = self.changes_panel().update(cx, |panel, pcx| {
+            panel.set_note(ref_target, reason, pcx);
+            panel.set_model(model, pcx)
+        });
         for path in again {
             self.fetch_change_diff(path, cx);
         }
@@ -43,13 +51,28 @@ impl ChatView {
     }
 
     pub(super) fn open_changes(&mut self, cx: &mut Context<Self>) {
+        self.open_changes_for(Target::Own, false, cx);
+    }
+
+    pub(super) fn open_changes_for(
+        &mut self,
+        target: Target,
+        from_branches: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.repo.other = (target != Target::Own).then(|| TargetState::new(target));
+        self.repo.changes_from_branches = from_branches;
         self.repo.changes_shown = true;
         self.push_branch(cx);
+        if self.repo.other.is_some() {
+            self.repo.gate_reset();
+        }
         self.git_ask(Why::Opened, cx);
         cx.notify();
     }
 
     pub(super) fn close_changes(&mut self, cx: &mut Context<Self>) {
+        changes_target::on_close(&mut self.repo.other, &mut self.repo.changes_from_branches);
         self.repo.changes_shown = false;
         self.changes_panel()
             .update(cx, |panel, pcx| panel.close_menu(pcx));
@@ -84,7 +107,9 @@ impl ChatView {
             return;
         };
         let from = model.find(&path).and_then(|f| f.from.clone());
-        let request = branch::file_request(&folder, &model.base, &path, from.as_deref());
+        let target = changes_target::shown_target(self.repo.other.as_ref());
+        let request =
+            changes_target::file_request(&folder, &target, &model.base, &path, from.as_deref());
         let base = model.base.clone();
         let acts = self.acts(cx);
         cx.spawn(async move |this, cx| {
@@ -126,7 +151,8 @@ impl ChatView {
             return;
         };
         let acts = self.acts(cx);
-        let request = branch::branches_request(&folder);
+        let target = changes_target::shown_target(self.repo.other.as_ref());
+        let request = changes_target::branches_request(&folder, &target);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -150,10 +176,19 @@ impl ChatView {
 
     pub(super) fn set_change_base(&mut self, base: String, cx: &mut Context<Self>) {
         self.close_change_menu(cx);
-        if self.repo.base_choice.as_deref() == Some(base.as_str()) {
-            return;
+        match self.repo.other.as_mut() {
+            Some(state) => {
+                if !changes_target::choose_base(state, base) {
+                    return;
+                }
+            }
+            None => {
+                if self.repo.base_choice.as_deref() == Some(base.as_str()) {
+                    return;
+                }
+                self.repo.base_choice = Some(base);
+            }
         }
-        self.repo.base_choice = Some(base);
         self.repo.gate_reset();
         self.git_ask(Why::Opened, cx);
     }
@@ -162,13 +197,19 @@ impl ChatView {
         &mut self,
         path: &str,
         from: Option<&str>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let model = self.changes_panel().read(cx).model().cloned();
         let Some(model) = model else {
             return;
         };
-        self.repo.diff_via = Some((model.base.clone(), from.map(str::to_owned)));
+        let target = changes_target::shown_target(self.repo.other.as_ref());
+        self.repo.diff_via = Some(DiffVia {
+            target: target.clone(),
+            base: model.base.clone(),
+            from: from.map(str::to_owned),
+        });
         super::select::clear();
         let asked = self.page.show_diff(path);
         if self.root.fixture.is_some() {
@@ -177,6 +218,9 @@ impl ChatView {
             }
         } else if let Some(folder) = self.selected_folder() {
             self.fetch_git_diff(folder, path.to_owned(), asked, cx);
+        }
+        if let Some(file) = model.find(path) {
+            self.offer_page(file, &target, window, cx);
         }
         cx.notify();
     }

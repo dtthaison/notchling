@@ -37,6 +37,8 @@ pub struct ChangesPanel {
     list: ListState,
     thumb: ThumbRecord,
     menu: bool,
+    ref_target: bool,
+    reason: Option<String>,
     _editor_events: Subscription,
 }
 
@@ -64,12 +66,22 @@ impl ChangesPanel {
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
             thumb: ThumbRecord::default(),
             menu: false,
+            ref_target: false,
+            reason: None,
             _editor_events: events,
         }
     }
 
     pub fn model(&self) -> Option<&Arc<BranchModel>> {
         self.model.as_ref()
+    }
+
+    pub fn set_note(&mut self, ref_target: bool, reason: Option<String>, cx: &mut Context<Self>) {
+        if self.ref_target != ref_target || self.reason != reason {
+            self.ref_target = ref_target;
+            self.reason = reason;
+            cx.notify();
+        }
     }
 
     pub fn set_model(
@@ -181,6 +193,17 @@ fn on_chat(
     }
 }
 
+fn on_chat_window(
+    chat: &WeakEntity<ChatView>,
+    act: impl Fn(&mut ChatView, &mut Window, &mut Context<ChatView>) + 'static,
+) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static {
+    let chat = chat.clone();
+    move |_, window, cx| {
+        cx.stop_propagation();
+        chat.update(cx, |view, cx| act(view, window, cx)).ok();
+    }
+}
+
 fn counts(added: Option<u64>, removed: Option<u64>, a: Appearance) -> gpui::Div {
     let mut row = div().flex_shrink_0().flex().items_center().gap(px(6.0));
     if let Some(n) = added {
@@ -212,8 +235,8 @@ fn file_row(
     let from = file.from.clone();
     let reveal = {
         let path = path.clone();
-        on_chat(chat, move |view, cx| {
-            view.open_branch_diff(&path, from.as_deref(), cx)
+        on_chat_window(chat, move |view, window, cx| {
+            view.open_branch_diff(&path, from.as_deref(), window, cx)
         })
     };
     let chevron = if open {
@@ -423,7 +446,7 @@ impl ChangesPanel {
         match &self.branches {
             None => items = items.child(menu_note(t::chat::changes_reading_branches(), a)),
             Some(list) => {
-                let choices = list.choices();
+                let choices = list.choices_for(self.ref_target.then_some(model.branch.as_str()));
                 if choices.is_empty() {
                     items = items.child(menu_note(t::chat::changes_no_branches(), a));
                 }
@@ -470,6 +493,11 @@ impl Render for ChangesPanel {
         let header = self.header(model.as_deref(), a);
         let mut column = div().size_full().flex().flex_col().child(header);
         let Some(model) = model else {
+            let reason = self.reason.as_deref().map(|why| {
+                div()
+                    .px(px(PAD))
+                    .child(label(why, TypeRole::Meta, Ink::TextFaint, a))
+            });
             return column
                 .child(div().p(px(PAD)).child(label(
                     t::chat::changes_nothing(),
@@ -477,14 +505,20 @@ impl Render for ChangesPanel {
                     Ink::TextMuted,
                     a,
                 )))
+                .children(reason)
                 .into_any_element();
         };
         column = column
             .child(
-                label(&model.counts_line(), TypeRole::Meta, Ink::TextFaint, a)
-                    .px(px(PAD))
-                    .pb(px(6.0))
-                    .flex_shrink_0(),
+                label(
+                    &model.counts_line_for(self.ref_target),
+                    TypeRole::Meta,
+                    Ink::TextFaint,
+                    a,
+                )
+                .px(px(PAD))
+                .pb(px(6.0))
+                .flex_shrink_0(),
             )
             .child(self.search(a, cx));
         column = column.child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a));

@@ -89,12 +89,19 @@ impl BranchModel {
         self.files.iter().find(|f| f.path == path)
     }
 
-    pub fn counts_line(&self) -> String {
+    pub fn counts_line_for(&self, committed_only: bool) -> String {
         let files = t::chat::changes_file_count(self.file_count, &self.file_count.to_string());
+        if committed_only {
+            return t::chat::changes_committed_only(&files);
+        }
         match self.uncommitted_files {
             0 => files,
             n => t::chat::changes_uncommitted(&files, &n.to_string()),
         }
+    }
+
+    pub fn counts_line(&self) -> String {
+        self.counts_line_for(false)
     }
 }
 
@@ -154,19 +161,25 @@ pub struct Branches {
 
 impl Branches {
     pub fn choices(&self) -> Vec<String> {
+        self.choices_for(None)
+    }
+
+    pub fn choices_for(&self, target: Option<&str>) -> Vec<String> {
+        let skip = |name: &str| match target {
+            Some(target) => name == target,
+            None => self.current.as_deref() == Some(name),
+        };
         let mut out: Vec<String> = Vec::new();
         let mut push = |name: &str| {
             if !out.iter().any(|n| n == name) {
                 out.push(name.to_owned());
             }
         };
-        if let Some(remote) = &self.remote_default {
+        if let Some(remote) = self.remote_default.as_deref().filter(|n| target != Some(n)) {
             push(remote);
         }
-        for name in &self.local {
-            if self.current.as_deref() != Some(name.as_str()) {
-                push(name);
-            }
+        for name in self.local.iter().filter(|n| !skip(n)) {
+            push(name);
         }
         out
     }

@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use super::{now_ms, ChatView};
 use crate::chat::branch::{self, BranchModel};
+use crate::chat::changes_target::{self, Applied, DiffVia, Target, TargetState};
 use crate::chat::git::{self, DiffText, Gate, GitModel, Why};
 use crate::chat::remote_control::Action;
 
@@ -13,6 +14,7 @@ struct Answer {
     base: Option<String>,
     result: Result<Value, String>,
     stat: Option<Result<Value, String>>,
+    other: Option<(Target, Option<String>, Result<Value, String>)>,
 }
 
 #[derive(Default)]
@@ -27,7 +29,9 @@ pub struct State {
     preview_branch: Option<std::sync::Arc<BranchModel>>,
     pub(super) base_choice: Option<String>,
     pub(super) changes_shown: bool,
-    pub(super) diff_via: Option<(String, Option<String>)>,
+    pub(super) diff_via: Option<DiffVia>,
+    pub(super) other: Option<TargetState>,
+    pub(super) changes_from_branches: bool,
 }
 
 impl State {
@@ -94,6 +98,13 @@ impl ChatView {
             return;
         }
         let folder = self.selected_folder();
+        if self.repo.other.is_some() && self.repo.folder.is_some() && self.repo.folder != folder {
+            changes_target::on_folder_change(
+                &mut self.repo.other,
+                &mut self.repo.changes_from_branches,
+            );
+            self.push_branch(cx);
+        }
         if self.repo.branch.is_some() && self.repo.folder != folder {
             self.repo.branch = None;
             self.repo.base_choice = None;
@@ -114,18 +125,35 @@ impl ChatView {
         let request = git::status_request(&folder);
         let base = self.repo.base_choice.clone();
         let stat_request = branch::stat_request(&folder, base.as_deref());
+        let other_request = self
+            .changes_visible()
+            .then(|| changes_target::asking(self.repo.other.as_ref()))
+            .flatten()
+            .map(|(target, base)| {
+                let request = changes_target::stat_request(&folder, &target, base.as_deref());
+                (target, base, request)
+            });
         cx.spawn(async move |this, cx| {
-            let (result, stat) = cx
+            let (result, stat, other) = cx
                 .background_executor()
                 .spawn(async move {
                     let result = acts.actions.read(&request);
                     let in_repo = result.as_ref().is_ok_and(|r| r["repo"] == json!(true));
                     let stat = in_repo.then(|| acts.actions.read(&stat_request));
-                    (result, stat)
+                    let other = other_request
+                        .filter(|_| in_repo)
+                        .map(|(target, base, request)| (target, base, acts.actions.read(&request)));
+                    (result, stat, other)
                 })
                 .await;
             this.update(cx, |view, cx| {
-                view.git_status_in(folder, Answer { base, result, stat }, cx)
+                let answer = Answer {
+                    base,
+                    result,
+                    stat,
+                    other,
+                };
+                view.git_status_in(folder, answer, cx)
             })
             .ok();
         })
@@ -138,7 +166,12 @@ impl ChatView {
             self.git_ask(Why::Folder, cx);
             return;
         }
-        let Answer { base, result, stat } = answer;
+        let Answer {
+            base,
+            result,
+            stat,
+            other,
+        } = answer;
         let Ok(reply) = result else {
             return;
         };
@@ -154,7 +187,13 @@ impl ChatView {
         if rejected && !stale {
             self.repo.base_choice = None;
         }
-        let unchanged = same_folder && self.repo.status == model && self.repo.branch == wanted;
+        let applied = other.map(|(target, asked, result)| {
+            changes_target::apply_stat(&mut self.repo.other, &target, asked.as_deref(), result)
+        });
+        let unchanged = same_folder
+            && self.repo.status == model
+            && self.repo.branch == wanted
+            && applied != Some(Applied::Changed);
         if !unchanged {
             self.repo.folder = Some(folder);
             self.repo.status = model;
@@ -163,7 +202,7 @@ impl ChatView {
             self.push_branch(cx);
             self.git_diff_again(cx);
         }
-        if stale || rejected {
+        if stale || rejected || applied == Some(Applied::Retry) {
             self.repo.gate.reset();
             self.git_ask(Why::Opened, cx);
         }
@@ -223,7 +262,7 @@ impl ChatView {
         self.repo.diff_inflight = true;
         let acts = self.acts(cx);
         let request = match &self.repo.diff_via {
-            Some((base, from)) => branch::file_request(&folder, base, &path, from.as_deref()),
+            Some(via) => via.request(&folder, &path),
             None => git::diff_request(&folder, &path),
         };
         cx.spawn(async move |this, cx| {

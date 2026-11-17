@@ -432,6 +432,8 @@ chat-changes-uncommitted = { $files } · { $count } uncommitted
 
 ## Details Panel, Branches
 
+# $files is the file count line; a branch without a folder has no uncommitted files to count.
+chat-changes-committed-only = { $files } · Committed work only
 chat-git-this-session = this session
 # $count is the number of uncommitted files, with a plus when git cut its own list.
 chat-git-uncommitted = { $count } uncommitted
