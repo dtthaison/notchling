@@ -76,6 +76,8 @@ mod tests_dist_manifest;
 #[cfg(test)]
 mod tests_engine;
 #[cfg(test)]
+mod tests_engine_check;
+#[cfg(test)]
 mod tests_engine_fix;
 #[cfg(test)]
 mod tests_engine_offers;

@@ -5,7 +5,7 @@ use super::engine::{
 };
 use super::masks::Masks;
 use super::process::CUT_NOTICE;
-use super::registry::Machine;
+use super::registry::{Machine, MachineAbilities};
 use super::runner::Call;
 use super::shell;
 use super::step::{
@@ -52,7 +52,16 @@ impl SetupEngine {
         only: Option<fn(&StepId) -> bool>,
     ) -> Evaluation {
         let first = self.evaluate_once(m, slow, use_prior, masks, only);
+        let arch = first
+            .detected
+            .abilities
+            .as_ref()
+            .and_then(|a| a.arch.clone());
         let build = Detected {
+            abilities: arch.map(|arch| MachineAbilities {
+                arch: Some(arch),
+                ..m.abilities.clone().unwrap_or_default()
+            }),
             os: first.detected.os,
             home: first.detected.home.clone(),
             python: first.detected.python.clone(),
