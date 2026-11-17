@@ -1,7 +1,6 @@
 use crate::acting::{file_says_on, SETTINGS_NAME};
 use crate::acting_ops::Room;
 use crate::cluster_forward::PromptFollowers;
-use crate::cluster_wiring::ClusterParts;
 pub use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
 use crate::log_activity::Publish;
@@ -172,12 +171,7 @@ fn poll_or_keep(poll: impl FnOnce() -> Value) -> Option<Value> {
     }
 }
 
-fn scan(
-    lister: &mut Lister,
-    options: &DaemonOptions,
-    sessions: &Mutex<Value>,
-    cluster: &ClusterParts,
-) {
+fn scan(lister: &mut Lister, options: &DaemonOptions, sessions: &Mutex<Value>, wired: &Wired) {
     if let Some(hold) = &options.before_scan {
         hold();
     }
@@ -193,7 +187,8 @@ fn scan(
         differs
     };
     if differs {
-        cluster.local_changed();
+        wired.cluster.local_changed();
+        wired.ask.sessions_changed();
     }
 }
 
@@ -329,7 +324,7 @@ pub fn run(
     }
     let mut watched = lister.watched();
     let mut watch = start_watch(&watched, options.watch);
-    scan(&mut lister, &options, &sessions, &wired.cluster);
+    scan(&mut lister, &options, &sessions, &wired);
     first_scan.finish();
     wired.cluster.recover_moves();
     let mut last_poll = Instant::now();
@@ -352,7 +347,7 @@ pub fn run(
             continue;
         }
         last_poll = Instant::now();
-        scan(&mut lister, &options, &sessions, &wired.cluster);
+        scan(&mut lister, &options, &sessions, &wired);
         wired.agy.reap();
         let now = lister.watched();
         if now != watched {

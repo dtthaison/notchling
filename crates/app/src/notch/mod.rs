@@ -3,6 +3,7 @@ pub mod agy_card;
 pub mod answer;
 #[cfg(target_os = "macos")]
 pub mod answering;
+pub mod ask;
 #[cfg(target_os = "macos")]
 pub mod backdrop;
 #[cfg(target_os = "macos")]

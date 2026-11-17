@@ -84,6 +84,9 @@ Off by default. **Let phones connect** in the Phone panel turns it on.
   Mac or a phone, wins. It never opens the form that takes a secret's value. Pairing is a file on the
   Mac that an agent with a shell could write, so a forged device could answer too; the maintainer
   accepted that risk until pairing has an anchor an agent can't write.
+  For a question an agent asked (see Questions agents ask) the detail is the question, cut to 400
+  characters, and the phone can answer with one of its choices or dismiss it; the answer text stays on the
+  Mac that asked.
 - Every remote change is logged on the Mac as an event (Audit and Activity), with the device's id and the
   length of any text sent, never the text itself.
 
@@ -226,12 +229,39 @@ one:
 - The vault node's audit log records each release by name, never the value, and the cluster step log
   records the call.
 - Inbox items from every node are mirrored to the primary and to each Can Be Master machine. That
-  includes a secret approval's title, command (cut to 120 characters) and folder, never a value.
+  includes a secret approval's title, command (cut to 120 characters) and folder, never a value, and a
+  question an agent asked (below): the question's text cut to 400 characters, the agent's name and its
+  branch, and its choices, never the answer.
 - Notchling does not renew a login on a Worker. A Worker tells the cluster whether Codex and
   Antigravity are signed in: Codex's `login status` exit code and text, and whether Antigravity's token
   file exists and is not empty, never its contents. A check that can't tell leaves the entry absent, and
   a Mac's Antigravity can't be refused, since its login may be in the Keychain, which is never read.
   Claude Code's long-lived login is not sent to Workers in this build.
+
+## Questions agents ask
+
+An agent in a Claude Code session, or a Codex or Antigravity job that `notchling delegate` runs, can
+ask you a question with `notchling ask`. The question is saved on the Mac that runs the agent, in
+`notchling.db`, and shown on a card in Chat and the notch.
+
+- The question's text, cut to 400 characters, is in the Inbox item, so it is on a paired phone that
+  asks for the inbox and, in a cluster, in the primary's `cluster.db` and the Standbys' copies. The
+  question of an agent on a Worker is mirrored to the primary and each Can Be Master machine, as other
+  inbox items are. The item also carries the agent's name and branch and its choices (each cut to 60
+  characters). Without that the Inbox and the phone could not show the question.
+- The answer you give stays on the Mac that asked, in the question's row, and goes to the agent that
+  asked. It is not in the Inbox item, the cluster or on the phone. A choice you pick on a phone or on
+  another machine shows there as the choice's action, not as text. A closed question and its answer
+  are deleted 24 hours after it closed.
+- The Audit, the Activity store and `notchlingd.log` hold only counts for a question: its length, the
+  number of choices, the answer's length, how long it waited and who answered (Mac, phone or the main
+  session), never the question or the answer.
+- Notchling works out which agent asked from the session's transcripts on this Mac. The name on the
+  card is a label, not proof: an agent that can write its session's transcripts can change it. Only you
+  answer by default; the main session answers its subagents' questions only when the asking agent
+  allowed it.
+- The agent's tool (Claude Code, Codex, Antigravity) sends the answer to its provider, as it sends
+  everything in its session.
 
 ## Tools Notchling starts
 

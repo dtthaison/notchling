@@ -177,6 +177,62 @@ fn field_names_and_choices_are_well_formed() {
 }
 
 #[test]
+fn session_ask_has_no_text_field() {
+    let ask = spec("session.ask");
+    let names: Vec<&str> = ask.fields.iter().map(|f| f.name).collect();
+    assert_eq!(
+        names,
+        [
+            "session",
+            "then",
+            "asker",
+            "by",
+            "mode",
+            "chars",
+            "choices",
+            "answer_chars",
+            "waited"
+        ]
+    );
+    let then = ask.fields.iter().find(|f| f.name == "then").unwrap();
+    for choice in [
+        "asked",
+        "found",
+        "answered",
+        "delivered",
+        "dismissed",
+        "expired",
+        "gone",
+        "refused",
+        "restored",
+    ] {
+        assert!(then.desc.choices.contains(&choice), "{choice}");
+    }
+    let asker = ask.fields.iter().find(|f| f.name == "asker").unwrap();
+    assert_eq!(
+        asker.desc.choices,
+        [
+            "main",
+            "subagent",
+            "codex",
+            "antigravity",
+            "unknown",
+            "other"
+        ]
+    );
+    let by = ask.fields.iter().find(|f| f.name == "by").unwrap();
+    assert!(by.desc.choices.contains(&"main"));
+    let mode = ask.fields.iter().find(|f| f.name == "mode").unwrap();
+    assert_eq!(mode.desc.choices, ["background", "wait", "other"]);
+    assert_eq!(ask.durability, Durability::Push);
+    assert_eq!(ask.keep_days, 30);
+    assert_eq!(ask.emitters, &[Proc::Daemon]);
+    assert_eq!(ask.agents_read, AgentsRead::Own);
+    assert!(ask.sinks.has(Sinks::ACTIVITY) && ask.sinks.has(Sinks::DIAG));
+    assert!(!ask.sinks.has(Sinks::AUDIT));
+}
+
+#[test]
 fn session_outbox_has_no_text_fields() {
     let outbox = spec("session.outbox");
     let names: Vec<&str> = outbox.fields.iter().map(|f| f.name).collect();
@@ -193,9 +249,9 @@ fn session_outbox_has_no_text_fields() {
 }
 
 #[test]
-fn fifty_seven_kinds() {
+fn fifty_eight_kinds() {
     let kinds = all();
-    assert_eq!(kinds.len(), 57);
+    assert_eq!(kinds.len(), 58);
     let off: Vec<&str> = kinds
         .iter()
         .filter(|k| k.default == DefaultState::Off)

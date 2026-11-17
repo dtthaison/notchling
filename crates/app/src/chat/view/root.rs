@@ -22,6 +22,7 @@ impl Render for ChatView {
             }
         }
         self.sync_prompt(cx);
+        self.sync_asks(window, cx);
         let inset = super::tasks::shown(self);
         self.sync_tasks(cx);
         if super::tasks::shown(self) != inset {
@@ -37,6 +38,7 @@ impl Render for ChatView {
             || self.composer.is_open()
             || parts_on(cx);
         self.activity_drawn.set(None);
+        self.asks.not_drawn();
         self.parts.root_spins.clear();
         self.parts.root_spins.seen();
         self.parts

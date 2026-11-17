@@ -1,4 +1,7 @@
 pub mod activity;
+pub mod ask_drafts;
+pub mod ask_preview;
+pub mod asks;
 pub mod bench_fixture;
 pub mod blocks;
 #[cfg(test)]
@@ -60,6 +63,7 @@ pub mod panels;
 #[cfg(test)]
 mod parse_cost_tests;
 pub mod paths;
+pub mod pending_ask;
 pub mod pending_child;
 pub mod permission_text;
 pub mod pickers;
@@ -93,6 +97,7 @@ pub mod selection;
 pub mod shell_list;
 pub mod shell_rows;
 pub mod sidebar;
+pub mod sidebar_ask;
 pub mod sidebar_node;
 #[cfg(test)]
 mod sidebar_node_tests;

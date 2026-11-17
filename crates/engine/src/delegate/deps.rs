@@ -17,6 +17,7 @@ pub struct Deps {
     pub network: bool,
     pub catalog_file: Option<PathBuf>,
 
+    pub notchling_binary: PathBuf,
     pub agy_binary: Option<String>,
     pub agy: Arc<dyn AcpSpawner>,
     pub agy_media_root: PathBuf,

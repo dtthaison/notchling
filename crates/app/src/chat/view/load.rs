@@ -118,6 +118,19 @@ impl ChatView {
                 Pending::GaveUp => self.pending_job = None,
             }
         }
+        if let Some(pending) = self.pending_ask.clone() {
+            match pending.after_load(&all, now_ms()) {
+                Pending::Found(id) => {
+                    self.pending_ask = None;
+                    self.reopen_row(&id);
+                    self.sessions = self.open_rows(all);
+                    self.select(&id, cx);
+                    return;
+                }
+                Pending::Waiting => {}
+                Pending::GaveUp => self.pending_ask = None,
+            }
+        }
         self.conversation_state(cx, |s| s.markdown.get_mut().reloaded());
         let selected_before = self.selected_session().cloned();
         let mut conversation_changed = false;
@@ -277,7 +290,9 @@ impl ChatView {
             );
             cx.notify();
         }
-        if crate::chat::activity::clock_due(self.activity_drawn.get(), now_ms()) {
+        if crate::chat::activity::clock_due(self.activity_drawn.get(), now_ms())
+            || self.ask_clock_due()
+        {
             self.redraw_chrome(cx);
         }
         self.inbox_tick(cx);

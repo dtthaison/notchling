@@ -583,3 +583,36 @@ chat-sheet-default = Default
 chat-sheet-run = Run
 chat-sheet-close = Close
 chat-sheet-prompt = Prompt
+
+## Ask cards
+
+# The line above an Ask card: who asks. A session's own question and one of its subagents' read differently.
+chat-ask-main = This session asks
+chat-ask-unknown = This session or one of its subagents
+chat-ask-subagent = A subagent
+chat-ask-codex = { -brand-codex } job
+chat-ask-antigravity = { -brand-antigravity } job
+# $head and $tail are two parts of the card's header line.
+chat-ask-join = { $head } · { $tail }
+# How long a question has waited. $n is whole minutes or whole hours; min stands for minutes and h for hours.
+chat-ask-waited-now = just now
+chat-ask-waited-minutes = waited { NUMBER($n) } min
+chat-ask-waited-hours = waited { NUMBER($n) } h
+# Who answered a question.
+chat-ask-by-mac = Mac
+chat-ask-by-phone = Phone
+chat-ask-by-main = main session
+# The one line a closed Ask card keeps. $by is who answered and $answer is the answer, cut when long.
+chat-ask-answered = Answered
+chat-ask-answered-by = Answered · { $by }
+chat-ask-answered-with = Answered · { $by }: { $answer }
+chat-ask-dismissed = Dismissed
+chat-ask-expired = No answer in time
+chat-ask-gone = Stopped waiting
+# The note when another answer was taken first. $by is who answered.
+chat-ask-already = Already answered
+chat-ask-already-by = Already answered · { $by }
+# The box and buttons on an open Ask card.
+chat-ask-type-answer = Type an answer…
+chat-ask-send = Send
+chat-ask-dismiss = Dismiss
