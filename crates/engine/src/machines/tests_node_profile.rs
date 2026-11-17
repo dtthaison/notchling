@@ -95,6 +95,7 @@ fn git_missing_fails() {
         ("", 1),
         ("", 127),
         ("xcode-select: note: no developer tools were found\n", 1),
+        ("clt=missing\n", 1),
     ] {
         let state = probe(&rig, &StepId::NODE_GIT, text, code);
         assert!(state.is_fail(), "{text}: {state:?}");
@@ -103,7 +104,56 @@ fn git_missing_fails() {
         &rig.machine,
         &StepId::NODE_GIT,
     ));
-    assert_eq!(script, "command -v git >/dev/null 2>&1 && git --version");
+    assert!(script.ends_with("command -v git >/dev/null 2>&1 && git --version"));
+    let xcode = script
+        .find("xcode-select -p >/dev/null 2>&1")
+        .expect(&script);
+    let git = script.find("git --version").expect(&script);
+    assert!(script.contains("uname -s") && xcode < git, "{script}");
+}
+
+#[test]
+fn git_without_command_line_tools_names_them() {
+    let rig = Rig::new(node_only_mac());
+    let state = probe(&rig, &StepId::NODE_GIT, "clt=missing\n", 1);
+    match state {
+        CheckState::Fail(text) => assert!(text.contains("Command Line Tools"), "{text}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn git_fix_with_unknown_os_asks_to_check_first() {
+    let mut m = node_only_mac();
+    m.os = None;
+    let step = super::tests_node_steps::step(&m, &StepId::NODE_GIT);
+    match &step.fix {
+        StepFix::HowTo(text) => assert!(!text.contains("xcode-select"), "{text}"),
+        _ => {
+            let p = plan(&step);
+            assert!(!p.display.contains("xcode-select"), "{}", p.display);
+            let rig = Rig::new(m.clone());
+            let out = (p.run)(&rig.fix());
+            assert!(!out.ok);
+            assert!(out.message.contains("Reachable"), "{}", out.message);
+            assert!(rig.argvs().is_empty());
+        }
+    }
+}
+
+#[test]
+fn git_fix_failure_reports_stderr_first() {
+    let rig = Rig::new(node_only_linux());
+    let step = super::tests_node_steps::step(&rig.machine, &StepId::NODE_GIT);
+    let p = plan(&step);
+    rig.runner.on_script(
+        "apt-get",
+        result(100, "Reading package lists\n", "E: no network\n"),
+    );
+    let out = (p.run)(&rig.fix());
+    assert!(!out.ok);
+    assert!(out.message.contains("E: no network"), "{}", out.message);
+    assert!(!out.message.contains("Reading package"), "{}", out.message);
 }
 
 #[test]

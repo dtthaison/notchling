@@ -127,3 +127,24 @@ fn control_characters_refused() {
         assert!(!refused(typed).is_empty(), "{typed:?}");
     }
 }
+
+#[test]
+fn every_suggested_name_passes_the_name_rule() {
+    for typed in [
+        "agent@[::ffff:192.0.2.128]",
+        "agent@[::192.0.2.7]",
+        "agent@[64:ff9b::198.51.100.9]",
+        "agent@[::ffff:192.0.2.0]",
+        "agent@[fe80::1]",
+        "agent@[2001:db8::abcd]",
+        "agent@[::1]",
+    ] {
+        let a = ok(typed);
+        assert!(
+            super::forms::machine_problems(&a.name, &a.host, &a.user, &[]).is_empty(),
+            "{typed}: {}",
+            a.name
+        );
+    }
+    assert_eq!(ok("agent@[::ffff:192.0.2.128]").name, "machine-128");
+}

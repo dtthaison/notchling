@@ -79,7 +79,8 @@ fn unbracket(host: &str) -> Result<(String, bool), String> {
 
 fn short_name(host: &str, v6: bool) -> String {
     if v6 {
-        let last = host.rsplit(':').next().unwrap_or("").to_ascii_lowercase();
+        let last = host.rsplit(':').next().unwrap_or("");
+        let last = last.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
         let last = last.trim_start_matches('0');
         return if last.is_empty() {
             "machine".into()

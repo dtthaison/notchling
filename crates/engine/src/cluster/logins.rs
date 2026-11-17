@@ -11,7 +11,7 @@ pub const CODEX_COMMAND: &str = "codex login --device-auth";
 pub const AGY_COMMAND: &str = "agy";
 pub const KEYCHAIN_PROGRAM: &str = "/usr/bin/security";
 pub const KEYCHAIN_ARGS: [&str; 5] = ["find-generic-password", "-s", "gemini", "-a", "antigravity"];
-const KEYCHAIN_REDIRECTS: [&str; 4] = [">/dev/null", "2>/dev/null", "2>", "1"];
+const KEYCHAIN_TAIL: &str = " >/dev/null 2>&1;";
 pub const FORBIDDEN: [&str; 4] = ["refresh", "logout", "setup-token", "--with-api-key"];
 
 pub fn codex_signed_in(exit: i32, stdout: &str) -> bool {
@@ -70,18 +70,21 @@ pub fn keychain_state(exit: i32) -> Option<bool> {
     (exit == 0).then_some(true)
 }
 
-fn security_allowed(words: &[String], i: usize) -> bool {
-    let rest = &words[i + 1..];
-    words[i] == KEYCHAIN_PROGRAM
-        && rest.len() >= KEYCHAIN_ARGS.len()
-        && rest[..KEYCHAIN_ARGS.len()] == KEYCHAIN_ARGS
-        && rest[KEYCHAIN_ARGS.len()..]
-            .iter()
-            .all(|w| KEYCHAIN_REDIRECTS.contains(&w.as_str()))
-}
-
-fn is_security(word: &str) -> bool {
-    word.rsplit('/').next() == Some("security")
+fn security_only_as_allowed(text: &str) -> bool {
+    let allowed = keychain_command();
+    let lower = text.to_ascii_lowercase();
+    lower.match_indices("security").all(|(i, _)| {
+        let Some(start) = i.checked_sub(KEYCHAIN_PROGRAM.len() - "security".len()) else {
+            return false;
+        };
+        let Some(rest) = text
+            .get(start..)
+            .and_then(|from| from.strip_prefix(allowed.as_str()))
+        else {
+            return false;
+        };
+        rest.is_empty() || rest.starts_with(KEYCHAIN_TAIL)
+    })
 }
 
 fn commands(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
@@ -95,13 +98,18 @@ fn commands(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
 }
 
 pub fn read_only(text: &str) -> bool {
-    commands(text).all(|words: Vec<String>| {
-        words.iter().enumerate().all(|(i, word)| {
-            !FORBIDDEN.contains(&word.as_str())
-                && (word != "login" || words.get(i + 1).map(String::as_str) == Some("status"))
-                && (!is_security(word) || security_allowed(&words, i))
+    let unquoted: String = text
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '"' | '\\'))
+        .collect();
+    security_only_as_allowed(text)
+        && security_only_as_allowed(&unquoted)
+        && commands(text).all(|words: Vec<String>| {
+            words.iter().enumerate().all(|(i, word)| {
+                !FORBIDDEN.contains(&word.as_str())
+                    && (word != "login" || words.get(i + 1).map(String::as_str) == Some("status"))
+            })
         })
-    })
 }
 
 pub fn argv_read_only(argv: &[String]) -> bool {

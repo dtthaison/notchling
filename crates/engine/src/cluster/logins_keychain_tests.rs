@@ -137,3 +137,33 @@ fn the_keychain_answer_is_only_the_exit_code() {
         assert_eq!(keychain_state(exit), None);
     }
 }
+
+#[test]
+fn the_security_command_cannot_be_hidden_in_a_redirect_or_a_quote() {
+    let allowed = keychain_command();
+    for bad in [
+        "/usr/bin/security find-generic-password -s gemini -a antigravity 2>&1 -w",
+        "/usr/bin/security>&1 delete-generic-password -s gemini -a antigravity",
+        "/usr/bin/security find-generic-password -s gemini -a antigravity >/dev/null 2>&1 -w",
+        "/usr/bin/security find-generic-password -s gemini -a antigravity >/dev/null 2>&1 -g",
+        "/usr/bin/security\tdelete-generic-password -s gemini -a antigravity",
+        "/usr/bin/SECURITY delete-generic-password -s gemini -a antigravity",
+        "/usr/bin/Security find-generic-password -s gemini -a antigravity",
+        "/usr/bin/sec\"\"urity delete-generic-password -s gemini -a antigravity",
+        "/usr/bin/sec''urity delete-generic-password -s gemini -a antigravity",
+        "/usr/bin/secu\\rity delete-generic-password -s gemini -a antigravity",
+        "/usr/bin/s\"e\"c\"u\"r\"i\"t\"y find-generic-password -s gemini -a antigravity -w",
+        "/usr/bin/\"security\" find-generic-password -s gemini -a antigravity -w",
+        "x=/usr/bin/security; $x delete-generic-password",
+    ] {
+        assert!(!read_only(bad), "{bad}");
+    }
+    for good in [
+        allowed.clone(),
+        format!("{allowed} >/dev/null 2>&1;"),
+        format!("if {allowed} >/dev/null 2>&1; then echo @@keychain; fi"),
+        format!("echo \"a b\"; {allowed} >/dev/null 2>&1; echo 'x'"),
+    ] {
+        assert!(read_only(&good), "{good}");
+    }
+}
