@@ -38,6 +38,7 @@ impl Render for ChatView {
             || self.composer.is_open()
             || parts_on(cx);
         self.activity_drawn.set(None);
+        self.asks.not_drawn();
         self.parts.root_spins.clear();
         self.parts.root_spins.seen();
         self.parts

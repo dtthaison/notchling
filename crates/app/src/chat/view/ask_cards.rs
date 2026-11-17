@@ -33,6 +33,16 @@ pub struct State {
 }
 
 impl State {
+    pub(super) fn clock_due(&self, now_ms: i64) -> bool {
+        self.drawn_minute
+            .get()
+            .is_some_and(|drawn| now_ms.div_euclid(MINUTE_MS) > drawn)
+    }
+
+    pub(super) fn not_drawn(&self) {
+        self.drawn_minute.set(None);
+    }
+
     pub fn preview(state: &str) -> State {
         State {
             preview: crate::chat::ask_preview::preview(state, now_ms()),
@@ -88,10 +98,7 @@ impl ChatView {
     }
 
     pub(super) fn ask_clock_due(&self) -> bool {
-        self.asks
-            .drawn_minute
-            .get()
-            .is_some_and(|drawn| now_ms().div_euclid(MINUTE_MS) > drawn)
+        self.asks.clock_due(now_ms())
     }
 
     fn ask_gate(&self, cx: &mut Context<Self>) -> Control {
@@ -374,3 +381,7 @@ pub(super) fn cards(
         .set(drawn.then(|| now.div_euclid(MINUTE_MS)));
     out
 }
+
+#[cfg(test)]
+#[path = "ask_cards_tests.rs"]
+mod tests;
