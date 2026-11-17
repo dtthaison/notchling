@@ -96,8 +96,11 @@ pub fn offer(
     let mut rows = Vec::new();
     for member in members {
         let Some(machine) = machines.iter().find(|m| m.name == member.name) else {
-            let same = this_build.is_some() && member.build.as_deref() == this_build;
-            if !same {
+            let differs = matches!(
+                (this_build, member.build.as_deref()),
+                (Some(ours), Some(theirs)) if ours != theirs
+            );
+            if differs {
                 rows.push(UpdateRow {
                     machine: member.name.clone(),
                     state: UpdateState::NotInMachines,

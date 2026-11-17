@@ -126,6 +126,9 @@ fn member_not_in_machines_says_so() {
     assert!(runnable(&rows, &[]).is_empty());
     let same = [member("stranger", "linux", Some(OURS))];
     assert!(offer(Some(OURS), &same, &machines(), None, &none()).is_empty());
+    let unknown = [member("stranger", "macos", None)];
+    assert!(offer(Some(OURS), &unknown, &machines(), None, &none()).is_empty());
+    assert!(offer(None, &members, &machines(), None, &none()).is_empty());
 }
 
 #[test]
