@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use notchling_engine::contract::{Registry, Tool as SubTool};
-use notchling_engine::sessions::{Agent, Monitor};
+use notchling_engine::sessions::job_fan::{state_path, FanEntry, FanReader};
+use notchling_engine::sessions::{Agent, AgentTarget, Monitor};
 use notchling_engine::tools::agy::elsewhere;
 use notchling_engine::tools::codex::children::{ChildSource, DayFolders};
 use notchling_engine::transcript::codex;
-use notchling_engine::transcript::model::Conversation;
+use notchling_engine::transcript::model::{BackgroundShell, Conversation};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_engine::transcript::subagents::{self, Origin, Subagent};
 use notchling_local_api::SOCKET_NAME;
@@ -15,6 +16,7 @@ use notchling_local_api::SOCKET_NAME;
 use super::codex_children::{DaemonChildren, Kept};
 use super::data::{DataRoot, Session, Tool};
 use super::inspector::SubagentRow;
+use super::job_fan::{extra_shells, mark_running};
 use super::log::{self, Change};
 use super::paging::{Counts, Tree};
 use super::subagent_rows::{decorate, Disk, SubagentRows};
@@ -32,6 +34,7 @@ pub struct Loaded {
     pub subagents: Vec<Subagent>,
     pub subagent_rows: Vec<SubagentRow>,
     pub subagent_counts: Counts,
+    pub fan_shells: Vec<BackgroundShell>,
     pub delegated: HashSet<String>,
     pub subagent: Option<(String, Arc<Conversation>)>,
     pub question: Option<PendingQuestion>,
@@ -56,6 +59,7 @@ pub struct Loader {
     registry: Arc<Registry>,
     children: Arc<dyn ChildSource>,
     peeked: SubagentRows,
+    fans: FanReader,
     agy_log: Option<AgyLog>,
     last: Option<(String, Arc<Conversation>)>,
 }
@@ -90,6 +94,7 @@ impl Loader {
             more_under: HashMap::new(),
             tree: Tree::default(),
             peeked: SubagentRows::new(Disk(registry.clone())),
+            fans: FanReader::default(),
             agy_log: None,
             last: None,
             root,
@@ -163,10 +168,15 @@ impl Loader {
         let switched = self.last.as_ref().map(|(id, _)| id) != selected.as_ref();
         let partial = self.quick_switch && switched && session.is_some();
         let conversation = session.map_or_else(Arc::default, |s| self.root.conversation_shared(s));
+        let fan = match session {
+            Some(session) if !partial => self.fan_of(session),
+            _ => Arc::default(),
+        };
+        let fan_shells = extra_shells(&fan, &conversation);
         let (subagents, subagent_rows, subagent_counts) = if partial {
             (Vec::new(), Vec::new(), Counts::default())
         } else {
-            self.subagents_of(session, &selected, &conversation, now_ms)
+            self.subagents_of(session, &selected, &conversation, &fan, now_ms)
         };
         let question = session
             .filter(|s| s.tool == Tool::Claude && s.agent.command.is_none())
@@ -197,6 +207,7 @@ impl Loader {
             subagents,
             subagent_rows,
             subagent_counts,
+            fan_shells,
             delegated,
             subagent,
             question,
@@ -211,9 +222,10 @@ impl Loader {
         session: Option<&Session>,
         selected: &Option<String>,
         conversation: &Conversation,
+        fan: &[FanEntry],
         now_ms: i64,
     ) -> (Vec<Subagent>, Vec<SubagentRow>, Counts) {
-        let subagents = session.map_or_else(Vec::new, |session| {
+        let mut subagents = session.map_or_else(Vec::new, |session| {
             let listed = self.root.subagents_in(
                 &self.registry,
                 session,
@@ -223,6 +235,7 @@ impl Loader {
             self.children.done();
             listed
         });
+        mark_running(&mut subagents, fan);
         let mut more = std::mem::take(&mut self.more_under);
         more.insert(String::new(), std::mem::take(&mut self.more_subagents));
         let shown = self
@@ -232,6 +245,26 @@ impl Loader {
         let mut rows = self.peeked.rows(&subagents, &indexes);
         decorate(&mut rows, &shown);
         (subagents, rows, shown.counts)
+    }
+}
+
+impl Loader {
+    fn fan_of(&mut self, session: &Session) -> Arc<Vec<FanEntry>> {
+        let AgentTarget::Job(short) = &session.agent.target else {
+            return Arc::default();
+        };
+        if session.tool != Tool::Claude
+            || session.agent.node.is_some()
+            || super::remote::is_remote(&session.agent)
+        {
+            return Arc::default();
+        }
+        let dir = session
+            .agent
+            .config_dir
+            .as_deref()
+            .map_or_else(|| self.root.claude_dir.clone(), PathBuf::from);
+        state_path(&dir, short).map_or_else(Arc::default, |path| self.fans.read(&path))
     }
 }
 

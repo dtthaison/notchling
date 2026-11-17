@@ -204,6 +204,7 @@ impl ChatView {
             } else {
                 self.open_pending_child(cx);
             }
+            self.fan_shells = loaded.fan_shells;
             self.refresh_shells(0);
             if let Some(open) = self.open_subagent.as_mut() {
                 open.apply_shared(&self.subagents, loaded.subagent);
@@ -254,6 +255,7 @@ impl ChatView {
         self.open_groups.clear();
         self.more_under.clear();
         self.shells = Default::default();
+        self.fan_shells.clear();
         self.open_subagent = None;
         self.prompt.transcript = None;
         self.loading = true;

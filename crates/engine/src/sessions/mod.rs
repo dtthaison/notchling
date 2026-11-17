@@ -2,6 +2,7 @@ pub mod agent;
 pub mod command_job;
 pub mod fresh;
 pub mod iso;
+pub mod job_fan;
 pub mod jobs;
 pub mod lanes;
 pub mod monitor;
