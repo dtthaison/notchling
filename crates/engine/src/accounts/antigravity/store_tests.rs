@@ -469,6 +469,19 @@ mod delegate_quota {
     }
 
     #[test]
+    fn switching_account_removes_the_old_accounts_pools() {
+        let rig = serving("dq-switch");
+        rig.set_live(&fake_login("1", "a@example.com", "ta"));
+        rig.save("2", &fake_login("2", "b@example.com", "tb"));
+        rig.http.ok(200, STATUS);
+        rig.http.ok(200, AGY_QUOTA);
+        rig.store.sync(false);
+        assert!(read(&rig).is_some());
+        rig.store.switch_to("2").unwrap();
+        assert!(read(&rig).is_none());
+    }
+
+    #[test]
     fn no_login_is_signed_out_and_no_server_leaves_nothing_new() {
         let rig = Rig::new("dq-out", FakeApps::new());
         rig.store.sync(false);

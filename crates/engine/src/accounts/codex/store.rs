@@ -277,6 +277,8 @@ impl CodexStore {
             None => Quota::of(self.now(), false, None, None),
             Some(id) => {
                 let Some(fetched) = inner.fetched.get(id).copied() else {
+                    drop(inner);
+                    quota::clear(&self.paths.state_dir, "codex");
                     return;
                 };
                 let report = inner.usage.get(id).map(UsageReport::from);
@@ -422,6 +424,7 @@ impl AccountProvider for CodexStore {
         drop(inner);
         if result.is_ok() {
             self.read_limits(false);
+            self.write_quota();
         }
         result
     }

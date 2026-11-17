@@ -99,6 +99,7 @@ impl AntigravityStore {
 
     fn write_quota(&self, id: &str) {
         let Some(usage) = lock(&self.inner).usage.get(id).cloned() else {
+            delegate_quota::clear(&self.paths.state_dir, "antigravity");
             return;
         };
         let report = UsageReport::from(&usage);
@@ -409,6 +410,9 @@ impl AccountProvider for AntigravityStore {
         lock(&self.inner).busy = true;
         let result = self.switch_locked(id, true);
         lock(&self.inner).busy = false;
+        if result.is_ok() {
+            self.write_quota(id);
+        }
         result
     }
 

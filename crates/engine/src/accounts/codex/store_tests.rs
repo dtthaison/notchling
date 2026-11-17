@@ -527,3 +527,28 @@ mod delegate_quota {
         assert!(read(&rig).is_none(), "an expired token gives no read");
     }
 }
+
+#[test]
+fn switching_account_never_leaves_the_old_accounts_quota_for_the_delegate_command() {
+    use crate::delegate::options::Tool;
+    use crate::delegate::quota;
+    let rig = Rig::new("dq-switch", FakeProcs::new(), FakeApps::new());
+    let (a, _) = two_accounts(&rig);
+    rig.live(&a);
+    rig.http.ok(
+        200,
+        r#"{"rate_limit_reached_type":{"type":"workspace_member_credits_depleted"}}"#,
+    );
+    rig.store.sync(true);
+    assert!(quota::load(&rig.root.join("state"), Tool::Codex)
+        .unwrap()
+        .reached
+        .is_some());
+    rig.http.ok(200, r#"{"plan_type":"pro"}"#);
+    rig.store.switch_to("user-2:ws-2").unwrap();
+    let after = quota::load(&rig.root.join("state"), Tool::Codex);
+    assert!(
+        after.is_none_or(|q| q.reached.is_none()),
+        "the credits of the account switched away from are gone"
+    );
+}

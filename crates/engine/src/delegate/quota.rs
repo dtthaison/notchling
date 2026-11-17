@@ -251,6 +251,10 @@ pub fn save(dir: &Path, provider: &str, quota: &Quota) {
     let _ = notchling_platform::files::write_private(&file_of(dir, provider), &text);
 }
 
+pub fn clear(dir: &Path, provider: &str) {
+    let _ = std::fs::remove_file(file_of(dir, provider));
+}
+
 pub fn load(dir: &Path, tool: Tool) -> Option<Quota> {
     use std::io::Read;
     let file = std::fs::File::open(file_of(dir, provider_of(tool))).ok()?;
