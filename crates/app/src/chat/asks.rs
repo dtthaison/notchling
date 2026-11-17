@@ -157,6 +157,14 @@ impl AskFeed {
         rows
     }
 
+    pub fn open_rows(&self) -> Vec<AskRow> {
+        self.rows
+            .values()
+            .filter(|r| r.is_open())
+            .cloned()
+            .collect()
+    }
+
     pub fn needs_you(&self, agent: &Agent) -> bool {
         let key = agent.outbox_key();
         self.rows

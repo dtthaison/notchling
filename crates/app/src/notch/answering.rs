@@ -179,7 +179,14 @@ impl NotchView {
         let Some(item) = q.items.get(tab) else {
             return div();
         };
-        let step = (q.items.len() > 1).then(|| t::notch::question_step(tab + 1, q.items.len()));
+        let step = (q.items.len() > 1)
+            .then(|| t::notch::question_step(tab + 1, q.items.len()))
+            .or_else(|| self.model.ask_step(id));
+        let title = if super::ask::is_ask(&q.tool_use_id) {
+            t::notch::ask_question()
+        } else {
+            t::notch::claude_asks()
+        };
         let tabs = (q.items.len() > 1).then(|| self.question_tabs(q, cx));
         let options = item
             .options
@@ -205,7 +212,7 @@ impl NotchView {
                             let key = this.model.answer_key(&session);
                             this.send_for(
                                 key,
-                                Request::answer_for(&session, &question, &answers),
+                                super::ask::request_for(&session, &question, &answers),
                                 Sending::Answer,
                                 cx,
                             );
@@ -223,13 +230,7 @@ impl NotchView {
             .flex()
             .flex_col()
             .gap(px(GAP))
-            .child(header(
-                Icon::Question,
-                t::notch::claude_asks(),
-                Ink::Working,
-                step,
-                agent,
-            ))
+            .child(header(Icon::Question, title, Ink::Working, step, agent))
             .children(tabs)
             .child(text(item.question.clone(), TypeRole::Heading, Ink::Text).line_clamp(3))
             .children(hint)
@@ -304,7 +305,8 @@ impl NotchView {
                     match type_key(typed, &k.key, k.key_char.as_deref(), modified) {
                         Typed::Submit => {
                             if let Some(answers) = this.draft.submit_text(&question) {
-                                let request = Request::answer_for(&session, &question, &answers);
+                                let request =
+                                    super::ask::request_for(&session, &question, &answers);
                                 let key = this.model.answer_key(&session);
                                 this.send_for(key, request, Sending::Answer, cx);
                             }
@@ -352,7 +354,7 @@ impl NotchView {
                     let key = this.model.answer_key(&session);
                     this.send_for(
                         key,
-                        Request::answer_for(&session, &question, &answers),
+                        super::ask::request_for(&session, &question, &answers),
                         Sending::Answer,
                         cx,
                     );

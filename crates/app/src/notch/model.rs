@@ -5,6 +5,8 @@ use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem, Snap
 use notchling_kit::Status;
 use notchling_locale as t;
 
+use super::ask::{self, AskCard};
+use crate::chat::asks::{AskFeed, AskRow};
 use crate::chat::outbox::OutboxFeed;
 
 use super::layout::{
@@ -68,6 +70,8 @@ pub struct NotchModel {
     pub answered: HashSet<String>,
     pub inbox_unread: usize,
     pub message_needs: HashSet<String>,
+    ask_rows: Vec<AskRow>,
+    ask_cards: HashMap<String, AskCard>,
     hovering: bool,
     pending: Option<Pending>,
     last_groups: Option<HashMap<String, AgentGroup>>,
@@ -91,6 +95,8 @@ impl Default for NotchModel {
             answered: HashSet::new(),
             inbox_unread: 0,
             message_needs: HashSet::new(),
+            ask_rows: Vec::new(),
+            ask_cards: HashMap::new(),
             hovering: false,
             pending: None,
             last_groups: None,
@@ -128,6 +134,7 @@ impl NotchModel {
         self.snapshot(id)
             .and_then(|s| s.question.clone())
             .or_else(|| self.agent(id).and_then(question_from_needs))
+            .or_else(|| self.ask_cards.get(id).map(|c| c.question.clone()))
             .filter(|q| !self.answered.contains(&q.tool_use_id))
     }
 
@@ -187,6 +194,33 @@ impl NotchModel {
             .collect();
     }
 
+    pub fn set_asks(&mut self, feed: &AskFeed) {
+        self.ask_rows = feed.open_rows();
+    }
+
+    fn refresh_asks(&mut self) {
+        let open: Vec<AskRow> = self
+            .ask_rows
+            .iter()
+            .filter(|r| {
+                !self
+                    .answered
+                    .contains(&format!("{}{}", ask::KEY_PREFIX, r.id))
+            })
+            .cloned()
+            .collect();
+        self.ask_cards = ask::cards(&self.agents, &open);
+    }
+
+    pub fn ask_step(&self, id: &str) -> Option<String> {
+        let showing = self
+            .question(id)
+            .is_some_and(|q| ask::is_ask(&q.tool_use_id));
+        showing
+            .then(|| self.ask_cards.get(id).and_then(AskCard::step))
+            .flatten()
+    }
+
     pub fn message_needs_you(&self, agent: &Agent) -> bool {
         self.message_needs.contains(&agent.id)
     }
@@ -194,6 +228,12 @@ impl NotchModel {
     pub fn status_line(&self, agent: &Agent) -> String {
         if let Some(r) = self.permission(&agent.id) {
             return t::notch::wants_to_use(&r.tool_name, &r.summary);
+        }
+        if self
+            .question(&agent.id)
+            .is_some_and(|q| ask::is_ask(&q.tool_use_id))
+        {
+            return t::notch::ask_question().to_owned();
         }
         if let Some(first) = self
             .question(&agent.id)
@@ -378,11 +418,13 @@ impl NotchModel {
         self.agents = agents;
         self.snapshots = snapshots;
         self.requests = requests;
+        self.refresh_asks();
         for agent in &mut self.agents {
             let held = self
                 .requests
                 .get(&agent.id)
-                .is_some_and(|r| !self.answered.contains(&r.id));
+                .is_some_and(|r| !self.answered.contains(&r.id))
+                || self.ask_cards.contains_key(&agent.id);
             if held && agent.group != AgentGroup::NeedsInput {
                 agent.group = AgentGroup::NeedsInput;
                 agent.label = t::notch::needs_input().into();

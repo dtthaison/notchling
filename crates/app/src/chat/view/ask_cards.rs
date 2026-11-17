@@ -21,6 +21,7 @@ use crate::phone::bridge::now_ms;
 pub const ASK_ENV: &str = "NOTCHLING_RENDER_ASK";
 const QUESTION_MAX_HEIGHT: f32 = 160.0;
 const MINUTE_MS: i64 = 60_000;
+const FOCUS_WAIT_MS: i64 = 5_000;
 
 #[derive(Default)]
 pub struct State {
@@ -28,6 +29,7 @@ pub struct State {
     focus: HashMap<String, FocusHandle>,
     preview: Option<Vec<AskRow>>,
     drawn_minute: Cell<Option<i64>>,
+    wanted: Option<(String, i64)>,
 }
 
 impl State {
@@ -50,7 +52,20 @@ impl ChatView {
         }
     }
 
-    pub(super) fn sync_asks(&mut self, cx: &mut Context<Self>) {
+    pub fn show_ask(&mut self, session: &str, id: &str, cx: &mut Context<Self>) {
+        let row = self
+            .sessions
+            .iter()
+            .find(|s| s.agent.outbox_key() == session)
+            .map(|s| s.agent.id.clone());
+        if let Some(row) = row {
+            self.select(&row, cx);
+        }
+        self.asks.wanted = Some((id.to_owned(), now_ms() + FOCUS_WAIT_MS));
+        cx.notify();
+    }
+
+    pub(super) fn sync_asks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rows = self.ask_rows();
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
         self.asks.drafts.keep_only(&ids);
@@ -58,6 +73,16 @@ impl ChatView {
         for row in rows.iter().filter(|r| r.is_open()) {
             if !self.asks.focus.contains_key(&row.id) {
                 self.asks.focus.insert(row.id.clone(), cx.focus_handle());
+            }
+        }
+        if let Some((id, until)) = self.asks.wanted.clone() {
+            match self.asks.focus.get(&id) {
+                Some(handle) => {
+                    window.focus(handle);
+                    self.asks.wanted = None;
+                }
+                None if now_ms() > until => self.asks.wanted = None,
+                None => {}
             }
         }
     }

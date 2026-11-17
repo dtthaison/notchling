@@ -115,3 +115,6 @@ notch-backdrop-terminal = Terminal
 
 # The made-up prompt line of the terminal behind the notch in a render.
 notch-backdrop-prompt = ~/work/notchling $
+
+# Second line of a row, and the title of a card, for a question an agent asked with the ask command.
+notch-ask-question = Question

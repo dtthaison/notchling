@@ -420,6 +420,16 @@ pub fn open_chat_session(cx: &mut App, target: SessionRef, child: Option<String>
     }
 }
 
+pub fn open_chat_ask(cx: &mut App, session: &str, id: &str) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        let (session, id) = (session.to_owned(), id.to_owned());
+        handle
+            .update(cx, |view, _, cx| view.show_ask(&session, &id, cx))
+            .ok();
+    }
+}
+
 pub fn open_chat_inbox(cx: &mut App) {
     open_chat(cx);
     if let Some(handle) = chat_window(cx) {

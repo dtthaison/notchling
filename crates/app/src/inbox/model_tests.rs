@@ -268,3 +268,74 @@ fn answer_and_seen_calls_name_their_arguments() {
         json!({"ids": ["a", "b"]})
     );
 }
+
+fn question(state: &str, answer: Option<&str>, by: Option<&str>) -> Value {
+    json!({
+        "id": "ask:q1:5",
+        "kind": "question",
+        "title": "Review asks",
+        "detail": "Which one?",
+        "source": {"session": "ab12cd34"},
+        "created_ms": 1_000,
+        "expires_ms": null,
+        "actions": [
+            {"id": "choice_1", "label": "Keep it", "primary": false},
+            {"id": "choice_2", "label": "Drop it", "primary": false},
+            {"id": "open", "label": "Answer in Chat", "primary": false},
+            {"id": "cancel", "label": "Dismiss", "primary": false}
+        ],
+        "state": state,
+        "answer": answer,
+        "answered_by": by,
+        "seen": true,
+        "open": {"ask": "q1", "session": "ab12cd34"}
+    })
+}
+
+fn result_of_question(state: &str, answer: Option<&str>, by: Option<&str>) -> Option<String> {
+    let mut model = InboxModel::default();
+    model.apply(&changed(question(state, answer, by)));
+    let (needs, done) = model.sections();
+    needs.into_iter().chain(done).next().and_then(|r| r.result)
+}
+
+#[test]
+fn inbox_question_answered_words() {
+    let word = |answer, by| result_of_question("answered", answer, by);
+    assert_eq!(
+        word(Some("choice_2"), Some("mac")).as_deref(),
+        Some("Answered · Mac: Drop it")
+    );
+    assert_eq!(
+        word(Some("choice_1"), Some("phone")).as_deref(),
+        Some("Answered · Phone: Keep it")
+    );
+    assert_eq!(word(None, Some("mac")).as_deref(), Some("Answered in Chat"));
+    assert_eq!(word(None, None).as_deref(), Some("Answered in Chat"));
+    assert_eq!(
+        word(Some("cancel"), Some("mac")).as_deref(),
+        Some("Dismissed")
+    );
+    assert_eq!(result_of_question("open", None, None), None);
+    assert_eq!(
+        result_of_question("withdrawn", None, None).as_deref(),
+        Some("Withdrawn")
+    );
+}
+
+#[test]
+fn inbox_open_on_question_goes_to_chat() {
+    let mut model = InboxModel::default();
+    model.apply(&changed(question("open", None, None)));
+    let (needs, _) = model.sections();
+    let open = needs[0].open.as_ref().expect("an open target");
+    assert_eq!(
+        target(open),
+        Some(Target::Ask {
+            id: "q1".to_owned(),
+            session: "ab12cd34".to_owned()
+        })
+    );
+    assert_eq!(target(&json!({"ask": "q1"})), None, "no session, no card");
+    assert!(is_local(ActionId::Open));
+}
