@@ -6,6 +6,7 @@ use crate::layout::Layout;
 use notchling_engine::ask::DEADLINE_VARIABLE;
 use notchling_local_api::{Client, ClientError, ClientKind};
 use serde_json::Value;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -81,11 +82,14 @@ fn drive(
     run: impl FnOnce(&mut SocketLink, &mut Env) -> i32,
 ) -> i32 {
     if let Some(message) = usage_error {
-        eprintln!("{message}");
+        let _ = writeln!(std::io::stderr(), "{message}");
         return 1;
     }
     let Some(layout) = Layout::from_env(socket.as_deref()) else {
-        eprintln!("notchling: no home folder in the environment, so no data folder");
+        let _ = writeln!(
+            std::io::stderr(),
+            "notchling: no home folder in the environment, so no data folder"
+        );
         return 1;
     };
     let mut link = SocketLink {
