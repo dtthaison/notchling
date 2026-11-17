@@ -20,12 +20,10 @@ ACTIONS_APP = {"actor_id": 15368, "actor_type": "Integration", "bypass_mode": "a
 
 STUB = """name: Stub
 jobs:
-  build:
+  other:
     runs-on: macos-latest
-  guard:
+  guard:  # comment
     runs-on: ubuntu-latest
-  app-build:  # comment
-    runs-on: macos-latest
 # the maintainer gate posts its own status: maintainer-gate
 """
 
@@ -69,11 +67,11 @@ class RulesetsTests(unittest.TestCase):
         self.assertEqual(validate(rs, wf), [])
 
     def test_real_workflows_have_the_jobs_they_provide(self):
-        self.assertIn("build", job_ids((REAL_WORKFLOWS / "build.yml").read_text()))
+        self.assertIn("guard", job_ids((REAL_WORKFLOWS / "guard.yml").read_text()))
         self.assertLessEqual({"phone-analyze", "phone-test"}, job_ids((REAL_WORKFLOWS / "phone.yml").read_text()))
 
     def test_job_ids(self):
-        self.assertEqual(job_ids(STUB), {"build", "guard", "app-build"})
+        self.assertEqual(job_ids(STUB), {"other", "guard"})
         self.assertEqual(job_ids("on: push\njobs:\n  a:\n    steps:\n      - run: x\n  b-c:\n"), {"a", "b-c"})
 
     def test_wrong_target_branch(self):
@@ -156,10 +154,10 @@ class RulesetsTests(unittest.TestCase):
 
     def test_context_without_job_fails(self):
         rs, wf = fixtures()
-        (wf / "stub.yml").write_text(STUB.replace("app-build:", "other-job:"))
+        (wf / "stub.yml").write_text(STUB.replace("guard:", "other-job:"))
         out = validate(rs, wf)
         self.assertEqual(len(out), 1, out)
-        self.assertIn("app-build", out[0])
+        self.assertIn("guard", out[0])
 
     def test_maintainer_gate_needs_a_workflow_mention(self):
         rs, wf = fixtures()
@@ -172,11 +170,11 @@ class RulesetsTests(unittest.TestCase):
 class DependabotTests(unittest.TestCase):
     def test_ecosystems(self):
         text = (ROOT / ".github" / "dependabot.yml").read_text()
-        for eco in ("github-actions", "pub", "swift"):
+        for eco in ("github-actions", "pub"):
             self.assertIn(f"package-ecosystem: {eco}", text)
         self.assertIn("directory: /apps/flutter", text)
-        self.assertEqual(text.count("interval: weekly"), 3)
-        self.assertEqual(text.count("default-days: 7"), 3)
+        self.assertEqual(text.count("interval: weekly"), 2)
+        self.assertEqual(text.count("default-days: 7"), 2)
         self.assertNotIn("auto-merge", text)
 
 

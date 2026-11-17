@@ -16,7 +16,7 @@ from tests.helpers import ENV, commit, git, head_of, make_repo
 
 H = "a" * 40
 R = ["ZONE: build.sh"]
-Z = Zones(("legacy/macos/Sources/Notchling/Search/**",), ("legacy/macos/Tests/**",))
+Z = Zones(("crates/engine/src/search/**",), ("apps/flutter/test/**",))
 
 
 def rev(login, state, commit_id, t=1):
@@ -102,23 +102,23 @@ class DecideTests(unittest.TestCase):
 
 class NeedsMaintainerTests(unittest.TestCase):
     def test_needs_maintainer_combines(self):
-        repo = make_repo({"build.sh": "echo 1\n", "legacy/macos/Sources/Notchling/Search/S.swift": "let a = 1\n"})
+        repo = make_repo({"build.sh": "echo 1\n", "crates/engine/src/search/S.swift": "let a = 1\n"})
         base = head_of(repo)
-        commit(repo, {"build.sh": "echo 2\n", "legacy/macos/Sources/Notchling/Search/S.swift": "let p = Process()\n"})
+        commit(repo, {"build.sh": "echo 2\n", "crates/engine/src/search/S.swift": "let p = Process()\n"})
         changes = diff(repo, base, head_of(repo))
         self.assertEqual(sorted(r.split(":")[0] for r in needs_maintainer(changes, Z)), ["CAP-PROCESS", "ZONE"])
 
     def test_needs_maintainer_weakening(self):
-        repo = make_repo({"legacy/macos/Tests/A.swift": "func testA() {}\n"})
+        repo = make_repo({"apps/flutter/test/A.swift": "func testA() {}\n"})
         base = head_of(repo)
-        commit(repo, {"legacy/macos/Tests/A.swift": "func testA() { throw XCTSkip(\"x\") }\n"})
+        commit(repo, {"apps/flutter/test/A.swift": "func testA() { #[ignore] }\n"})
         reasons = needs_maintainer(diff(repo, base, head_of(repo)), Z)
         self.assertIn("WEAK-TEST-EDIT", [r.split(":")[0] for r in reasons])
 
     def test_zone_only_change_is_clean(self):
-        repo = make_repo({"legacy/macos/Sources/Notchling/Search/S.swift": "let a = 1\n"})
+        repo = make_repo({"crates/engine/src/search/S.swift": "let a = 1\n"})
         base = head_of(repo)
-        commit(repo, {"legacy/macos/Sources/Notchling/Search/S.swift": "let a = 2\n"})
+        commit(repo, {"crates/engine/src/search/S.swift": "let a = 2\n"})
         self.assertEqual(needs_maintainer(diff(repo, base, head_of(repo)), Z), [])
 
 
@@ -135,9 +135,9 @@ def commit_exact(repo, files):
 class CaseCollisionTests(unittest.TestCase):
 
     def test_file_beside_a_file_of_another_case(self):
-        self.assertEqual(case_collisions(["legacy/macos/Tests/NotchlingTests/chattests.swift"],
-                                         ["legacy/macos/Tests/NotchlingTests/ChatTests.swift"]),
-                         ["CASE-COLLISION: legacy/macos/Tests/NotchlingTests/chattests.swift vs legacy/macos/Tests/NotchlingTests/ChatTests.swift"])
+        self.assertEqual(case_collisions(["apps/flutter/test/chattests.swift"],
+                                         ["apps/flutter/test/ChatTests.swift"]),
+                         ["CASE-COLLISION: apps/flutter/test/chattests.swift vs apps/flutter/test/ChatTests.swift"])
 
     def test_normalization_counts(self):
         self.assertEqual(case_collisions(["docs/cafe\u0301.md"], ["docs/caf\u00e9.md"]),
@@ -161,7 +161,7 @@ class CaseCollisionTests(unittest.TestCase):
 
     def test_unrelated_paths_are_fine(self):
         self.assertEqual(case_collisions(["docs/new.md", "docs/sub/new.md"],
-                                         ["docs/old.md", "docs/sub/old.md", "legacy/macos/Tests/A.swift"]), [])
+                                         ["docs/old.md", "docs/sub/old.md", "apps/flutter/test/A.swift"]), [])
 
     def test_a_path_is_not_its_own_collision(self):
         self.assertEqual(case_collisions(["docs/a.md"], ["docs/a.md"]), [])
@@ -177,20 +177,20 @@ class CaseCollisionTests(unittest.TestCase):
         self.assertIn("docs/Decisions/x.md", reasons[0])
 
     def test_attack_test_file_beside_an_existing_one(self):
-        repo = make_repo({"legacy/macos/Tests/NotchlingTests/ChatTests.swift": "final class ChatTests {}\n"})
+        repo = make_repo({"apps/flutter/test/ChatTests.swift": "final class ChatTests {}\n"})
         base = head_of(repo)
-        head = commit_exact(repo, {"legacy/macos/Tests/NotchlingTests/chattests.swift": "final class ChatTests {}\n"})
+        head = commit_exact(repo, {"apps/flutter/test/chattests.swift": "final class ChatTests {}\n"})
         reasons = collision_reasons(repo, base, head, diff(repo, base, head))
-        self.assertEqual(reasons, ["CASE-COLLISION: legacy/macos/Tests/NotchlingTests/chattests.swift vs "
-                                   "legacy/macos/Tests/NotchlingTests/ChatTests.swift"])
+        self.assertEqual(reasons, ["CASE-COLLISION: apps/flutter/test/chattests.swift vs "
+                                   "apps/flutter/test/ChatTests.swift"])
 
     def test_attack_two_new_files_in_one_pr(self):
         repo = make_repo({"README.md": "x\n"})
         base = head_of(repo)
-        head = commit_exact(repo, {"legacy/macos/Tests/A/Same.swift": "a\n", "legacy/macos/Tests/A/same.swift": "b\n"})
+        head = commit_exact(repo, {"apps/flutter/test/A/Same.swift": "a\n", "apps/flutter/test/A/same.swift": "b\n"})
         reasons = collision_reasons(repo, base, head, diff(repo, base, head))
         self.assertEqual(len(reasons), 2)
-        self.assertTrue(all(r.startswith("CASE-COLLISION: legacy/macos/Tests/A/") for r in reasons))
+        self.assertTrue(all(r.startswith("CASE-COLLISION: apps/flutter/test/A/") for r in reasons))
 
     def test_attack_protected_folder_in_the_base_tree(self):
         repo = make_repo({"docs/decisions/0001.md": "x\n", "docs/chat.md": "x\n"})
@@ -200,7 +200,7 @@ class CaseCollisionTests(unittest.TestCase):
         self.assertEqual(reasons, ["CASE-COLLISION: docs/Decisions/0002.md vs docs/decisions/"])
 
     def test_clean_pr_has_no_collisions(self):
-        repo = make_repo({"docs/a.md": "x\n", "legacy/macos/Tests/T.swift": "x\n"})
+        repo = make_repo({"docs/a.md": "x\n", "apps/flutter/test/T.swift": "x\n"})
         base = head_of(repo)
         head = commit(repo, {"docs/b.md": "y\n", "docs/sub/c.md": "z\n"})
         self.assertEqual(collision_reasons(repo, base, head, diff(repo, base, head)), [])
@@ -268,9 +268,9 @@ class GateCliTests(unittest.TestCase):
         return code, out.getvalue()
 
     def repo_with_zones(self, change):
-        zones = json.dumps({"auto": ["legacy/macos/Sources/Notchling/Search/**"], "new_files_only": []})
+        zones = json.dumps({"auto": ["crates/engine/src/search/**"], "new_files_only": []})
         repo = make_repo({"tools/guard/zones.json": zones, "build.sh": "echo 1\n",
-                          "legacy/macos/Sources/Notchling/Search/S.swift": "let a = 1\n"})
+                          "crates/engine/src/search/S.swift": "let a = 1\n"})
         base = head_of(repo)
         commit(repo, change)
         return repo, base, head_of(repo)
@@ -294,13 +294,13 @@ class GateCliTests(unittest.TestCase):
         self.assertIn("Approved by the maintainer", out)
 
     def test_cli_fails_on_case_collision(self):
-        zones = json.dumps({"auto": ["legacy/macos/Tests/**"], "new_files_only": ["legacy/macos/Tests/**"]})
-        repo = make_repo({"tools/guard/zones.json": zones, "legacy/macos/Tests/ChatTests.swift": "final class ChatTests {}\n"})
+        zones = json.dumps({"auto": ["apps/flutter/test/**"], "new_files_only": ["apps/flutter/test/**"]})
+        repo = make_repo({"tools/guard/zones.json": zones, "apps/flutter/test/ChatTests.swift": "final class ChatTests {}\n"})
         base = head_of(repo)
-        head = commit_exact(repo, {"legacy/macos/Tests/chattests.swift": "final class ChatTests {}\n"})
+        head = commit_exact(repo, {"apps/flutter/test/chattests.swift": "final class ChatTests {}\n"})
         code, out = self.run_cli(["gate", "--repo", str(repo), "--base", base, "--head", head])
         self.assertEqual(code, 1)
-        self.assertIn("CASE-COLLISION: legacy/macos/Tests/chattests.swift vs legacy/macos/Tests/ChatTests.swift", out)
+        self.assertIn("CASE-COLLISION: apps/flutter/test/chattests.swift vs apps/flutter/test/ChatTests.swift", out)
 
     def test_cli_fails_on_protected_folder_that_differs_by_case(self):
         zones = json.dumps({"auto": ["docs/**", "!docs/decisions/**"], "new_files_only": []})
@@ -312,10 +312,10 @@ class GateCliTests(unittest.TestCase):
         self.assertIn("CASE-COLLISION: docs/Decisions/0001.md", out)
 
     def test_cli_case_collision_passes_with_approval(self):
-        zones = json.dumps({"auto": ["legacy/macos/Tests/**"], "new_files_only": ["legacy/macos/Tests/**"]})
-        repo = make_repo({"tools/guard/zones.json": zones, "legacy/macos/Tests/ChatTests.swift": "final class ChatTests {}\n"})
+        zones = json.dumps({"auto": ["apps/flutter/test/**"], "new_files_only": ["apps/flutter/test/**"]})
+        repo = make_repo({"tools/guard/zones.json": zones, "apps/flutter/test/ChatTests.swift": "final class ChatTests {}\n"})
         base = head_of(repo)
-        head = commit_exact(repo, {"legacy/macos/Tests/chattests.swift": "final class ChatTests {}\n"})
+        head = commit_exact(repo, {"apps/flutter/test/chattests.swift": "final class ChatTests {}\n"})
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump([rev("dtthaison", "APPROVED", head)], f)
         try:
@@ -325,7 +325,7 @@ class GateCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_cli_passes_zone_only(self):
-        repo, base, head = self.repo_with_zones({"legacy/macos/Sources/Notchling/Search/S.swift": "let a = 2\n"})
+        repo, base, head = self.repo_with_zones({"crates/engine/src/search/S.swift": "let a = 2\n"})
         self.assertEqual(self.run_cli(["gate", "--repo", str(repo), "--base", base, "--head", head])[0], 0)
 
 

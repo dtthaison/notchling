@@ -61,7 +61,7 @@ def _lint_probe(rule_id: str) -> Callable[[], bool]:
     return probe
 
 
-ZONE_FILE = "legacy/macos/Sources/Notchling/Search/X.swift"
+ZONE_FILE = "crates/engine/src/search/x.rs"
 CAP_BAD: Dict[str, Tuple[str, str]] = {
     "CAP-PROCESS": (ZONE_FILE, "let p = Process()"),
     "CAP-PTY": (ZONE_FILE, "let pid = forkpty(&master, nil, nil, nil)"),
@@ -70,7 +70,6 @@ CAP_BAD: Dict[str, Tuple[str, str]] = {
     "CAP-NETWORK": (ZONE_FILE, "URLSession.shared.dataTask(with: url)"),
     "CAP-KEYCHAIN": (ZONE_FILE, "SecItemCopyMatching(query, &out)"),
     "CAP-FILEWRITE": (ZONE_FILE, "try data.write(to: url)"),
-    "CAP-PROTECTED-TYPE": ("legacy/macos/Sources/Notchling/Chat/Views/Row.swift", "ReplySender.send(text, to: agent)"),
     "CAP-OBSCURE": (ZONE_FILE, "a /* b */ " * (capability.MAX_COMMENT_ENDS + 1)),
 }
 
@@ -164,7 +163,7 @@ def _guard_provider_gaps() -> bool:
 
 def _guard_claude_md() -> bool:
     with _tmp() as root:
-        _repo(root, {"CLAUDE.md": "@AGENTS.md\n", "legacy/macos/Sources/CLAUDE.md": "a second source\n"})
+        _repo(root, {"CLAUDE.md": "@AGENTS.md\n", "crates/app/CLAUDE.md": "a second source\n"})
         problems = claudemd.check(root)
     return any(p.startswith("GUARD-CLAUDE-MD") for p in problems)
 
@@ -261,10 +260,10 @@ for _id in capability.RULES:
 REGISTRY[capability.BINARY_RULE] = _cap_binary
 REGISTRY[capability.OBSCURE_RULE] = _cap_probe(capability.OBSCURE_RULE)
 REGISTRY.update({
-    "WEAK-TEST-EDIT": _weak("WEAK-TEST-EDIT", Change("legacy/macos/Tests/NotchlingTests/AThingTests.swift", "M")),
-    "WEAK-SKIP": _weak("WEAK-SKIP", Change("legacy/macos/Tests/NotchlingTests/AThingTests.swift", "A",
-                                           None, ((1, "try XCTSkip(\"later\")"),))),
-    "WEAK-UNICODE": _weak("WEAK-UNICODE", Change("legacy/macos/Sources/Notchling/A.swift", "M",
+    "WEAK-TEST-EDIT": _weak("WEAK-TEST-EDIT", Change("crates/engine/tests/a_thing.rs", "M")),
+    "WEAK-SKIP": _weak("WEAK-SKIP", Change("crates/engine/tests/a_thing.rs", "A",
+                                           None, ((1, "#[ignore]"),))),
+    "WEAK-UNICODE": _weak("WEAK-UNICODE", Change("crates/app/src/a.rs", "M",
                                                  None, ((1, "let a = 1 \u202e // reads differently\n"),))),
     "ZONE": _gate_zone,
     "CASE-COLLISION": _gate_case_collision,

@@ -116,7 +116,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_only_the_release_workflow_can_write_contents(self):
         writers = [f.name for f in sorted(WORKFLOWS.glob("*.yml")) if re.search(r"contents:\s*write", read(f".github/workflows/{f.name}"))]
-        self.assertEqual(writers, ["beta.yml", "promote.yml", "release.yml"])
+        self.assertEqual(writers, ["release.yml"])
 
     def test_phone_checks_run_on_every_pull_request(self):
         text = read(".github/workflows/phone.yml")
@@ -142,7 +142,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/checkout", text)
 
     def test_code_jobs_have_no_secrets(self):
-        for f in ("guard.yml", "build.yml", "phone.yml", "rust.yml"):
+        for f in ("guard.yml", "phone.yml", "rust.yml"):
             self.assertNotIn("secrets.", read(".github/workflows/" + f), f)
 
     def test_every_workflow_sets_permissions(self):
@@ -151,7 +151,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_required_check_jobs_exist(self):
         found = {j for f in WORKFLOWS.glob("*.yml") for j in jobs(f.read_text())}
-        for name in ("build", "app-build", "guard", "phone-analyze", "phone-test", "rust-test", "rust-clippy", "rust-deny"):
+        for name in ("guard", "phone-analyze", "phone-test", "rust-test", "rust-clippy", "rust-deny"):
             self.assertIn(name, found)
 
     def test_rust_clippy_job_checks_formatting_before_clippy(self):
@@ -168,7 +168,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(cmd, text)
 
     def test_pr_workflows_dont_persist_credentials(self):
-        for f in ("guard.yml", "build.yml", "phone.yml", "rust.yml", "maintainer-gate.yml"):
+        for f in ("guard.yml", "phone.yml", "rust.yml", "maintainer-gate.yml"):
             text = read(".github/workflows/" + f)
             self.assertEqual(text.count("actions/checkout@"), text.count("persist-credentials: false"), f)
 

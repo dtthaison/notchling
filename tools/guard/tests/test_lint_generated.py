@@ -39,10 +39,6 @@ class GeneratedFileSizeTests(unittest.TestCase):
         for rule in SIZE_RULES:
             self.assertEqual(len(self.found("apps/flutter/lib/features/big.dart", text, rule)), 1, rule)
 
-    def test_a_marked_swift_file_is_still_flagged(self):
-        text = "// @generated\n" + LONG
-        self.assertEqual(len(self.found("legacy/macos/Sources/Notchling/Big.swift", text)), 1)
-
     def test_a_lookalike_path_is_not_exempt(self):
         for path in ("crates/protocol/src/generated.rs.bak", "crates/other/src/generated.rs",
                      "crates/protocol/src/sub/generated.rs", "apps/flutter/lib/core/protocol/generated.dart.orig",

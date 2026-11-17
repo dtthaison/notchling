@@ -9,8 +9,7 @@ from typing import Any, Dict, List, Set
 GITHUB_ACTIONS_APP = 15368
 ADMIN_BYPASS = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]
 ACTIONS_BYPASS = [{"actor_id": GITHUB_ACTIONS_APP, "actor_type": "Integration", "bypass_mode": "always"}]
-CONTEXTS = ["build", "app-build", "guard", "maintainer-gate", "phone-analyze", "phone-test",
-            "rust-test", "rust-clippy", "rust-deny"]
+CONTEXTS = ["guard", "maintainer-gate", "phone-analyze", "phone-test", "rust-test", "rust-clippy", "rust-deny"]
 POSTED_STATUSES = {"maintainer-gate"}
 PULL_REQUEST = {
     "require_code_owner_review": True,

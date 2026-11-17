@@ -28,7 +28,6 @@ CHANGES_DIR = "changes"
 NO_CHANGELOG_LABEL = "no-changelog"
 
 APP_CODE = (
-    re.compile(r"^legacy/macos/Sources/"),
     re.compile(r"^apps/flutter/lib/"),
     re.compile(r"^crates/([^/]+/)+src/"),
 )

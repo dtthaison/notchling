@@ -14,19 +14,19 @@ def rules(*changes):
 
 class WeakeningTests(unittest.TestCase):
     def test_edited_test_trips(self):
-        self.assertEqual(rules(chg("legacy/macos/Tests/NotchlingTests/ChatTests.swift", "M")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("crates/engine/tests/chat.rs", "M")), ["WEAK-TEST-EDIT"])
 
     def test_deleted_test_trips(self):
-        self.assertEqual(rules(chg("legacy/macos/Tests/NotchlingTests/ChatTests.swift", "D")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("crates/engine/tests/chat.rs", "D")), ["WEAK-TEST-EDIT"])
 
     def test_new_test_ok(self):
-        self.assertEqual(rules(chg("legacy/macos/Tests/NotchlingTests/New.swift", "A", added=["func testX() {}"])), [])
+        self.assertEqual(rules(chg("crates/engine/tests/new.rs", "A", added=["fn x() {}"])), [])
 
     def test_renamed_test_is_weakening(self):
-        self.assertEqual(rules(chg("legacy/macos/Tests/A/B.swift", "R", old="legacy/macos/Tests/A/A.swift")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("crates/engine/tests/b.rs", "R", old="crates/engine/tests/a.rs")), ["WEAK-TEST-EDIT"])
 
     def test_fixture_edit_trips(self):
-        self.assertEqual(rules(chg("legacy/macos/Fixtures/acp-agy.jsonl", "M")), ["WEAK-TEST-EDIT"])
+        self.assertEqual(rules(chg("crates/engine/tests/fixtures/notchling/acp-agy.jsonl", "M")), ["WEAK-TEST-EDIT"])
 
     def test_guard_tests_edit_trips(self):
         self.assertEqual(rules(chg("tools/guard/tests/test_zones.py", "M")), ["WEAK-TEST-EDIT"])
@@ -40,9 +40,6 @@ class WeakeningTests(unittest.TestCase):
     def test_golden_outside_test_folder_trips(self):
         self.assertEqual(rules(chg("crates/app/goldens/notch.png", "M", binary=True)), ["WEAK-TEST-EDIT"])
 
-    def test_xctskip_trips(self):
-        self.assertEqual(rules(chg("legacy/macos/Tests/X/New.swift", "A", added=['throw XCTSkip("later")'])), ["WEAK-SKIP"])
-
     def test_rust_ignore_trips(self):
         self.assertEqual(rules(chg("crates/engine/src/a.rs", "M", added=["#[ignore]"])), ["WEAK-SKIP"])
 
@@ -51,7 +48,7 @@ class WeakeningTests(unittest.TestCase):
                          ["WEAK-SKIP"])
 
     def test_bidi_rejected(self):
-        self.assertEqual(rules(chg("legacy/macos/Sources/Notchling/Search/S.swift", "M", added=["let a = 1 \u202e"])),
+        self.assertEqual(rules(chg("crates/engine/src/search/s.rs", "M", added=["let a = 1 \u202e"])),
                          ["WEAK-UNICODE"])
 
     def test_zero_width_rejected(self):

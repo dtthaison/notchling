@@ -30,8 +30,6 @@
       "parameters": {
         "strict_required_status_checks_policy": false,
         "required_status_checks": [
-          {"context": "build", "integration_id": 15368},
-          {"context": "app-build", "integration_id": 15368},
           {"context": "guard", "integration_id": 15368},
           {"context": "maintainer-gate", "integration_id": 15368},
           {"context": "phone-analyze", "integration_id": 15368},

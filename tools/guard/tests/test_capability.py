@@ -1,15 +1,11 @@
-import re
 import unittest
-from pathlib import Path
 
-from guard.capability import OWN_FILES, PROTECTED_TYPES, RULES, scan
+from guard.capability import RULES, scan
 from guard.changes import Change, diff
-from guard.zones import load as load_zones
 from tests.helpers import commit, head_of, make_repo
 
-ZONE = "legacy/macos/Sources/Notchling/Search/X.swift"
+ZONE = "crates/engine/src/search/x.swift"
 DART = "apps/flutter/lib/features/chat/a.dart"
-REPO = Path(__file__).resolve().parents[3]
 
 BAD = [
     ("CAP-PROCESS", ZONE, "let p = Process()"),
@@ -24,7 +20,6 @@ BAD = [
     ("CAP-KEYCHAIN", "crates/app/src/a.rs", "let e = keyring::Entry::new(s, u);"),
     ("CAP-FILEWRITE", ZONE, "try FileManager.default.removeItem(at: url)"),
     ("CAP-FILEWRITE", ZONE, "try data.write(to: url)"),
-    ("CAP-PROTECTED-TYPE", "legacy/macos/Sources/Notchling/Chat/Views/Row.swift", "ReplySender.send(text, to: agent)"),
 ]
 
 GOOD = [
@@ -63,16 +58,6 @@ I1_BAD = [
     ("CAP-FILEWRITE", ZONE, "try fm.copyItem(atPath: a, toPath: b)"),
 ]
 
-WRAPPER_USES = [
-    "TerminalSession(run: cmd, in: dir)",
-    "AgentActions.stop(agent)",
-    "CodexRunner.run(prompt, in: dir)",
-    "AntigravityRunner.shared.prompt(text)",
-    "SecretRunner.run(names, command)",
-    "VaultServer.shared.start()",
-]
-
-
 def added(path, *lines):
     return Change(path, "M", None, tuple((i + 1, l) for i, l in enumerate(lines)))
 
@@ -90,14 +75,7 @@ class CapabilityTests(unittest.TestCase):
             self.assertEqual(scan([added(path, line)]), [], line)
 
     def test_comment_does_not_trip(self):
-        self.assertEqual(scan([added("legacy/macos/Sources/Notchling/Limits/LimitWatcher.swift", "// never osascript")]), [])
-
-    def test_protected_type_in_own_file_ok(self):
-        self.assertEqual(scan([added("legacy/macos/Sources/Notchling/Agents/ReplySender.swift", "ReplySender.send(x)")]), [])
-
-    def test_protected_type_elsewhere_trips(self):
-        trips = scan([added("legacy/macos/Sources/Notchling/Chat/Views/Row.swift", "ReplySender.send(x)")])
-        self.assertEqual([t.rule for t in trips], ["CAP-PROTECTED-TYPE"])
+        self.assertEqual(scan([added("crates/engine/src/limits/watcher.rs", "// never osascript")]), [])
 
     def test_removed_lines_ignored(self):
         self.assertEqual(scan([Change(ZONE, "M", None, (), ("let p = Process()",))]), [])
@@ -112,7 +90,7 @@ def rules_of(path, *lines):
 
 
 class BinaryCodeTests(unittest.TestCase):
-    PATH = "legacy/macos/Sources/Notchling/Search/S.swift"
+    PATH = "crates/engine/src/search/s.swift"
 
     def _changes(self, files, base_files=None):
         repo = make_repo({self.PATH: "import SwiftUI\nstruct S {}\n", **(base_files or {})})
@@ -131,13 +109,13 @@ class BinaryCodeTests(unittest.TestCase):
         self.assertEqual((trips[0].path, trips[0].line), (self.PATH, 0))
 
     def test_gitattributes_nodiff_in_head_does_not_hide_process(self):
-        changes = self._changes({"legacy/macos/Sources/Notchling/Search/.gitattributes": "*.swift -diff\n",
+        changes = self._changes({"crates/engine/src/search/.gitattributes": "*.swift -diff\n",
                                  self.PATH: "import SwiftUI\nlet p = Process()\n"})
         self.assertIn("CAP-PROCESS", {t.rule for t in scan(changes)})
 
     def test_gitattributes_nodiff_in_base_does_not_hide_process(self):
         changes = self._changes({self.PATH: "import SwiftUI\nlet p = Process()\n"},
-                                base_files={"legacy/macos/Sources/Notchling/Search/.gitattributes": "*.swift -diff\n"})
+                                base_files={"crates/engine/src/search/.gitattributes": "*.swift -diff\n"})
         self.assertIn("CAP-PROCESS", {t.rule for t in scan(changes)})
 
     def test_binary_asset_does_not_trip(self):
@@ -267,7 +245,7 @@ class BlockCommentStateTests(unittest.TestCase):
         for line in ("let a = 1 /* Process() */ // done",
                      "/* Process() */",
                      "// see */ the docs",
-                     'let glob = "legacy/macos/Sources/**/*.swift"',
+                     'let glob = "crates/**/*.swift"',
                      "*/"):
             with self.subTest(line):
                 self.assertEqual(rules_of(ZONE, line), set())
@@ -380,68 +358,12 @@ class RustCapabilityTests(unittest.TestCase):
             self.assertIn(rule, {t.rule for t in trips})
 
 
-class OwnFileTests(unittest.TestCase):
-
-    def test_lookalike_names_are_not_own_files(self):
-        for path, line in (("legacy/macos/Sources/Notchling/Chat/Views/VaultStoreRow.swift", "VaultStore.shared.values()"),
-                           ("legacy/macos/Sources/Notchling/Chat/Views/ReplySenderButton.swift", "ReplySender.send(x, to: a)"),
-                           ("legacy/macos/Sources/Notchling/Agents/ReplySenderQueue.swift", "ReplySender.send(x)"),
-                           ("legacy/macos/Sources/Notchling/Search/AccountStoreView.swift", "AccountStore.shared.accounts")):
-            self.assertEqual(rules_of(path, line), {"CAP-PROTECTED-TYPE"}, path)
-
-    def test_no_own_file_is_in_the_zone(self):
-        zones = load_zones(REPO / "tools/guard/zones.json")
-        for type_name, paths in OWN_FILES.items():
-            for path in paths:
-                self.assertFalse(zones.in_zone(path), f"{type_name}: {path} is in the auto-merge zone")
-
-    def test_own_file_by_exact_path_is_ok(self):
-        for type_name, paths in OWN_FILES.items():
-            for path in paths:
-                self.assertEqual(rules_of(path, f"{type_name}.shared.use()"), set(), f"{type_name} in {path}")
-
-    def test_own_file_of_another_type_is_not_ok(self):
-        self.assertEqual(rules_of("legacy/macos/Sources/Notchling/Vault/VaultStore.swift", "ReplySender.send(x)"),
-                         {"CAP-PROTECTED-TYPE"})
-
-    def test_every_protected_type_has_own_files(self):
-        self.assertEqual(set(OWN_FILES), set(PROTECTED_TYPES))
-
-    def test_own_files_exist_and_define_the_type(self):
-        for type_name, paths in OWN_FILES.items():
-            text = ""
-            for path in paths:
-                self.assertTrue((REPO / path).is_file(), f"{type_name}: {path} does not exist")
-                text += (REPO / path).read_text(encoding="utf-8")
-            self.assertTrue(re.search(r"\b(class|struct|enum|actor|protocol)\s+%s\b" % type_name, text),
-                            f"{type_name} is not defined in {paths}")
-
-
 class BroaderPatternTests(unittest.TestCase):
 
     def test_each_equivalent_trips_its_rule(self):
         for rule, path, line in I1_BAD:
             with self.subTest(line):
                 self.assertIn(rule, rules_of(path, line))
-
-    def test_app_wrappers_trip_from_outside_their_files(self):
-        for line in WRAPPER_USES:
-            with self.subTest(line):
-                self.assertEqual(rules_of("legacy/macos/Sources/Notchling/Chat/Views/Row.swift", line), {"CAP-PROTECTED-TYPE"})
-
-    def test_app_wrappers_are_protected_types(self):
-        for name in ("TerminalSession", "AgentActions", "CodexRunner", "AntigravityRunner", "SecretRunner",
-                     "VaultServer"):
-            self.assertIn(name, PROTECTED_TYPES)
-
-    def test_app_wrappers_are_ok_in_their_own_files(self):
-        for path, line in (("legacy/macos/Sources/Notchling/Terminal/TerminalSession.swift", "TerminalSession(run: c, in: d)"),
-                           ("legacy/macos/Sources/Notchling/Agents/AgentActions.swift", "AgentActions.stop(a)"),
-                           ("legacy/macos/Sources/Notchling/Agents/CodexRunner.swift", "CodexRunner.run(p, in: d)"),
-                           ("legacy/macos/Sources/Notchling/Agents/AntigravityCLI.swift", "AntigravityRunner.shared.prompt(t)"),
-                           ("legacy/macos/Sources/Notchling/Vault/SecretVault.swift", "SecretRunner.run(n, c)"),
-                           ("legacy/macos/Sources/Notchling/Vault/VaultServer.swift", "VaultServer.shared.start()")):
-            self.assertEqual(rules_of(path, line), set(), line)
 
     def test_look_alikes_that_are_not_the_api_do_not_trip(self):
         for line in ("let env = ProcessInfo.processInfo.environment",

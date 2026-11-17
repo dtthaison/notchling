@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Pattern, Tuple
+from typing import Dict, List, Pattern
 
 from guard.changes import Change
 from guard.source import SLASH, strip_code, strip_comments
@@ -12,26 +12,6 @@ CODE_EXTS = {".swift", ".rs", ".dart", ".sh", ".py"}
 BINARY_RULE = "CAP-BINARY"
 OBSCURE_RULE = "CAP-OBSCURE"
 MAX_COMMENT_ENDS = 8
-
-OWN_FILES: Dict[str, Tuple[str, ...]] = {
-    "VaultStore": ("legacy/macos/Sources/Notchling/Vault/VaultStore.swift",),
-    "AccountStore": ("legacy/macos/Sources/Notchling/Accounts/Accounts.swift",),
-    "LaneStore": ("legacy/macos/Sources/Notchling/Lanes/Lanes.swift",),
-    "ReplySender": ("legacy/macos/Sources/Notchling/Agents/ReplySender.swift", "legacy/macos/Sources/Notchling/Agents/ReplySender+Dialog.swift"),
-    "HookBridge": ("legacy/macos/Sources/Notchling/Hook/HookBridge.swift",),
-    "OwnerPublish": ("legacy/macos/Sources/Notchling/Pages/OwnerPublish.swift",),
-    "TerminalSession": ("legacy/macos/Sources/Notchling/Terminal/TerminalSession.swift",),
-    "AgentActions": ("legacy/macos/Sources/Notchling/Agents/AgentActions.swift",),
-    "CodexRunner": ("legacy/macos/Sources/Notchling/Agents/CodexRunner.swift",),
-    "AntigravityRunner": ("legacy/macos/Sources/Notchling/Agents/AntigravityCLI.swift",),
-    "ACPRunner": ("legacy/macos/Sources/Notchling/Agents/ACPRunner.swift",),
-    "ACPConnection": ("legacy/macos/Sources/Notchling/Agents/ACPConnection.swift",),
-    "HostTerminals": ("legacy/macos/Sources/Notchling/Agents/ReplySender.swift",),
-    "SecretRunner": ("legacy/macos/Sources/Notchling/Vault/SecretVault.swift",),
-    "SecretVault": ("legacy/macos/Sources/Notchling/Vault/SecretVault.swift",),
-    "VaultServer": ("legacy/macos/Sources/Notchling/Vault/VaultServer.swift",),
-}
-PROTECTED_TYPES = list(OWN_FILES)
 
 
 @dataclass(frozen=True)
@@ -73,7 +53,6 @@ RULES: Dict[str, List[Pattern[str]]] = {
                         r"\bfs::(%s)\b" % _RS_FS_WRITES, r"\bfs::\*", r"\bfs::\{(?:[^}]*\b(?:%s)\b|[^}]*$)" % _RS_FS_WRITES,
                         r"\bFile::(create|create_new|options)\b", r"\bOpenOptions\b",
                         r"\bFile\([^)]*\)\.(writeAs\w+|delete|rename)\b"),
-    "CAP-PROTECTED-TYPE": [],
 }
 
 IN_STRINGS: Dict[str, List[Pattern[str]]] = {
@@ -82,19 +61,11 @@ IN_STRINGS: Dict[str, List[Pattern[str]]] = {
     "CAP-NETWORK": _c(r"^\s*import\s+['\"]package:(http|dio|web_socket_channel)/"),
 }
 
-TYPE_USE = re.compile(r"\b(" + "|".join(PROTECTED_TYPES) + r")\b")
-
-
-def _own_file(path: str, type_name: str) -> bool:
-    return path in OWN_FILES.get(type_name, ())
-
 
 def _view_trips(path: str, text: str) -> List[str]:
     code, comments_out = strip_code(path, text), strip_comments(path, text)
     rules = [r for r, pats in RULES.items() if any(p.search(code) for p in pats)]
     rules += [r for r, pats in IN_STRINGS.items() if r not in rules and any(p.search(comments_out) for p in pats)]
-    if any(not _own_file(path, m.group(1)) for m in TYPE_USE.finditer(code)):
-        rules.append("CAP-PROTECTED-TYPE")
     return rules
 
 
