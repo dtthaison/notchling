@@ -4,6 +4,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
+use crate::ask_ops::AskOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
 use crate::awake_ops::AwakeOps;
@@ -489,6 +490,7 @@ pub struct Wired {
     pub catalog: Arc<CatalogService>,
     pub inbox: Arc<InboxOps>,
     pub outbox: Arc<OutboxOps>,
+    pub ask: Arc<AskOps>,
     pub postmen: Postmen,
     pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
@@ -567,6 +569,7 @@ impl Wired {
             .with_cluster_dir(layout.cluster_dir());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         acting.attach_outbox(outbox.clone());
+        let ask = crate::ask_wiring::build(layout, &sessions, &acting, &room, &events);
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),
@@ -802,6 +805,7 @@ impl Wired {
             catalog,
             inbox,
             outbox,
+            ask,
             postmen,
             outbox_notice,
             vault,
@@ -881,6 +885,7 @@ impl Wired {
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.outbox.clone())
+            .with_group(self.ask.clone())
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())

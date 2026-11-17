@@ -10,6 +10,10 @@ pub mod agy_elsewhere;
 pub mod agy_ops;
 pub mod agy_phone;
 pub mod agy_sink;
+mod ask_events;
+pub mod ask_ops;
+mod ask_rows;
+pub mod ask_wiring;
 pub mod attach;
 pub mod awake_loop;
 pub mod awake_ops;
@@ -199,6 +203,8 @@ mod acting_permission_tests;
 mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
+#[cfg(test)]
+mod ask_testkit;
 #[cfg(test)]
 mod awake_follow_tests;
 #[cfg(test)]
