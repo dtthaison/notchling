@@ -75,6 +75,18 @@ impl GitOps {
         cache_key: &Path,
         start_ms: i64,
     ) -> Result<Snapshot<'a>, Failure> {
+        let mut snap = self.view(reader, cache_key, start_ms)?;
+        snap.fill_counts();
+        snap.fill_facts();
+        Ok(snap)
+    }
+
+    pub fn view<'a>(
+        &'a self,
+        reader: &'a Reader<'a>,
+        cache_key: &Path,
+        start_ms: i64,
+    ) -> Result<Snapshot<'a>, Failure> {
         let (refs, refs_truncated) = reader.refs()?;
         let cached = lock(&self.cache)
             .repo(cache_key, start_ms)
@@ -103,7 +115,7 @@ impl GitOps {
             }
         };
         let bases = bases_of(&listed, &refs);
-        let mut snap = Snapshot {
+        Ok(Snapshot {
             listed,
             refs,
             refs_truncated,
@@ -114,10 +126,7 @@ impl GitOps {
             reader,
             key: cache_key.to_path_buf(),
             budget: Budget::new(start_ms, READ_STOP_MS),
-        };
-        snap.fill_counts();
-        snap.fill_facts();
-        Ok(snap)
+        })
     }
 }
 

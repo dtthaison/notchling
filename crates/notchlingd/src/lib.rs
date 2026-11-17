@@ -96,6 +96,7 @@ pub mod git_args;
 pub mod git_branch_list;
 pub mod git_cache;
 pub mod git_ops;
+pub mod git_targets;
 pub mod git_view;
 pub mod git_work_reads;
 pub mod git_worktrees;
@@ -292,11 +293,15 @@ mod git_args_tests;
 #[cfg(test)]
 mod git_cache_tests;
 #[cfg(all(test, unix))]
+mod git_ops_allowlist_tests;
+#[cfg(all(test, unix))]
 mod git_ops_branch_list_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;
 #[cfg(test)]
 mod git_ops_listed_tests;
+#[cfg(all(test, unix))]
+mod git_ops_targets_tests;
 #[cfg(test)]
 mod git_ops_tests;
 #[cfg(all(test, unix))]

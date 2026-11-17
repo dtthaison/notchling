@@ -27,7 +27,7 @@ pub(crate) struct Row {
     pub unrelated: bool,
 }
 
-fn prefix_len(cwd: &Path, entry: &WorktreeEntry, real: &str) -> Option<usize> {
+pub(crate) fn prefix_len(cwd: &Path, entry: &WorktreeEntry, real: &str) -> Option<usize> {
     [Path::new(&entry.path), Path::new(real)]
         .into_iter()
         .filter(|path| cwd.starts_with(path))

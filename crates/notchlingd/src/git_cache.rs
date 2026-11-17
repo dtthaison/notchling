@@ -159,6 +159,13 @@ impl GitCache {
         repo.asked_ms = now_ms;
         repo
     }
+
+    #[cfg(test)]
+    pub fn find_work(&self, path: &str) -> Option<Work> {
+        self.repos
+            .values()
+            .find_map(|repo| repo.work.get(path).cloned())
+    }
 }
 
 pub fn pick_reads(
