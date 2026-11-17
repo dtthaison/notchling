@@ -98,7 +98,7 @@ impl Shared {
     }
 }
 
-const READ_ONLY_KEYS: [&str; 4] = ["replication", "move", "promote", "waiting"];
+const READ_ONLY_KEYS: [&str; 5] = ["replication", "move", "promote", "waiting", "jobs"];
 
 pub(super) fn carried(last: &Value, event: &Value) -> Value {
     let mut next = event.clone();

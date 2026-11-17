@@ -395,6 +395,9 @@ pub trait ClusterTokens: Send + Sync {
     fn tailnet(&self) -> Option<String> {
         None
     }
+    fn status_json(&self) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 pub struct NoCluster;

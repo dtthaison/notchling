@@ -159,6 +159,7 @@ pub struct MachinesModel {
     pub diff: Option<DiffSheet>,
     mac: Option<Result<MacSide, MacVersionsError>>,
     pub(super) masters: BTreeMap<String, Option<bool>>,
+    pub(super) update_banner: Option<String>,
 }
 
 impl MachinesModel {
@@ -192,6 +193,7 @@ impl MachinesModel {
             diff: None,
             mac: None,
             masters: BTreeMap::new(),
+            update_banner: None,
         };
         model.refresh_machines();
         model.refresh_vault();

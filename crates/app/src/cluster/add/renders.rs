@@ -1,29 +1,61 @@
+use notchling_engine::machines::node_updates::{UpdateRow, UpdateState};
 use notchling_engine::machines::step::StepId;
 
-use super::add::{Phase, Stop};
-use super::add_parts::AddParts;
-use super::add_plan::{Choice, PlanRow, PlanView};
-use super::add_runs::{AddRuns, Snap};
-use super::add_source::AddSource;
-use super::feed::ClusterFeed;
-use super::model::ClusterModel;
-use super::renders::Shown;
-use super::view::ClusterSheetView;
+use crate::cluster::add::{Phase, Stop};
+use crate::cluster::add_parts::AddParts;
+use crate::cluster::add_plan::{Choice, PlanRow, PlanView};
+use crate::cluster::add_runs::{AddRuns, Snap};
+use crate::cluster::add_source::{AddSource, Offer};
+use crate::cluster::feed::ClusterFeed;
+use crate::cluster::model::ClusterModel;
+use crate::cluster::renders::Shown;
+use crate::cluster::view::ClusterSheetView;
 use crate::machines::data::Setup;
 
 const HOST: &str = "m2.tail1234.ts.net";
 const USER: &str = "sondoan";
 
-pub(super) fn adds(which: Shown) -> bool {
+pub(in crate::cluster) fn adds(which: Shown) -> bool {
     matches!(
         which,
-        Shown::Add | Shown::AddPlan | Shown::AddRunning | Shown::NotJoined | Shown::AddStopped
+        Shown::Add
+            | Shown::AddPlan
+            | Shown::AddRunning
+            | Shown::NotJoined
+            | Shown::AddStopped
+            | Shown::Update
     )
 }
 
-pub(super) fn feed_for(which: Shown, model: ClusterModel) -> ClusterFeed {
+fn offer() -> Offer {
+    let busy = "2 shell job(s) running; the update restarts the daemon";
+    let rows = [
+        ("m1", UpdateState::Ready),
+        (
+            "vps-sing-1",
+            UpdateState::NeedsBuild("Build the Linux nodes first: tools/build-node.sh".into()),
+        ),
+        ("m3", UpdateState::Busy(busy.into())),
+    ];
+    let rows = rows
+        .into_iter()
+        .map(|(machine, state)| UpdateRow {
+            machine: machine.into(),
+            state,
+        })
+        .collect();
+    (Some("a1b2c3d".into()), rows)
+}
+
+pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> ClusterFeed {
     if !adds(which) {
         return ClusterFeed::fixed(model);
+    }
+    if which == Shown::Update {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/machines-node");
+        let parts = AddParts::live(&Setup::for_render(Some(&dir)));
+        let source = AddSource::over(parts).with_offer(offer());
+        return ClusterFeed::fixed_adding(model, source, AddRuns::fixed(Vec::new()));
     }
     let parts = AddParts::live(&Setup::for_render(None));
     ClusterFeed::fixed_adding(model, AddSource::over(parts), AddRuns::fixed(snaps(which)))
@@ -137,14 +169,18 @@ fn snaps(which: Shown) -> Vec<Snap> {
 }
 
 impl ClusterSheetView {
-    pub(super) fn preview_add(&mut self, which: Shown, cx: &mut gpui::Context<Self>) {
+    pub(in crate::cluster) fn preview_add(&mut self, which: Shown, cx: &mut gpui::Context<Self>) {
+        if which == Shown::Update {
+            self.preview_update(cx);
+            return;
+        }
         let parts = self.feed.add_source().parts();
         let flow = match which {
             Shown::Add => None,
             Shown::AddPlan | Shown::AddRunning | Shown::AddStopped => Some("m2".to_owned()),
             _ => return,
         };
-        let sheet = super::add_view::AddSheet::new(parts, flow, cx);
+        let sheet = crate::cluster::add_view::AddSheet::new(parts, flow, cx);
         if which == Shown::Add {
             let typed = format!("{USER}@{HOST}");
             sheet

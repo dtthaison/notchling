@@ -18,6 +18,12 @@ impl MachinesView {
             move || ask.run(),
             |view, answer, _| view.model.set_masters(answer),
         );
+        let updates = self.model.update_ask();
+        Self::background(
+            cx,
+            move || updates.run_here(),
+            |view, banner, _| view.model.set_update_banner(banner),
+        );
     }
 
     fn join_cluster(&mut self, name: &str, cx: &mut Context<Self>) {

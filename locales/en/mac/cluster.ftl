@@ -510,3 +510,38 @@ cluster-not-joined-join = Join Cluster…
 cluster-not-joined-line = { $target } · { $os }
 # Under a machine in that section when its system isn't known yet; $target is user@host.
 cluster-not-joined-line-unknown = { $target }
+
+## Update Machines
+
+# Line in the Cluster sheet when members run another Notchling build than this Mac; $count is how many, $names their names.
+cluster-update-banner = { $count ->
+    [one] { $count } machine runs another Notchling build: { $names }
+   *[other] { $count } machines run another Notchling build: { $names }
+}
+# Button on that line; $count is how many machines.
+cluster-update-button-open = { $count ->
+    [one] Update { $count } Machine…
+   *[other] Update { $count } Machines…
+}
+# Button that runs the update; $count is how many machines will be updated.
+cluster-update-button-run = { $count ->
+    [one] Update { $count } Machine
+   *[other] Update { $count } Machines
+}
+cluster-update-not-now = Not Now
+cluster-update-anyway = Update Anyway
+cluster-update-title = Update Machines
+cluster-update-intro = Each machine gets this Mac's Notchling, one at a time. A running Claude Code session keeps running through the restart.
+cluster-update-ready = Ready to update.
+# Under a machine that has a reason to wait but was chosen anyway; $why is that reason.
+cluster-update-anyway-chosen = { $why }. It will update anyway.
+# Under a member that isn't in Machines; $name is its name.
+cluster-update-not-in-machines = { $name } isn't in Machines, so it can't be updated from here.
+cluster-update-nothing = No machine can be updated now.
+cluster-update-running = Updating…
+cluster-update-continue = Continue
+# Asks for the admin password of a step; $step is the step's title.
+cluster-update-password-for = Admin password for { $step }
+cluster-update-password-placeholder = Admin password
+# Second sentence of the update line in the Machines window.
+cluster-update-from-cluster = Update them from the Cluster sheet in Notchling.

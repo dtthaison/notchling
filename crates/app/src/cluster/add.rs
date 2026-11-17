@@ -21,6 +21,9 @@ use super::add_plan::{
 use super::model::ClusterModel;
 use crate::machines::model::Registry;
 
+#[cfg(target_os = "macos")]
+pub(super) mod renders;
+
 pub const JOIN_WAIT_SECS: f64 = 60.0;
 
 pub use super::add_job::{End, Phase, Probe, Progress, Reply, RunJob, Stop};

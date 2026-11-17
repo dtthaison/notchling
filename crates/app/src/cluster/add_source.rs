@@ -1,16 +1,25 @@
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
+use notchling_engine::cluster::build_id::build_id;
+use notchling_engine::machines::dist_manifest;
+use notchling_engine::machines::node_updates::UpdateRow;
 use notchling_engine::machines::step::StepId;
+use notchling_engine::machines::steps_node::dist_dir;
 
 use super::add_parts::AddParts;
 use super::model::ClusterModel;
 use super::not_joined::{not_joined, NotJoined};
+use super::updates::rows_for;
 use crate::chat::data::DataRoot;
 use crate::machines::data::Setup;
+
+pub type Offer = (Option<String>, Vec<UpdateRow>);
 
 pub struct AddSource {
     root: Option<DataRoot>,
     parts: OnceLock<Option<AddParts>>,
+    fixed_offer: Option<Offer>,
 }
 
 impl AddSource {
@@ -18,6 +27,7 @@ impl AddSource {
         AddSource {
             root: None,
             parts: OnceLock::new(),
+            fixed_offer: None,
         }
     }
 
@@ -25,7 +35,13 @@ impl AddSource {
         AddSource {
             root: Some(root),
             parts: OnceLock::new(),
+            fixed_offer: None,
         }
+    }
+
+    pub fn with_offer(mut self, offer: Offer) -> AddSource {
+        self.fixed_offer = Some(offer);
+        self
     }
 
     pub fn over(parts: AddParts) -> AddSource {
@@ -60,5 +76,49 @@ impl AddSource {
                 .cloned()
         };
         not_joined(&machines, &joined, model)
+    }
+}
+
+impl AddSource {
+    pub fn updates(&self, model: &ClusterModel) -> Offer {
+        if let Some(fixed) = &self.fixed_offer {
+            return fixed.clone();
+        }
+        let this_build = build_id().map(str::to_owned);
+        let Some(parts) = self.parts() else {
+            return (this_build, Vec::new());
+        };
+        let manifest = self
+            .root
+            .as_ref()
+            .and_then(|root| dist_manifest::read(&dist_dir(&root.data_dir)));
+        let machines = parts.registry.all();
+        let node_of = |name: &str| {
+            parts
+                .engine
+                .results(name)
+                .get(&StepId::NODE_JOINED)
+                .and_then(|r| r.detected.node.clone())
+        };
+        let failed: BTreeSet<String> = machines
+            .iter()
+            .filter(|m| {
+                parts
+                    .engine
+                    .results(&m.name)
+                    .get(&StepId::NODE_BINARY)
+                    .is_some_and(|r| r.state.is_fail())
+            })
+            .map(|m| m.name.clone())
+            .collect();
+        let rows = rows_for(
+            this_build.as_deref(),
+            model,
+            &machines,
+            &node_of,
+            manifest.as_ref(),
+            &failed,
+        );
+        (this_build, rows)
     }
 }

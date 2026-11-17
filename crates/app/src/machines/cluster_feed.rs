@@ -122,6 +122,10 @@ impl ClusterTokens for DaemonTokens {
         primary_addr_in(&self.recent_status()?)
     }
 
+    fn status_json(&self) -> Option<Value> {
+        self.recent_status()
+    }
+
     fn tailnet(&self) -> Option<String> {
         let mut cached = self.tailnet.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((at, name)) = cached.as_ref() {

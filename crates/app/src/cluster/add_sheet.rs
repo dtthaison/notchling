@@ -44,7 +44,7 @@ impl AddPassword {
 
 impl fmt::Debug for AddPassword {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("AddPassword(<hidden>)")
+        f.write_str("<hidden>")
     }
 }
 

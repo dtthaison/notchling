@@ -77,6 +77,12 @@ fn render_cluster_not_joined() {
 }
 
 #[test]
+#[ignore = "opens a window and captures it; needs a window server"]
+fn render_cluster_update() {
+    render("cluster-update");
+}
+
+#[test]
 fn the_add_views_are_listed_and_named_for_the_map() {
     for name in [
         "cluster-add",
@@ -84,6 +90,7 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         "cluster-add-running",
         "cluster-add-stopped",
         "cluster-not-joined",
+        "cluster-update",
     ] {
         assert!(views::spec(name).is_some(), "{name}");
     }
@@ -91,9 +98,15 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         include_str!("../src/cluster/add_view.rs"),
         include_str!("../src/cluster/add_plan_view.rs"),
         include_str!("../src/cluster/not_joined_view.rs"),
+        include_str!("../src/cluster/updates_view.rs"),
     ]
     .join("\n");
-    for part in ["Add Machine Sheet", "Machine Plan", "Not in the Cluster"] {
+    for part in [
+        "Add Machine Sheet",
+        "Machine Plan",
+        "Not in the Cluster",
+        "Update Machines",
+    ] {
         assert!(
             sources.contains(&format!("part(\"{part}\""))
                 || sources.contains(&format!("part_at(\"{part}\"")),

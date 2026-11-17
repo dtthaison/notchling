@@ -11,7 +11,7 @@ use super::secrets::SecretsModel;
 use super::wire::{self, Request};
 use crate::tools::requests::RowTool;
 use notchling_engine::cluster::Qualified;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 const TOOLS: [(VersionTool, ClusterTool); 3] = [
     (VersionTool::Claude, ClusterTool::Claude),
@@ -198,6 +198,7 @@ pub struct ClusterModel {
     reference: Option<Versions>,
     main: BTreeSet<String>,
     kept: BTreeSet<String>,
+    shell_jobs: BTreeMap<String, usize>,
     moving: Option<MoveStatus>,
     link: bool,
     listening: bool,
@@ -401,7 +402,23 @@ fn id_set(status: &Value, key: &str) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
+fn shell_jobs(status: &Value) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    let jobs = status.get("jobs").and_then(Value::as_array);
+    for job in jobs.into_iter().flatten() {
+        let live = matches!(text(job, "state"), "running" | "dispatching");
+        if live && text(job, "tool") == "shell" {
+            *counts.entry(text(job, "node").to_owned()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
 impl ClusterModel {
+    pub fn running_shell_jobs(&self, node: &str) -> usize {
+        self.shell_jobs.get(node).copied().unwrap_or(0)
+    }
+
     pub fn from_status(status: &Value, me: &str) -> ClusterModel {
         let members: Vec<&Value> = status
             .get("members")
@@ -449,6 +466,7 @@ impl ClusterModel {
             reference,
             main: id_set(status, "main"),
             kept: id_set(status, "kept"),
+            shell_jobs: shell_jobs(status),
             moving: MoveStatus::of(status),
             link: flag(status, "link"),
             listening: status

@@ -4,8 +4,6 @@ pub mod add_parts;
 pub mod add_plan;
 #[cfg(target_os = "macos")]
 mod add_plan_view;
-#[cfg(target_os = "macos")]
-mod add_renders;
 pub mod add_runs;
 pub mod add_sheet;
 pub mod add_source;
@@ -29,6 +27,9 @@ pub mod replication;
 pub mod secrets;
 #[cfg(target_os = "macos")]
 pub mod secrets_view;
+pub mod updates;
+#[cfg(target_os = "macos")]
+mod updates_view;
 #[cfg(target_os = "macos")]
 pub mod view;
 #[cfg(target_os = "macos")]
@@ -64,3 +65,5 @@ mod promote_tests;
 mod replication_tests;
 #[cfg(test)]
 mod secrets_tests;
+#[cfg(test)]
+mod updates_tests;

@@ -26,6 +26,9 @@ mod model_tests_node;
 mod model_tests_safety;
 #[cfg(test)]
 mod model_tests_sheet;
+#[cfg(test)]
+mod model_tests_updates;
+pub mod model_updates;
 pub mod model_vault;
 #[cfg(target_os = "macos")]
 pub mod morning_view;
