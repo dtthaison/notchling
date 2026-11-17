@@ -22,7 +22,7 @@ fn make(hub: &mut Hub, at: &NodeId, secret: &str, minter: &NodeId, invite: Invit
     hub.local(
         at,
         LocalCmd::Invite {
-            secret: secret.to_string(),
+            secret: secret.to_string().into(),
             invite,
             minter: minter.clone(),
         },
@@ -261,7 +261,7 @@ fn plain_token_still_makes_join_request() {
     hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: "plain".to_string(),
+            secret: "plain".to_string().into(),
             minter: m5.clone(),
         },
     );
@@ -463,4 +463,25 @@ fn status_lists_open_invites_on_the_primary_without_their_secret() {
     assert!(hub.core(&m1).status().get("invites").is_none());
     present(&mut hub, &m5, &w9, "w9", "secret-for-w9");
     assert_eq!(hub.core(&m5).status()["invites"], json!([]));
+}
+
+#[test]
+fn debug_of_local_commands_hides_join_secrets() {
+    let node = id("w1");
+    let cmds = [
+        LocalCmd::IssueToken {
+            secret: "SENTINEL-SECRET-1".to_string().into(),
+            minter: node.clone(),
+        },
+        LocalCmd::Invite {
+            secret: "SENTINEL-SECRET-2".to_string().into(),
+            invite: invite_for(&node, "w1", false, false),
+            minter: node.clone(),
+        },
+    ];
+    for cmd in cmds {
+        let text = format!("{:?}", Input::Local { id: 1, cmd });
+        assert!(!text.contains("SENTINEL"), "{text}");
+        assert!(text.contains("minter"), "{text}");
+    }
 }

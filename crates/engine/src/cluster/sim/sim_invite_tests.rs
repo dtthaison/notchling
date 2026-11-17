@@ -76,3 +76,66 @@ fn an_active_member_nobody_approved_is_caught() {
         Err(Violation::ActiveWithoutApproval { .. })
     ));
 }
+
+fn forged_invite_joined(node: &crate::cluster::NodeId) -> crate::cluster::core::Effect {
+    crate::cluster::core::Effect::InviteJoined {
+        node: node.clone(),
+        name: "forged".to_string(),
+        os: "linux".to_string(),
+        arch: "x86_64".to_string(),
+        minter: node.clone(),
+        minter_name: "forged".to_string(),
+    }
+}
+
+#[test]
+fn an_invite_joined_for_a_node_nobody_invited_is_not_approval() {
+    let mut world = World::new(5);
+    let m5 = world.add_node("m5", true);
+    let w1 = world.add_node("w1", false);
+    world.create(&m5);
+    world.join(&w1, false);
+    world.run_for(2_000);
+    assert!(world.is_active_member(&w1));
+    world.forget_approvals();
+    world
+        .secrets
+        .planted
+        .push((m5.clone(), forged_invite_joined(&w1)));
+    world.run_for(2_000);
+    assert!(!world.is_approved(&w1));
+    assert!(matches!(
+        check(&world),
+        Err(Violation::ActiveWithoutApproval { .. })
+    ));
+}
+
+#[test]
+fn an_invite_joined_for_an_invited_node_is_approval() {
+    let mut world = World::new(5);
+    let m5 = world.add_node("m5", true);
+    let w1 = world.add_node("w1", false);
+    world.create(&m5);
+    world.join(&w1, false);
+    world.run_for(2_000);
+    world.forget_approvals();
+    world.local(
+        &m5,
+        crate::cluster::core::LocalCmd::Invite {
+            secret: "s".to_string().into(),
+            invite: crate::cluster::invite::Invite {
+                node: w1.clone(),
+                name: "w1".to_string(),
+                can_be_master: false,
+                acting: false,
+            },
+            minter: m5.clone(),
+        },
+    );
+    world
+        .secrets
+        .planted
+        .push((m5.clone(), forged_invite_joined(&w1)));
+    world.run_for(2_000);
+    assert!(world.is_approved(&w1));
+}

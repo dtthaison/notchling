@@ -420,7 +420,7 @@ impl Driver {
         self.step(Input::Local {
             id,
             cmd: LocalCmd::IssueToken {
-                secret,
+                secret: secret.into(),
                 minter: minter.unwrap_or_else(|| self.me.clone()),
             },
         });

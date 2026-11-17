@@ -159,7 +159,7 @@ fn issue(hub: &mut Hub, home: &NodeId, secret: &str) {
     hub.local(
         home,
         LocalCmd::IssueToken {
-            secret: secret.to_string(),
+            secret: secret.to_string().into(),
             minter: home.clone(),
         },
     );

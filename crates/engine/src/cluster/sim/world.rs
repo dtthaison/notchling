@@ -90,6 +90,7 @@ pub struct World {
     pub(super) answers: Vec<(NodeId, u64, Result<Value, WireError>)>,
     pub(super) join_requests: Vec<(NodeId, NodeId)>,
     pub(super) approved: BTreeSet<NodeId>,
+    pub(super) invited: BTreeSet<NodeId>,
     pub(super) seen: BTreeMap<NodeId, Term>,
     pub(super) violation: Option<Violation>,
     pub(super) first_home: Option<NodeId>,
@@ -114,6 +115,7 @@ impl World {
             answers: Vec::new(),
             join_requests: Vec::new(),
             approved: BTreeSet::new(),
+            invited: BTreeSet::new(),
             seen: BTreeMap::new(),
             violation: None,
             first_home: None,
@@ -331,7 +333,7 @@ impl World {
         self.local(
             &home,
             LocalCmd::IssueToken {
-                secret: secret.clone(),
+                secret: secret.clone().into(),
                 minter: home.clone(),
             },
         );
@@ -379,7 +381,7 @@ impl World {
         self.local(
             &home,
             LocalCmd::Invite {
-                secret: secret.clone(),
+                secret: secret.clone().into(),
                 invite: Invite {
                     node: invited.clone(),
                     name: self.name_of(invited),
@@ -543,6 +545,9 @@ impl World {
             }
             LocalCmd::Create { me, .. } => {
                 self.approved.insert(me.id.clone());
+            }
+            LocalCmd::Invite { invite, .. } if self.is_up(n) => {
+                self.invited.insert(invite.node.clone());
             }
             _ => {}
         }

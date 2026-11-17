@@ -76,6 +76,27 @@ pub enum Input {
     },
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct JoinSecret(String);
+
+impl JoinSecret {
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for JoinSecret {
+    fn from(secret: String) -> JoinSecret {
+        JoinSecret(secret)
+    }
+}
+
+impl std::fmt::Debug for JoinSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JoinSecret(<hidden>)")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum LocalCmd {
     Create {
@@ -84,11 +105,11 @@ pub enum LocalCmd {
         me: Member,
     },
     IssueToken {
-        secret: String,
+        secret: JoinSecret,
         minter: NodeId,
     },
     Invite {
-        secret: String,
+        secret: JoinSecret,
         invite: Invite,
         minter: NodeId,
     },

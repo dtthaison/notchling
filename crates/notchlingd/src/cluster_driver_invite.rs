@@ -68,7 +68,7 @@ impl Driver {
         self.step(Input::Local {
             id,
             cmd: LocalCmd::Invite {
-                secret,
+                secret: secret.into(),
                 invite,
                 minter: minter.unwrap_or_else(|| self.me.clone()),
             },

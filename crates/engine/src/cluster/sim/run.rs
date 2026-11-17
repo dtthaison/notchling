@@ -202,7 +202,9 @@ impl World {
                 }
                 Effect::JoinRequest { node, .. } => self.join_requests.push((n.clone(), node)),
                 Effect::InviteJoined { node, .. } => {
-                    self.approved.insert(node);
+                    if self.invited.remove(&node) {
+                        self.approved.insert(node);
+                    }
                 }
             }
         }

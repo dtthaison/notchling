@@ -175,7 +175,7 @@ impl Hub {
         self.local(
             &h,
             LocalCmd::IssueToken {
-                secret: secret.clone(),
+                secret: secret.clone().into(),
                 minter: h.clone(),
             },
         );
@@ -268,7 +268,7 @@ fn a_join_token_is_one_time() {
     hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: "once".to_string(),
+            secret: "once".to_string().into(),
             minter: m5.clone(),
         },
     );

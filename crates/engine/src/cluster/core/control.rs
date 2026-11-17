@@ -94,7 +94,8 @@ impl NodeCore {
                 } else if !self.may_mint(&minter) {
                     Err(refusal("forbidden", "only a member makes join tokens"))
                 } else {
-                    self.tokens.issue(secret, minter, &self.me, self.wall_ms);
+                    self.tokens
+                        .issue(secret.into_inner(), minter, &self.me, self.wall_ms);
                     Ok(json!({}))
                 };
                 self.finish(target, result, out);
@@ -113,8 +114,13 @@ impl NodeCore {
                         name: shown_name(&invite.name, &invite.node),
                         ..invite
                     };
-                    self.tokens
-                        .issue_invite(secret, minter, &self.me, self.wall_ms, invite);
+                    self.tokens.issue_invite(
+                        secret.into_inner(),
+                        minter,
+                        &self.me,
+                        self.wall_ms,
+                        invite,
+                    );
                     Ok(json!({"expiresMs": self.wall_ms + TOKEN_TTL_MS}))
                 };
                 self.finish(target, result, out);
