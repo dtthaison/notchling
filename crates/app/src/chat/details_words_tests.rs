@@ -2,31 +2,10 @@ use notchling_locale as t;
 use serde_json::json;
 
 use super::branch::{branch_name, BranchModel};
-use super::git::{parse_status, tracking, GitFile, GitModel, SHOWN_FILES};
+use super::git::{parse_status, tracking};
 use super::inspector::{counted_title, fact_icon, fact_text, token_line, TaskSummary};
 use super::markers;
 use notchling_kit::Icon;
-
-fn git_model(files: usize, truncated: bool) -> GitModel {
-    GitModel {
-        branch: "main".into(),
-        tracking: None,
-        files: (0..files)
-            .map(|n| GitFile {
-                path: format!("f{n}"),
-                status: "M".into(),
-                added: None,
-                removed: None,
-            })
-            .collect(),
-        truncated,
-        upstream: None,
-        ahead: 0,
-        behind: 0,
-        initial: false,
-        changed_at: None,
-    }
-}
 
 fn branch_model(file_count: u64, uncommitted: u64) -> BranchModel {
     BranchModel {
@@ -113,20 +92,6 @@ fn git_words_read_as_they_did() {
         tracking("origin/main", 2, 3),
         "origin/main · 2 ahead, 3 behind"
     );
-    assert_eq!(git_model(3, false).hidden_text(), None);
-    assert_eq!(
-        git_model(0, true).hidden_text().as_deref(),
-        Some("More files not shown")
-    );
-    assert_eq!(
-        git_model(SHOWN_FILES + 1, false).hidden_text().as_deref(),
-        Some("1 more files not shown")
-    );
-    assert_eq!(
-        git_model(SHOWN_FILES + 5, true).hidden_text().as_deref(),
-        Some("5+ more files not shown")
-    );
-    assert_eq!(git_model(2, false).title(), "Git · 2");
     let detached = json!({"repo": true, "detached": true, "head": "abc1234"});
     assert_eq!(branch_name(&detached), "Detached at abc1234");
     assert_eq!(

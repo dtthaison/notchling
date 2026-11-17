@@ -16,16 +16,15 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::paged_rows::{group_more_row, more_row, subagent_row, More};
-use super::{repo_section, ChatView};
-use crate::chat::branch::Summary;
+use super::{repo_section, worktrees_ask, ChatView};
 use crate::chat::format::short_path;
-use crate::chat::git::GitModel;
 use crate::chat::inspector::{
     fact_icon, fact_text, inspector_listed, Inspector, Mark, ShellRow, SubagentRow, TaskRow,
 };
 use crate::chat::paging::Counts;
 use crate::chat::remote_control::Action;
 use crate::chat::shell_list::Listing;
+use crate::chat::worktrees::GitSection;
 use notchling_engine::transcript::model::Conversation;
 
 pub(super) const WIDTH: f32 = crate::chat::panels::DETAILS_DEFAULT;
@@ -57,8 +56,7 @@ pub struct DetailsModel {
     pub i: Inspector,
     pub folder: Option<(String, String)>,
     pub reveal: bool,
-    pub git: Option<Arc<GitModel>>,
-    pub changes: Option<Summary>,
+    pub git: Option<Arc<GitSection>>,
 }
 
 fn model_of(
@@ -68,14 +66,13 @@ fn model_of(
     shells: Option<&Listing>,
     writers: &dyn Fn(&str) -> Vec<i32>,
     folder: Option<(String, String)>,
-    git: Option<Arc<GitModel>>,
+    git: Option<Arc<GitSection>>,
 ) -> DetailsModel {
     DetailsModel {
         i: inspector_listed(conversation, subagents, subagent_counts, shells, writers),
         folder,
         reveal: true,
         git,
-        changes: None,
     }
 }
 
@@ -91,9 +88,8 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         Some(&view.shells),
         &|p: &str| view.shell_probe.writers(p),
         folder,
-        view.git_for_details(),
+        worktrees_ask::section_of(view),
     );
-    model.changes = view.changes_summary();
     model.reveal = !view.selected_refused(Action::Files);
     model
 }
@@ -106,7 +102,6 @@ pub fn render(m: &DetailsModel, a: Appearance, cx: &mut Context<ChatView>) -> An
         a,
         chat: cx.entity().downgrade(),
         git: m.git.clone(),
-        changes: m.changes.clone(),
     }
     .into_any_element()
 }
@@ -118,8 +113,7 @@ struct Panel {
     reveal: bool,
     a: Appearance,
     chat: WeakEntity<ChatView>,
-    git: Option<Arc<GitModel>>,
-    changes: Option<Summary>,
+    git: Option<Arc<GitSection>>,
 }
 
 impl RenderOnce for Panel {
@@ -215,8 +209,8 @@ impl RenderOnce for Panel {
             sections.push((
                 "Git",
                 "Git Changes",
-                git.title(),
-                repo_section::content(git, self.changes.as_ref(), &self.chat, a),
+                git.title.clone(),
+                repo_section::content(git, &self.chat, a),
             ));
         }
         let mut column = div()

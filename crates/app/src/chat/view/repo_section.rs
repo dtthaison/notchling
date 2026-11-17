@@ -1,177 +1,225 @@
-use gpui::{div, prelude::*, px, Div, SharedString, Stateful, WeakEntity};
-use notchling_kit::metric::RADIUS_SM;
+use gpui::{
+    div, prelude::*, px, Div, HighlightStyle, SharedString, Stateful, StyledText, WeakEntity,
+};
+use notchling_kit::metric::{PILL_HEIGHT, RADIUS_SM};
 use notchling_kit::ui::{hsla, icon, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
-use notchling_locale as t;
 
-use super::inspector::{empty, fact_row, MARK_BOX, ROW_LINE};
+use super::inspector::{MARK_BOX, ROW_LINE};
 use super::ChatView;
-use crate::chat::branch::Summary;
-use crate::chat::git::{GitFile, GitModel, SHOWN_FILES};
+use crate::chat::changes_target::Target;
+use crate::chat::worktrees::{CurrentRow, GitSection, OtherRow, SubPart};
 
-pub fn content(
-    m: &GitModel,
-    changes: Option<&Summary>,
-    chat: &WeakEntity<ChatView>,
-    a: Appearance,
-) -> Div {
+const DOT: f32 = 7.0;
+
+pub fn content(section: &GitSection, chat: &WeakEntity<ChatView>, a: Appearance) -> Div {
     let mut column = div().flex().flex_col().gap(px(6.0));
-    column = column.child(fact_row(Icon::Branch, &m.branch, a));
-    if let Some(tracking) = &m.tracking {
-        column = column.child(
-            label(tracking, TypeRole::Meta, Ink::TextFaint, a)
-                .pl(px(MARK_BOX + 8.0))
-                .line_height(px(ROW_LINE))
-                .w_full()
-                .elide(),
-        );
+    column = column.child(current_row(&section.current, chat, a));
+    for (index, row) in section.others.iter().enumerate() {
+        column = column.child(other_row(index, row, chat, a));
     }
-    if m.files.is_empty() {
-        let text = if changes.is_some_and(|c| c.files > 0) {
-            t::chat::git_no_uncommitted()
-        } else {
-            t::chat::git_no_changes()
-        };
-        column = column.child(empty(text, a));
-    }
-    for (index, file) in m.files.iter().take(SHOWN_FILES).enumerate() {
-        column = column.child(file_row(index, file, chat, a));
-    }
-    if let Some(text) = m.hidden_text() {
-        column = column.child(label(&text, TypeRole::Meta, Ink::TextFaint, a));
-    }
-    match changes {
-        Some(summary) => column.child(changes_row(summary, chat, a)),
+    match &section.more {
+        Some(text) => column.child(more_row(text, a)),
         None => column,
     }
 }
 
-fn changes_row(summary: &Summary, chat: &WeakEntity<ChatView>, a: Appearance) -> Stateful<Div> {
-    let chat = chat.clone();
+fn shell(id: impl Into<gpui::ElementId>) -> Stateful<Div> {
     div()
-        .id("git-changes")
+        .id(id)
         .mx(px(-4.0))
         .px(px(4.0))
         .py(px(2.0))
         .rounded(px(RADIUS_SM))
-        .cursor_pointer()
-        .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
-        .on_click(move |_, _, cx| {
-            chat.update(cx, |this, cx| this.open_changes(cx)).ok();
-        })
-        .flex()
-        .items_center()
-        .gap(px(7.0))
-        .child(
-            div()
-                .w(px(MARK_BOX))
-                .h(px(ROW_LINE))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon(Icon::Diff, 10.0, Ink::TextFaint, a)),
-        )
-        .child(
-            label(&format!("+{}", summary.added), TypeRole::Meta, Ink::Done, a)
-                .line_height(px(ROW_LINE)),
-        )
-        .child(
-            label(
-                &format!("\u{2212}{}", summary.removed),
-                TypeRole::Meta,
-                Ink::Expired,
-                a,
-            )
-            .line_height(px(ROW_LINE)),
-        )
-        .child(
-            label(
-                &t::chat::git_vs_base(&summary.base),
-                TypeRole::Meta,
-                Ink::TextFaint,
-                a,
-            )
-            .line_height(px(ROW_LINE))
-            .flex_1()
-            .min_w(px(0.0))
-            .elide(),
-        )
 }
 
-fn counts(file: &GitFile, a: Appearance) -> Div {
+fn clickable(
+    row: Stateful<Div>,
+    chat: &WeakEntity<ChatView>,
+    target: Target,
+    a: Appearance,
+) -> Stateful<Div> {
+    let chat = chat.clone();
+    row.cursor_pointer()
+        .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
+        .on_click(move |_, _, cx| {
+            let target = target.clone();
+            chat.update(cx, |this, cx| this.open_changes_for(target, false, cx))
+                .ok();
+        })
+}
+
+fn icon_column(shape: Icon, ink: Ink, a: Appearance) -> Div {
+    div()
+        .w(px(MARK_BOX))
+        .h(px(ROW_LINE))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(icon(shape, 10.0, ink, a))
+}
+
+fn counts(right: Option<(u64, u64)>, a: Appearance) -> Div {
     let mut row = div().flex_shrink_0().flex().items_center().gap(px(4.0));
-    if let Some(added) = file.added.filter(|n| *n > 0) {
-        row = row.child(
-            label(&format!("+{added}"), TypeRole::Meta, Ink::Done, a).line_height(px(ROW_LINE)),
-        );
-    }
-    if let Some(removed) = file.removed.filter(|n| *n > 0) {
-        row = row.child(
-            label(
-                &format!("\u{2212}{removed}"),
-                TypeRole::Meta,
-                Ink::Expired,
-                a,
+    if let Some((added, removed)) = right {
+        row = row
+            .child(
+                label(&format!("+{added}"), TypeRole::Meta, Ink::Done, a).line_height(px(ROW_LINE)),
             )
-            .line_height(px(ROW_LINE)),
-        );
+            .child(
+                label(
+                    &format!("\u{2212}{removed}"),
+                    TypeRole::Meta,
+                    Ink::Expired,
+                    a,
+                )
+                .line_height(px(ROW_LINE)),
+            );
     }
     row
 }
 
-fn file_row(
-    index: usize,
-    file: &GitFile,
-    chat: &WeakEntity<ChatView>,
-    a: Appearance,
-) -> Stateful<Div> {
-    let (chat, path) = (chat.clone(), file.path.clone());
-    let mut text = div()
-        .flex_1()
-        .min_w(px(0.0))
+fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
+    let mut text = String::new();
+    let mut marks: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
+    for part in parts {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        let start = text.len();
+        let ink = match part {
+            SubPart::Faint(shown) | SubPart::Running(shown) => {
+                text.push_str(shown);
+                matches!(part, SubPart::Running(_)).then_some(Ink::AccentText)
+            }
+            SubPart::Added(n) => {
+                text.push_str(&format!("+{n}"));
+                Some(Ink::Done)
+            }
+            SubPart::Removed(n) => {
+                text.push_str(&format!("\u{2212}{n}"));
+                Some(Ink::Expired)
+            }
+        };
+        if let Some(ink) = ink {
+            let style = HighlightStyle {
+                color: Some(hsla(ink.color(a))),
+                ..Default::default()
+            };
+            marks.push((start..text.len(), style));
+        }
+    }
+    div()
+        .w_full()
+        .kit_type(TypeRole::Meta)
+        .ink(Ink::TextFaint, a)
+        .line_height(px(ROW_LINE))
+        .child(StyledText::new(SharedString::from(text)).with_highlights(marks))
+}
+
+fn name_line(branch: &str, ink: Ink, extra: Option<Div>, a: Appearance) -> Div {
+    let mut line = div().w_full().flex().items_center().gap(px(6.0));
+    if let Some(extra) = extra {
+        line = line.child(extra);
+    }
+    line.child(
+        label(branch, TypeRole::Meta, ink, a)
+            .line_height(px(ROW_LINE))
+            .min_w(px(0.0))
+            .elide(),
+    )
+}
+
+fn pill(text: &str, a: Appearance) -> Div {
+    div()
+        .h(px(PILL_HEIGHT - 4.0))
+        .px(px(7.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .rounded_full()
+        .bg(hsla(Ink::Raised.color(a)))
+        .child(label(text, TypeRole::Meta, Ink::TextFaint, a))
+}
+
+fn working_dot(a: Appearance) -> Div {
+    div()
+        .w(px(DOT))
+        .h(px(DOT))
+        .flex_shrink_0()
+        .rounded_full()
+        .bg(hsla(Ink::Working.color(a)))
+}
+
+fn body(name: Div, sub: &[SubPart], right: Option<(u64, u64)>, a: Appearance) -> Div {
+    div()
+        .w_full()
         .flex()
         .flex_col()
         .gap(px(2.0))
         .child(
-            label(file.name(), TypeRole::Meta, Ink::Text, a)
-                .line_height(px(ROW_LINE))
-                .w_full()
-                .elide(),
-        );
-    if !file.folder().is_empty() {
-        text = text.child(
-            label(file.folder(), TypeRole::Meta, Ink::TextFaint, a)
-                .line_height(px(ROW_LINE))
-                .w_full()
-                .elide(),
-        );
-    }
-    div()
-        .id(SharedString::from(format!("git-file-{index}")))
-        .mx(px(-4.0))
-        .px(px(4.0))
-        .py(px(2.0))
-        .rounded(px(RADIUS_SM))
-        .cursor_pointer()
-        .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
-        .on_click(move |_, window, cx| {
-            chat.update(cx, |this, cx| this.open_git_row(&path, window, cx))
-                .ok();
-        })
-        .flex()
-        .items_start()
-        .gap(px(7.0))
-        .child(
             div()
-                .w(px(MARK_BOX))
-                .h(px(ROW_LINE))
-                .flex_shrink_0()
+                .w_full()
                 .flex()
-                .items_center()
-                .justify_center()
-                .child(label(&file.status, TypeRole::Mono, file.ink(), a)),
+                .items_start()
+                .gap(px(7.0))
+                .child(icon_column(Icon::Branch, Ink::TextFaint, a))
+                .child(div().flex_1().min_w(px(0.0)).child(name))
+                .child(counts(right, a)),
         )
-        .child(text)
-        .child(counts(file, a))
+        .child(div().pl(px(MARK_BOX + 7.0)).child(sub_line(sub, a)))
+}
+
+fn current_row(row: &CurrentRow, chat: &WeakEntity<ChatView>, a: Appearance) -> Stateful<Div> {
+    let name = div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(
+            label(&row.branch, TypeRole::Meta, Ink::Text, a)
+                .line_height(px(ROW_LINE))
+                .min_w(px(0.0))
+                .elide(),
+        )
+        .child(pill(notchling_locale::chat::git_this_session(), a));
+    let item = shell("git-current").child(body(name, &row.sub, row.right, a));
+    clickable(item, chat, Target::Own, a)
+}
+
+fn other_row(
+    index: usize,
+    row: &OtherRow,
+    chat: &WeakEntity<ChatView>,
+    a: Appearance,
+) -> Stateful<Div> {
+    let ink = if row.missing {
+        Ink::TextFaint
+    } else {
+        Ink::Text
+    };
+    let dot = row.working.then(|| working_dot(a));
+    let name = name_line(&row.branch, ink, dot, a);
+    let item = shell(SharedString::from(format!("git-worktree-{index}")))
+        .child(body(name, &row.sub, row.right, a));
+    if row.missing {
+        return item;
+    }
+    clickable(item, chat, Target::Worktree(row.path.clone()), a)
+}
+
+fn more_row(text: &str, a: Appearance) -> Stateful<Div> {
+    div()
+        .id("git-more")
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(
+            label(text, TypeRole::Meta, Ink::TextMuted, a)
+                .line_height(px(ROW_LINE))
+                .min_w(px(0.0))
+                .elide(),
+        )
+        .child(icon(Icon::ChevronRight, 9.0, Ink::TextFaint, a).flex_shrink_0())
 }

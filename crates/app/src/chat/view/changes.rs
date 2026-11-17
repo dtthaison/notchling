@@ -9,7 +9,7 @@ use notchling_kit::{Appearance, Ink};
 use super::page_panel::resize_edge;
 use super::render_map::WindowRegion;
 use super::ChatView;
-use crate::chat::branch::{self, Branches, Summary};
+use crate::chat::branch::{self, Branches};
 use crate::chat::branch_rows::Slot;
 use crate::chat::changes_target::{self, DiffVia, Target, TargetState};
 use crate::chat::git::{self, DiffText, Why};
@@ -21,12 +21,6 @@ impl ChatView {
             && !self.page.is_open()
             && !self.terminal.shown()
             && !self.simulator.shown()
-    }
-
-    pub(super) fn changes_summary(&self) -> Option<Summary> {
-        self.repo
-            .branch_for(self.selected_folder().as_deref())
-            .map(|m| m.summary())
     }
 
     pub(super) fn push_branch(&mut self, cx: &mut Context<Self>) {
@@ -48,10 +42,6 @@ impl ChatView {
 
     fn changes_panel(&self) -> gpui::Entity<super::changes_panel::ChangesPanel> {
         self.parts.changes.clone()
-    }
-
-    pub(super) fn open_changes(&mut self, cx: &mut Context<Self>) {
-        self.open_changes_for(Target::Own, false, cx);
     }
 
     pub(super) fn open_changes_for(

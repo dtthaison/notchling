@@ -21,17 +21,14 @@ fn reply() -> Value {
 }
 
 #[test]
-fn a_status_reply_becomes_the_branch_the_tracking_line_and_the_files() {
+fn a_status_reply_becomes_the_branch_and_the_files() {
     let m = parse_status(&reply()).unwrap();
     assert_eq!(m.branch, "main");
-    assert_eq!(
-        m.tracking.as_deref(),
-        Some("origin/main \u{b7} 2 ahead, 1 behind")
-    );
+    assert_eq!(m.upstream.as_deref(), Some("origin/main"));
+    assert_eq!((m.ahead, m.behind), (2, 1));
     assert_eq!(m.files.len(), 2, "a row without a status is left out");
     assert_eq!(m.files[0].added, Some(12));
     assert_eq!(m.files[1].added, None);
-    assert_eq!(m.title(), "Git \u{b7} 2");
 }
 
 #[test]
@@ -42,10 +39,9 @@ fn not_a_repository_and_odd_replies_give_no_section() {
 }
 
 #[test]
-fn a_clean_tree_is_titled_plain_and_a_detached_head_says_where() {
+fn a_detached_head_says_where() {
     let clean = parse_status(&json!({"repo": true, "branch": "main", "changes": []})).unwrap();
-    assert_eq!(clean.title(), "Git");
-    assert_eq!(clean.tracking, None);
+    assert!(clean.files.is_empty());
     let detached = parse_status(
         &json!({"repo": true, "branch": null, "detached": true, "head": "abc1234", "changes": []}),
     )
@@ -75,37 +71,6 @@ fn files_split_into_a_name_and_a_folder_and_ink_by_status() {
     assert_eq!(f("c.rs", "D").ink(), Ink::Expired);
     assert_eq!(f("c.rs", "?").ink(), Ink::TextFaint);
     assert_eq!(f("c.rs", "M").ink(), Ink::AccentText);
-}
-
-#[test]
-fn only_forty_files_show_and_the_rest_are_counted() {
-    let many = |n: usize, truncated| GitModel {
-        branch: "main".into(),
-        tracking: None,
-        files: (0..n)
-            .map(|i| GitFile {
-                path: format!("f{i}"),
-                status: "M".into(),
-                added: None,
-                removed: None,
-            })
-            .collect(),
-        truncated,
-        upstream: None,
-        ahead: 0,
-        behind: 0,
-        initial: false,
-        changed_at: None,
-    };
-    assert_eq!(many(40, false).hidden_text(), None);
-    assert_eq!(
-        many(43, false).hidden_text().as_deref(),
-        Some("3 more files not shown")
-    );
-    assert_eq!(
-        many(500, true).hidden_text().as_deref(),
-        Some("460+ more files not shown")
-    );
 }
 
 #[test]

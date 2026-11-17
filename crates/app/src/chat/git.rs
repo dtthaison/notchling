@@ -4,7 +4,6 @@ use std::sync::Arc;
 use notchling_kit::Ink;
 use serde_json::{json, Value};
 
-use super::inspector::counted_title;
 use crate::acting::Request;
 
 pub const STATUS_OP: &str = "git.status";
@@ -12,7 +11,6 @@ pub const DIFF_OP: &str = "git.diff";
 
 pub const EVERY_MS: i64 = 5_000;
 pub const EVENT_FLOOR_MS: i64 = 1_000;
-pub const SHOWN_FILES: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitFile {
@@ -47,7 +45,6 @@ impl GitFile {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitModel {
     pub branch: String,
-    pub tracking: Option<String>,
     pub files: Vec<GitFile>,
     pub truncated: bool,
     pub upstream: Option<String>,
@@ -55,26 +52,6 @@ pub struct GitModel {
     pub behind: u64,
     pub initial: bool,
     pub changed_at: Option<i64>,
-}
-
-impl GitModel {
-    pub fn title(&self) -> String {
-        counted_title(t::chat::details_git(), 0, self.files.len())
-    }
-
-    pub fn hidden(&self) -> usize {
-        self.files.len().saturating_sub(SHOWN_FILES)
-    }
-
-    pub fn hidden_text(&self) -> Option<String> {
-        let hidden = self.hidden();
-        let plus = if self.truncated { "+" } else { "" };
-        match (hidden, self.truncated) {
-            (0, false) => None,
-            (0, true) => Some(t::chat::git_more_not_shown().to_owned()),
-            _ => Some(t::chat::git_hidden(&format!("{hidden}{plus}"))),
-        }
-    }
 }
 
 pub fn tracking(upstream: &str, ahead: u64, behind: u64) -> String {
@@ -98,13 +75,6 @@ pub fn parse_status(reply: &Value) -> Option<GitModel> {
         (_, Some(name)) => name.to_owned(),
         _ => t::chat::git_no_branch().to_owned(),
     };
-    let tracking = reply["upstream"].as_str().map(|upstream| {
-        tracking(
-            upstream,
-            reply["ahead"].as_u64().unwrap_or(0),
-            reply["behind"].as_u64().unwrap_or(0),
-        )
-    });
     let files = reply["changes"]
         .as_array()
         .map(|rows| {
@@ -122,7 +92,6 @@ pub fn parse_status(reply: &Value) -> Option<GitModel> {
         .unwrap_or_default();
     Some(GitModel {
         branch,
-        tracking,
         files,
         truncated: reply["truncated"].as_bool().unwrap_or(false),
         upstream: reply["upstream"].as_str().map(str::to_owned),
@@ -294,7 +263,6 @@ pub fn preview_model() -> Arc<GitModel> {
     };
     Arc::new(GitModel {
         branch: "agent/details-git".to_owned(),
-        tracking: Some(tracking("origin/agent-run-oss", 2, 0)),
         files: vec![
             file("crates/app/src/chat/inspector.rs", "M", Some(14), Some(9)),
             file("crates/app/src/chat/git.rs", "A", Some(212), Some(0)),

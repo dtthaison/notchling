@@ -67,7 +67,6 @@ fn sub(id: &str, cwd: Option<&str>, running: bool, started: i64) -> SubagentRow 
 fn status(branch: &str) -> GitModel {
     GitModel {
         branch: branch.into(),
-        tracking: None,
         files: Vec::new(),
         truncated: false,
         upstream: None,

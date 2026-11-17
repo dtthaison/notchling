@@ -51,6 +51,7 @@ mod tasks;
 mod terminal;
 mod tool;
 mod tools;
+mod worktrees_ask;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;

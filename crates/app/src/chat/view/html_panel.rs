@@ -172,22 +172,6 @@ impl ChatView {
         cx.notify();
     }
 
-    pub(super) fn open_git_row(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_git_diff(path, cx);
-        let status = self
-            .git_for_details()
-            .and_then(|m| {
-                m.files
-                    .iter()
-                    .find(|f| f.path == path)
-                    .map(|f| f.status.clone())
-            })
-            .filter(|status| html_preview::git_offers(status));
-        if let Some(status) = status {
-            self.attach_page(path, &status, window, cx);
-        }
-    }
-
     pub fn preview_html(&mut self, how: &str, window: &mut Window, cx: &mut Context<Self>) {
         match how {
             "source" => self.set_html_look(Look::Source, window, cx),

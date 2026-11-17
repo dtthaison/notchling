@@ -583,6 +583,70 @@ pub fn section(
     }
 }
 
+pub const PREVIEW_NOW_MS: i64 = 1_800_000_000_000;
+
+pub fn preview() -> Worktrees {
+    let ago = |minutes: i64| Some(PREVIEW_NOW_MS - minutes * JUST_NOW_MS);
+    let lane = |path: &str, branch: &str, ahead: u64, work: Option<Work>, minutes: i64| Worktree {
+        path: format!("/Users/me/work/notchling/.claude/worktrees/{path}"),
+        real: format!("/Users/me/work/notchling/.claude/worktrees/{path}"),
+        branch: Some(branch.to_owned()),
+        base: Some("agent-run-oss".to_owned()),
+        ahead,
+        committed_at: ago(minutes),
+        work,
+        ..Worktree::default()
+    };
+    let work = |added, removed, files| {
+        Some(Work {
+            added,
+            removed,
+            files,
+            uncommitted_files: 0,
+            changed_at: None,
+            read_at: PREVIEW_NOW_MS,
+        })
+    };
+    let mut missing = lane("old", "agent/old-lane", 0, None, 0);
+    missing.missing = true;
+    missing.committed_at = None;
+    Worktrees {
+        name: "notchling".to_owned(),
+        default: Some("origin/main".to_owned()),
+        integration: Some("agent-run-oss".to_owned()),
+        fetched_at: None,
+        no_worktree: 39,
+        truncated: false,
+        list: vec![
+            Worktree {
+                path: "/Users/me/work/notchling".to_owned(),
+                real: "/Users/me/work/notchling".to_owned(),
+                main: true,
+                current: true,
+                branch: Some("agent/details-git".to_owned()),
+                upstream: Some("origin/agent/details-git".to_owned()),
+                committed_at: ago(2),
+                ..Worktree::default()
+            },
+            lane("ask", "agent/ask", 2, work(1240, 38, 23), 6),
+            lane("ssh-join", "agent/ssh-join", 4, None, 12),
+            missing,
+        ],
+    }
+}
+
+pub fn preview_occupancy(count: usize) -> Vec<Option<Occupancy>> {
+    let mut held: Vec<Option<Occupancy>> = vec![None; count];
+    if let Some(slot) = held.get_mut(1) {
+        *slot = Some(Occupancy::Running {
+            since_ms: PREVIEW_NOW_MS - 41 * JUST_NOW_MS,
+            open: Open::Session("preview-ask".to_owned()),
+            more: 0,
+        });
+    }
+    held
+}
+
 #[cfg(test)]
 #[path = "worktrees_tests.rs"]
 mod tests;

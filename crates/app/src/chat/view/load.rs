@@ -266,6 +266,7 @@ impl ChatView {
                 self.daemon_note = note;
             }
             self.sync_tools(cx);
+            self.worktrees_ask(crate::chat::git::Why::TurnEnded, cx);
             cx.notify();
         }
         let catalog = self.source.catalog_generation();

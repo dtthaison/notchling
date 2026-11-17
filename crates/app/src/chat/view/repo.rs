@@ -4,11 +4,15 @@ use std::sync::Arc;
 use gpui::Context;
 use serde_json::{json, Value};
 
+use super::worktrees_ask::WorktreesState;
 use super::{now_ms, ChatView};
+use crate::acting::Request;
 use crate::chat::branch::{self, BranchModel};
 use crate::chat::changes_target::{self, Applied, DiffVia, Target, TargetState};
 use crate::chat::git::{self, DiffText, Gate, GitModel, Why};
 use crate::chat::remote_control::Action;
+use crate::chat::worktrees;
+use notchling_engine::sessions::Agent;
 
 struct Answer {
     base: Option<String>,
@@ -32,6 +36,17 @@ pub struct State {
     pub(super) diff_via: Option<DiffVia>,
     pub(super) other: Option<TargetState>,
     pub(super) changes_from_branches: bool,
+    pub(super) wt: WorktreesState,
+}
+
+pub(super) fn folder_of(agent: &Agent) -> Option<String> {
+    Some(worktrees::session_folder(agent))
+        .filter(|folder| !folder.is_empty())
+        .map(str::to_owned)
+}
+
+pub(super) fn own_stat_request(folder: &str, base_choice: Option<&str>) -> Request {
+    changes_target::stat_request(folder, &Target::Own, base_choice)
 }
 
 impl State {
@@ -62,6 +77,7 @@ impl State {
     pub fn show_preview(&mut self) {
         self.preview = Some(git::preview_model());
         self.preview_branch = Some(branch::preview_model());
+        self.wt.show_preview();
     }
 
     pub fn gate_reset(&mut self) {
@@ -85,8 +101,7 @@ impl ChatView {
     pub(super) fn selected_folder(&self) -> Option<String> {
         self.selected_session()
             .filter(|s| !self.remote_refused(&s.agent.id, Action::Files))
-            .map(|s| s.agent.cwd.clone())
-            .filter(|cwd| !cwd.is_empty())
+            .and_then(|s| folder_of(&s.agent))
     }
 
     pub(super) fn git_for_details(&self) -> Option<Arc<GitModel>> {
@@ -110,6 +125,7 @@ impl ChatView {
             self.repo.base_choice = None;
             self.push_branch(cx);
         }
+        self.worktrees_ask(why, cx);
         let visible = self.details_visible() || self.changes_visible();
         if !self
             .repo
@@ -124,7 +140,7 @@ impl ChatView {
         let acts = self.acts(cx);
         let request = git::status_request(&folder);
         let base = self.repo.base_choice.clone();
-        let stat_request = branch::stat_request(&folder, base.as_deref());
+        let stat_request = own_stat_request(&folder, base.as_deref());
         let other_request = self
             .changes_visible()
             .then(|| changes_target::asking(self.repo.other.as_ref()))
@@ -202,6 +218,9 @@ impl ChatView {
             self.refresh_details(cx);
             self.push_branch(cx);
             self.git_diff_again(cx);
+        }
+        if in_repo {
+            self.worktrees_ask(Why::Opened, cx);
         }
         let again = changes_target::needs_ask_again(
             self.repo.other.as_ref(),
