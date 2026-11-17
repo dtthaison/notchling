@@ -4,6 +4,7 @@ pub mod branch_parse;
 pub mod guard;
 pub mod porcelain;
 pub mod read;
+pub mod refs;
 pub mod sandbox;
 pub mod worktrees;
 
@@ -28,6 +29,8 @@ mod porcelain_tests;
 mod read_hardening_tests;
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod refs_tests;
 #[cfg(test)]
 mod sandbox_tests;
 #[cfg(test)]
