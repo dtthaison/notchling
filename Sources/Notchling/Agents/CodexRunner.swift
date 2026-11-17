@@ -177,6 +177,12 @@ final class CodexRunner {
     static func environment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         if let path = loginPath { env["PATH"] = path }
+        // An npm install is a Node script (`#!/usr/bin/env node`); its folder holds that node too (nvm).
+        if let codex = CodexStore.binary() {
+            let folder = (codex as NSString).deletingLastPathComponent
+            let path = env["PATH"] ?? "/usr/bin:/bin"
+            if !path.split(separator: ":").contains(Substring(folder)) { env["PATH"] = folder + ":" + path }
+        }
         env.removeValue(forKey: "NO_COLOR")
         return env
     }

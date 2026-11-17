@@ -3,6 +3,22 @@ import XCTest
 
 /// Codex CLI logins (`~/.codex/auth.json`, 0.166) and its usage endpoint, with made-up tokens.
 final class CodexLoginTests: XCTestCase {
+    /// codex installed with npm under nvm sits in that Node version's bin folder; the newest version with one wins.
+    func testNewestNVMBinary() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("nvm-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        XCTAssertNil(CodexStore.newestNVMBinary(home: home.path))
+        for (version, hasCodex) in [("v9.11.2", true), ("v22.22.0", true), ("v24.1.0", false)] {
+            let bin = home.appendingPathComponent(".nvm/versions/node/\(version)/bin")
+            try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+            if hasCodex {
+                FileManager.default.createFile(atPath: bin.appendingPathComponent("codex").path, contents: Data("#!/bin/sh\n".utf8),
+                                               attributes: [.posixPermissions: 0o755])
+            }
+        }
+        XCTAssertEqual(CodexStore.newestNVMBinary(home: home.path), home.path + "/.nvm/versions/node/v22.22.0/bin/codex")
+    }
+
     private func jwt(_ claims: [String: Any]) -> String {
         let body = try! JSONSerialization.data(withJSONObject: claims)
         let b64 = body.base64EncodedString().replacingOccurrences(of: "+", with: "-")

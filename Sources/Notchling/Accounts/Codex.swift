@@ -248,7 +248,7 @@ final class CodexStore: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: codex)
         process.arguments = ["login", "-c", "cli_auth_credentials_store=\"file\""]
-        var env = ProcessInfo.processInfo.environment
+        var env = CodexRunner.environment()
         env["CODEX_HOME"] = scratch.path
         process.environment = env
         let out = Pipe()
@@ -408,9 +408,26 @@ final class CodexStore: ObservableObject {
         where FileManager.default.isExecutableFile(atPath: path) {
             return path
         }
-        let found = shell("/bin/zsh", ["-lc", "command -v codex"], timeout: 5)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let found, found.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: found) else { return nil }
-        return found
+        // npm under nvm puts it next to that Node version, a folder only an interactive shell (.zshrc) adds to PATH.
+        if let nvm = newestNVMBinary(home: home) { return nvm }
+        let printed = shell("/bin/zsh", ["-ilc", "command -v codex"], timeout: 5) ?? ""
+        if let found = printed.split(separator: "\n").map({ $0.trimmingCharacters(in: .whitespaces) }).last(where: { $0.hasPrefix("/") }),
+           FileManager.default.isExecutableFile(atPath: found) {
+            return found
+        }
+        // Last: the copy inside the ChatGPT app, which runs on its own.
+        let bundled = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+        return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : nil
+    }
+
+    /// `~/.nvm/versions/node/v22.22.0/bin/codex`, from the newest Node version that has one.
+    static func newestNVMBinary(home: String) -> String? {
+        let root = "\(home)/.nvm/versions/node"
+        let versions = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+        let numbers: (String) -> [Int] = { $0.drop { $0 == "v" }.split(separator: ".").map { Int($0) ?? 0 } }
+        return versions.sorted { numbers($0).lexicographicallyPrecedes(numbers($1)) }.reversed()
+            .map { "\(root)/\($0)/bin/codex" }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     private static func quitApp() throws -> Bool {
@@ -436,6 +453,7 @@ final class CodexStore: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
+        process.environment = CodexRunner.environment()
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
