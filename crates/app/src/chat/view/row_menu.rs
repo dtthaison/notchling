@@ -316,7 +316,9 @@ impl ChatView {
             move |view, result, cx| match result {
                 Ok(_) => {
                     if view.selected.as_deref() == Some(id.as_str()) {
+                        let folder_before = view.selected_folder();
                         view.selected = None;
+                        view.branches_switched(folder_before, cx);
                     }
                     view.reload_now(cx);
                 }
