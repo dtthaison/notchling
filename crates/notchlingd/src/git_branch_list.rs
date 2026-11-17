@@ -16,6 +16,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 type Pair = (String, String);
+
+#[derive(Default)]
+struct Gaps {
+    counts: RefCell<Vec<(Candidate, String)>>,
+    lines: RefCell<Vec<Pair>>,
+}
 type Places = Vec<(
     WorktreeEntry,
     notchling_engine::git::branch_list::WorktreeOf,
@@ -61,7 +67,7 @@ impl GitOps {
         snap: &Snapshot,
         key: &Path,
         places: &Places,
-        missing: Option<&RefCell<Vec<Pair>>>,
+        gaps: Option<&Gaps>,
     ) -> Vec<BranchRow> {
         let input = ListInput {
             refs: &snap.refs,
@@ -71,10 +77,18 @@ impl GitOps {
             detached_facts: &snap.facts,
         };
         let counts = |base: &Candidate, head: &str| {
-            lock(&self.cache)
+            let known = lock(&self.cache)
                 .repo(key, now_ms())
                 .numbers
-                .counts(&base.commit, head)
+                .counts(&base.commit, head);
+            if known.is_none() {
+                if let Some(gaps) = gaps {
+                    gaps.counts
+                        .borrow_mut()
+                        .push((base.clone(), head.to_owned()));
+                }
+            }
+            known
         };
         let lines = |base: &Candidate, head: &str| {
             let known = lock(&self.cache)
@@ -82,8 +96,8 @@ impl GitOps {
                 .numbers
                 .lines(&base.commit, head);
             if known.is_none() {
-                if let Some(missing) = missing {
-                    missing
+                if let Some(gaps) = gaps {
+                    gaps.lines
                         .borrow_mut()
                         .push((base.commit.clone(), head.to_owned()));
                 }
@@ -102,11 +116,28 @@ impl GitOps {
         budget: &Budget,
     ) {
         let mut tried: HashSet<Pair> = HashSet::new();
+        let mut counted: HashSet<Pair> = HashSet::new();
         loop {
-            let missing = RefCell::new(Vec::new());
-            self.compute(snap, key, places, Some(&missing));
+            let gaps = Gaps::default();
+            self.compute(snap, key, places, Some(&gaps));
+            let mut unknown: Vec<(Candidate, String)> = Vec::new();
+            for (base, head) in gaps.counts.into_inner() {
+                let pair = (base.commit.clone(), head.clone());
+                if counted.insert(pair) {
+                    unknown.push((base, head));
+                }
+            }
+            if !unknown.is_empty() {
+                for (base, head) in unknown {
+                    if !budget.may_start(now_ms()) {
+                        return;
+                    }
+                    snap.count_pair(&base, &head);
+                }
+                continue;
+            }
             let mut todo: Vec<Pair> = Vec::new();
-            for pair in missing.into_inner() {
+            for pair in gaps.lines.into_inner() {
                 if !tried.contains(&pair) && !todo.contains(&pair) {
                     todo.push(pair);
                 }

@@ -251,6 +251,62 @@ fn lines_pending_past_one_second_budget() {
 }
 
 #[test]
+fn upstream_only_candidate_settles() {
+    let rig = RepoRig::new("bl-upstream-only");
+    let int = git_out(&rig.repo, &["rev-parse", "int"]);
+    let remote_tip = commit_on(&rig, &int, "remote tip");
+    git(
+        &rig.repo,
+        &["update-ref", "refs/remotes/origin/int", &remote_tip],
+    );
+    let topic_tip = commit_on(&rig, &int, "topic tip");
+    git(&rig.repo, &["branch", "topic", &topic_tip]);
+    git(
+        &rig.repo,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+    );
+    git(&rig.repo, &["config", "branch.topic.remote", "origin"]);
+    git(
+        &rig.repo,
+        &["config", "branch.topic.merge", "refs/heads/int"],
+    );
+    let key = key_of(&rig);
+    reply(&rig);
+    idle(&rig, &key);
+    let last = reply(&rig);
+    idle(&rig, &key);
+    let topic = row(&last, "topic");
+    assert_eq!(topic["upstream"], "origin/int", "{topic}");
+    assert_eq!(topic["pending"], false, "{topic}");
+    assert!(!topic["base"].is_null(), "{topic}");
+    assert_eq!(last["pending"], 0, "{last}");
+}
+
+#[test]
+fn prunable_detached_head_is_not_pending_forever() {
+    let rig = RepoRig::new("bl-prunable");
+    let int = git_out(&rig.repo, &["rev-parse", "int"]);
+    let tip = commit_on(&rig, &int, "gone tip");
+    let dir = rig.lane("gone", &["--detach"], &[&tip]);
+    std::fs::remove_dir_all(&dir).unwrap();
+    let key = key_of(&rig);
+    reply(&rig);
+    idle(&rig, &key);
+    let last = reply(&rig);
+    idle(&rig, &key);
+    let gone = branches(&last)
+        .iter()
+        .find(|b| b["detached"] == true && b["subject"].is_null())
+        .unwrap_or_else(|| panic!("no prunable row in {last}"));
+    assert_eq!(gone["pending"], false, "{gone}");
+    assert_eq!(last["pending"], 0, "{last}");
+}
+
+#[test]
 fn second_call_same_heads_runs_no_diff_or_rev_list() {
     let rig = RepoRig::new("bl-cached");
     let first = settled(&rig);
