@@ -54,6 +54,7 @@ fn note(row: &str, block: u16, text: &str) -> Note {
         block,
         text: text.to_owned(),
         layout: TextLayout::default(),
+        links: Vec::new(),
     }
 }
 

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
@@ -45,6 +46,7 @@ pub struct Note {
     block: u16,
     text: String,
     layout: TextLayout,
+    links: Vec<(Range<usize>, String)>,
 }
 
 pub type SelState = Rc<RefCell<SelFrame>>;
@@ -152,6 +154,15 @@ impl SelFrame {
             .iter()
             .map(|n| (n.row.clone(), n.block, n.text.clone()))
             .collect()
+    }
+
+    pub fn link_at(&self, position: Point<Pixels>) -> Option<String> {
+        let note = self
+            .notes
+            .iter()
+            .find(|n| n.layout.bounds().contains(&position))?;
+        let index = note.layout.index_for_position(position).ok()?;
+        crate::chat::link_target::link_at(&note.links, index).map(str::to_owned)
     }
 
     pub fn spot_at(&self, position: Point<Pixels>) -> Option<Spot> {
@@ -292,10 +303,11 @@ pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl Int
                             frame.selection.anchor.as_ref(),
                             frame.selection.focus.as_ref(),
                         );
+                        let link = frame.link_at(event.position);
                         drop(frame);
                         let at = event.position;
                         down_view
-                            .update(cx, |view, cx| view.right_click(at, enabled, cx))
+                            .update(cx, |view, cx| view.right_click(at, enabled, link, cx))
                             .ok();
                     }
                     return;
@@ -375,6 +387,14 @@ pub fn selectable(
         child: Some(child),
         a,
         state: state.clone(),
+        links: Vec::new(),
+    }
+}
+
+impl Selectable {
+    pub fn links(mut self, links: Vec<(Range<usize>, String)>) -> Selectable {
+        self.links = links;
+        self
     }
 }
 
@@ -386,6 +406,7 @@ pub struct Selectable {
     child: Option<AnyElement>,
     a: Appearance,
     state: SelState,
+    links: Vec<(Range<usize>, String)>,
 }
 
 impl IntoElement for Selectable {
@@ -437,6 +458,7 @@ impl Element for Selectable {
             block: self.block,
             text: std::mem::take(&mut self.text),
             layout: self.layout.clone(),
+            links: std::mem::take(&mut self.links),
         });
         window.insert_hitbox(bounds, HitboxBehavior::Normal)
     }

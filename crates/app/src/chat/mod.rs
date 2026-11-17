@@ -39,6 +39,7 @@ pub mod image_size;
 pub mod inspector;
 pub mod lane_limits;
 pub mod limit_ring;
+pub mod link_target;
 pub mod loader;
 #[cfg(test)]
 mod loader_change_tests;
