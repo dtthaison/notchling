@@ -1,7 +1,9 @@
 pub mod branch;
 pub mod branch_file;
+pub mod branch_list;
 pub mod branch_parse;
 pub mod guard;
+pub mod nearest;
 pub mod porcelain;
 pub mod read;
 pub mod refs;
@@ -16,6 +18,8 @@ pub use read::{read_diff, read_status, Diff, Failure, MAX_DIFF_BYTES, MAX_DIFF_L
 pub use sandbox::SandboxedLauncher;
 
 #[cfg(test)]
+mod branch_list_tests;
+#[cfg(test)]
 mod branch_parse_tests;
 #[cfg(all(test, unix))]
 mod branch_real_tests;
@@ -23,6 +27,8 @@ mod branch_real_tests;
 mod branch_tests;
 #[cfg(test)]
 mod guard_tests;
+#[cfg(test)]
+mod nearest_tests;
 #[cfg(test)]
 mod porcelain_tests;
 #[cfg(all(test, unix))]
