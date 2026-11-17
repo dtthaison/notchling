@@ -50,6 +50,7 @@ cargo run -p notchling-notchlingd --bin notchling -- daemon   # the `notchling` 
 - [accounts.md](../docs/notes/accounts.md): account switching and the account log
 - [data-and-logs.md](../docs/notes/data-and-logs.md): the data folders, every log, log events
 - [inbox.md](../docs/notes/inbox.md): the Inbox, on the Mac and the phone
+- [ask.md](../docs/notes/ask.md): `notchling ask`: who asked, who answers, waiting, restarts
 - [versions.md](../docs/notes/versions.md): tool versions on workers
 - [cluster.md](../docs/notes/cluster.md): nodes, standbys, forwarding, dispatch, the handover
 

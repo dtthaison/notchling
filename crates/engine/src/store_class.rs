@@ -6,7 +6,7 @@ pub enum Class {
 
 pub fn table_class(name: &str) -> Option<Class> {
     match name {
-        "meta" | "settings" | "drafts" | "docs" | "outbox" => Some(Class::Node),
+        "meta" | "settings" | "drafts" | "docs" | "outbox" | "asks" => Some(Class::Node),
         "inbox" => Some(Class::Cluster),
         _ => None,
     }

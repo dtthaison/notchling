@@ -3,6 +3,7 @@ log_choice! {
         Mac = "mac",
         Phone = "phone",
         NoOne = "none",
+        Main = "main",
     }
 }
 
@@ -132,5 +133,36 @@ log_choice! {
         Hook = "hook",
         Cli = "cli",
         Ptyhost = "ptyhost",
+    }
+}
+
+log_choice! {
+    pub enum AskThen {
+        Asked = "asked",
+        Found = "found",
+        Answered = "answered",
+        Delivered = "delivered",
+        Dismissed = "dismissed",
+        Expired = "expired",
+        Gone = "gone",
+        Refused = "refused",
+        Restored = "restored",
+    }
+}
+
+log_choice! {
+    pub enum AskerKind {
+        Main = "main",
+        Subagent = "subagent",
+        Codex = "codex",
+        Antigravity = "antigravity",
+        Unknown = "unknown",
+    }
+}
+
+log_choice! {
+    pub enum AskMode {
+        Background = "background",
+        Wait = "wait",
     }
 }

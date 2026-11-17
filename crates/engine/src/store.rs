@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 pub const DB_NAME: &str = "notchling.db";
 
-const SCHEMA: i64 = 4;
+const SCHEMA: i64 = 5;
 
 const BUSY: Duration = Duration::from_secs(5);
 
@@ -136,7 +136,39 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
          );
          CREATE INDEX IF NOT EXISTS outbox_session ON outbox(session, n);
          CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
-         PRAGMA user_version = 4;
+         CREATE TABLE IF NOT EXISTS asks (
+             n INTEGER PRIMARY KEY AUTOINCREMENT,
+             id TEXT NOT NULL UNIQUE,
+             key TEXT NOT NULL,
+             session TEXT NOT NULL,
+             session_id TEXT,
+             asker TEXT NOT NULL,
+             agent_id TEXT,
+             label TEXT,
+             agent_type TEXT,
+             model TEXT,
+             tool_use_id TEXT,
+             folder TEXT,
+             branch TEXT,
+             question TEXT NOT NULL,
+             choices TEXT,
+             main_may_answer INTEGER NOT NULL DEFAULT 0,
+             mode TEXT NOT NULL,
+             deadline_ms INTEGER,
+             pid INTEGER NOT NULL,
+             pid_start INTEGER,
+             state TEXT NOT NULL,
+             answer TEXT,
+             choice INTEGER,
+             by TEXT,
+             inbox_id TEXT,
+             created_ms INTEGER NOT NULL,
+             updated_ms INTEGER NOT NULL,
+             closed_ms INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS asks_session ON asks(session, n);
+         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);
+         PRAGMA user_version = 5;
          COMMIT;",
         )
     })

@@ -19,6 +19,7 @@ pub fn status_line(status: &Status) -> String {
         Status::Sent => t::chat::outbox_sent().to_owned(),
         Status::MayBeIn => t::chat::outbox_maybe().to_owned(),
         Status::BoxHasText(text) => t::chat::outbox_box(&shortened(text)),
+        Status::BoxHoldsThis => t::chat::outbox_box_same().to_owned(),
         Status::Stopped => t::chat::outbox_stopped().to_owned(),
         Status::NotFound => t::chat::outbox_gone().to_owned(),
     }
@@ -174,3 +175,7 @@ pub fn attachments_for(editing: Option<&Editing>, row: &str, files: Vec<PathBuf>
 #[cfg(test)]
 #[path = "outbox_rows_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "outbox_box_same_tests.rs"]
+mod box_same_tests;

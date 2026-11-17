@@ -332,3 +332,15 @@ fn prune_keeps_only_the_newest_closed_items() {
     assert!(ids.contains(&format!("d{}", MAX_DONE + extra - 1).as_str()));
     assert!(ids.contains(&format!("d{extra}").as_str()));
 }
+
+#[test]
+fn remove_takes_one_item_out_whatever_its_state() {
+    let mut book = Book::new();
+    book.raise(item("a", Kind::Notice, 1, &[]));
+    book.raise(item("b", Kind::Notice, 2, &[]));
+    book.resolve("a", State::Withdrawn, None, None, 3);
+    assert_eq!(book.remove("a"), Some(Change::Removed("a".to_string())));
+    assert_eq!(book.remove("a"), None);
+    let left: Vec<String> = book.items().into_iter().map(|i| i.id).collect();
+    assert_eq!(left, vec!["b".to_string()]);
+}

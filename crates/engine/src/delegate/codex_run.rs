@@ -1,7 +1,8 @@
 use super::deps::Deps;
 use super::media;
-use super::options::{Options, Tool, DEPTH_VARIABLE};
+use super::options::{deadline_ms, Options, Tool, DEPTH_VARIABLE};
 use super::outcome::Outcome;
+use crate::ask::DEADLINE_VARIABLE;
 use crate::tools::codex::plan::{
     arguments, valid_effort, valid_session_id, ExitInfo, Pick, TurnSpec, MAX_PROMPT_BYTES,
     WORKSPACE_WRITE,
@@ -171,6 +172,10 @@ pub fn run(options: &Options, deps: &Deps) -> Outcome {
             ("NO_COLOR".into(), None),
             ("PATH".into(), Some(deps.path.clone())),
             (DEPTH_VARIABLE.into(), Some(deps.depth.to_string())),
+            (
+                DEADLINE_VARIABLE.into(),
+                Some(deadline_ms(options.timeout).to_string()),
+            ),
         ],
     };
     let process = match deps.codex.spawn(&spec) {

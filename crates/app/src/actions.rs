@@ -7,7 +7,7 @@ use notchling_local_api::{
 };
 use serde_json::{json, Value};
 
-use crate::acting::{self, ops, Acting, Request};
+use crate::acting::{self, ops, Acting, AskAnswer, Request};
 use crate::chat::data::DataRoot;
 use crate::switches::restart::{Area, RestartNotice, Said};
 
@@ -227,7 +227,7 @@ impl Actions {
                 if let Some(acting) = acting::after_error(&e) {
                     self.set(acting);
                 }
-                Err(e.to_string())
+                Err(acting::failure_message(e))
             }
         }
     }
@@ -257,9 +257,17 @@ impl Actions {
                         message: api.message,
                         data: api.data,
                     },
-                    other => SendFailure::said(&other.to_string()),
+                    other => SendFailure::said(&acting::failure_message(other)),
                 }
             })
+    }
+
+    pub fn ask_answer(&self, id: &str, answer: AskAnswer) -> Result<Value, String> {
+        self.send(&Request::ask_answer(id, answer))
+    }
+
+    pub fn ask_dismiss(&self, id: &str) -> Result<Value, String> {
+        self.send(&Request::ask_dismiss(id))
     }
 
     pub fn read(&self, request: &Request) -> Result<Value, String> {
@@ -272,10 +280,7 @@ impl Actions {
                 if let Some(Acting::Detached) = acting::after_error(&e) {
                     self.set(Acting::Detached);
                 }
-                match e {
-                    ClientError::Api(api) => api.message,
-                    other => other.to_string(),
-                }
+                acting::failure_message(e)
             })
     }
 }
@@ -331,6 +336,8 @@ mod tests {
             ops::OUTBOX_REMOVE,
             ops::OUTBOX_RESEND,
             ops::OUTBOX_DISCARD,
+            api_ops::ASK_ANSWER,
+            api_ops::ASK_DISMISS,
         ] {
             assert_eq!(call_timeout(op), notchling_local_api::CALL_TIMEOUT, "{op}");
         }
@@ -384,6 +391,40 @@ mod tests {
         assert_eq!(calls.lock().unwrap().len(), 1);
         assert!(actions.send(&Request::stop("s1")).is_err());
         assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn ask_answers_and_dismissals_go_out_only_while_acting_is_on() {
+        let (actions, calls) = fake(|op| match op {
+            "daemon.status" => Ok(json!({"acting": true})),
+            "ask.answer" => Ok(json!({"answered": true})),
+            _ => Ok(json!({"dismissed": true})),
+        });
+        assert_eq!(
+            actions.ask_answer("q1", AskAnswer::Choice(1)).unwrap_err(),
+            OFF_MESSAGE
+        );
+        assert_eq!(actions.ask_dismiss("q1").unwrap_err(), OFF_MESSAGE);
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(actions.refresh(), Acting::On);
+        assert_eq!(
+            actions.ask_answer("q1", AskAnswer::Choice(1)).unwrap(),
+            json!({"answered": true})
+        );
+        actions.ask_answer("q2", AskAnswer::Text("yes")).unwrap();
+        assert_eq!(
+            actions.ask_dismiss("q3").unwrap(),
+            json!({"dismissed": true})
+        );
+        let sent: Vec<(String, Value)> = calls.lock().unwrap().iter().skip(1).cloned().collect();
+        assert_eq!(
+            sent,
+            [
+                ("ask.answer".to_owned(), json!({"id": "q1", "choice": 1})),
+                ("ask.answer".to_owned(), json!({"id": "q2", "text": "yes"})),
+                ("ask.dismiss".to_owned(), json!({"id": "q3"})),
+            ]
+        );
     }
 
     #[test]
@@ -575,3 +616,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "actions_busy_tests.rs"]
+mod busy_tests;

@@ -32,6 +32,7 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
         path,
         network: folders.network,
         catalog_file: Some(folders.catalog_file.clone()),
+        notchling_binary: std::env::current_exe().unwrap_or_default(),
         agy_binary: crate::tools::agy::find_binary(&folders.home)
             .map(|p| p.to_string_lossy().into_owned()),
         agy: Arc::new(AcpSpawner::new(&folders.home)),

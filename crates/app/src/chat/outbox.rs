@@ -26,6 +26,7 @@ pub struct OutboxRow {
     pub position: usize,
     pub queued_ms: i64,
     pub updated_ms: i64,
+    pub attempt_ms: Option<i64>,
     pub via: Via,
 }
 
@@ -51,6 +52,7 @@ impl OutboxRow {
                 .map_or(1, |n| n as usize),
             queued_ms: value.get("queuedMs").and_then(Value::as_i64).unwrap_or(0),
             updated_ms: value.get("updatedMs").and_then(Value::as_i64).unwrap_or(0),
+            attempt_ms: value.get("attemptMs").and_then(Value::as_i64),
             via: Via::parse(word(value, "via").unwrap_or("chat")).unwrap_or(Via::Chat),
         })
     }
@@ -67,6 +69,7 @@ pub enum Status {
     Sent,
     MayBeIn,
     BoxHasText(String),
+    BoxHoldsThis,
     Stopped,
     NotFound,
 }
@@ -120,10 +123,18 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         State::Sending => (Status::Sending, Vec::new()),
         State::InQueue => (Status::QueuedInSession, Vec::new()),
         State::Unsure => (Status::MayBeIn, vec![Button::SendAgain, Button::Drop]),
-        State::Box => (
-            Status::BoxHasText(squeeze(row.boxed.as_deref().unwrap_or_default())),
-            vec![Button::ClearBoxAndSend, Button::Edit, Button::Remove],
-        ),
+        State::Box => {
+            let held = squeeze(row.boxed.as_deref().unwrap_or_default());
+            let status = if !held.is_empty() && held == squeeze(&row.text) {
+                Status::BoxHoldsThis
+            } else {
+                Status::BoxHasText(held)
+            };
+            (
+                status,
+                vec![Button::ClearBoxAndSend, Button::Edit, Button::Remove],
+            )
+        }
         State::Stopped => (
             Status::Stopped,
             vec![Button::ResumeAndSend, Button::Edit, Button::Remove],
@@ -148,7 +159,12 @@ pub fn head_needs_you(rows: &[OutboxRow]) -> bool {
 }
 
 fn shown_by_transcript(row: &OutboxRow, conversation: &Conversation) -> bool {
-    row.state == State::Sending && dated_since(&row.text, row.updated_ms as f64, conversation)
+    let since = match row.state {
+        State::Sending => row.updated_ms,
+        State::Unsure => row.attempt_ms.unwrap_or(row.queued_ms),
+        _ => return false,
+    };
+    dated_since(&row.text, since as f64, conversation)
 }
 
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {

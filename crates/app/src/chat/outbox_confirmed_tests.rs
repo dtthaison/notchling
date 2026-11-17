@@ -109,9 +109,7 @@ fn spacing_does_not_keep_the_second_bubble() {
 #[test]
 fn only_a_row_being_sent_gives_way_to_the_transcript() {
     let after = transcript(&[("hi", 1_794_878_654.783)]);
-    for state in [
-        "queued", "waiting", "in_queue", "unsure", "box", "stopped", "gone",
-    ] {
+    for state in ["queued", "waiting", "in_queue", "box", "stopped", "gone"] {
         let feed = feed(&[wire("o1", state, "hi")]);
         assert_eq!(texts(&feed, &after), ["hi"], "{state} keeps its bubble");
     }
@@ -151,16 +149,14 @@ fn the_bubble_comes_back_when_the_row_leaves_sending() {
     let mut feed = feed(&[wire("o1", "sending", "hi")]);
     let after = transcript(&[("hi", 1_794_878_654.783)]);
     assert!(texts(&feed, &after).is_empty());
-    let mut unsure = wire("o1", "unsure", "hi");
-    unsure["why"] = json!("not_found");
     feed.apply(
         &notchling_local_api::Event {
             event: "outbox.changed".into(),
-            data: json!({"row": unsure}),
+            data: json!({"row": wire("o1", "stopped", "hi")}),
         },
         ATTEMPT_MS + 20_000,
     );
     let shown = feed.bubbles_for_in(&job(), &after);
     assert_eq!(shown.len(), 1);
-    assert_eq!(shown[0].status, Status::MayBeIn);
+    assert_eq!(shown[0].status, Status::Stopped);
 }

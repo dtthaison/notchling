@@ -383,6 +383,13 @@ impl InboxOps {
         inner.send(changes);
     }
 
+    pub fn remove(&self, id: &str) {
+        let mut inner = lock(&self.inner);
+        let changes: Vec<Change> = inner.book.remove(id).into_iter().collect();
+        inner.forget(&changes);
+        inner.send(changes);
+    }
+
     pub fn tick(&self, now_ms: i64) {
         let mut inner = lock(&self.inner);
         let Inner {

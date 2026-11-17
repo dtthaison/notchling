@@ -10,6 +10,18 @@ pub mod agy_elsewhere;
 pub mod agy_ops;
 pub mod agy_phone;
 pub mod agy_sink;
+mod ask_cli;
+mod ask_cli_args;
+mod ask_cli_run;
+mod ask_events;
+mod ask_find;
+mod ask_inbox;
+mod ask_main;
+pub mod ask_ops;
+mod ask_rows;
+mod ask_tick;
+mod ask_waiters;
+pub mod ask_wiring;
 pub mod attach;
 pub mod awake_loop;
 pub mod awake_ops;
@@ -17,6 +29,7 @@ pub mod bridge_backend;
 pub mod bridge_cluster;
 pub mod bridge_machines;
 pub mod bridge_ops;
+pub mod caller_session;
 pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
@@ -141,6 +154,7 @@ mod outbox_settle;
 pub mod outbox_verify;
 pub mod pages_cli;
 pub mod pages_ops;
+mod process_facts;
 pub mod prompts;
 pub mod providers_cli;
 pub mod providers_daemon;
@@ -200,11 +214,27 @@ mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
 #[cfg(test)]
+mod ask_cluster_tests;
+#[cfg(test)]
+mod ask_find_tests;
+#[cfg(test)]
+mod ask_inbox_tests;
+#[cfg(test)]
+mod ask_load_tests;
+#[cfg(test)]
+mod ask_main_tests;
+#[cfg(test)]
+mod ask_marks_tests;
+#[cfg(test)]
+mod ask_testkit;
+#[cfg(test)]
 mod awake_follow_tests;
 #[cfg(test)]
 mod awake_loop_tests;
 #[cfg(test)]
 mod bridge_models_tests;
+#[cfg(test)]
+mod caller_session_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
 #[cfg(test)]
@@ -335,6 +365,8 @@ mod log_retention_tests;
 mod outbox_testkit;
 #[cfg(test)]
 mod pages_ops_tests;
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+mod process_facts_tests;
 #[cfg(test)]
 mod providers_add_tests;
 #[cfg(test)]
@@ -436,6 +468,9 @@ pub fn run(command: Command) -> i32 {
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
+        Command::Ask { args } => ask_cli::run_ask(&args, None),
+        Command::Asks { args } => ask_cli::run_asks(&args, None),
+        Command::Answer { args } => ask_cli::run_answer(&args, None),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         Command::HookFence => match Layout::from_env(None) {
             Some(l) => hook_fence::run(&l),

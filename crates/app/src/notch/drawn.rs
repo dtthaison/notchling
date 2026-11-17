@@ -1,3 +1,4 @@
+use super::ask::AskCard;
 use super::layout::{NotchState, NotchWidth, Size};
 use super::model::{ago, NotchModel};
 use super::requests::HookRequest;
@@ -19,6 +20,7 @@ pub struct Drawn {
     card_height: Option<f64>,
     inbox_unread: usize,
     message_needs: Vec<String>,
+    asks: Vec<(String, AskCard)>,
     ages: Vec<String>,
 }
 
@@ -40,6 +42,12 @@ impl NotchModel {
         answered.sort();
         let mut message_needs: Vec<_> = self.message_needs.iter().cloned().collect();
         message_needs.sort();
+        let mut asks: Vec<_> = self
+            .ask_cards
+            .iter()
+            .map(|(id, c)| (id.clone(), c.clone()))
+            .collect();
+        asks.sort_by(|a, b| a.0.cmp(&b.0));
         Drawn {
             agents: self.agents.clone(),
             snapshots,
@@ -54,6 +62,7 @@ impl NotchModel {
             card_height: self.card_height,
             inbox_unread: self.inbox_unread,
             message_needs,
+            asks,
             ages: self
                 .agents
                 .iter()

@@ -1,5 +1,6 @@
-use notchling_engine::inbox::{ActionId, Item, State};
+use notchling_engine::inbox::{ActionId, Item, Kind, State};
 use notchling_local_api::topics;
+use notchling_locale as t;
 use serde_json::{json, Value};
 
 use crate::chat::format::age;
@@ -43,6 +44,14 @@ fn decided(answer: Option<ActionId>) -> &'static str {
         Some(ActionId::Keep) => "Kept",
         Some(ActionId::ContinueHere) => "Continued Here",
         Some(ActionId::WaitFor) => "Waiting",
+        Some(
+            ActionId::Choice1
+            | ActionId::Choice2
+            | ActionId::Choice3
+            | ActionId::Choice4
+            | ActionId::Choice5
+            | ActionId::Choice6,
+        ) => "Answered",
         None => "Answered",
     }
 }
@@ -51,11 +60,38 @@ fn place(by: &str) -> String {
     match by {
         "mac" => "Mac".to_owned(),
         "phone" => "Phone".to_owned(),
+        "main" => t::inbox::question_by_main().to_owned(),
         other => other.to_owned(),
     }
 }
 
+fn question_words(item: &Item) -> String {
+    let by = item
+        .answered_by
+        .as_deref()
+        .filter(|by| !by.is_empty())
+        .map_or_else(|| place("mac"), place);
+    match item.answer {
+        Some(ActionId::Cancel) => t::inbox::question_dismissed().to_owned(),
+        Some(
+            id @ (ActionId::Choice1
+            | ActionId::Choice2
+            | ActionId::Choice3
+            | ActionId::Choice4
+            | ActionId::Choice5
+            | ActionId::Choice6),
+        ) => match item.actions.iter().find(|a| a.id == id) {
+            Some(action) => t::inbox::question_answered_with(&by, &action.label),
+            None => t::inbox::question_answered_in_chat().to_owned(),
+        },
+        _ => t::inbox::question_answered_in_chat().to_owned(),
+    }
+}
+
 fn result_of(item: &Item) -> Option<String> {
+    if item.kind == Kind::Question && item.state == State::Answered {
+        return Some(question_words(item));
+    }
     match item.state {
         State::Open => None,
         State::Expired => Some("Expired".to_owned()),
@@ -187,6 +223,7 @@ pub enum Target {
     Request(String),
     Settings { page: String, tool: Option<String> },
     Machines(String),
+    Ask { id: String, session: String },
 }
 
 pub fn target(open: &Value) -> Option<Target> {
@@ -198,6 +235,13 @@ pub fn target(open: &Value) -> Option<Target> {
     }
     if let Some(machine) = open.get("machines").and_then(Value::as_str) {
         return Some(Target::Machines(machine.to_owned()));
+    }
+    if let Some(id) = open.get("ask").and_then(Value::as_str) {
+        let session = open.get("session").and_then(Value::as_str)?;
+        return Some(Target::Ask {
+            id: id.to_owned(),
+            session: session.to_owned(),
+        });
     }
     let page = open.get("settings").and_then(Value::as_str)?;
     Some(Target::Settings {

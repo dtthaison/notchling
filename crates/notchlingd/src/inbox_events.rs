@@ -21,7 +21,8 @@ fn kind_of(kind: Kind) -> ItemKind {
         | Kind::PausedStep
         | Kind::NoPrimary
         | Kind::PrimaryBack
-        | Kind::SessionWaits => ItemKind::Notice,
+        | Kind::SessionWaits
+        | Kind::Question => ItemKind::Notice,
         Kind::SettingChange => ItemKind::SettingChange,
     }
 }

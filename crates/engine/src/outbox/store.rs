@@ -363,6 +363,17 @@ impl OutboxStore {
         Ok(changed > 0)
     }
 
+    pub fn delete_unsure(&self, id: &str, updated_ms: i64) -> Result<bool, String> {
+        let changed = self
+            .lock()
+            .execute(
+                "DELETE FROM outbox WHERE id = ?1 AND state = 'unsure' AND updated_ms = ?2",
+                params![id, updated_ms],
+            )
+            .map_err(db_err)?;
+        Ok(changed > 0)
+    }
+
     pub fn discard_session(&self, session: &str) -> Result<Vec<Row>, String> {
         let mut db = self.lock();
         let tx = db

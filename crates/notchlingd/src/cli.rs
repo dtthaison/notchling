@@ -63,6 +63,15 @@ pub enum Command {
     Cluster {
         args: Vec<String>,
     },
+    Ask {
+        args: Vec<String>,
+    },
+    Asks {
+        args: Vec<String>,
+    },
+    Answer {
+        args: Vec<String>,
+    },
     Version,
     Help,
 }
@@ -103,6 +112,10 @@ pub fn usage() -> &'static str {
      \u{20}                                           change a setting; some wait for the user's approval in the Inbox\n  \
      notchling cluster status [--json]     this machine's cluster and its members\n  \
      notchling cluster join --token-stdin   join the cluster whose token is on stdin\n  \
+     notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>\n  \
+     \u{20}                                           ask the person a question and wait for the answer\n  \
+     notchling asks [--wait] [--json]      the open questions you may answer; --wait blocks until there is one\n  \
+     notchling answer <id> (--choice <n> | -- <text>)  answer a question you may answer\n  \
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling hook --fence                      Claude Code's PreToolUse hook for cluster sessions: reads the fence file only\n  \
@@ -165,6 +178,21 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "cluster" => {
             return Ok(Command::Cluster {
+                args: args.collect(),
+            })
+        }
+        "ask" => {
+            return Ok(Command::Ask {
+                args: args.collect(),
+            })
+        }
+        "asks" => {
+            return Ok(Command::Asks {
+                args: args.collect(),
+            })
+        }
+        "answer" => {
+            return Ok(Command::Answer {
                 args: args.collect(),
             })
         }

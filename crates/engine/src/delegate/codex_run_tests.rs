@@ -290,3 +290,31 @@ fn a_real_process_is_read_line_by_line() {
     assert_eq!(outcome.reply, "Line 3 looks off.");
     assert_eq!(outcome.tokens, Some(900));
 }
+
+#[test]
+fn child_env_has_the_deadline() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE]));
+    let options = rig.options(Tool::Codex, "x");
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+    };
+    let before = now() + options.timeout.as_millis() as i64;
+    run(&options, &rig.deps);
+    let after = now() + options.timeout.as_millis() as i64;
+    let spec = rig.codex.specs().remove(0);
+    let value = spec
+        .env
+        .iter()
+        .find(|(k, _)| k == "NOTCHLING_DELEGATE_DEADLINE_MS")
+        .and_then(|(_, v)| v.as_ref())
+        .map(|v| v.parse::<i64>().unwrap())
+        .expect("the deadline is in the child's env");
+    assert!(
+        value >= before && value <= after,
+        "{value} {before} {after}"
+    );
+}

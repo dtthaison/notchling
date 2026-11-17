@@ -96,7 +96,7 @@
     {"name":"folder","type":"ref:folder","optional":true,"list":false,"choices":[]},
     {"name":"command_exe","type":"exe","optional":true,"list":false,"choices":[]},
     {"name":"approval","type":"choice","optional":false,"list":false,"choices":["always_allow","asked","other"]},
-    {"name":"answered_by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","other"]},
+    {"name":"answered_by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","main","other"]},
     {"name":"device","type":"ref:device","optional":true,"list":false,"choices":[]},
     {"name":"result","type":"choice","optional":false,"list":false,"choices":["given","denied","expired","cancelled","no_app","failed","other"]},
     {"name":"waited_ms","type":"millis","optional":true,"list":false,"choices":[]}
@@ -106,7 +106,7 @@
     {"name":"session","type":"ref:session","optional":true,"list":false,"choices":[]},
     {"name":"folder","type":"ref:folder","optional":true,"list":false,"choices":[]},
     {"name":"result","type":"choice","optional":false,"list":false,"choices":["saved","cancelled","expired","withdrawn","other"]},
-    {"name":"answered_by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","other"]}
+    {"name":"answered_by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","main","other"]}
   ]},
   {"name":"vault.entry_changed","kv":1,"group":"secrets","lock":"always","sinks":["audit","activity"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"name","type":"ref:secret","optional":false,"list":false,"choices":[]},
@@ -130,6 +130,17 @@
     {"name":"then","type":"choice","optional":false,"list":false,"choices":["queued","in_queue","sent","unsure","box","stopped","gone","edited","removed","discarded","session_removed","restored_unsure","noticed","other"]},
     {"name":"chars","type":"count","optional":false,"list":false,"choices":[]},
     {"name":"via","type":"choice","optional":false,"list":false,"choices":["chat","notch","phone","held","agent","other"]}
+  ]},
+  {"name":"session.ask","kv":1,"group":"agents","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"session","type":"ref:session","optional":false,"list":false,"choices":[]},
+    {"name":"then","type":"choice","optional":false,"list":false,"choices":["asked","found","answered","delivered","dismissed","expired","gone","refused","restored","other"]},
+    {"name":"asker","type":"choice","optional":false,"list":false,"choices":["main","subagent","codex","antigravity","unknown","other"]},
+    {"name":"by","type":"choice","optional":false,"list":false,"choices":["mac","phone","none","main","other"]},
+    {"name":"mode","type":"choice","optional":false,"list":false,"choices":["background","wait","other"]},
+    {"name":"chars","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"choices","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"answer_chars","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"waited","type":"millis","optional":false,"list":false,"choices":[]}
   ]},
   {"name":"session.queue_stuck","kv":1,"group":"agents","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["app"],"retired":false,"fields":[
     {"name":"session","type":"ref:session","optional":false,"list":false,"choices":[]},
@@ -281,7 +292,7 @@
     {"name":"value_chars","type":"count","optional":true,"list":false,"choices":[]},
     {"name":"value_hash","type":"hex","optional":true,"list":false,"choices":[]},
     {"name":"result","type":"choice","optional":false,"list":false,"choices":["set","asked","allowed","denied","expired","refused","unknown_key","bad_value","failed","no_app","full","other"]},
-    {"name":"answered_by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","other"]},
+    {"name":"answered_by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","main","other"]},
     {"name":"device","type":"ref:device","optional":true,"list":false,"choices":[]}
   ]},
   {"name":"settings.changed","kv":1,"group":"settings","lock":"toggle","sinks":["activity"],"default":"on","durability":"push","emitters":["app"],"retired":false,"fields":[

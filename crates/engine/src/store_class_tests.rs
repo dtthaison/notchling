@@ -42,6 +42,11 @@ fn inbox_is_the_only_cluster_table() {
 }
 
 #[test]
+fn asks_is_a_node_table() {
+    assert_eq!(table_class("asks"), Some(Class::Node));
+}
+
+#[test]
 fn every_doc_constant_has_a_class() {
     for name in [
         LIMITS_DOC,

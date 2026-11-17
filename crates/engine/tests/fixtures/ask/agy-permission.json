@@ -1,0 +1,38 @@
+{
+  "jsonrpc": "2.0",
+  "method": "session/request_permission",
+  "id": "1",
+  "params": {
+    "sessionId": "73777b61-0000-4000-8000-000000000001",
+    "toolCall": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "call_1000000000000000001",
+      "name": "run_command",
+      "args": {
+        "CommandLine": "/Applications/Notchling.app/Contents/MacOS/notchling ask --wait --choice 'Keep it' --choice 'Drop it' -- 'Keep the old API?'",
+        "WaitMsBeforeAsync": 10000,
+        "toolSummary": "Ask the user"
+      },
+      "status": "pending",
+      "kind": "execute",
+      "title": "/Applications/Notchling.app/Contents/MacOS/notchling ask --wait --choice 'Keep it' --choice 'Drop it' -- 'Keep the old API?'",
+      "rawInput": {
+        "CommandLine": "/Applications/Notchling.app/Contents/MacOS/notchling ask --wait --choice 'Keep it' --choice 'Drop it' -- 'Keep the old API?'",
+        "WaitMsBeforeAsync": 10000,
+        "toolSummary": "Ask the user"
+      }
+    },
+    "options": [
+      {
+        "optionId": "allow",
+        "name": "Allow",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "deny",
+        "name": "Deny",
+        "kind": "reject_once"
+      }
+    ]
+  }
+}

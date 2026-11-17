@@ -1306,7 +1306,7 @@ class InboxAction {
     'primary': primary,
   };
 
-  /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open, and, from a cluster, move_here, move_anyway, take_back, keep, wait_for and continue_here. open is for the Mac only: the phone shows it disabled and the Mac refuses it. move_here, move_anyway, take_back and continue_here change where sessions run, so a phone asks before it answers with one.
+  /// One of allow, allow_once, allow_always, deny, continue, cancel, done, open, and, from a cluster, move_here, move_anyway, take_back, keep, wait_for and continue_here, and, for a question an agent asks, choice_1 to choice_6, one per choice. open is for the Mac only: the phone shows it disabled and the Mac refuses it. move_here, move_anyway, take_back and continue_here change where sessions run, so a phone asks before it answers with one.
   final String id;
   final String label;
 
@@ -1366,7 +1366,7 @@ class InboxItem {
 
   final String id;
 
-  /// secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits; a phone treats a kind it doesn't know as notice.
+  /// secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits, and, for a question an agent asks, question; a phone treats a kind it doesn't know as notice.
   final String kind;
   final String title;
   final String detail;

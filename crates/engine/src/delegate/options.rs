@@ -137,6 +137,13 @@ pub fn to_args(parsed: &Parsed) -> Vec<String> {
 pub const MAX_DEPTH: u32 = 2;
 pub const DEPTH_VARIABLE: &str = "NOTCHLING_DELEGATE_DEPTH";
 
+pub fn deadline_ms(timeout: std::time::Duration) -> u128 {
+    std::time::SystemTime::now()
+        .checked_add(timeout)
+        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis())
+}
+
 pub fn enter_depth(raw: Option<&str>) -> Result<u32, String> {
     let depth = raw.and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0);
     if depth >= MAX_DEPTH {
