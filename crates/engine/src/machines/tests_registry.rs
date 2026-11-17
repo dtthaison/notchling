@@ -621,4 +621,7 @@ fn the_vault_entry_for_the_admin_password_round_trips_and_an_old_file_loads_with
         r#"{"version":2,"machines":[{"name":"m4","host":"h","user":"u","adminSecret":""}]}"#,
     );
     assert_eq!(empty.machine("m4").unwrap().admin_secret(), None);
+    let m4 = empty.machine("m4").unwrap();
+    assert!(empty.save(std::slice::from_ref(&m4)));
+    assert!(!doc(&empty).unwrap().contains("adminSecret"));
 }

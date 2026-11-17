@@ -28,10 +28,10 @@ impl SetupEngine {
         shown: &ApprovedStep,
         ask_admin: &dyn Fn(&ApprovedStep) -> AdminAnswer,
     ) -> AdminAnswer {
-        if m.admin() == AdminAccess::Sudo && m.admin_secret().is_some() {
-            return AdminAnswer::Vault;
+        match m.admin_secret() {
+            Some(entry) if m.admin() == AdminAccess::Sudo => AdminAnswer::Vault(entry.to_owned()),
+            _ => ask_admin(shown),
         }
-        ask_admin(shown)
     }
 
     pub fn set_admin_secret(&self, machine: &str, entry: Option<&str>) -> Result<(), String> {
@@ -67,13 +67,19 @@ impl SetupEngine {
                 vault: None,
             });
         }
-        if !matches!(admin, AdminAnswer::Vault) {
+        let AdminAnswer::Vault(shown) = admin else {
             return Ok(AdminUse::default());
-        }
+        };
         let entry = m
             .admin_secret()
             .ok_or_else(|| format!("{} has no Vault entry for the admin password", m.name))?
             .to_owned();
+        if &entry != shown {
+            return Err(format!(
+                "{}'s Vault entry changed from {shown}; Set up again",
+                m.name
+            ));
+        }
         match self.admin_secrets.read(&entry, &m.name) {
             Ok(secret) if !secret.is_empty() => Ok(AdminUse {
                 secret: Some(secret),

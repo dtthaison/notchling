@@ -316,12 +316,13 @@ impl VaultOps {
         if !self.entries()?.iter().any(|e| e.id() == id) {
             return Err(failed(format!("{name} isn't in the Vault.")));
         }
-        let mut trail = Trail::new(String::new(), "sudo".to_string());
+        let reason = format!("sudo on {machine}");
+        let mut trail = Trail::new(String::new(), reason.clone());
         let always = || Ok(());
         let released = self.release_picked(
-            &Who::Caller(caller),
+            &Who::Machine(&machine),
             std::slice::from_ref(&name),
-            ("", &format!("sudo on {machine}")),
+            ("", &reason),
             (&mut trail, &always),
         );
         match released {

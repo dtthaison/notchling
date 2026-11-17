@@ -70,9 +70,11 @@ fn the_vault_password_reaches_sudo_stdin_and_nothing_else() {
         None,
         "planning never reads the Vault"
     );
-    let out = w
-        .engine
-        .run(w.engine.confirm(plan.id, AdminAnswer::Vault).unwrap());
+    let out = w.engine.run(
+        w.engine
+            .confirm(plan.id, AdminAnswer::Vault(ENTRY.into()))
+            .unwrap(),
+    );
     assert!(out.ok, "{}", out.message);
     assert_eq!(lock(&w.secrets.reads).get(ENTRY), Some(&1));
     let sudo = sudo_calls(&w);
@@ -104,7 +106,7 @@ fn a_missing_entry_fails_the_step_by_name_and_the_typed_password_still_works() {
     let mut s = with_entry();
     s.audit = Some(file.clone());
     let w = s.build();
-    let out = w.fix("m1", "adm", AdminAnswer::Vault);
+    let out = w.fix("m1", "adm", AdminAnswer::Vault(ENTRY.into()));
     assert!(!out.ok);
     assert!(
         out.message.starts_with(&format!(
@@ -132,7 +134,7 @@ fn an_entry_with_an_empty_value_fails_like_a_missing_one() {
     let mut s = with_entry();
     s.secrets = Secrets::with(&[(ENTRY, "")]);
     let w = s.build();
-    let out = w.fix("m1", "adm", AdminAnswer::Vault);
+    let out = w.fix("m1", "adm", AdminAnswer::Vault(ENTRY.into()));
     assert!(!out.ok);
     assert!(out.message.contains(ENTRY), "{}", out.message);
     assert!(sudo_calls(&w).is_empty());
@@ -144,7 +146,11 @@ fn a_vault_answer_needs_an_entry_saved_for_the_machine() {
     s.secrets = Secrets::with(&[(ENTRY, VAULT_PW)]);
     let w = s.build();
     let plan = w.engine.plan("m1", PlanKind::Fix(sid("adm"))).unwrap();
-    let err = w.engine.confirm(plan.id, AdminAnswer::Vault).err().unwrap();
+    let err = w
+        .engine
+        .confirm(plan.id, AdminAnswer::Vault(ENTRY.into()))
+        .err()
+        .unwrap();
     assert!(err.contains("no Vault entry"), "{err}");
     assert!(w.runner.calls().is_empty());
     assert_eq!(lock(&w.secrets.reads).get(ENTRY), None);
@@ -216,7 +222,11 @@ fn the_engine_reads_through_the_admin_source_it_was_given() {
     let w = s.build();
     let engine = w.engine.with_admin_secrets(source.clone());
     let plan = engine.plan("m1", PlanKind::Fix(sid("adm"))).unwrap();
-    let out = engine.run(engine.confirm(plan.id, AdminAnswer::Vault).unwrap());
+    let out = engine.run(
+        engine
+            .confirm(plan.id, AdminAnswer::Vault(ENTRY.into()))
+            .unwrap(),
+    );
     assert!(out.ok, "{}", out.message);
     assert_eq!(
         lock(&source.0).clone(),
@@ -237,7 +247,11 @@ fn a_source_that_refuses_names_the_entry_and_never_leaks() {
     let w = with_entry().build();
     let engine = w.engine.with_admin_secrets(Arc::new(Refuses));
     let plan = engine.plan("m1", PlanKind::Fix(sid("adm"))).unwrap();
-    let out = engine.run(engine.confirm(plan.id, AdminAnswer::Vault).unwrap());
+    let out = engine.run(
+        engine
+            .confirm(plan.id, AdminAnswer::Vault(ENTRY.into()))
+            .unwrap(),
+    );
     assert_eq!(
         out,
         FixOutcome::fail(format!(
@@ -264,7 +278,7 @@ fn readiness_is_a_typed_password_or_an_entry() {
     assert!(matches!(AdminAnswer::pick(None, None), AdminAnswer::None));
     assert!(matches!(
         AdminAnswer::pick(Some(Secret::new("")), Some(ENTRY)),
-        AdminAnswer::Vault
+        AdminAnswer::Vault(e) if e == ENTRY
     ));
     assert!(matches!(
         AdminAnswer::pick(Some(Secret::new(TYPED_PW)), Some(ENTRY)),
@@ -288,4 +302,54 @@ fn the_entry_is_saved_per_machine_and_cleared_without_touching_others() {
     assert!(w.engine.set_admin_secret("nope", Some(ENTRY)).is_err());
     *lock(&w.store.refuse) = true;
     assert!(w.engine.set_admin_secret("m2", Some(ENTRY)).is_err());
+}
+
+#[test]
+fn an_entry_changed_after_the_plan_was_shown_is_refused_not_swapped() {
+    let mut s = with_entry();
+    s.secrets = Secrets::with(&[(ENTRY, VAULT_PW), ("other-admin", "test-other-password")]);
+    let w = s.build();
+    let plan = w.engine.plan("m1", PlanKind::Fix(sid("adm"))).unwrap();
+    let shown = AdminAnswer::Vault(ENTRY.into());
+    w.engine
+        .set_admin_secret("m1", Some("other-admin"))
+        .unwrap();
+    let err = w.engine.confirm(plan.id, shown).err().unwrap();
+    assert!(err.contains("changed from m1-admin"), "{err}");
+    let plan = w.engine.plan("m1", PlanKind::Fix(sid("adm"))).unwrap();
+    let confirmed = w
+        .engine
+        .confirm(plan.id, AdminAnswer::Vault("other-admin".into()))
+        .unwrap();
+    w.engine.set_admin_secret("m1", Some(ENTRY)).unwrap();
+    let out = w.engine.run(confirmed);
+    assert!(!out.ok);
+    assert!(
+        out.message.contains("changed from other-admin"),
+        "{}",
+        out.message
+    );
+    assert_eq!(lock(&w.secrets.reads).get(ENTRY), None);
+    assert!(sudo_calls(&w).is_empty());
+}
+
+#[test]
+fn the_command_line_source_refuses_an_entry_that_asks_first() {
+    struct Asks(Secrets);
+    impl super::step::SecretSource for Asks {
+        fn value(&self, name: &str) -> Option<Secret> {
+            self.0.value(name)
+        }
+        fn entry(&self, name: &str) -> Option<crate::vault::entry::VaultEntry> {
+            let mut e =
+                crate::vault::entry::VaultEntry::new(name, crate::vault::entry::Kind::Login);
+            e.ask = Some(true);
+            Some(e)
+        }
+    }
+    let inner = Secrets::with(&[(ENTRY, VAULT_PW)]);
+    let asks = Asks(inner);
+    let err = FromSource(Arc::new(asks)).read(ENTRY, "m1").unwrap_err();
+    assert!(err.contains("asks first"), "{err}");
+    assert!(!err.contains(VAULT_PW));
 }

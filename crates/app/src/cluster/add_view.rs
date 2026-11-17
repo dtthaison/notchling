@@ -383,6 +383,9 @@ impl ClusterSheetView {
             }
             PickEvent::Choose(id) => {
                 sheet.error = runs.set_admin_entry(&name, Some(id)).err();
+                if sheet.error.is_none() {
+                    sheet.password.clear();
+                }
                 sheet.vault.close();
             }
             PickEvent::Clear => {

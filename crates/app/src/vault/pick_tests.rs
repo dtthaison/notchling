@@ -31,6 +31,7 @@ fn opening_starts_a_read_and_the_list_is_sorted_by_name_with_the_chosen_one_chec
         [false, true, false]
     );
     assert_eq!(rows[1].id, "m1-admin");
+    assert_eq!(rows[2].id, "Zed", "a choice carries the entry's own name");
     assert_eq!(rows[1].detail, "Login · example.test");
     assert_eq!(rows[0].detail, "Token");
     assert!(!pick.toggle());
@@ -41,10 +42,14 @@ fn a_chosen_entry_the_vault_no_longer_has_stays_listed_so_it_can_be_cleared() {
     let mut pick = VaultPick::default();
     pick.toggle();
     pick.loaded(Ok(entries()));
-    let rows = pick.rows(Some("gone-entry"));
+    let rows = pick.rows(Some("Gone-Entry"));
     let last = rows.last().unwrap();
     assert!((last.gone, last.checked) == (true, true));
     assert_eq!(last.detail, "Not in the Vault");
+    assert_eq!(
+        (last.id.as_str(), last.name.as_str()),
+        ("Gone-Entry", "Gone-Entry")
+    );
     assert_eq!(rows.len(), 4);
 }
 

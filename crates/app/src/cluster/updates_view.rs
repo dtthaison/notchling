@@ -34,6 +34,7 @@ pub(super) struct UpdateUi {
     commands: bool,
     password: AddPassword,
     vault: VaultPick,
+    vault_error: Option<String>,
     focus: Option<FocusHandle>,
     seen: Option<(u64, Instant, Option<String>, Vec<UpdateRow>)>,
 }
@@ -59,6 +60,7 @@ impl UpdateUi {
             commands: false,
             password: AddPassword::default(),
             vault: VaultPick::default(),
+            vault_error: None,
             focus: None,
             seen: None,
         }
@@ -153,6 +155,7 @@ impl ClusterSheetView {
         self.update.anyway.clear();
         self.update.commands = false;
         self.update.password.clear();
+        self.update.vault_error = None;
         self.update.focus = Some(cx.focus_handle());
         self.update.seen = None;
         let parts = self.feed.add_source().parts();
@@ -202,8 +205,9 @@ impl ClusterSheetView {
             self.update
                 .offered
                 .reset(parts.as_ref().map(|p| &*p.engine));
-            self.update.password.clear();
         }
+        self.update.password.clear();
+        self.update.vault_error = None;
         self.update.open = false;
         cx.notify();
     }
@@ -243,6 +247,7 @@ impl ClusterSheetView {
                 .await;
             this.update(cx, |view, cx| {
                 view.update.seen = None;
+                view.update.password.clear();
                 cx.notify();
             })
             .ok();
@@ -260,6 +265,7 @@ impl ClusterSheetView {
             let alive = this.update(cx, |view, cx| {
                 if !running {
                     view.update.seen = None;
+                    view.update.password.clear();
                 }
                 if changed || !running {
                     cx.notify();
@@ -280,6 +286,7 @@ impl ClusterSheetView {
     ) {
         match event {
             PickEvent::Toggle => {
+                self.update.vault_error = None;
                 if self.update.vault.toggle() {
                     self.read_vault_entries(cx);
                 }
@@ -293,10 +300,13 @@ impl ClusterSheetView {
                 };
                 match parts.engine.set_admin_secret(&machine, Some(&id)) {
                     Ok(()) => {
+                        self.update.vault_error = None;
                         self.update.vault.close();
-                        self.update.session.answer_vault();
+                        self.update
+                            .session
+                            .answer_vault(&machine, &id, &mut self.update.password);
                     }
-                    Err(why) => self.note = Some((why, true)),
+                    Err(why) => self.update.vault_error = Some(t::cluster::vault_save_failed(&why)),
                 }
             }
             PickEvent::Clear => self.update.vault.close(),
@@ -578,6 +588,12 @@ impl ClusterSheetView {
                     })),
             );
         }
+        prompt = prompt.children(
+            self.update
+                .vault_error
+                .as_deref()
+                .map(|why| label(why, TypeRole::Meta, Ink::Needs, a)),
+        );
         prompt = prompt.child(pick_block(
             "update",
             &self.update.vault,

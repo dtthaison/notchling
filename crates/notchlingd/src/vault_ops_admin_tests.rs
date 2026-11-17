@@ -94,3 +94,45 @@ fn an_ask_first_entry_waits_for_the_user_and_with_no_app_is_not_read() {
     assert_eq!(*s.item.reads.lock().unwrap(), reads, "no value read");
     assert_eq!(results(&s.sink, "vault.secret_used"), ["no_app"]);
 }
+
+#[test]
+fn the_approval_for_a_machine_names_the_machine_and_no_agent_or_folder() {
+    let s = setup("admin-popup", true);
+    seed(&s, false);
+    let ask = json!({"name": "reg", "kind": "login", "ask": true});
+    s.ops
+        .call(
+            &app(),
+            ops::VAULT_SAVE,
+            &json!({"entry": ask, "replacing": "reg", "value": {"username": "u", "secret": PASSWORD}}),
+        )
+        .unwrap();
+    s.room
+        .follows
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let ops = s.ops.clone();
+    let user = std::thread::spawn(move || ops.call(&app(), ops::VAULT_ADMIN, &admin("reg")));
+    let mut event = None;
+    for _ in 0..500 {
+        event = s.room.pending(topics::VAULT_APPROVAL_PENDING);
+        if event.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let event = event.expect("an approval was asked");
+    assert_eq!(event["machine"], "m2");
+    assert_eq!(event["folder"], "");
+    assert!(event["verified"].is_null(), "{event}");
+    assert_eq!(event["command"], "sudo on m2");
+    let id = event["id"].as_str().unwrap().to_string();
+    s.ops
+        .call(
+            &app(),
+            ops::VAULT_APPROVAL_ANSWER,
+            &json!({"id": id, "decision": "once"}),
+        )
+        .unwrap();
+    assert_eq!(user.join().unwrap().unwrap()["secret"], PASSWORD);
+    assert!(!format!("{event}").contains(PASSWORD));
+}

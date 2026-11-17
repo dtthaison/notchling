@@ -87,13 +87,16 @@ impl MachinesModel {
             return;
         };
         self.vault_error = self.parts.engine.set_admin_secret(&name, entry).err();
+        if self.vault_error.is_none() && entry.is_some() {
+            self.password.0.clear();
+        }
         self.refresh_machines();
     }
 
     pub fn open_vault_pick(&mut self) {
         if self.vault_pick.toggle() {
-            let entries = self.parts.vault.entries();
-            self.vault_pick.loaded(Ok(entries));
+            let listing = self.parts.vault.listing();
+            self.vault_pick.loaded(listing);
         }
     }
 }

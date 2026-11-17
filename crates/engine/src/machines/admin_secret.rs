@@ -20,6 +20,11 @@ pub struct FromSource(pub Arc<dyn SecretSource>);
 
 impl AdminSecrets for FromSource {
     fn read(&self, entry: &str, _machine: &str) -> Result<Secret, String> {
+        if self.0.entry(entry).is_some_and(|e| e.asks()) {
+            return Err(format!(
+                "{entry} asks first; the Notchling app can ask, not this command line"
+            ));
+        }
         self.0
             .value(entry)
             .filter(|v| !v.is_empty())

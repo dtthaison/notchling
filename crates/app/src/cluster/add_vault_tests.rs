@@ -1,6 +1,6 @@
 use notchling_engine::accounts::Secret;
 
-use super::planned;
+use super::{planned, stopped};
 use crate::cluster::add::Phase;
 use crate::cluster::add_rig_tests::Rig;
 
@@ -46,4 +46,20 @@ fn the_entry_cannot_change_once_the_run_started() {
     flow.run(Some(Secret::new("test-password"))).expect("runs");
     assert!(flow.set_admin_entry(Some("m1-admin".into())).is_err());
     assert_eq!(rig.saved("vps-sing-1").unwrap().admin_secret(), None);
+}
+
+#[test]
+fn an_entry_changed_behind_the_sheet_stops_the_run() {
+    let rig = Rig::new(vec![]);
+    let mut flow = planned(&rig, "agent@vps-sing-1");
+    flow.set_admin_entry(Some("m1-admin".into())).expect("set");
+    {
+        let mut list = crate::cluster::add_rig_tests::lock(&rig.registry.list);
+        let m = list.iter_mut().find(|m| m.name == "vps-sing-1").unwrap();
+        m.set_admin_secret(Some("other-admin"));
+    }
+    let why = flow.run(None).expect_err("changed");
+    assert!(why.contains("changed from m1-admin"), "{why}");
+    let stop = stopped(&flow);
+    assert!(stop.reason.contains("changed from m1-admin") && stop.check_again);
 }

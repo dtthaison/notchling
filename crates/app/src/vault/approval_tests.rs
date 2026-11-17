@@ -151,3 +151,17 @@ fn the_model_is_bound_to_its_approval_and_resolves_only_when_the_daemon_takes_it
     assert_eq!(m.answer(Decision::Once, ARMING_MS * 2), None, "resolved");
     assert_eq!(m.prompt.id, "ap-1", "never another approval");
 }
+
+#[test]
+fn the_prompt_for_a_machine_names_notchling_and_the_machine_and_has_no_folder() {
+    let a = Approval::from_event(
+        &json!({"id": "ap-2", "names": ["m1-admin"], "command": "sudo on m1",
+        "folder": "", "verified": null, "machine": "m1"}),
+    )
+    .unwrap();
+    let p = Prompt::new(&a);
+    assert_eq!(p.title, "Allow Notchling to use m1-admin for sudo on m1?");
+    assert!(p.folder.is_empty() && p.command.is_empty());
+    assert!(p.warning.is_none() && p.unchecked.is_none() && p.claimed_folder.is_none());
+    assert!(p.requested_by.is_none());
+}

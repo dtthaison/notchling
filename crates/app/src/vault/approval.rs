@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use notchling_locale as t;
+
 use super::wire::{Approval, Decision};
 
 pub const WINDOW_TITLE: &str = "Use a Secret";
@@ -37,6 +39,23 @@ pub struct Prompt {
 impl Prompt {
     pub fn new(a: &Approval) -> Prompt {
         let names = a.names.join(", ");
+        if let Some(machine) = &a.machine {
+            return Prompt {
+                id: a.id.clone(),
+                title: t::cluster::vault_approve_title(&names, machine),
+                folder: String::new(),
+                claimed_folder: None,
+                requested_by: None,
+                command: String::new(),
+                command_size: None,
+                explanation: t::cluster::vault_approve_note(),
+                always_tip: format!(
+                    "Stop asking for {names}; you can turn it back on in the vault"
+                ),
+                warning: None,
+                unchecked: None,
+            };
+        }
         let claimed = if a.folder.is_empty() {
             "unknown folder".to_owned()
         } else {

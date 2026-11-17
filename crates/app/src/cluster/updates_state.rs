@@ -97,11 +97,16 @@ impl UpdateSession {
         self.inner().pending.as_ref().map(|p| p.machine.clone())
     }
 
-    pub fn answer_vault(&self) -> bool {
-        let Some(pending) = self.inner().pending.take() else {
+    pub fn answer_vault(&self, machine: &str, entry: &str, password: &mut AddPassword) -> bool {
+        let mut inner = self.inner();
+        if inner.pending.as_ref().is_none_or(|p| p.machine != machine) {
+            return false;
+        }
+        let Some(pending) = inner.pending.take() else {
             return false;
         };
-        pending.answer(AdminAnswer::Vault);
+        password.clear();
+        pending.answer(AdminAnswer::Vault(entry.to_owned()));
         true
     }
 

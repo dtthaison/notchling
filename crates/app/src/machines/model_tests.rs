@@ -423,7 +423,14 @@ fn a_vault_entry_on_the_machine_makes_the_admin_step_ready() {
     assert!(w.model.password_ready());
     w.model.set_admin_entry(None);
     assert!(!w.model.password_ready());
+    w.model.password_field().unwrap().push_str("partial");
+    assert_eq!(w.model.password_len(), 7);
     w.model.set_admin_entry(Some("m1-admin"));
+    assert_eq!(
+        w.model.password_len(),
+        0,
+        "choosing an entry drops the typed text"
+    );
     let run = w.model.confirm().expect("a run");
     assert_eq!(run.kind, PlanKind::Fix(StepId::STAYS_AWAKE));
     assert!(!format!("{:?}", w.model.outcomes).contains("test-password"));

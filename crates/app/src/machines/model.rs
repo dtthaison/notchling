@@ -58,6 +58,9 @@ impl Registry for RegistryFiles {
 
 pub trait VaultList: Send + Sync {
     fn entries(&self) -> Vec<VaultEntry>;
+    fn listing(&self) -> Result<Vec<VaultEntry>, String> {
+        Ok(self.entries())
+    }
     fn rename(&self, old: &str, new: &str) -> Result<(), String>;
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String>;
     fn stamp(&self) -> Option<VaultStamp> {

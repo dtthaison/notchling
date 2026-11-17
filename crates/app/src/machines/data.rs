@@ -21,13 +21,14 @@ use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::store::{system_keychain, Unsupported, VaultStore};
 use notchling_engine::vault::url::renew_url;
 use notchling_engine::vault::VaultRequest;
-use notchling_local_api::SOCKET_NAME;
+use notchling_local_api::{ops, Client, ClientKind, ConnectOptions, SOCKET_NAME};
 
-use super::admin_feed::DaemonAdminSecrets;
-use super::cluster_feed::DaemonTokens;
+use super::admin_feed::{failure_text, DaemonAdminSecrets};
+use super::cluster_feed::{DaemonTokens, NOT_RUNNING};
 use super::model::{Parts, VaultList, VaultStamp};
 use super::versions_feed::{fixed_mac, DaemonVersions, FixedVersions, MacVersions};
 use crate::chat::data::DataRoot;
+use crate::switches::{Switch, Switches};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Setup {
@@ -184,6 +185,7 @@ impl Setup {
             .with_plan(MergePlan::from_process(&roots.merge_dir())),
         );
         let vault = Arc::new(VaultFiles {
+            socket: (!self.fixture && !self.vault).then(|| self.data_dir.join(SOCKET_NAME)),
             index: self.vault_index(),
             secrets,
             runner: runner.clone(),
@@ -224,7 +226,31 @@ fn open_url(runner: &dyn Runner, url: &str) {
     ));
 }
 
+const SWITCH_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+pub fn vault_state(reply: &serde_json::Value) -> Result<(), String> {
+    match Switches::from_reply(reply).message(Switch::Vault) {
+        Some(why) => Err(why.to_owned()),
+        None => Ok(()),
+    }
+}
+
+fn daemon_vault_state(socket: &Path) -> Result<(), String> {
+    let options = ConnectOptions {
+        timeout: SWITCH_WAIT,
+        ..ConnectOptions::default()
+    };
+    let mut client =
+        Client::connect_with(socket, ClientKind::App, env!("CARGO_PKG_VERSION"), &options)
+            .map_err(|_| NOT_RUNNING.to_owned())?;
+    let reply = client
+        .call(ops::SETTINGS_SWITCHES, serde_json::json!({}))
+        .map_err(|e| failure_text(&e))?;
+    vault_state(&reply)
+}
+
 struct VaultFiles {
+    socket: Option<PathBuf>,
     index: VaultIndex,
     secrets: Arc<dyn SecretSource>,
     runner: Arc<dyn Runner>,
@@ -235,6 +261,15 @@ impl VaultList for VaultFiles {
         VaultStore::new(self.index.clone(), Box::new(Unsupported("list only")))
             .entries()
             .unwrap_or_default()
+    }
+
+    fn listing(&self) -> Result<Vec<VaultEntry>, String> {
+        if let Some(socket) = &self.socket {
+            daemon_vault_state(socket)?;
+        }
+        VaultStore::new(self.index.clone(), Box::new(Unsupported("list only")))
+            .entries()
+            .map_err(|e| e.to_string())
     }
 
     fn rename(&self, old: &str, new: &str) -> Result<(), String> {
@@ -335,6 +370,7 @@ mod tests {
     fn renew_opens_only_a_web_page_and_says_when_there_is_none() {
         let runner = Arc::new(ScriptedRunner::new());
         let files = VaultFiles {
+            socket: None,
             index: VaultIndex::in_data(Path::new("/nonexistent")),
             secrets: Arc::new(NoSecrets),
             runner: runner.clone(),
@@ -351,5 +387,31 @@ mod tests {
         );
         open_url(&*runner, "file:///etc/passwd");
         assert_eq!(runner.calls().len(), 1, "only http(s) pages open");
+    }
+    #[test]
+    fn the_vault_picker_says_off_and_unreadable_instead_of_empty() {
+        use serde_json::json;
+        assert_eq!(vault_state(&json!({"vault": true})), Ok(()));
+        assert_eq!(
+            vault_state(&json!({"vault": false})),
+            Err(Switch::Vault.off_message().to_owned())
+        );
+        let dir = std::env::temp_dir().join(format!("notchling-pick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("daemon")).unwrap();
+        std::fs::write(dir.join("daemon").join("vault.json"), "{not json").unwrap();
+        let broken = VaultFiles {
+            socket: None,
+            index: VaultIndex::in_data(&dir),
+            secrets: Arc::new(NoSecrets),
+            runner: Arc::new(ScriptedRunner::new()),
+        };
+        assert!(broken.listing().is_err());
+        let nobody = VaultFiles {
+            socket: Some(dir.join("no-daemon.sock")),
+            ..broken
+        };
+        assert_eq!(nobody.listing().unwrap_err(), NOT_RUNNING);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

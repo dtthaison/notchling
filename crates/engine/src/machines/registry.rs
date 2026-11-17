@@ -211,6 +211,9 @@ impl Machine {
 
     fn settle(&mut self) {
         self.admin = Some(self.admin());
+        if self.admin_secret.as_deref().is_some_and(str::is_empty) {
+            self.admin_secret = None;
+        }
         let name = self.name.clone();
         for job in &mut self.jobs {
             if let Some(s) = &mut job.sd_worker {

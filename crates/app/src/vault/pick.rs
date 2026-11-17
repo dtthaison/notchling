@@ -97,12 +97,13 @@ impl VaultPick {
     }
 
     pub fn rows(&self, chosen: Option<&str>) -> Vec<PickRow> {
+        let shown = chosen.map(str::to_owned);
         let chosen = chosen.map(str::to_lowercase);
         let mut rows: Vec<PickRow> = match &self.load {
             Load::Ready(entries) => entries
                 .iter()
                 .map(|e| PickRow {
-                    id: e.id(),
+                    id: e.name.clone(),
                     name: e.name.clone(),
                     detail: detail_of(e),
                     checked: chosen.as_deref() == Some(e.id().as_str()),
@@ -112,11 +113,11 @@ impl VaultPick {
             _ => Vec::new(),
         };
         rows.sort_by_key(|r| r.name.to_lowercase());
-        if let (Some(id), Load::Ready(_)) = (&chosen, &self.load) {
-            if !rows.iter().any(|r| &r.id == id) {
+        if let (Some(id), Some(shown), Load::Ready(_)) = (&chosen, &shown, &self.load) {
+            if !rows.iter().any(|r| r.id.to_lowercase() == *id) {
                 rows.push(PickRow {
-                    id: id.clone(),
-                    name: id.clone(),
+                    id: shown.clone(),
+                    name: shown.clone(),
                     detail: t::cluster::vault_gone().to_owned(),
                     checked: true,
                     gone: true,

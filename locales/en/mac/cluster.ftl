@@ -575,3 +575,11 @@ cluster-vault-stop = Don't Use Vault
 # Kind shown beside an entry in the list.
 cluster-vault-kind-login = Login
 cluster-vault-kind-token = Token
+# Shown in the list when the Vault switch is off.
+cluster-vault-off = The Vault is off. Turn it on in Settings to use an entry.
+# Title of the approval window for Notchling's own sudo step; $names are the entries, $machine the machine.
+cluster-vault-approve-title = Allow Notchling to use { $names } for sudo on { $machine }?
+# Line under that title in the approval window.
+cluster-vault-approve-note = Notchling reads this password only for the sudo step, sends it to the machine over ssh and never shows it.
+# Shown on the sheet when the chosen entry can't be saved on the machine; $error is the reason.
+cluster-vault-save-failed = Couldn't keep that entry for the machine: { $error }

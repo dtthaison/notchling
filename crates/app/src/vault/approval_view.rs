@@ -263,26 +263,28 @@ impl Render for VaultApprovalView {
                     .as_deref()
                     .map(|r| label(r, TypeRole::Meta, Ink::TextMuted, a)),
             )
-            .child(section(FOLDER, folder, a))
-            .child(section(
-                COMMAND,
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(scrollable(mono_box(
-                        prompt.element("command-box"),
-                        &prompt.command,
-                        a,
-                    )))
-                    .children(
-                        prompt
-                            .command_size
-                            .as_deref()
-                            .map(|s| label(s, TypeRole::Meta, Ink::Needs, a)),
-                    ),
-                a,
-            ))
+            .children((!prompt.folder.is_empty()).then(|| section(FOLDER, folder, a)))
+            .children((!prompt.command.is_empty()).then(|| {
+                section(
+                    COMMAND,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(4.0))
+                        .child(scrollable(mono_box(
+                            prompt.element("command-box"),
+                            &prompt.command,
+                            a,
+                        )))
+                        .children(
+                            prompt
+                                .command_size
+                                .as_deref()
+                                .map(|s| label(s, TypeRole::Meta, Ink::Needs, a)),
+                        ),
+                    a,
+                )
+            }))
             .child(label(prompt.explanation, TypeRole::Meta, Ink::TextMuted, a))
             .children(
                 self.model

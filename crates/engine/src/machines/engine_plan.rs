@@ -69,7 +69,7 @@ const MAX_SHOWN: usize = 64;
 pub enum AdminAnswer {
     None,
     Password(Secret),
-    Vault,
+    Vault(String),
     RootConfirmed,
 }
 
@@ -82,10 +82,13 @@ impl AdminAnswer {
     }
 
     pub fn pick(typed: Option<Secret>, entry: Option<&str>) -> AdminAnswer {
-        match typed.filter(|p| !p.is_empty()) {
-            Some(p) => AdminAnswer::Password(p),
-            None if entry.is_some_and(|e| !e.is_empty()) => AdminAnswer::Vault,
-            None => AdminAnswer::None,
+        match (
+            typed.filter(|p| !p.is_empty()),
+            entry.filter(|e| !e.is_empty()),
+        ) {
+            (Some(p), _) => AdminAnswer::Password(p),
+            (None, Some(e)) => AdminAnswer::Vault(e.to_owned()),
+            (None, None) => AdminAnswer::None,
         }
     }
 
@@ -94,7 +97,7 @@ impl AdminAnswer {
     }
 
     pub(super) fn gives_password(&self) -> bool {
-        self.password().is_some() || matches!(self, AdminAnswer::Vault)
+        self.password().is_some() || matches!(self, AdminAnswer::Vault(_))
     }
 }
 
@@ -167,15 +170,23 @@ impl SetupEngine {
             (AdminNeed::Password, a) if !a.gives_password() => {
                 return Err("needs the admin password".into())
             }
-            (AdminNeed::Password, AdminAnswer::Vault)
-                if self
-                    .machine(&plan.machine)
-                    .is_none_or(|m| m.admin_secret().is_none()) =>
-            {
-                return Err(format!(
-                    "{} has no Vault entry for the admin password",
-                    plan.machine
-                ))
+            (AdminNeed::Password, AdminAnswer::Vault(name)) => {
+                let now = self.machine(&plan.machine);
+                match now.as_ref().and_then(|m| m.admin_secret()) {
+                    None => {
+                        return Err(format!(
+                            "{} has no Vault entry for the admin password",
+                            plan.machine
+                        ))
+                    }
+                    Some(entry) if entry != name => {
+                        return Err(format!(
+                            "{}'s Vault entry changed from {name}; Set up again",
+                            plan.machine
+                        ))
+                    }
+                    Some(_) => {}
+                }
             }
             (AdminNeed::RootConfirm, a) if !matches!(a, AdminAnswer::RootConfirmed) => {
                 return Err(format!(

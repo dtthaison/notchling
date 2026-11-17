@@ -116,9 +116,22 @@ fn choosing_a_vault_entry_answers_the_question_without_a_typed_password() {
     let asked = asking(&session);
     session.pull();
     assert_eq!(session.pending_machine().as_deref(), Some("m1"));
-    assert!(session.answer_vault());
-    assert!(matches!(asked.join().unwrap(), AdminAnswer::Vault));
-    assert!(!session.answer_vault(), "nothing left to answer");
+    let mut partly = typed("partial");
+    assert!(
+        !session.answer_vault("m2", "m2-admin", &mut partly),
+        "another machine's choice never answers this prompt"
+    );
+    assert_eq!(partly.len(), 7, "a refused choice keeps what was typed");
+    assert!(session.answer_vault("m1", "m1-admin", &mut partly));
+    assert!(partly.is_empty(), "choosing an entry drops the typed text");
+    let AdminAnswer::Vault(entry) = asked.join().unwrap() else {
+        panic!("not the Vault")
+    };
+    assert_eq!(entry, "m1-admin");
+    assert!(
+        !session.answer_vault("m1", "m1-admin", &mut partly),
+        "nothing left to answer"
+    );
 }
 
 #[test]
