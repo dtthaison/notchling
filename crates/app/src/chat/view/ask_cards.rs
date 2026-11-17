@@ -63,17 +63,21 @@ impl ChatView {
     }
 
     pub fn show_ask(&mut self, session: &str, id: &str, cx: &mut Context<Self>) {
-        let row = self
-            .sessions
-            .iter()
-            .find(|s| s.agent.outbox_key() == session)
-            .map(|s| s.agent.id.clone());
+        let row = crate::chat::pending_ask::row_for_key(&self.sessions, session);
         self.inbox_panel = None;
         if self.open_subagent.is_some() {
             self.close_subagent(cx);
         }
-        if let Some(row) = row {
-            self.select(&row, cx);
+        match row {
+            Some(row) => {
+                self.pending_ask = None;
+                self.select(&row, cx);
+            }
+            None => {
+                self.pending_ask =
+                    Some(crate::chat::pending_ask::PendingAsk::new(session, now_ms()));
+                self.reload_now(cx);
+            }
         }
         self.asks.wanted = Some((id.to_owned(), now_ms() + FOCUS_WAIT_MS));
         cx.notify();

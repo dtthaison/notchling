@@ -63,6 +63,7 @@ pub mod panels;
 #[cfg(test)]
 mod parse_cost_tests;
 pub mod paths;
+pub mod pending_ask;
 pub mod pending_child;
 pub mod permission_text;
 pub mod pickers;
