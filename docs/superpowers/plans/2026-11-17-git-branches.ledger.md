@@ -16,3 +16,17 @@ Append-only: add new rulings and log lines at the end of their section; never ed
 - git: Task 5: dispatched (sonnet high).
 - git: Task 5: complete dfc8a45e (git:: 148 pass; engine suite green; notchlingd git_ops 22 pass). Only the three planned `calls.len()` growths in existing tests. Implementer wrote code before tests (no red seen for the new tests); accepted, the tests check behavior against real git.
 - git: Task 6: merged origin/agent-run-oss (d7749377) first, as the merge notes ask; dispatched (sonnet high).
+- git: Task 5 review (agy hydrogen high): Approved.
+- git: Task 6: complete 55edf934 (5 new tests; sessions:: 75, notchlingd git_ops 23; workspace clippy clean). Workspace run under heavy load (other lanes' builds): file-watcher timeouts only, in `platform watch::tests`, app `chat::reload` watcher test, notchlingd `codex_children_tests::a_rollout_written_after_start_is_found`, `log_audit_e2e`; none in code this lane touches (platform has no diff). To recheck on a quiet machine.
+- git: Task 7: dispatched (sonnet high).
+- git: Task 6 review (agy hydrogen high, second run: the first stopped on a declined shell command): Approved. The workspace build is the literal check (cargo check --all-targets clean).
+- git: Task 7: complete 67cddc8f (6 new tests; glance 19, contract:: 49, chat::subagent_rows 11, subagent_reads 5; engine suite green). App lib: one watcher-timing failure `chat::reload::tests::steady_writes_still_make_the_watcher_report` under load (not touched here); the app's other targets rerun with Task 15.
+- git: Task 15: dispatched (sonnet high).
+- git: Task 7 review (agy hydrogen high): Approved.
+- git: Task 15: complete 1b51be9f (8 tests, red seen with a todo! stub; app package all 28 targets pass but the lib's `chat::reload::tests::steady_writes_still_make_the_watcher_report`, a 3.5 s watcher-timing test, fails under load avg 16-43 from other lanes; not touched here). Ruling R2: `fresh_after` names only paths present in both lists whose value changed; a new worktree is not "fresh" (its work is missing, so the daemon reads it first anyway). The pending retry is due on Tick only.
+- git: Task 3: dispatched (sonnet high).
+- git: Task 15 review (agy hydrogen high): Approved.
+- git: Task 3: complete 84d3b0c2 (nearest_tests 12, branch_list_tests 22, red seen; engine suite green). Ruling R3 (implementer's reading where the spec is silent, accepted): a pick 0 ahead that is not a merge base (e.g. its own upstream) gets zero `lines` without a read; no candidates gives `base: null` with neither `pending` nor `unrelated`; a remote-only row is a base only when `<remote>/<name>` equals the base rev exactly; `merged_into` carries the rev (D4), the app shows it with `shown_base`; base rows carry no numbers (spec 7.2: bases are never classified).
+- git: Task 4: dispatched (sonnet high).
+- git: Task 3 review (agy hydrogen high): Approved.
+- git: Task 4: complete e1087e1e (reader_real_tests 20, 6 reader hardening traps, the sandbox trap test; git:: 209; engine suite green). Accepted deviations: `remotes` reads `^remote\..*\.url$` so a remote named with a dot is kept; `commit_facts` adds `--no-show-signature` (no gpg). The implementer's "duplicated line in parse_left_right" does not hold (checked).
