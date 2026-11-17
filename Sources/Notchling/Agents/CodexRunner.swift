@@ -67,6 +67,9 @@ final class CodexRunner {
         var id = session
         var announced = false
         var lastError = ""
+        /// Codex said why in its JSON (out of credits, a bad model): that beats any stderr log line, such as an
+        /// MCP server's "worker quit with fatal", which came after it and was shown instead.
+        var reported = false
         var buffer = Data()
         let announce: (Result<String, Error>) -> Void = { result in
             guard !announced else { return }
@@ -95,7 +98,7 @@ final class CodexRunner {
                     }
                 case "error", "turn.failed":
                     let message = (event["message"] as? String) ?? ((event["error"] as? [String: Any])?["message"] as? String)
-                    if let message { lastError = message }
+                    if let message { lastError = message; reported = true }
                 default:
                     break
                 }
@@ -107,6 +110,7 @@ final class CodexRunner {
             guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
             let text = String(decoding: chunk, as: UTF8.self)
             serial.async {
+                guard !reported else { return }
                 if let line = text.split(whereSeparator: \.isNewline).last(where: { $0.contains("rror") }) { lastError = String(line) }
             }
         }
