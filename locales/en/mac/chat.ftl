@@ -103,6 +103,8 @@ chat-back = Back
 # The title of a code block that names no language.
 chat-code = code
 chat-copy = Copy
+chat-copy-link = Copy Link
+chat-copy-path = Copy Path
 chat-copy-done = Copied
 chat-select-first = Select some text first.
 chat-run = Run

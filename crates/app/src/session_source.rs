@@ -321,9 +321,9 @@ impl SessionSource {
         (state.prompts.clone(), state.answered.clone())
     }
 
-    pub fn outbox_bubbles(&self, agent: &Agent) -> Vec<Bubble> {
+    pub fn outbox_bubbles(&self, agent: &Agent, conversation: &Conversation) -> Vec<Bubble> {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.outbox.bubbles_for(agent)
+        state.outbox.bubbles_for_in(agent, conversation)
     }
 
     pub fn outbox_covers(&self, id: &str) -> bool {

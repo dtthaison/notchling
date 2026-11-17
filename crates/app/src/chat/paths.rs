@@ -119,7 +119,7 @@ pub fn bases(text: &str, cwd: &str, probe: &dyn Probe) -> Vec<PathBuf> {
     out
 }
 
-fn without_line(token: &str) -> Option<&str> {
+pub(crate) fn without_line(token: &str) -> Option<&str> {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     if let Some(i) = token.rfind("#L") {
         let tail = &token[i + 2..];

@@ -1,6 +1,6 @@
-use gpui::{prelude::*, Context, Div, Pixels, Point, SharedString};
+use gpui::{prelude::*, ClipboardItem, Context, Div, Pixels, Point, SharedString};
 use notchling_kit::labels::Corner;
-use notchling_kit::ui::{menu_panel, KitPart};
+use notchling_kit::ui::{menu_panel, menu_rule, KitPart};
 use notchling_kit::Appearance;
 use notchling_locale as t;
 
@@ -8,11 +8,14 @@ use super::accounts::{held_item, menu_item};
 use super::row_menu::popup;
 use super::ChatView;
 use crate::acting::Control;
+use crate::chat::link_target::{self, Target};
+use crate::chat::remote_control::Action;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CopyMenu {
     pub at: Point<Pixels>,
     pub enabled: bool,
+    pub target: Option<Target>,
 }
 
 pub fn selects<T: PartialEq>(anchor: Option<&T>, focus: Option<&T>) -> bool {
@@ -41,7 +44,20 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
         )
         .into_any_element()
     };
+    let target = menu.target.as_ref().map(|target| {
+        let (id, title) = match target {
+            Target::Link(_) => ("copy-menu-copy-link", t::chat::copy_link()),
+            Target::Path(_) => ("copy-menu-copy-path", t::chat::copy_path()),
+        };
+        let text = target.text();
+        menu_item(SharedString::from(id), title, a).on_click(cx.listener(move |this, _, _, cx| {
+            this.close_copy_menu(cx);
+            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+        }))
+    });
     let card = menu_panel(a)
+        .children(target)
+        .children(menu.target.is_some().then(|| menu_rule(a)))
         .child(item)
         .part_at("Copy Menu", Corner::TopTrailing, a, cx);
     Some(popup(
@@ -58,6 +74,7 @@ impl ChatView {
         &mut self,
         at: Point<Pixels>,
         enabled: bool,
+        link: Option<String>,
         cx: &mut Context<Self>,
     ) {
         if self.sheet.is_some()
@@ -67,8 +84,36 @@ impl ChatView {
         {
             return;
         }
-        self.copy_menu = Some(CopyMenu { at, enabled });
+        let target = link.and_then(|url| self.link_target(&url));
+        self.copy_menu = Some(CopyMenu {
+            at,
+            enabled,
+            target,
+        });
         cx.notify();
+    }
+
+    pub(super) fn open_copy_menu_for_path(
+        &mut self,
+        at: Point<Pixels>,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let enabled = self.shown_selection(cx).is_some();
+        self.open_copy_menu(at, enabled, Some(path), cx);
+    }
+
+    fn link_target(&self, url: &str) -> Option<Target> {
+        let folder = if self.selected_refused(Action::Files) {
+            String::new()
+        } else {
+            self.selected_session()
+                .map(|s| s.agent.cwd.clone())
+                .unwrap_or_default()
+        };
+        link_target::resolve(url, &folder, super::page_panel::home().as_deref(), |path| {
+            path.exists()
+        })
     }
 
     pub(super) fn copy_menu_open(&self) -> bool {

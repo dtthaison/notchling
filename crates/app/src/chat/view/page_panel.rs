@@ -207,6 +207,18 @@ pub fn follow_link(url: &str, window: &mut Window, cx: &mut App) {
     }
 }
 
+pub fn right_click_path(
+    path: &str,
+    at: gpui::Point<gpui::Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(Some(chat)) = window.root::<ChatView>() {
+        let path = path.to_owned();
+        chat.update(cx, |view, cx| view.open_copy_menu_for_path(at, path, cx));
+    }
+}
+
 pub fn open_file_in_chat(path: &Path, window: &mut Window, cx: &mut App) -> bool {
     match window.root::<ChatView>() {
         Some(Some(chat)) => {

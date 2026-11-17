@@ -241,9 +241,13 @@ impl ConversationView {
         &self,
         at: gpui::Point<gpui::Pixels>,
         enabled: bool,
+        link: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.act(move |chat, cx| chat.open_copy_menu(at, enabled, cx), cx);
+        self.act(
+            move |chat, cx| chat.open_copy_menu(at, enabled, link, cx),
+            cx,
+        );
     }
 
     pub(super) fn copy_menu_open(&self, cx: &App) -> bool {

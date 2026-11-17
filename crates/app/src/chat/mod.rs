@@ -39,6 +39,7 @@ pub mod image_size;
 pub mod inspector;
 pub mod lane_limits;
 pub mod limit_ring;
+pub mod link_target;
 pub mod loader;
 #[cfg(test)]
 mod loader_change_tests;
@@ -50,6 +51,8 @@ pub mod markdown_cache;
 pub mod markers;
 pub mod message_meta;
 pub mod outbox;
+#[cfg(test)]
+mod outbox_confirmed_tests;
 pub mod outgoing;
 pub mod page_panel;
 pub mod paging;
