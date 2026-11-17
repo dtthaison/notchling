@@ -86,7 +86,16 @@ impl ChatView {
     pub(super) fn sync_asks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rows = self.ask_rows();
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-        self.asks.drafts.keep_only(&ids);
+        let kept = match &self.asks.preview {
+            Some(_) => Vec::new(),
+            None => self.source.ask_ids(),
+        };
+        let kept: Vec<&str> = kept
+            .iter()
+            .map(String::as_str)
+            .chain(ids.iter().copied())
+            .collect();
+        self.asks.drafts.keep_only(&kept);
         self.asks.focus.retain(|id, _| ids.contains(&id.as_str()));
         for row in rows.iter().filter(|r| r.is_open()) {
             if !self.asks.focus.contains_key(&row.id) {

@@ -137,3 +137,37 @@ fn drafts_of_cards_that_are_gone_are_dropped() {
     assert_eq!(drafts.typed("qa"), "");
     assert_eq!(drafts.lost("qa"), None);
 }
+
+#[test]
+fn drafts_of_other_sessions_survive_when_the_whole_feed_is_kept() {
+    let mine = row("qa", &[]);
+    let other = row("qb", &[]);
+    let mut feed = crate::chat::asks::AskFeed::default();
+    for r in ["qa", "qb"] {
+        let wire = json!({
+            "id": r, "session": if r == "qa" { "s1" } else { "s2" }, "asker": "main",
+            "question": "Which?", "choices": [], "mainMayAnswer": false, "state": "open",
+            "waiting": true, "createdMs": 1, "updatedMs": 1,
+        });
+        feed.apply("ask.changed", &json!({"row": wire}));
+    }
+    let mut drafts = Drafts::default();
+    type_all(&mut drafts, &mine, "first");
+    type_all(&mut drafts, &other, "second");
+    drafts.act(&other, Act::Dismiss);
+    let ids = feed.ids();
+    let kept: Vec<&str> = ids.iter().map(String::as_str).collect();
+    drafts.keep_only(&kept);
+    assert_eq!(drafts.typed("qa"), "first");
+    assert_eq!(drafts.typed("qb"), "second");
+    assert!(drafts.busy("qb"), "a send in flight is not forgotten");
+    feed.apply("ask.removed", &json!({"id": "qb", "session": "s2"}));
+    let ids = feed.ids();
+    let kept: Vec<&str> = ids.iter().map(String::as_str).collect();
+    drafts.keep_only(&kept);
+    assert_eq!(
+        drafts.typed("qb"),
+        "",
+        "a question that left the feed is dropped"
+    );
+}

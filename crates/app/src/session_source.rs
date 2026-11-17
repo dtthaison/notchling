@@ -350,6 +350,11 @@ impl SessionSource {
         state.asks.rows_for(agent).into_iter().cloned().collect()
     }
 
+    pub fn ask_ids(&self) -> Vec<String> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.asks.ids()
+    }
+
     pub fn asks(&self) -> AskFeed {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.asks.clone()

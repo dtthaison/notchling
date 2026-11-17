@@ -157,6 +157,10 @@ impl AskFeed {
         rows
     }
 
+    pub fn ids(&self) -> Vec<String> {
+        self.rows.keys().cloned().collect()
+    }
+
     pub fn open_rows(&self) -> Vec<AskRow> {
         self.rows
             .values()
