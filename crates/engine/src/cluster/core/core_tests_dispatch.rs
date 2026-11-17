@@ -226,6 +226,23 @@ fn status_lists_roles_and_online() {
 }
 
 #[test]
+fn status_members_carry_addrs_and_port() {
+    let (hub, m5, w1) = pair();
+    let status = hub.core(&m5).status();
+    let members = status["members"].as_array().expect("members");
+    for id in [&m5, &w1] {
+        let row = members.iter().find(|m| m["id"] == json!(id)).expect("row");
+        assert!(row["addrs"].is_array(), "{row}");
+        assert!(row["port"].is_u64(), "{row}");
+    }
+    let state = hub.core(&m5).state().expect("state").clone();
+    let home = &state.members[&m5];
+    let row = members.iter().find(|m| m["id"] == json!(m5)).expect("row");
+    assert_eq!(row["addrs"], json!(home.addrs));
+    assert_eq!(row["port"], json!(home.port));
+}
+
+#[test]
 fn a_second_join_token_use_by_an_active_member_gets_its_answer_again() {
     let (mut hub, m5, w1) = pair();
     let effects = hub.run(

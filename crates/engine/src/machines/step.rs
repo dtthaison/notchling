@@ -37,6 +37,7 @@ impl StepId {
     pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
     pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));
     pub const NODE_APP_CLOSED: StepId = StepId(Cow::Borrowed("node-app-closed"));
+    pub const NODE_REACH: StepId = StepId(Cow::Borrowed("node-reach"));
     pub const NODE_JOINED: StepId = StepId(Cow::Borrowed("node-joined"));
     pub const MASTER_ENCRYPTED: StepId = StepId(Cow::Borrowed("master-encrypted"));
     pub const MASTER_SAME_HOME: StepId = StepId(Cow::Borrowed("master-same-home"));
@@ -376,6 +377,22 @@ pub trait ClusterTokens: Send + Sync {
     }
     fn master_checks(&self, node: Option<&str>) -> Option<crate::cluster::ready::Checks> {
         let _ = node;
+        None
+    }
+    fn invite(
+        &self,
+        node: &str,
+        name: &str,
+        can_be_master: bool,
+        acting: bool,
+    ) -> Result<Option<String>, String> {
+        let _ = (node, name, can_be_master, acting);
+        Ok(None)
+    }
+    fn primary_addr(&self) -> Option<(String, u16)> {
+        None
+    }
+    fn tailnet(&self) -> Option<String> {
         None
     }
 }

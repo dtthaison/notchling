@@ -123,9 +123,27 @@ pub struct Job {
     pub sd_worker: Option<SdWorkerSettings>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeChoices {
+    #[serde(default)]
+    pub can_be_master: bool,
+    #[serde(default)]
+    pub acting: bool,
+}
+
+impl NodeChoices {
+    pub fn is_default(&self) -> bool {
+        *self == NodeChoices::default()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NodeSettings {}
+pub struct NodeSettings {
+    #[serde(default, skip_serializing_if = "NodeChoices::is_default")]
+    pub choices: NodeChoices,
+}
 
 fn claude_worker() -> String {
     "claude-worker".into()

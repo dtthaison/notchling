@@ -33,6 +33,7 @@ pub mod steps_node;
 mod steps_node_binary;
 mod steps_node_logins;
 mod steps_node_mac;
+pub mod steps_node_reach;
 mod steps_node_service;
 pub mod steps_push;
 pub mod steps_replace;
@@ -103,6 +104,8 @@ mod tests_morning;
 mod tests_node_app;
 #[cfg(test)]
 mod tests_node_final;
+#[cfg(test)]
+mod tests_node_join;
 #[cfg(test)]
 mod tests_node_keychain;
 #[cfg(test)]

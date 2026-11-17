@@ -465,6 +465,8 @@ impl NodeCore {
                     "role": role,
                     "canBeMaster": m.can_be_master,
                     "online": m.id == self.me || online.contains(&m.id),
+                    "addrs": m.addrs,
+                    "port": m.port,
                     "client": m.client,
                     "headless": m.headless,
                     "reference": m.reference,
