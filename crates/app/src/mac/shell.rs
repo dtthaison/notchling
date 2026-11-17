@@ -215,6 +215,7 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
                 }
             },
         };
+        let update_root = root.clone();
         cx.set_global(Shell {
             state,
             tray,
@@ -229,6 +230,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         cx.on_window_closed(update_dock).detach();
         if let Some(source) = notch {
             crate::notch::panel::open(cx, source, for_notch, actions);
+        }
+        if let Some(root) = update_root.as_ref().filter(|r| r.fixture.is_none()) {
+            super::update_watch::watch(cx, root);
         }
         welcome_window::open_first_run_once(cx);
         if open_chat_now || data_root_is_real {
@@ -323,6 +327,7 @@ fn handle(command: Command, cx: &mut App) {
         }
         Command::About => welcome_window::open(cx, Which::About),
         Command::Welcome => welcome_window::open(cx, Which::FirstRun),
+        Command::OpenUpdate => super::update_watch::open_release_page(cx),
         Command::SetAwake(_) | Command::ToggleDisplay => change_awake(command, cx),
         Command::Quit => cx.quit(),
     }
@@ -349,6 +354,17 @@ pub fn on_awake_setting(cx: &mut App, key: &str, value: &serde_json::Value) {
     let shell = cx.global_mut::<Shell>();
     if let Some(next) = crate::keep_awake::with(&shell.state, key, value) {
         shell.state = next;
+        refresh_tray(shell);
+    }
+}
+
+pub fn on_update(cx: &mut App, version: Option<String>) {
+    if !cx.has_global::<Shell>() {
+        return;
+    }
+    let shell = cx.global_mut::<Shell>();
+    if shell.state.update != version {
+        shell.state.update = version;
         refresh_tray(shell);
     }
 }

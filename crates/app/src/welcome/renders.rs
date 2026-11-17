@@ -3,7 +3,7 @@ use serde_json::json;
 use super::about::{self, About};
 use super::facts::{HookFacts, SwiftApp};
 use super::first_run::FirstRun;
-use super::updates::Outcome;
+use super::updates::{Outcome, Skip};
 use crate::views::ViewSpec;
 
 pub const VIEWS: [ViewSpec; 3] = [
@@ -20,7 +20,7 @@ pub const VIEWS: [ViewSpec; 3] = [
     ViewSpec {
         name: "about",
         size: (460.0, 560.0),
-        about: "About: version, build, license, links, and the update line with releases off (made-up build)",
+        about: "About: version, build, license, links, and the update line with the update line of a development build (made-up build)",
     },
 ];
 
@@ -95,7 +95,7 @@ pub fn about_model() -> About {
 }
 
 pub fn update_outcome() -> Outcome {
-    Outcome::Off
+    Outcome::Skipped(Skip::Development)
 }
 
 #[cfg(test)]
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn the_about_render_is_made_up() {
-        assert_eq!(update_outcome(), Outcome::Off);
+        assert_eq!(update_outcome(), Outcome::Skipped(Skip::Development));
         assert_eq!(about_model().version, "0.1.0");
     }
 }

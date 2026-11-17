@@ -8,8 +8,9 @@ page in the same pull request.
 ## In short
 
 - Notchling has no server. It sends nothing to the project or its maintainer, unless you turn on the tunnel and leave its default hostname and team, which are the maintainer's (see Tunnel below).
-- There is **no telemetry today**: no analytics, no crash reports, no usage statistics and no update
-  check. The Swift app has no third-party packages.
+- There is **no telemetry today**: no analytics, no crash reports and no usage statistics. The app
+  checks for a newer release by reading one public file (see Update check below); you can turn that off.
+  The Swift app has no third-party packages.
 - Its own calls go only to services you already use, with your own logins, for the features listed
   below: Anthropic, OpenAI (ChatGPT), GitHub and, if you set up the tunnel, Cloudflare. It also
   reaches the machines you list in Machines, over `ssh`, and the other machines of a cluster you create or join, over Tailscale (see The cluster). Web pages you open load what they link to.
@@ -106,6 +107,17 @@ Cloudflare Tunnel and Cloudflare Access that you set up.
   to the phone inside the pairing QR code.
 - The hostname and team fields start filled in with the maintainer's own. Replace them with yours.
 
+## Update check (Notchling)
+
+- **When:** when the app starts and then at most once a day (once an hour after a failed read), and
+  when you press Check for Updates in About. Never in a development build, and never while
+  Settings > Check for updates automatically is off or the environment variable `NOTCHLING_RELEASES`
+  is `off`. The variable also stops the button.
+- **What:** `curl` fetches one public file over https, with no cookie, no account, no login and no
+  identifier: `https://github.com/dtthaison/notchling/releases/download/appcast/appcast.xml`.
+- **Why:** to say in the menu bar and in About that a newer release is out, with a link to its page.
+  Nothing is downloaded or installed.
+
 ## Tool versions on this Mac
 
 Settings > Agents shows the newest version of each tool, so it can tell you when the Mac is behind.
@@ -117,7 +129,7 @@ Settings > Agents shows the newest version of each tool, so it can tell you when
   `https://registry.npmjs.org/@openai/codex/latest` (Codex) and Antigravity's own release manifest, the
   URL its installer reads (`https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/<platform>.json`).
   Your Mac's operating system and architecture choose the Antigravity file name. Notchling's own update
-  check is separate and unchanged.
+  check is separate (see Update check above).
 - **Why:** to show "Latest" next to the installed version, and to offer Update.
 - The Update and Go Back buttons run the tool's own update command on this Mac (`claude update`,
   `npm install -g`, `brew upgrade --cask`, Codex's installer, `agy update`), only while **Install** is on,
@@ -357,7 +369,6 @@ None of these exist yet. Each will change this page when it lands.
 
 - **Crash reports**, opt-in only. Stable updates become automatic only after this privacy policy and
   opt-in, privacy-respecting crash reports exist.
-- **Update checks** (Phase 6): the app will read one signed update feed with Beta and Stable channels.
 - **Remote computers outside the cluster:** the desktop app and the phone will connect to other
   people's computers' Notchling the way the phone connects today, with the same pairing. Accounts,
   lanes and the vault never leave their computer. Your own machines are the cluster, above.

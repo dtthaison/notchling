@@ -1,6 +1,7 @@
 use super::github::NoGitHub;
 use super::masks::Masks;
 use super::registry::{Machine, MachineAbilities, MachineOs, MachineRepo, SdWorkerSettings};
+use super::release_download::{NoDownloads, ReleaseDownloads};
 use super::runner::{CommandResult, Recorded, ScriptedRunner};
 use super::shell;
 use super::step::{
@@ -8,9 +9,42 @@ use super::step::{
     StepContext, StepFix, StepId,
 };
 use crate::accounts::Secret;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+pub struct FakeDownloads {
+    served: Mutex<BTreeMap<String, Vec<u8>>>,
+    asked: Mutex<Vec<String>>,
+}
+
+impl FakeDownloads {
+    pub fn serve(&self, url: &str, bytes: &[u8]) -> &Self {
+        self.served
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), bytes.to_vec());
+        self
+    }
+
+    pub fn urls(&self) -> Vec<String> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl ReleaseDownloads for FakeDownloads {
+    fn fetch(&self, url: &str, dest: &Path, max_bytes: u64) -> Result<(), String> {
+        self.asked.lock().unwrap().push(url.to_string());
+        let served = self.served.lock().unwrap();
+        let bytes = served.get(url).ok_or("HTTP 404")?;
+        if bytes.len() as u64 > max_bytes {
+            return Err("file too large".into());
+        }
+        std::fs::write(dest, bytes).map_err(|e| e.to_string())
+    }
+}
 
 pub const REPO: &str = "dtthaison/lingeva-mono";
 
@@ -148,6 +182,7 @@ impl Rig {
             runner: self.runner.clone(),
             secrets: Arc::new(NoSecrets),
             http: Arc::new(NoGitHub),
+            downloads: Arc::new(NoDownloads),
             opener: Arc::new(NoOpener),
             mac: self.mac.clone(),
             now: 1_800_000_000.0,

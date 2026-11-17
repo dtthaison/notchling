@@ -53,11 +53,15 @@ pub fn about(version: &str, commit: Option<&str>, release_build: bool, system: &
     }
 }
 
+pub fn build_id() -> Option<&'static str> {
+    option_env!("NOTCHLING_BUILD")
+}
+
 pub fn current() -> About {
     let system = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
     about(
         env!("CARGO_PKG_VERSION"),
-        option_env!("NOTCHLING_BUILD"),
+        build_id(),
         !cfg!(debug_assertions),
         &system,
     )

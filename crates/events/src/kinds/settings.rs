@@ -43,6 +43,7 @@ log_choice! {
         ChatPageWidth = "chatPageWidth",
         ChatHistory = "chatHistory",
         Appearance = "appearance",
+        CheckForUpdates = "checkForUpdates",
         SearchShortcut = "searchShortcut",
         ClusterFailover = "clusterFailover",
         VaultReminderSent = "vaultReminderSent",

@@ -63,7 +63,7 @@ fn same_build_offers_nothing() {
         member("m1", "macos", Some(OURS)),
         member("vps", "linux", Some(OURS)),
     ];
-    let rows = offer(Some(OURS), &members, &machines(), None, &none());
+    let rows = offer(Some(OURS), &members, &machines(), None, &none(), false);
     assert!(rows.is_empty(), "{rows:?}");
 }
 
@@ -74,7 +74,14 @@ fn other_build_is_ready() {
         member("vps", "linux", Some(OTHER)),
     ];
     let listed = manifest(OURS, &["notchling-linux-x86_64"]);
-    let rows = offer(Some(OURS), &members, &machines(), Some(&listed), &none());
+    let rows = offer(
+        Some(OURS),
+        &members,
+        &machines(),
+        Some(&listed),
+        &none(),
+        false,
+    );
     assert_eq!(state(&rows, "m1"), Some(UpdateState::Ready));
     assert_eq!(state(&rows, "vps"), Some(UpdateState::Ready));
 }
@@ -87,7 +94,14 @@ fn linux_needs_manifest_build() {
         Some(manifest(OTHER, &["notchling-linux-x86_64"])),
         Some(manifest(OURS, &[])),
     ] {
-        let rows = offer(Some(OURS), &members, &machines(), dist.as_ref(), &none());
+        let rows = offer(
+            Some(OURS),
+            &members,
+            &machines(),
+            dist.as_ref(),
+            &none(),
+            false,
+        );
         match state(&rows, "vps") {
             Some(UpdateState::NeedsBuild(why)) => {
                 assert!(why.contains("tools/build-node.sh"), "{why}")
@@ -101,7 +115,7 @@ fn linux_needs_manifest_build() {
 fn running_shell_jobs_skip_the_machine() {
     let mut busy = member("m1", "macos", Some(OTHER));
     busy.running_shell_jobs = 2;
-    let rows = offer(Some(OURS), &[busy], &machines(), None, &none());
+    let rows = offer(Some(OURS), &[busy], &machines(), None, &none(), false);
     match state(&rows, "m1") {
         Some(UpdateState::Busy(why)) => assert!(why.contains('2'), "{why}"),
         other => panic!("{other:?}"),
@@ -113,7 +127,7 @@ fn running_shell_jobs_skip_the_machine() {
 fn moving_primary_skips() {
     let mut moving = member("m1", "macos", Some(OTHER));
     moving.moving = true;
-    let rows = offer(Some(OURS), &[moving], &machines(), None, &none());
+    let rows = offer(Some(OURS), &[moving], &machines(), None, &none(), false);
     assert!(matches!(state(&rows, "m1"), Some(UpdateState::Busy(_))));
     assert!(runnable(&rows, &[]).is_empty());
 }
@@ -121,14 +135,14 @@ fn moving_primary_skips() {
 #[test]
 fn member_not_in_machines_says_so() {
     let members = [member("stranger", "linux", Some(OTHER))];
-    let rows = offer(Some(OURS), &members, &machines(), None, &none());
+    let rows = offer(Some(OURS), &members, &machines(), None, &none(), false);
     assert_eq!(state(&rows, "stranger"), Some(UpdateState::NotInMachines));
     assert!(runnable(&rows, &[]).is_empty());
     let same = [member("stranger", "linux", Some(OURS))];
-    assert!(offer(Some(OURS), &same, &machines(), None, &none()).is_empty());
+    assert!(offer(Some(OURS), &same, &machines(), None, &none(), false).is_empty());
     let unknown = [member("stranger", "macos", None)];
-    assert!(offer(Some(OURS), &unknown, &machines(), None, &none()).is_empty());
-    assert!(offer(None, &members, &machines(), None, &none()).is_empty());
+    assert!(offer(Some(OURS), &unknown, &machines(), None, &none(), false).is_empty());
+    assert!(offer(None, &members, &machines(), None, &none(), false).is_empty());
 }
 
 #[test]
@@ -137,10 +151,10 @@ fn dev_build_falls_back_to_binary_step() {
         member("m1", "macos", None),
         member("vps", "linux", Some(OTHER)),
     ];
-    let rows = offer(None, &members, &machines(), None, &none());
+    let rows = offer(None, &members, &machines(), None, &none(), false);
     assert!(rows.is_empty(), "{rows:?}");
     let failed: BTreeSet<String> = ["vps".to_string()].into();
-    let rows = offer(None, &members, &machines(), None, &failed);
+    let rows = offer(None, &members, &machines(), None, &failed, false);
     assert_eq!(state(&rows, "vps"), Some(UpdateState::Ready));
     assert_eq!(state(&rows, "m1"), None);
     let rows = offer(
@@ -149,6 +163,7 @@ fn dev_build_falls_back_to_binary_step() {
         &machines(),
         None,
         &none(),
+        false,
     );
     assert!(rows.is_empty(), "{rows:?}");
     let failed: BTreeSet<String> = ["m1".to_string()].into();
@@ -158,6 +173,7 @@ fn dev_build_falls_back_to_binary_step() {
         &machines(),
         None,
         &failed,
+        false,
     );
     assert_eq!(state(&rows, "m1"), Some(UpdateState::Ready));
 }
@@ -392,7 +408,14 @@ fn update_anyway_runs_a_busy_machine() {
     busy.running_shell_jobs = 1;
     let members = [member("m1", "macos", Some(OTHER)), busy];
     let listed = manifest(OURS, &["notchling-linux-x86_64"]);
-    let rows = offer(Some(OURS), &members, &machines(), Some(&listed), &none());
+    let rows = offer(
+        Some(OURS),
+        &members,
+        &machines(),
+        Some(&listed),
+        &none(),
+        false,
+    );
     assert_eq!(runnable(&rows, &[]), ["m1"]);
     assert_eq!(runnable(&rows, &["vps".to_string()]), ["m1", "vps"]);
     assert_eq!(runnable(&rows, &["m1".to_string()]), ["m1"]);

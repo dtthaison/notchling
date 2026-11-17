@@ -20,6 +20,7 @@ pub mod offers;
 pub mod poller;
 pub mod process;
 pub mod registry;
+pub mod release_download;
 pub mod remote_edit;
 pub mod repo_common;
 pub mod roots;
@@ -129,6 +130,8 @@ mod tests_node_updates;
 mod tests_poller;
 #[cfg(test)]
 mod tests_registry;
+#[cfg(test)]
+mod tests_release_download;
 #[cfg(test)]
 mod tests_remote_edit;
 #[cfg(test)]

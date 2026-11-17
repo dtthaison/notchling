@@ -9,13 +9,14 @@ use notchling_kit::ui::{
     TopBorder,
 };
 use notchling_kit::{sentence, Appearance, Ink, TypeRole};
+use notchling_locale as t;
 
-use super::about::{current, About};
+use super::about::{build_id, current, About};
 use super::defaults::{import_into, DefaultsSource};
 use super::first_run::{FirstRun, HookBlock, OWNED_BY_SWIFT, OWNERSHIP, TITLE};
 use super::hooks::Hooks;
 use super::renders::{self, Shown};
-use super::updates::{self, FeedFetcher, Outcome};
+use super::updates::{self, FeedFetcher, Inputs, Outcome, Trigger};
 
 pub fn section(title: &str, a: Appearance) -> Div {
     div()
@@ -346,6 +347,7 @@ impl Render for FirstRunView {
 pub struct AboutEnv {
     pub fetcher: Arc<dyn FeedFetcher>,
     pub switch: Option<String>,
+    pub known: Option<Outcome>,
 }
 
 pub struct AboutView {
@@ -378,11 +380,19 @@ impl AboutView {
         cx.spawn(async move |this, cx| {
             let outcome = cx
                 .background_executor()
-                .spawn(async move { updates::check(&version, switch.as_deref(), fetcher.as_ref()) })
+                .spawn(async move {
+                    let inputs = Inputs {
+                        version: &version,
+                        build: build_id(),
+                        switch: switch.as_deref(),
+                        setting: true,
+                    };
+                    updates::run(Trigger::Manual, &inputs, fetcher.as_ref())
+                })
                 .await;
             this.update(cx, |view, cx| {
                 view.checking = false;
-                view.outcome = Some(outcome);
+                view.outcome = Some(outcome.clone());
                 cx.notify();
             })
             .ok();
@@ -420,6 +430,10 @@ impl Render for AboutView {
         let line = match &self.outcome {
             Some(outcome) => outcome.line(),
             None => "Not checked yet.".to_owned(),
+        };
+        let release_page = match &self.outcome {
+            Some(Outcome::Available(release)) => Some(release.page()),
+            _ => None,
         };
         let state = if self.checking || self.env.is_none() {
             PartState::Disabled
@@ -474,20 +488,33 @@ impl Render for AboutView {
                         a,
                     ))
                     .child(
-                        div().flex().child(
-                            button(
-                                "check-updates",
-                                if self.checking {
-                                    "Checking…"
-                                } else {
-                                    "Check for Updates"
-                                },
-                                ButtonKind::Secondary,
-                                state,
-                                a,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| this.check(cx))),
-                        ),
+                        div()
+                            .flex()
+                            .gap(px(8.0))
+                            .children(release_page.map(|page| {
+                                button(
+                                    "open-release",
+                                    t::update::open_release(),
+                                    ButtonKind::Primary,
+                                    PartState::Rest,
+                                    a,
+                                )
+                                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&page)))
+                            }))
+                            .child(
+                                button(
+                                    "check-updates",
+                                    if self.checking {
+                                        "Checking…"
+                                    } else {
+                                        "Check for Updates"
+                                    },
+                                    ButtonKind::Secondary,
+                                    state,
+                                    a,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| this.check(cx))),
+                            ),
                     ),
             )
             .child(
@@ -503,7 +530,7 @@ impl Render for AboutView {
 }
 
 pub fn live_about(env: AboutEnv) -> AboutView {
-    let outcome = (!updates::releases_on(env.switch.as_deref())).then_some(Outcome::Off);
+    let outcome = env.known.clone();
     AboutView::new(current(), Some(env), outcome)
 }
 

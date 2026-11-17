@@ -45,7 +45,11 @@ fn parse(m: &Machine, id: &StepId, text: &str, code: i32) -> CheckResult {
 }
 
 fn host(arch: &'static str, build: Option<&'static str>) -> Host<'static> {
-    Host { arch, build }
+    Host {
+        arch,
+        build,
+        release: None,
+    }
 }
 
 fn manifest(dir: &std::path::Path, build: &str) {

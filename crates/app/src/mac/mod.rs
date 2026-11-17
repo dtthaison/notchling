@@ -15,6 +15,7 @@ pub mod restart_notice;
 pub mod settings_live;
 pub mod shell;
 pub mod tray;
+pub mod update_watch;
 pub mod vault_prompts;
 pub mod views;
 pub mod window;

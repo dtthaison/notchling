@@ -61,7 +61,8 @@ def add_args(feed, version, short, sig=SIG_A, channel=None, extra=()):
     args = [
         "add", "--feed", feed, "--version", str(version), "--short", short,
         "--url", "https://github.com/dtthaison/notchling/releases/download/v%s/Notchling-%s.dmg" % (short, short),
-        "--length", "1234567", "--ed-signature", sig, "--min-system", "13.0",
+        "--length", "1234567", "--ed-signature" if sig else "--unsigned", *([sig] if sig else []),
+        "--min-system", "13.0",
         "--notes-url", "https://github.com/dtthaison/notchling/releases/tag/v%s" % short,
     ]
     if channel:
@@ -266,6 +267,38 @@ class TestAdd(CliCase):
                 self.assertEqual(code, 1, err)
                 self.assertTrue(err.strip(), name)
                 self.assertFalse(os.path.exists(self.feed), name)
+
+    def test_unsigned_item_has_no_signature_attribute(self):
+        self.assertEqual(self.run_cli(add_args(self.feed, 100, "2.0.0", sig=None))[0], 0)
+        enc = self.items()[0].find("enclosure")
+        self.assertEqual(sorted(enc.attrib), ["length", "type", "url"])
+        self.assertNotIn("edSignature", self.read())
+
+    def test_unsigned_and_signature_are_mutually_exclusive_and_one_is_required(self):
+        base = add_args(self.feed, 7, "1.0.0", sig=None)
+        both = base + ["--ed-signature", SIG_A]
+        neither = [a for a in base if a != "--unsigned"]
+        for name, args in (("both", both), ("neither", neither)):
+            with self.subTest(name), self.assertRaises(SystemExit) as cm:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    appcast.main(args)
+            self.assertEqual(cm.exception.code, 2)
+            self.assertFalse(os.path.exists(self.feed))
+
+    def test_empty_ed_signature_is_refused_not_treated_as_unsigned(self):
+        args = add_args(self.feed, 7, "1.0.0", sig=None)
+        args[args.index("--unsigned")] = "--ed-signature"
+        args.insert(args.index("--ed-signature") + 1, "")
+        code, _, err = self.run_cli(args)
+        self.assertEqual(code, 1)
+        self.assertIn("edSignature", err)
+        self.assertFalse(os.path.exists(self.feed))
+
+    def test_an_unsigned_beta_item_promotes_unsigned(self):
+        self.run_cli(add_args(self.feed, 15, "1.3.0-beta.1", sig=None, channel="beta"))
+        code, _, err = self.run_cli(["promote", "--feed", self.feed, "--version", "15"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("edSignature", self.read())
 
     def test_unreadable_feed_is_never_overwritten(self):
         with open(self.feed, "w", encoding="utf-8") as f:
@@ -608,8 +641,26 @@ class TestVerify(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("https", err)
 
-    def test_missing_signature(self):
+    def test_missing_signature_is_accepted(self):
         code, _, err = self.mutate(' sparkle:edSignature="%s"' % SIG_B, "")
+        self.assertEqual((code, err), (0, ""))
+
+    def test_empty_signature_is_refused(self):
+        code, _, err = self.mutate(' sparkle:edSignature="%s"' % SIG_B, ' sparkle:edSignature=""')
+        self.assertEqual(code, 1)
+        self.assertIn("edSignature", err)
+
+    def test_unsigned_feed_passes(self):
+        self.assertEqual(self.run_cli(add_args(self.feed, 100, "2.0.0", sig=None))[0], 0)
+        self.assertEqual(self.run_cli(["verify", "--feed", self.feed]), (0, "%s ok: 1 item\n" % self.feed, ""))
+
+    def test_a_present_signature_in_a_mixed_feed_must_still_be_valid(self):
+        self.run_cli(add_args(self.feed, 100, "2.0.0", sig=None))
+        self.run_cli(add_args(self.feed, 50, "1.2.0"))
+        self.assertEqual(self.run_cli(["verify", "--feed", self.feed])[0], 0)
+        text = self.read().replace(SIG_A, base64.b64encode(b"short").decode())
+        self.write(text)
+        code, _, err = self.run_cli(["verify", "--feed", self.feed])
         self.assertEqual(code, 1)
         self.assertIn("edSignature", err)
 

@@ -1,5 +1,6 @@
 use super::dist_manifest;
 use super::registry::{AdminAccess, Machine};
+use super::release_download::this_release;
 use super::runner::CommandResult;
 use super::service_files::{node_launchdaemon, NODE_LABEL};
 use super::shell;
@@ -26,7 +27,7 @@ pub(super) const NODE_PLIST: &str = "/Library/LaunchDaemons/dev.notchling.node.p
 pub(super) const OLD_LABEL: &str = "dev.notchling.daemon";
 pub(super) const OLD_AGENT_PLIST: &str = "~/Library/LaunchAgents/dev.notchling.daemon.plist";
 const HEREDOC_END: &str = "NOTCHLING_PLIST_END";
-const BUILD_LINUX: &str = "Build the Linux nodes first: tools/build-node.sh";
+pub(super) const BUILD_LINUX: &str = "Build the Linux nodes first: tools/build-node.sh";
 const BUILD_INTEL: &str = "Build Notchling for Intel Macs first: tools/build-node.sh --mac-intel";
 const UNKNOWN_CHIP: &str = "the machine's system and chip aren't known yet; check it first";
 
@@ -58,6 +59,7 @@ pub(super) fn where_word(m: &Machine) -> &'static str {
 pub(super) struct Host<'a> {
     pub arch: &'a str,
     pub build: Option<&'a str>,
+    pub release: Option<&'a str>,
 }
 
 impl Host<'static> {
@@ -65,6 +67,7 @@ impl Host<'static> {
         Host {
             arch: std::env::consts::ARCH,
             build: build_id::build_id(),
+            release: this_release(),
         }
     }
 }
@@ -159,6 +162,21 @@ pub(super) fn source_for(
             digest: None,
         }),
     }
+}
+
+pub(super) fn downloadable<'a>(
+    m: &Machine,
+    dist: Option<&Path>,
+    host: Host<'a>,
+) -> Option<(&'a str, String)> {
+    let (Some("linux"), Some(arch)) = (os_word(m), arch_word(m)) else {
+        return None;
+    };
+    dist?;
+    host.build?;
+    let known = matches!(arch.as_str(), "x86_64" | "aarch64");
+    known.then_some(())?;
+    Some((host.release?, format!("notchling-linux-{arch}")))
 }
 
 pub(super) fn copy_heading(m: &Machine) -> String {
