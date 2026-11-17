@@ -32,6 +32,7 @@ pub mod steps_master;
 pub mod steps_node;
 mod steps_node_binary;
 mod steps_node_logins;
+mod steps_node_mac;
 mod steps_node_service;
 pub mod steps_push;
 pub mod steps_replace;
@@ -106,6 +107,8 @@ mod tests_node_final;
 mod tests_node_keychain;
 #[cfg(test)]
 mod tests_node_logins;
+#[cfg(test)]
+mod tests_node_mac;
 #[cfg(test)]
 mod tests_node_profile;
 #[cfg(test)]

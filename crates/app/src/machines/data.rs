@@ -139,9 +139,18 @@ impl Setup {
         } else {
             Arc::new(DaemonTokens::new(self.data_dir.join(SOCKET_NAME)))
         };
+        let mac_daemon = (!self.fixture)
+            .then(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| Some(exe.parent()?.join("notchling")))
+            })
+            .flatten()
+            .filter(|path| path.is_file());
         let engine = Arc::new(
             SetupEngine::new(deps, catalog::standard())
-                .with_cluster(cluster.clone(), Some(dist_dir(&self.data_dir))),
+                .with_cluster(cluster.clone(), Some(dist_dir(&self.data_dir)))
+                .with_mac_daemon(mac_daemon),
         );
         let for_poller = registry.clone();
         let poller = Arc::new(MachinePoller::new(

@@ -100,6 +100,7 @@ pub struct SetupEngine {
     pub(super) on_change: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub(super) tokens: Arc<dyn ClusterTokens>,
     pub(super) dist_dir: Option<PathBuf>,
+    pub(super) mac_daemon: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -174,6 +175,7 @@ impl SetupEngine {
             on_change: Mutex::new(None),
             tokens: Arc::new(NoCluster),
             dist_dir: None,
+            mac_daemon: None,
         };
         engine.load_offers();
         engine
@@ -186,6 +188,11 @@ impl SetupEngine {
     ) -> SetupEngine {
         self.tokens = tokens;
         self.dist_dir = dist_dir;
+        self
+    }
+
+    pub fn with_mac_daemon(mut self, mac_daemon: Option<PathBuf>) -> SetupEngine {
+        self.mac_daemon = mac_daemon;
         self
     }
 
@@ -319,6 +326,7 @@ impl SetupEngine {
             masks: masks.clone(),
             tokens: self.tokens.clone(),
             dist_dir: self.dist_dir.clone(),
+            mac_daemon: self.mac_daemon.clone(),
             node: self.node_of(&m.name),
         }
     }

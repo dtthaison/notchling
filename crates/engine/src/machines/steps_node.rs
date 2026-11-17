@@ -8,6 +8,7 @@ use super::step::{
 };
 use super::steps_machine::{cut, is_newline, trim_ws};
 use super::steps_node_binary::binary;
+use super::steps_node_mac::app_closed;
 use super::steps_node_service::service;
 use super::steps_sd::first_line_300;
 use crate::cluster::persist::CLUSTER_DIR;
@@ -18,11 +19,8 @@ pub const MAC_BUILD: &str = concat!("notchling ", env!("CARGO_PKG_VERSION"));
 
 pub(super) const BINARY: &str = "~/.local/bin/notchling";
 pub(super) const BINARY_NEW: &str = "~/.local/bin/notchling.new";
-pub(super) const APP_BINARY: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
 pub(super) const APP_DIR: &str = "/Applications/Notchling.app";
-pub(super) const NOT_NEEDED: &str = "Not needed: the Notchling app runs it";
 pub(super) const UNIT: &str = "notchlingd.service";
-pub(super) const LABEL: &str = "dev.notchling.daemon";
 pub(super) const RUNTIME_DIR: &str = r#"export XDG_RUNTIME_DIR="/run/user/$(id -u)""#;
 
 const TAILSCALE_LINUX: &str = "tailscale status --json --peers=false";
@@ -33,7 +31,12 @@ pub fn dist_dir(data: &Path) -> PathBuf {
 }
 
 pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
-    vec![tailscale(m), binary(m), service(m), joined(m)]
+    let mut out = vec![tailscale(m), binary(m), service(m)];
+    if m.runs_app() {
+        out.push(app_closed(m));
+    }
+    out.push(joined(m));
+    out
 }
 
 fn tailscale(m: &Machine) -> SetupStep {
@@ -58,27 +61,20 @@ fn tailscale(m: &Machine) -> SetupStep {
 }
 
 fn joined(m: &Machine) -> SetupStep {
-    let app = m.runs_app();
+    let mut needs = vec![StepId::NODE_SERVICE, StepId::NODE_TAILSCALE];
+    if m.runs_app() {
+        needs.insert(1, StepId::NODE_APP_CLOSED);
+    }
     SetupStep::new(
         StepId::NODE_JOINED,
         "Joined the cluster",
-        vec![StepId::NODE_SERVICE, StepId::NODE_TAILSCALE],
+        needs,
         Cadence::EveryRefresh,
         Probe::remote(
-            format!(
-                "{} cluster status --json",
-                shell::path(if app { APP_BINARY } else { BINARY })
-            ),
+            format!("{} cluster status --json", shell::path(BINARY)),
             parse_joined,
         ),
-        if app {
-            StepFix::HowTo(format!(
-                "On {}, open Cluster in Notchling's Chat and join with a token from Copy Join Token here.",
-                m.name
-            ))
-        } else {
-            StepFix::Run(FixPlan::new(join_display(), false, join_fix))
-        },
+        StepFix::Run(FixPlan::new(join_display(), false, join_fix)),
     )
 }
 

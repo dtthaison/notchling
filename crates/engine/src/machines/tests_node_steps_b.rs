@@ -133,9 +133,14 @@ fn binary_fix_restarts_the_service_after_the_move() {
     let out = (plan(&step(&mac.machine, &StepId::NODE_BINARY)).run)(&ctx);
     assert!(out.ok, "{}", out.message);
     let seen = texts(&mac.calls());
+    let print = seen
+        .iter()
+        .position(|t| t.contains("launchctl print system/"))
+        .unwrap();
     let last = seen.last().unwrap();
-    assert!(last.contains("launchctl print"), "{last}");
-    assert!(last.contains("launchctl kickstart -k"));
+    assert!(print + 1 < seen.len(), "{seen:?}");
+    assert!(last.contains("sudo -S"), "{last}");
+    assert!(last.contains("launchctl kickstart -k system/dev.notchling.node"));
     assert!(
         !last.contains("bootstrap"),
         "a restart never loads the service"
@@ -211,77 +216,8 @@ fn fix_displays_name_the_machine() {
 #[test]
 fn linux_load_enables_then_restarts() {
     assert_eq!(
-        load_command(true),
+        load_command(),
         "systemctl --user daemon-reload && systemctl --user enable notchlingd.service && systemctl --user restart notchlingd.service"
     );
-    assert!(restart_command(true).contains("is-active --quiet"));
-}
-
-#[cfg(unix)]
-mod launchctl {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt;
-    use std::process::Command;
-
-    fn run(script: &str, loaded: bool) -> Vec<String> {
-        let dir = TempDir::new("launchctl-stub");
-        let log = dir.path().join("log");
-        let stub = dir.path().join("launchctl");
-        std::fs::write(
-            &stub,
-            "#!/bin/sh\necho \"$@\" >> \"$LOG\"\nif [ \"$1\" = print ]; then exit \"$PRINT_RC\"; fi\nexit 0\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let status = Command::new("/bin/sh")
-            .arg("-c")
-            .arg(script)
-            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
-            .env("LOG", &log)
-            .env("PRINT_RC", if loaded { "0" } else { "113" })
-            .env("HOME", "/home/test")
-            .status()
-            .unwrap();
-        assert!(status.success());
-        std::fs::read_to_string(&log)
-            .unwrap_or_default()
-            .lines()
-            .map(str::to_string)
-            .collect()
-    }
-
-    #[test]
-    fn a_loaded_label_is_kickstarted_not_bootstrapped() {
-        let log = run(&load_command(false), true);
-        assert!(log.iter().any(|l| l.starts_with("enable gui/")), "{log:?}");
-        assert!(
-            log.iter().any(|l| l.starts_with("kickstart -k gui/")),
-            "{log:?}"
-        );
-        assert!(!log.iter().any(|l| l.starts_with("bootstrap")), "{log:?}");
-    }
-
-    #[test]
-    fn an_unloaded_label_is_bootstrapped_from_the_plist() {
-        let log = run(&load_command(false), false);
-        let boot = log
-            .iter()
-            .find(|l| l.starts_with("bootstrap"))
-            .expect("bootstrap");
-        assert!(
-            boot.ends_with("/home/test/Library/LaunchAgents/dev.notchling.daemon.plist"),
-            "{boot}"
-        );
-        assert!(!log.iter().any(|l| l.starts_with("kickstart")), "{log:?}");
-    }
-
-    #[test]
-    fn restart_does_nothing_when_the_label_is_not_loaded() {
-        assert!(run(&restart_command(false), false)
-            .iter()
-            .all(|l| l.starts_with("print")));
-        assert!(run(&restart_command(false), true)
-            .iter()
-            .any(|l| l.starts_with("kickstart -k gui/")));
-    }
+    assert!(restart_command().contains("is-active --quiet"));
 }

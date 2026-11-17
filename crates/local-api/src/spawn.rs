@@ -260,6 +260,36 @@ mod tests {
         assert!(!spawn_allowed(&link));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn mac_node_path_is_allowed_by_server_trusted() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new("spawn-mac-node");
+        let home = dir.path();
+        let real = file(
+            home,
+            ".local/share/notchling/Notchling.app/Contents/MacOS/notchling",
+        );
+        let link = home.join(".local/bin/notchling");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        symlink(&real, &link).unwrap();
+        assert!(spawn_allowed(&real));
+        assert!(spawn_allowed(&link));
+        assert_eq!(
+            allowed_binary(&link),
+            Some(std::fs::canonicalize(&real).unwrap())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn todays_mac_path_is_refused() {
+        let dir = TempDir::new("spawn-todays-mac");
+        let plain = file(dir.path(), ".local/bin/notchling");
+        assert!(!spawn_allowed(&plain));
+        assert_eq!(allowed_binary(&plain), None);
+    }
+
     #[test]
     fn the_daemon_inherits_no_notchling_knob() {
         let dir = TempDir::new("spawn-env");

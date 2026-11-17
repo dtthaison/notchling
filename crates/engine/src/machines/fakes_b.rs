@@ -155,6 +155,7 @@ impl Rig {
             masks: self.masks.clone(),
             tokens: Arc::new(NoCluster),
             dist_dir: None,
+            mac_daemon: None,
             node: None,
         }
     }

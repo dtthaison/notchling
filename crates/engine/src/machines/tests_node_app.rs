@@ -1,12 +1,11 @@
 use super::fakes_b::*;
 use super::registry::Machine;
-use super::step::{CheckResult, CheckState, ClusterTokens, RemoteOutput, StepFix, StepId};
+use super::step::{CheckResult, CheckState, ClusterTokens, RemoteOutput, StepId};
 use super::tests_node_steps::{node_linux, node_mac, step};
 use std::sync::Arc;
 
 const CLUSTER: &str = "cluster-aaaa";
 const NODE: &str = "0123456789abcdef0123456789abcdef";
-const NOT_NEEDED: &str = "Not needed: the Notchling app runs it";
 
 struct Same;
 
@@ -47,7 +46,7 @@ fn script(m: &Machine, id: &StepId) -> String {
 }
 
 #[test]
-fn mac_with_app_skips_binary_and_service() {
+fn mac_with_app_still_checks_binary_and_service() {
     let m = mac_with_app();
     let binary = parse(
         &m,
@@ -55,10 +54,10 @@ fn mac_with_app_skips_binary_and_service() {
         "sh: notchling: not found\nsha256=\napp=yes\n",
         0,
     );
-    assert_eq!(binary.state, CheckState::Pass(NOT_NEEDED.into()));
+    assert!(binary.state.is_fail(), "{:?}", binary.state);
     assert_eq!(binary.detected.notchling_app, Some(true));
-    let service = parse(&m, &StepId::NODE_SERVICE, "no daemon is running\n", 3);
-    assert_eq!(service.state, CheckState::Pass(NOT_NEEDED.into()));
+    let service = parse(&m, &StepId::NODE_SERVICE, "plist=no\n", 0);
+    assert!(service.state.is_fail(), "{:?}", service.state);
 }
 
 #[test]
@@ -70,7 +69,7 @@ fn the_app_is_learned_from_the_binary_probe() {
         "sh: notchling: not found\nsha256=\napp=yes\n",
         0,
     );
-    assert_eq!(first.state, CheckState::Pass(NOT_NEEDED.into()));
+    assert!(first.state.is_fail(), "{:?}", first.state);
     assert_eq!(first.detected.notchling_app, Some(true));
 
     let without = parse(
@@ -118,30 +117,24 @@ fn only_a_mac_asks_whether_the_app_is_there() {
 #[test]
 fn mac_without_the_app_keeps_every_step_as_before() {
     let m = node_mac();
-    let service = parse(&m, &StepId::NODE_SERVICE, "no daemon is running\n", 3);
+    let service = parse(&m, &StepId::NODE_SERVICE, "plist=no\n", 0);
     assert!(service.state.is_fail(), "{:?}", service.state);
     assert!(script(&m, &StepId::NODE_JOINED).contains(".local/bin"));
     assert!(step(&m, &StepId::NODE_JOINED).plan().is_some());
 }
 
 #[test]
-fn mac_with_app_join_is_a_howto() {
+fn mac_with_app_join_is_a_fix_after_the_app_is_closed() {
     let m = mac_with_app();
     let joined = step(&m, &StepId::NODE_JOINED);
-    match &joined.fix {
-        StepFix::HowTo(text) => assert_eq!(
-            text,
-            "On m2, open Cluster in Notchling's Chat and join with a token from Copy Join Token here."
-        ),
-        _ => panic!("a Mac with the app joins from the app, not by a Fix"),
-    }
-    let probe = script(&m, &StepId::NODE_JOINED);
     assert!(
-        probe.contains("/Applications/Notchling.app/Contents/MacOS/notchling"),
-        "{probe}"
+        joined.plan().is_some(),
+        "a Mac with the app joins by a Fix too"
     );
+    assert!(joined.needs.contains(&StepId::NODE_APP_CLOSED));
+    let probe = script(&m, &StepId::NODE_JOINED);
     assert!(probe.ends_with("cluster status --json"), "{probe}");
-    assert!(!probe.contains(".local/bin"), "{probe}");
+    assert!(!probe.contains("/Applications/Notchling.app"), "{probe}");
     let status = format!(
         "{{\"cluster\": {{\"id\": \"{CLUSTER}\", \"name\": \"home\"}}, \"joining\": null, \"me\": \"{NODE}\", \"members\": []}}"
     );

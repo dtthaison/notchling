@@ -36,6 +36,7 @@ impl StepId {
     pub const NODE_TAILSCALE: StepId = StepId(Cow::Borrowed("node-tailscale"));
     pub const NODE_BINARY: StepId = StepId(Cow::Borrowed("node-binary"));
     pub const NODE_SERVICE: StepId = StepId(Cow::Borrowed("node-service"));
+    pub const NODE_APP_CLOSED: StepId = StepId(Cow::Borrowed("node-app-closed"));
     pub const NODE_JOINED: StepId = StepId(Cow::Borrowed("node-joined"));
     pub const MASTER_ENCRYPTED: StepId = StepId(Cow::Borrowed("master-encrypted"));
     pub const MASTER_SAME_HOME: StepId = StepId(Cow::Borrowed("master-same-home"));
@@ -419,6 +420,7 @@ pub struct StepContext {
     pub masks: Masks,
     pub tokens: Arc<dyn ClusterTokens>,
     pub dist_dir: Option<PathBuf>,
+    pub mac_daemon: Option<PathBuf>,
     pub node: Option<String>,
 }
 
