@@ -42,12 +42,11 @@ impl AskOps {
         let Some(hit) = pid.and_then(|pid| self.session_of(pid)) else {
             return Err(forbidden(NO_SESSION));
         };
-        let session = self.session_key(&hit);
         let until = Instant::now() + waited(args);
         let here = self.waiters.enter(ANY);
         let rows = loop {
             let seen = here.mark();
-            let rows = self.mine_rows(&session)?;
+            let rows = self.mine_rows(&self.session_key(&hit))?;
             if !rows.is_empty() || self.waiters.is_closed() || !here.block(seen, until) {
                 break rows;
             }

@@ -1,4 +1,4 @@
-use crate::ask_ops::{AskOps, Mark};
+use crate::ask_ops::{AskOps, Mark, Taken};
 use crate::ask_tick::Msg;
 use crate::inbox_ops::{InboxOps, Responder};
 use notchling_engine::ask::{
@@ -49,7 +49,20 @@ impl AskOps {
         });
     }
 
+    fn queued(&self, id: &str, msg: Msg) -> bool {
+        lock(&self.pending).insert(id.to_string());
+        if self.tx.send(msg).is_err() {
+            lock(&self.pending).remove(id);
+            self.drop_mark(id);
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn queue_answer(&self, id: &str, choice: u8, by: By) -> bool {
+        if self.waiters.is_closed() {
+            return false;
+        }
         let Ok(Some(row)) = self.store.get(id) else {
             return false;
         };
@@ -72,14 +85,13 @@ impl AskOps {
             choice,
             by,
         };
-        if self.tx.send(msg).is_err() {
-            self.drop_mark(id);
-            return false;
-        }
-        true
+        self.queued(id, msg)
     }
 
     pub(crate) fn queue_dismiss(&self, id: &str) -> bool {
+        if self.waiters.is_closed() {
+            return false;
+        }
         let Ok(Some(row)) = self.store.get(id) else {
             return false;
         };
@@ -93,33 +105,47 @@ impl AskOps {
         if self.take(id, mark).is_some() {
             return false;
         }
-        if self.tx.send(Msg::Dismiss(id.to_string())).is_err() {
-            self.drop_mark(id);
-            return false;
-        }
-        true
+        self.queued(id, Msg::Dismiss(id.to_string()))
     }
 
     pub(crate) fn apply(&self, msg: Msg) {
-        let (id, failed) = match msg {
+        let (id, result) = match msg {
             Msg::Answer {
                 id,
                 answer,
                 choice,
                 by,
             } => {
-                let failed = self.finish_answer(&id, &answer, choice, by).is_err();
-                (id, failed)
+                let result = self.finish_answer(&id, &answer, choice, by);
+                (id, result)
             }
             Msg::Dismiss(id) => {
-                let failed = self.finish_dismiss(&id).is_err();
-                (id, failed)
+                let result = self.finish_dismiss(&id);
+                (id, result)
             }
             Msg::Stop => return,
         };
-        if failed {
-            lock(&self.raised).remove(&id);
-            self.settled(&id);
+        lock(&self.pending).remove(&id);
+        if !matches!(result, Ok(Taken::Won)) {
+            self.replace_item(&id);
+        }
+    }
+
+    fn replace_item(&self, id: &str) {
+        let Some(link) = self.link.get() else {
+            return;
+        };
+        let Ok(Some(row)) = self.store.get(id) else {
+            return;
+        };
+        if let Some(old) = row.inbox_id.as_deref() {
+            link.inbox.remove(old);
+        }
+        lock(&self.raised).remove(id);
+        if row.state == AskState::Open {
+            self.settled(id);
+        } else {
+            let _ = self.store.set_inbox(id, None);
         }
     }
 
@@ -172,7 +198,11 @@ impl AskOps {
         };
         let fresh = if row.state == AskState::Open {
             lock(&self.raised).insert(row.id.clone());
-            Some(self.raise_item(link, row, now_ms))
+            let mut at = now_ms;
+            while Some(item(row, None, at).id) == row.inbox_id {
+                at += 1;
+            }
+            Some(self.raise_item(link, row, at))
         } else {
             let _ = self.store.set_inbox(&row.id, None);
             None
@@ -194,7 +224,7 @@ impl AskOps {
             return;
         };
         let (state, answer, by) = match row.state {
-            AskState::Answered => (
+            AskState::Answered | AskState::Delivered => (
                 State::Answered,
                 row.choice.map(action_for),
                 row.by.map(By::as_str),

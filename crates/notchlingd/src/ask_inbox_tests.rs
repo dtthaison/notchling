@@ -333,3 +333,145 @@ fn no_answer_text_reaches_the_inbox_or_events() {
         assert!(text(&event, "answer").is_none());
     }
 }
+
+#[test]
+fn a_delivered_row_resolves_its_item_as_answered() {
+    let r = rig();
+    let id = open(&r);
+    r.store.answer(&id, "b", Some(2), By::Mac, T0).unwrap();
+    r.store
+        .close(&id, &[AskState::Answered], AskState::Delivered, T0)
+        .unwrap();
+    let row = r.store.get(&id).unwrap().unwrap();
+    r.ops.resolve_item(&row);
+    let item = item_of(&r, &id);
+    assert_eq!(item.state, State::Answered);
+    assert_eq!(item.answer, Some(ActionId::Choice2));
+    assert_eq!(item.answered_by.as_deref(), Some("mac"));
+}
+
+#[test]
+fn tick_leaves_a_queued_answer_alone() {
+    let r = rig();
+    let id = open(&r);
+    let item = item_of(&r, &id);
+    r.tree.end(ASKER);
+    let done = r.inbox.decide(&item.id, ActionId::Choice1, "mac").unwrap();
+    assert!(done.answered);
+    r.ops.tick(T0 + 1_000);
+    assert_eq!(state_of(&r, &id), "open");
+    r.ops.drain();
+    assert_eq!(state_of(&r, &id), "answered");
+    assert_eq!(item_of(&r, &id).state, State::Answered);
+}
+
+#[test]
+fn tick_leaves_a_queued_dismiss_alone() {
+    let r = rig();
+    let id = open(&r);
+    let item = item_of(&r, &id);
+    r.tree.end(ASKER);
+    assert!(
+        r.inbox
+            .decide(&item.id, ActionId::Cancel, "mac")
+            .unwrap()
+            .answered
+    );
+    r.ops.tick(T0 + 1_000);
+    assert_eq!(state_of(&r, &id), "open");
+    r.ops.drain();
+    assert_eq!(state_of(&r, &id), "dismissed");
+}
+
+#[test]
+fn a_queued_answer_that_loses_leaves_no_stale_item() {
+    let r = rig();
+    let id = open(&r);
+    let item = item_of(&r, &id);
+    assert!(
+        r.inbox
+            .decide(&item.id, ActionId::Choice1, "mac")
+            .unwrap()
+            .answered
+    );
+    r.store
+        .close(&id, &[AskState::Open], AskState::Gone, T0 + 1)
+        .unwrap();
+    r.ops.drain();
+    assert_eq!(state_of(&r, &id), "gone");
+    assert!(items(&r).is_empty());
+    assert!(r.store.get(&id).unwrap().unwrap().inbox_id.is_none());
+}
+
+#[test]
+fn close_applies_what_is_queued() {
+    let r = rig();
+    let id = open(&r);
+    let item = item_of(&r, &id);
+    assert!(
+        r.inbox
+            .decide(&item.id, ActionId::Choice2, "phone")
+            .unwrap()
+            .answered
+    );
+    r.ops.close();
+    assert_eq!(state_of(&r, &id), "answered");
+    assert_eq!(item_of(&r, &id).state, State::Answered);
+}
+
+#[test]
+fn the_responder_refuses_once_closed() {
+    let r = rig();
+    let id = open(&r);
+    let item = item_of(&r, &id);
+    r.ops.close();
+    let done = r
+        .inbox
+        .decide(&item.id, ActionId::Choice1, "phone")
+        .unwrap();
+    assert!(!done.answered);
+    let done = r.inbox.decide(&item.id, ActionId::Cancel, "phone").unwrap();
+    assert!(!done.answered);
+    r.ops.drain();
+    assert_eq!(state_of(&r, &id), "open");
+    assert_eq!(item_of(&r, &id).state, State::Open);
+}
+
+#[test]
+fn load_in_the_same_millisecond_still_gets_a_live_item() {
+    let data = scratch("inbox-data3");
+    let inbox_dir = data.0.join("inbox");
+    let first = rig_full(
+        json!([]),
+        Some((
+            Arc::new(AskStore::open(&data.0).unwrap()),
+            scratch("inbox-e"),
+        )),
+        Some(inbox_dir.clone()),
+    );
+    let id = open(&first);
+    let old = item_of(&first, &id).id;
+    first.inbox.flush();
+    drop(first);
+    let second = rig_full(
+        json!([]),
+        Some((
+            Arc::new(AskStore::open(&data.0).unwrap()),
+            scratch("inbox-f"),
+        )),
+        Some(inbox_dir),
+    );
+    second.inbox.load();
+    second.ops.load(T0);
+    let now = items(&second);
+    assert_eq!(now.len(), 1);
+    assert_ne!(now[0].id, old);
+    assert_eq!(now[0].state, State::Open);
+    assert!(
+        second
+            .inbox
+            .decide(&now[0].id, ActionId::Choice1, "phone")
+            .unwrap()
+            .answered
+    );
+}

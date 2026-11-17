@@ -1,12 +1,14 @@
 use crate::ask_testkit::{
     asker_at, base, open, open_with, person, rig, state_of, until, wait_as, ASKER, STRANGER, T0,
 };
-use crate::ask_waiters::budget;
+use crate::ask_waiters::{budget, Waiters};
 use crate::event_assert::{of, text};
 use crate::op_group::OpGroup;
 use notchling_engine::ask::AskState;
 use notchling_local_api::{ops, ErrorCode, OpSpec};
 use serde_json::{json, Value};
+use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const NOT_YOURS: &str = "Only the command that asked can wait for this answer.";
@@ -287,4 +289,32 @@ fn the_wait_budget_is_capped_at_fifty_seconds() {
         budget(&json!({"waitMs": "x"})),
         Duration::from_millis(50_000)
     );
+}
+
+#[test]
+fn release_cannot_remove_the_slot_of_a_waiter_entering() {
+    let waiters = Arc::new(Waiters::default());
+    let (in_tx, in_rx) = channel();
+    let (done_tx, done_rx) = channel::<()>();
+    let done_rx = Mutex::new(done_rx);
+    waiters.set_window(Arc::new(move || {
+        in_tx.send(()).unwrap();
+        let _ = done_rx
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_millis(300));
+    }));
+    let releaser = {
+        let waiters = waiters.clone();
+        std::thread::spawn(move || {
+            in_rx.recv().unwrap();
+            waiters.release("q");
+            done_tx.send(()).unwrap();
+        })
+    };
+    let here = waiters.enter("q");
+    releaser.join().unwrap();
+    assert!(waiters.connected("q"));
+    waiters.wake("q");
+    assert!(!here.block(here.mark(), Instant::now()));
 }

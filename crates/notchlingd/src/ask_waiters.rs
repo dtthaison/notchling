@@ -28,6 +28,8 @@ struct Counts {
 pub(crate) struct Waiters {
     slots: Mutex<HashMap<String, Arc<Slot>>>,
     closed: AtomicBool,
+    #[cfg(test)]
+    window: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 pub(crate) struct Present {
@@ -39,13 +41,28 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Waiters {
-    fn slot(&self, id: &str) -> Arc<Slot> {
-        lock(&self.slots).entry(id.to_string()).or_default().clone()
+    #[cfg(test)]
+    pub(crate) fn set_window(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *lock(&self.window) = Some(hook);
+    }
+
+    #[cfg(test)]
+    fn in_window(&self) {
+        let hook = lock(&self.window).clone();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
 
     pub(crate) fn enter(&self, id: &str) -> Present {
-        let slot = self.slot(id);
-        lock(&slot.state).connected += 1;
+        let slot = {
+            let mut slots = lock(&self.slots);
+            let slot = slots.entry(id.to_string()).or_default().clone();
+            #[cfg(test)]
+            self.in_window();
+            lock(&slot.state).connected += 1;
+            slot
+        };
         Present { slot }
     }
 

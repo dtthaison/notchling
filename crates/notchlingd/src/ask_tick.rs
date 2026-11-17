@@ -47,6 +47,9 @@ impl AskOps {
     pub fn tick(&self, now_ms: i64) {
         if let Ok(rows) = self.store.live() {
             for row in rows {
+                if lock(&self.pending).contains(&row.id) {
+                    continue;
+                }
                 let late = row.mode == Mode::Wait
                     && row.state == AskState::Open
                     && row.deadline_ms.is_some_and(|at| now_ms >= at);
@@ -126,7 +129,13 @@ impl AskOps {
                         return;
                     };
                     match msg {
-                        Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+                        Ok(Msg::Stop) => {
+                            while let Ok(queued) = rx.try_recv() {
+                                ops.apply(queued);
+                            }
+                            return;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => return,
                         Ok(msg) => ops.apply(msg),
                         Err(RecvTimeoutError::Timeout) => {}
                     }
@@ -145,9 +154,12 @@ impl AskOps {
             finder.stop();
         }
         let thread = lock(&self.thread).take();
-        if let Some(handle) = thread {
-            let _ = self.tx.send(Msg::Stop);
-            let _ = handle.join();
+        match thread {
+            Some(handle) => {
+                let _ = self.tx.send(Msg::Stop);
+                let _ = handle.join();
+            }
+            None => self.drain(),
         }
     }
 }

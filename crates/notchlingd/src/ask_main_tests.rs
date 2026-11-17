@@ -269,3 +269,22 @@ fn mine_waits_for_one() {
     assert_eq!(listed[0]["asker"], json!("subagent"));
     assert_eq!(items(&l.r).len(), 1);
 }
+
+#[test]
+fn mine_follows_a_session_that_is_rekeyed_while_it_waits() {
+    let l = lab(A1, A2);
+    main_cmd(&l);
+    let ops_ = l.r.ops.clone();
+    let waiting = std::thread::spawn(move || {
+        ops_.call(&asker_at(MAINCMD), ops::ASK_MINE, &json!({"waitMs": 5000}))
+            .unwrap()
+    });
+    until("waiter", || l.r.ops.waiters.connected(ANY));
+    *l.r.list.lock().unwrap() = crate::acting_ops_tests::sessions();
+    l.r.ops.sessions_changed();
+    let id = asked(&l, true);
+    assert_ne!(l.row(&id).session, SESSION);
+    let listed = waiting.join().unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["id"], json!(id));
+}
