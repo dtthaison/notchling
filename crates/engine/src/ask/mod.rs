@@ -1,9 +1,11 @@
 mod branch;
+mod find;
 mod model;
 mod store;
 mod words;
 
 pub use branch::branch;
+pub use find::{candidates, delegate_tool, find, Asking, Candidate, Source};
 pub use model::{
     new_id, AskState, Asker, By, Found, Mode, New, OpenError, Row, CHOICE_LABEL_CHARS,
     DEADLINE_MARGIN_MS, DEADLINE_VARIABLE, DETAIL_CHARS, FIND_MAX_FILES, FIND_MS, FIND_TAIL_BYTES,
@@ -17,6 +19,9 @@ pub use words::{same_command, simple_commands};
 #[cfg(test)]
 #[path = "branch_tests.rs"]
 mod branch_tests;
+#[cfg(test)]
+#[path = "find_tests.rs"]
+mod find_tests;
 #[cfg(test)]
 #[path = "model_tests.rs"]
 mod model_tests;
