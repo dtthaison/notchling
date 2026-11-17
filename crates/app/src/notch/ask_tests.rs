@@ -5,6 +5,7 @@ use crate::notch::answer::QuestionDraft;
 use crate::notch::layout::NotchState;
 use crate::notch::model::NotchModel;
 use notchling_engine::sessions::{AgentGroup, AgentTarget};
+use notchling_engine::transcript::snapshot::Snapshot;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -216,5 +217,69 @@ fn an_ask_card_marks_its_own_key_not_an_answered_permission() {
         answer_key(&m, "row-j1", &plain),
         m.answer_key("row-j1"),
         "everything else is unchanged"
+    );
+}
+
+fn hook_question(id: &str) -> crate::notch::requests::HookRequest {
+    crate::notch::requests::HookRequest {
+        id: id.into(),
+        session_id: "row-j1".into(),
+        created: 0.0,
+        kind: crate::notch::requests::RequestKind::Question(PendingQuestion {
+            tool_use_id: format!("hook:{id}"),
+            items: vec![],
+        }),
+        tool_name: "AskUserQuestion".into(),
+        summary: String::new(),
+        description: String::new(),
+        can_always_allow: false,
+        agy: None,
+    }
+}
+
+#[test]
+fn an_answered_question_never_hides_an_ask_card() {
+    let open = feed(&[wire("q1", "j1", 1, "open", &[])]);
+    let agents = vec![agent("j1", AgentGroup::Working)];
+    let mut m = NotchModel::default();
+    m.set_asks(&open);
+    m.update(
+        agents.clone(),
+        HashMap::new(),
+        HashMap::from([("row-j1".to_owned(), hook_question("r1"))]),
+    );
+    assert_eq!(
+        m.question("row-j1").map(|q| q.tool_use_id),
+        Some("hook:r1".into()),
+        "an open hook question still comes first"
+    );
+    m.mark_answered_key("r1");
+    assert_eq!(
+        m.question("row-j1").map(|q| q.tool_use_id),
+        Some("ask:q1".into()),
+        "answered hook question: the ask shows"
+    );
+    m.mark_answered_key("ask:q1");
+    assert!(m.question("row-j1").is_none(), "both answered: nothing");
+
+    let snap = Snapshot {
+        question: Some(PendingQuestion {
+            tool_use_id: "tu1".into(),
+            items: vec![],
+        }),
+        ..Snapshot::default()
+    };
+    let mut m = NotchModel::default();
+    m.set_asks(&open);
+    m.update(
+        agents,
+        HashMap::from([("row-j1".to_owned(), snap)]),
+        HashMap::new(),
+    );
+    m.mark_answered_key("tu1");
+    assert_eq!(
+        m.question("row-j1").map(|q| q.tool_use_id),
+        Some("ask:q1".into()),
+        "answered transcript question: the ask shows"
     );
 }

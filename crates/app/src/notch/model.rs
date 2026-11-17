@@ -128,13 +128,23 @@ impl NotchModel {
     pub fn question(&self, id: &str) -> Option<PendingQuestion> {
         if let Some(r) = self.requests.get(id) {
             if let Some(q) = r.question() {
-                return (!self.answered.contains(&r.id)).then(|| q.clone());
+                if !self.answered.contains(&r.id) {
+                    return Some(q.clone());
+                }
+                return self.ask_question(id);
             }
         }
         self.snapshot(id)
             .and_then(|s| s.question.clone())
             .or_else(|| self.agent(id).and_then(question_from_needs))
-            .or_else(|| self.ask_cards.get(id).map(|c| c.question.clone()))
+            .filter(|q| !self.answered.contains(&q.tool_use_id))
+            .or_else(|| self.ask_question(id))
+    }
+
+    fn ask_question(&self, id: &str) -> Option<PendingQuestion> {
+        self.ask_cards
+            .get(id)
+            .map(|c| c.question.clone())
             .filter(|q| !self.answered.contains(&q.tool_use_id))
     }
 
