@@ -29,6 +29,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [0019](0019-agent-instructions-per-tool.md) | The skills, rules and hooks Notchling installs in each agent tool, owned file by file | Proposed |
 | [0020](0020-agents-change-settings-by-class.md) | Agents read every setting and change one by its class: free at once, ask through the Inbox, never the switches | Proposed |
 | [0021](0021-notes-read-on-demand.md) | The root `AGENTS.md` is one page and imports nothing; the working notes are one file per topic in `docs/notes/`, read on demand | Proposed |
+| [0022](0022-ask.md) | Ask: an agent asks the person with `notchling ask`, the answer goes straight to the waiting command, only the person answers by default | Proposed |
 | [XXXX](XXXX-localization-fluent-source.md) | One English source in Fluent, every platform's words generated from it | Accepted |
 | [XXXX](XXXX-one-typed-event-stream.md) | One typed event stream: kinds in a registry, fields from a closed list with no text, the daemon the only writer, a sealed Audit | Proposed |
 | [XXXX](XXXX-provider-capability-contract.md) | One capability contract for every tool: 39 capabilities in four states, two shrink-only files, a conformance suite and a generated matrix | Proposed |

@@ -126,6 +126,9 @@ impl InboxPanelView {
                 self.note = Some("Open Machines from the menu bar.".to_string());
                 cx.notify();
             }
+            Some(Target::Ask { id, session }) => {
+                cx.defer(move |cx| crate::mac::shell::open_chat_ask(cx, &session, &id));
+            }
             Some(Target::Settings { .. }) | None => {}
         }
     }

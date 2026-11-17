@@ -190,7 +190,7 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
         let Ok((source, answer)) = taken else {
             break;
         };
-        let (claude, prompts, live, note, answered, outbox) = match answer {
+        let (claude, prompts, live, note, answered, outbox, asks) = match answer {
             Some(answer) => {
                 let note = answer.note();
                 (
@@ -200,6 +200,7 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                     note,
                     answer.answered,
                     answer.outbox,
+                    answer.asks,
                 )
             }
             None => (
@@ -207,6 +208,7 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                 None,
                 ToolLive::default(),
                 None,
+                Default::default(),
                 Default::default(),
                 Default::default(),
             ),
@@ -238,6 +240,7 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                     view.model.notch = g.notch;
                     view.geometry = Some(g);
                 }
+                view.model.set_asks(&asks);
                 let peek = view
                     .model
                     .update(loaded.agents, loaded.snapshots, loaded.requests);

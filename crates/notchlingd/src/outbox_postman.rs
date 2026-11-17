@@ -15,6 +15,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub const TICK_MS: i64 = 1_000;
+pub const UNSURE_LOOK_EVERY_MS: i64 = 5_000;
+pub const UNSURE_LOOK_FOR_MS: i64 = 600_000;
 const LAND_TRIES: u32 = 3;
 const LAND_BACKOFF_MS: u64 = 40;
 
@@ -23,6 +25,12 @@ pub trait Verifier: Send + Sync {
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict;
     fn watch(&self, row: &Row, before: Seen, now_ms: i64) -> QueuedVerdict;
     fn next_look_ms(&self, row: &Row) -> Option<i64>;
+    fn looks_again(&self) -> bool {
+        false
+    }
+    fn found_late(&self, _row: &Row, _before: Seen) -> bool {
+        false
+    }
     fn forget(&self, _id: &str) {}
     fn close(&self) {}
 }
@@ -80,6 +88,12 @@ enum Msg {
 pub(crate) enum Next {
     At(i64),
     Done,
+}
+
+enum Again {
+    Landed,
+    At(i64),
+    Never,
 }
 
 struct Running {
@@ -313,6 +327,7 @@ fn finish(inner: &Arc<Inner>, session: &str, rx: &Receiver<Msg>) -> bool {
 
 enum Owed {
     Sent(Row),
+    Found(Row),
     Moved(Move),
 }
 
@@ -333,6 +348,7 @@ pub(crate) struct Postman {
     courier: Option<Arc<dyn Courier>>,
     owed: Option<Owed>,
     cut_short: Option<String>,
+    looked: Option<(String, i64, i64)>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -353,6 +369,7 @@ impl Postman {
             courier: None,
             owed: None,
             cut_short: None,
+            looked: None,
         }
     }
 
@@ -376,9 +393,12 @@ impl Postman {
                 State::Sending if self.cut_short.as_deref() != Some(row.id.as_str()) => {
                     self.orphan(&row, now)
                 }
-                State::Unsure | State::Box | State::Stopped | State::Sending => {
-                    return self.rest(now, None)
-                }
+                State::Unsure => match self.look_again(&row, now) {
+                    Again::Landed => None,
+                    Again::At(at) => Some(at),
+                    Again::Never => return self.rest(now, None),
+                },
+                State::Box | State::Stopped | State::Sending => return self.rest(now, None),
                 State::Gone => self.recheck_gone(&row, now),
                 State::InQueue => self.watch(&row, now),
                 State::Queued | State::Waiting => self.gate(&row, now),
@@ -431,6 +451,35 @@ impl Postman {
         self.courier
             .clone()
             .unwrap_or_else(|| self.inner.couriers.claude.clone())
+    }
+
+    fn look_again(&mut self, row: &Row, now: i64) -> Again {
+        if !self.inner.verifier.looks_again()
+            || row.seen_before.is_none()
+            || row.queued_before.is_none()
+        {
+            return Again::Never;
+        }
+        let last = self
+            .looked
+            .as_ref()
+            .filter(|(id, updated, _)| *id == row.id && *updated == row.updated_ms)
+            .map(|(_, _, at)| *at);
+        let due = last.unwrap_or(row.updated_ms) + UNSURE_LOOK_EVERY_MS;
+        if now < due {
+            return Again::At(due);
+        }
+        if last.is_some() && now - row.updated_ms >= UNSURE_LOOK_FOR_MS {
+            return Again::Never;
+        }
+        self.looked = Some((row.id.clone(), row.updated_ms, now));
+        if !self.inner.verifier.found_late(row, baseline(row)) {
+            return Again::At(now + UNSURE_LOOK_EVERY_MS);
+        }
+        match self.settle(Owed::Found(row.clone())) {
+            true => Again::Landed,
+            false => Again::At(now + TICK_MS),
+        }
     }
 
     fn recheck_gone(&mut self, row: &Row, now: i64) -> Option<i64> {
@@ -644,15 +693,21 @@ impl Postman {
 
     fn try_land(&self, owed: &Owed) -> bool {
         match owed {
-            Owed::Sent(row) => {
-                if self.inner.ops.store().delete(&row.id).is_err() {
-                    return false;
-                }
-                self.inner
+            Owed::Sent(row) => match self.inner.ops.store().delete(&row.id) {
+                Ok(_) => self.announce_sent(row),
+                Err(_) => false,
+            },
+            Owed::Found(row) => {
+                match self
+                    .inner
                     .ops
-                    .publish_removed(&row.id, &row.session, "sent");
-                self.inner.ops.emit_then(row, OutboxThen::Sent);
-                true
+                    .store()
+                    .delete_unsure(&row.id, row.updated_ms)
+                {
+                    Ok(true) => self.announce_sent(row),
+                    Ok(false) => true,
+                    Err(_) => false,
+                }
             }
             Owed::Moved(step) => {
                 let now = (self.inner.clock)();
@@ -677,6 +732,14 @@ impl Postman {
                 true
             }
         }
+    }
+
+    fn announce_sent(&self, row: &Row) -> bool {
+        self.inner
+            .ops
+            .publish_removed(&row.id, &row.session, "sent");
+        self.inner.ops.emit_then(row, OutboxThen::Sent);
+        true
     }
 
     fn publish(&self, id: &str) {

@@ -209,7 +209,11 @@ impl TranscriptVerifier {
 
     fn transcript(&self, row: &Row) -> Option<(String, String)> {
         let agent = self.files.row(&row.session)?;
-        Some((agent.transcript_path?, agent.name))
+        let path = match agent.transcript_path.clone() {
+            Some(path) => path,
+            None => self.files.locate(&agent)?,
+        };
+        Some((path, agent.name))
     }
 
     fn put(&self, id: &str, watch: Watch) {
@@ -281,7 +285,7 @@ impl Verifier for TranscriptVerifier {
     }
 
     fn wait(&self, row: &Row, before: Seen, entered_ms: i64) -> Verdict {
-        let found = self.transcript(row);
+        let mut found = self.transcript(row);
         let mut waits = found.as_ref().map(|(path, _)| {
             self.pause
                 .watch(Path::new(path), is_clear(&message_of(row)))
@@ -289,6 +293,15 @@ impl Verifier for TranscriptVerifier {
         let mut noted = false;
         loop {
             let now = (self.clock)();
+            if found.is_none() {
+                found = self.transcript(row);
+                if let Some((path, _)) = &found {
+                    waits = Some(
+                        self.pause
+                            .watch(Path::new(path), is_clear(&message_of(row))),
+                    );
+                }
+            }
             let seen = found
                 .as_ref()
                 .and_then(|(path, name)| count_row(path, name, row));
@@ -351,6 +364,17 @@ impl Verifier for TranscriptVerifier {
             .map(|since| since + VERIFY_LOOK_MS)
     }
 
+    fn looks_again(&self) -> bool {
+        true
+    }
+
+    fn found_late(&self, row: &Row, before: Seen) -> bool {
+        let seen = self
+            .transcript(row)
+            .and_then(|(path, name)| count_row(&path, &name, row));
+        verdict(seen, before, 0) == Verdict::Sent
+    }
+
     fn forget(&self, id: &str) {
         self.take(id);
     }
@@ -363,3 +387,7 @@ impl Verifier for TranscriptVerifier {
 #[cfg(test)]
 #[path = "outbox_verify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "outbox_late_tests.rs"]
+mod late_tests;

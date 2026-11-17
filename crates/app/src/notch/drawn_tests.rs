@@ -93,3 +93,35 @@ fn a_peek_is_a_change() {
     model.peek("a", 0);
     assert_ne!(model.drawn(), before);
 }
+
+#[test]
+fn a_second_or_answered_ask_question_is_drawn_again() {
+    let ask = |id: &str, created: i64| {
+        serde_json::json!({
+            "id": id, "session": "job-a", "asker": "main", "question": "Which?",
+            "choices": [], "mainMayAnswer": false, "state": "open", "waiting": true,
+            "createdMs": created, "updatedMs": created,
+        })
+    };
+    let feed = |rows: &[serde_json::Value]| {
+        let mut feed = crate::chat::asks::AskFeed::default();
+        for row in rows {
+            feed.apply("ask.changed", &serde_json::json!({"row": row}));
+        }
+        feed
+    };
+    let agents = || vec![agent("a", 0)];
+    let mut model = NotchModel::default();
+    model.set_asks(&feed(&[ask("q1", 1)]));
+    poll(&mut model, agents(), HashMap::new());
+    let one = model.drawn();
+    poll(&mut model, agents(), HashMap::new());
+    assert_eq!(model.drawn(), one, "the same poll draws nothing new");
+    model.set_asks(&feed(&[ask("q1", 1), ask("q2", 2)]));
+    poll(&mut model, agents(), HashMap::new());
+    let two = model.drawn();
+    assert_ne!(two, one, "1 of 2 is a change");
+    model.set_asks(&feed(&[ask("q2", 2)]));
+    poll(&mut model, agents(), HashMap::new());
+    assert_ne!(model.drawn(), two, "the first answered, the second stays");
+}

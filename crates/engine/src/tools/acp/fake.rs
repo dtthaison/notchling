@@ -126,6 +126,7 @@ pub struct FakeSpawner {
     make: Option<Arc<dyn Fn() -> Responder + Send + Sync>>,
     spawned: Mutex<Vec<FakeHandle>>,
     calls: Mutex<Vec<(String, Vec<String>, String)>>,
+    envs: Mutex<Vec<Vec<(String, String)>>>,
     refuse: Mutex<Option<String>>,
 }
 
@@ -160,6 +161,10 @@ impl FakeSpawner {
             .clone()
     }
 
+    pub fn envs(&self) -> Vec<Vec<(String, String)>> {
+        self.envs.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub fn calls(&self) -> Vec<(String, Vec<String>, String)> {
         self.calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -167,6 +172,20 @@ impl FakeSpawner {
 
 impl Spawner for FakeSpawner {
     fn spawn(&self, program: &str, args: &[String], folder: &str) -> Result<Spawned, String> {
+        self.spawn_with_env(program, args, folder, &[])
+    }
+
+    fn spawn_with_env(
+        &self,
+        program: &str,
+        args: &[String],
+        folder: &str,
+        env: &[(String, String)],
+    ) -> Result<Spawned, String> {
+        self.envs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(env.to_vec());
         self.calls.lock().unwrap_or_else(|e| e.into_inner()).push((
             program.to_string(),
             args.to_vec(),

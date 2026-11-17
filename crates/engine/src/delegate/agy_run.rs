@@ -1,14 +1,17 @@
+use super::agy_ask;
 use super::agy_pick;
 use super::deps::Deps;
 use super::media;
-use super::options::{Options, Tool};
+use super::options::{deadline_ms, Options, Tool};
 use super::outcome::Outcome;
 use super::progress::{self, Waited};
+use crate::ask::DEADLINE_VARIABLE;
 use crate::tools::acp::{Connection, Handler, METHOD_NOT_FOUND};
 use crate::tools::agy::runner::NO_BINARY;
 use crate::tools::agy::{ConfigOption, ConfigValue};
 use serde_json::{json, Value};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -37,6 +40,7 @@ impl State {
 
 struct Listener {
     write: bool,
+    notchling: PathBuf,
     state: Mutex<State>,
     conn: OnceLock<Connection>,
 }
@@ -75,6 +79,16 @@ impl Listener {
                         .and_then(id_of)
                 })
         };
+        if kind == "execute" && agy_ask::allows(&json!({"params": params}), &self.notchling) {
+            let once = options
+                .iter()
+                .find(|o| o.get("kind").and_then(Value::as_str) == Some("allow_once"))
+                .and_then(|o| o.get("optionId").and_then(Value::as_str));
+            if let Some(allow) = once {
+                conn.respond(id, selected(allow));
+                return;
+            }
+        }
         if self.write && ["edit", "delete", "move"].contains(&kind) {
             if let Some(allow) = option("allow") {
                 conn.respond(id, selected(&allow));
@@ -206,10 +220,15 @@ pub fn run(options: &Options, deps: &Deps, progress_out: &mut dyn Write) -> Outc
         o.error = Some(NO_BINARY.into());
         return o;
     };
-    let spawned = match deps
-        .agy
-        .spawn(binary, &["acp".to_string()], &options.folder)
-    {
+    let spawned = match deps.agy.spawn_with_env(
+        binary,
+        &["acp".to_string()],
+        &options.folder,
+        &[(
+            DEADLINE_VARIABLE.to_string(),
+            deadline_ms(options.timeout).to_string(),
+        )],
+    ) {
         Ok(s) => s,
         Err(e) => {
             o.error = Some(e);
@@ -219,6 +238,7 @@ pub fn run(options: &Options, deps: &Deps, progress_out: &mut dyn Write) -> Outc
     o.session = options.session.clone();
     let listener = Arc::new(Listener {
         write: options.write,
+        notchling: deps.notchling_binary.clone(),
         state: Mutex::new(State::default()),
         conn: OnceLock::new(),
     });

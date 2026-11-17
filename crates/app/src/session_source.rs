@@ -13,6 +13,7 @@ use notchling_local_api::{
 };
 use serde_json::Value;
 
+use crate::chat::asks::{self, AskFeed};
 use crate::chat::data::DataRoot;
 use crate::chat::outbox::{Bubble, OutboxFeed, OutboxRow};
 use crate::tools::live::ToolLive;
@@ -90,6 +91,7 @@ pub struct View {
     pub prompts: Option<Vec<Value>>,
     pub tools: ToolLive,
     pub outbox: OutboxFeed,
+    pub asks: AskFeed,
     pub answered: HashSet<String>,
     pub link: Link,
     pub generation: u64,
@@ -119,6 +121,7 @@ struct State {
     prompts: Option<Vec<Value>>,
     tools: ToolLive,
     outbox: OutboxFeed,
+    asks: AskFeed,
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     catalog_generation: u64,
     answered: HashSet<String>,
@@ -196,6 +199,12 @@ impl Shared {
                     state.generation += 1;
                 }
             }
+            topics::ASK_CHANGED | topics::ASK_REMOVED => {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if state.asks.apply(&event.event, &event.data) {
+                    state.generation += 1;
+                }
+            }
             topics::CODEX_TURN | topics::SESSION_CHANGED => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
@@ -212,6 +221,14 @@ impl Shared {
         next.reseed_rows(fresh);
         if state.outbox != next {
             state.outbox = next;
+            state.generation += 1;
+        }
+    }
+
+    fn reseed_asks(&self, fresh: AskFeed) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.asks != fresh {
+            state.asks = fresh;
             state.generation += 1;
         }
     }
@@ -257,6 +274,7 @@ impl SessionSource {
                     prompts: None,
                     tools: ToolLive::default(),
                     outbox: OutboxFeed::default(),
+                    asks: AskFeed::default(),
                     catalog: HashMap::new(),
                     catalog_generation: 0,
                     answered: HashSet::new(),
@@ -296,6 +314,7 @@ impl SessionSource {
             prompts: state.prompts.clone(),
             tools: state.tools.clone(),
             outbox: state.outbox.clone(),
+            asks: state.asks.clone(),
             answered: state.answered.clone(),
             link: state.link,
             generation: state.generation,
@@ -324,6 +343,21 @@ impl SessionSource {
     pub fn outbox_bubbles(&self, agent: &Agent, conversation: &Conversation) -> Vec<Bubble> {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.outbox.bubbles_for_in(agent, conversation)
+    }
+
+    pub fn ask_rows(&self, agent: &Agent) -> Vec<asks::AskRow> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.asks.rows_for(agent).into_iter().cloned().collect()
+    }
+
+    pub fn ask_ids(&self) -> Vec<String> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.asks.ids()
+    }
+
+    pub fn asks(&self) -> AskFeed {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.asks.clone()
     }
 
     pub fn outbox_covers(&self, id: &str) -> bool {
@@ -378,10 +412,11 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents, shells, prompts, outbox)) => {
+            Ok((client, agents, shells, prompts, outbox, asks)) => {
                 shared.set_prompts(prompts);
                 shared.set_shells(shells);
                 shared.reseed_outbox(outbox);
+                shared.reseed_asks(asks);
                 shared.set(Link::Daemon, Some(agents));
                 failures = 0;
                 follow(client, shared);
@@ -398,6 +433,7 @@ fn run(config: SourceConfig, shared: &Shared) {
         shared.set_prompts(None);
         shared.set_shells(Vec::new());
         shared.clear_outbox_rows();
+        shared.reseed_asks(AskFeed::default());
         shared.reset_tools();
         shared.set(link, None);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
@@ -421,6 +457,7 @@ type Connected = (
     Vec<Agent>,
     Option<Vec<Value>>,
     OutboxFeed,
+    AskFeed,
 );
 
 fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
@@ -465,6 +502,7 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             Err(e) => return Err(e),
         }
     }
+    let mut asks = asks::seed(&mut client)?;
     let mut prompts = match followed {
         true => match client.call(ops::PROMPTS_LIST, serde_json::json!({})) {
             Ok(Value::Array(list)) => Some(list),
@@ -488,6 +526,9 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             topics::OUTBOX_CHANGED | topics::OUTBOX_REMOVED => {
                 outbox.apply(&event, now_ms());
             }
+            topics::ASK_CHANGED | topics::ASK_REMOVED => {
+                asks.apply(&event.event, &event.data);
+            }
             _ => {
                 if let Some(list) = &mut prompts {
                     held_change(list, &event);
@@ -495,7 +536,7 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             }
         }
     }
-    Ok((client, agents, shells, prompts, outbox))
+    Ok((client, agents, shells, prompts, outbox, asks))
 }
 
 fn now_ms() -> i64 {
@@ -598,3 +639,7 @@ mod prompts_tests;
 #[cfg(all(test, unix))]
 #[path = "session_source_outbox_tests.rs"]
 mod outbox_tests;
+
+#[cfg(all(test, unix))]
+#[path = "session_source_asks_tests.rs"]
+mod asks_tests;

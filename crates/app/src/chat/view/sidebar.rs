@@ -150,6 +150,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
         view.daemon_note,
     )
     .with_nodes(&view.nodes())
+    .with_asks(&view.source.asks(), &view.sessions)
 }
 
 pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {

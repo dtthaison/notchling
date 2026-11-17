@@ -211,6 +211,8 @@ chat-outbox-sent = Sent
 chat-outbox-maybe = May already be in the session
 # $text is what the session's terminal box holds, on one line and cut when long.
 chat-outbox-box = Box has other text: { $text }
+# The session's terminal box already holds this very message, typed earlier and not sent.
+chat-outbox-box-same = This message is already in the box
 chat-outbox-stopped = Session stopped
 chat-outbox-gone = Session not found
 # The buttons on those messages.
@@ -225,6 +227,8 @@ chat-outbox-resume-send = Resume and Send
 chat-outbox-editing = Editing a queued message
 # The note when a queued message was taken before its edit went in.
 chat-outbox-already-sent = Already sent
+# Shown when the daemon did not answer in time because the Mac is busy. Nothing was lost; asking again works.
+chat-daemon-busy = Notchling is busy. Try again.
 chat-add-files = Add files or photos
 chat-add-folder = Add folder
 chat-slash-commands = Slash commands
@@ -298,6 +302,8 @@ chat-already-answered = Already answered in the terminal: { $tool }
 chat-already-answered-subject = Already answered in the terminal: { $tool } { $subject }
 # $said is the reason, without its final full stop.
 chat-may-have-reached = { $said }. It may still have reached the session: look before sending again.
+# Shown when an answer to a question or permission got no reply because the Mac is busy.
+chat-busy-may-have-reached = Notchling is busy. Your answer may still have reached the session: look before answering again.
 # Replaces "Answer it in the terminal" when the question card is already on screen.
 chat-answer-above = Answer it above
 chat-not-answered = Not answered
@@ -669,3 +675,36 @@ chat-sheet-default = Default
 chat-sheet-run = Run
 chat-sheet-close = Close
 chat-sheet-prompt = Prompt
+
+## Ask cards
+
+# The line above an Ask card: who asks. A session's own question and one of its subagents' read differently.
+chat-ask-main = This session asks
+chat-ask-unknown = This session or one of its subagents
+chat-ask-subagent = A subagent
+chat-ask-codex = { -brand-codex } job
+chat-ask-antigravity = { -brand-antigravity } job
+# $head and $tail are two parts of the card's header line.
+chat-ask-join = { $head } · { $tail }
+# How long a question has waited. $n is whole minutes or whole hours; min stands for minutes and h for hours.
+chat-ask-waited-now = just now
+chat-ask-waited-minutes = waited { NUMBER($n) } min
+chat-ask-waited-hours = waited { NUMBER($n) } h
+# Who answered a question.
+chat-ask-by-mac = Mac
+chat-ask-by-phone = Phone
+chat-ask-by-main = main session
+# The one line a closed Ask card keeps. $by is who answered and $answer is the answer, cut when long.
+chat-ask-answered = Answered
+chat-ask-answered-by = Answered · { $by }
+chat-ask-answered-with = Answered · { $by }: { $answer }
+chat-ask-dismissed = Dismissed
+chat-ask-expired = No answer in time
+chat-ask-gone = Stopped waiting
+# The note when another answer was taken first. $by is who answered.
+chat-ask-already = Already answered
+chat-ask-already-by = Already answered · { $by }
+# The box and buttons on an open Ask card.
+chat-ask-type-answer = Type an answer…
+chat-ask-send = Send
+chat-ask-dismiss = Dismiss

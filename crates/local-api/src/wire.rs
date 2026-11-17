@@ -147,6 +147,13 @@ pub mod ops {
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
     pub const OUTBOX_RESEND: &str = "outbox.resend";
     pub const OUTBOX_DISCARD: &str = "outbox.discard";
+
+    pub const ASK_OPEN: &str = "ask.open";
+    pub const ASK_WAIT: &str = "ask.wait";
+    pub const ASK_MINE: &str = "ask.mine";
+    pub const ASK_ANSWER: &str = "ask.answer";
+    pub const ASK_DISMISS: &str = "ask.dismiss";
+    pub const ASK_LIST: &str = "ask.list";
 }
 
 pub mod topics {
@@ -204,6 +211,10 @@ pub mod topics {
     pub const OUTBOX: &str = "outbox";
     pub const OUTBOX_CHANGED: &str = "outbox.changed";
     pub const OUTBOX_REMOVED: &str = "outbox.removed";
+
+    pub const ASKS: &str = "asks";
+    pub const ASK_CHANGED: &str = "ask.changed";
+    pub const ASK_REMOVED: &str = "ask.removed";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -419,6 +430,19 @@ mod tests {
         assert_eq!(topics::OUTBOX, "outbox");
         assert_eq!(topics::OUTBOX_CHANGED, "outbox.changed");
         assert_eq!(topics::OUTBOX_REMOVED, "outbox.removed");
+    }
+
+    #[test]
+    fn the_ask_names_are_on_the_wire() {
+        assert_eq!(ops::ASK_OPEN, "ask.open");
+        assert_eq!(ops::ASK_WAIT, "ask.wait");
+        assert_eq!(ops::ASK_MINE, "ask.mine");
+        assert_eq!(ops::ASK_ANSWER, "ask.answer");
+        assert_eq!(ops::ASK_DISMISS, "ask.dismiss");
+        assert_eq!(ops::ASK_LIST, "ask.list");
+        assert_eq!(topics::ASKS, "asks");
+        assert_eq!(topics::ASK_CHANGED, "ask.changed");
+        assert_eq!(topics::ASK_REMOVED, "ask.removed");
     }
 
     #[test]

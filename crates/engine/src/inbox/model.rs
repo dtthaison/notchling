@@ -20,6 +20,7 @@ pub enum Kind {
     NoPrimary,
     PrimaryBack,
     SessionWaits,
+    Question,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +42,18 @@ pub enum ActionId {
     Keep,
     ContinueHere,
     WaitFor,
+    #[serde(rename = "choice_1")]
+    Choice1,
+    #[serde(rename = "choice_2")]
+    Choice2,
+    #[serde(rename = "choice_3")]
+    Choice3,
+    #[serde(rename = "choice_4")]
+    Choice4,
+    #[serde(rename = "choice_5")]
+    Choice5,
+    #[serde(rename = "choice_6")]
+    Choice6,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

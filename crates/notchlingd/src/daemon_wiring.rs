@@ -4,6 +4,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
+use crate::ask_ops::AskOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
 use crate::awake_ops::AwakeOps;
@@ -489,6 +490,7 @@ pub struct Wired {
     pub catalog: Arc<CatalogService>,
     pub inbox: Arc<InboxOps>,
     pub outbox: Arc<OutboxOps>,
+    pub ask: Arc<AskOps>,
     pub postmen: Postmen,
     pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
@@ -567,6 +569,10 @@ impl Wired {
             .with_cluster_dir(layout.cluster_dir());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         acting.attach_outbox(outbox.clone());
+        let node_slot = crate::ask_wiring::Slot::default();
+        let worker = crate::ask_wiring::worker_in(node_slot.clone());
+        let ask =
+            crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox, worker);
         let agy = Arc::new(AgyOps::for_daemon(
             layout,
             acting.acting_switch(),
@@ -758,6 +764,9 @@ impl Wired {
             events.clone(),
             (sessions.clone(), acting.acting_switch()),
         );
+        if let Ok(node) = &cluster.node {
+            let _ = node_slot.set(node.clone());
+        }
         cluster.fence_keeper().set_codex(codex.clone());
         bridge.cluster().attach(
             cluster.handler(),
@@ -802,6 +811,7 @@ impl Wired {
             catalog,
             inbox,
             outbox,
+            ask,
             postmen,
             outbox_notice,
             vault,
@@ -881,6 +891,7 @@ impl Wired {
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.outbox.clone())
+            .with_group(self.ask.clone())
             .with_group(self.vault.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
@@ -916,14 +927,17 @@ impl Wired {
         self.codex_children.start();
         self.postmen.begin();
         self.outbox_notice.spawn_loop();
+        self.ask.spawn_loop();
     }
 
     pub fn load(&self) {
         self.inbox.load();
+        self.ask.load(crate::acting_ops::now_ms());
         self.outbox.load(crate::acting_ops::now_ms());
     }
 
     pub fn close(&self) {
+        self.ask.close();
         self.outbox_notice.close();
         self.postmen.stop();
         self.wake.close();

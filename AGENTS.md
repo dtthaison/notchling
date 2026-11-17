@@ -51,20 +51,20 @@ Only a queued issue (`notchling:queued`), on a branch `agent/<issue>-<slug>`; a 
 - Renders, benches, a dev app over a fixture: docs/notes/rust-dev.md
 - A change across processes or areas, or a new op, setting or area: docs/notes/overview.md
 - The daemon, local API, tiers, switches, `notchling` command line: docs/notes/daemon.md (ops: docs/local-api-ops.md)
-- The Claude Code hook and the Artifact page hooks: docs/notes/hook.md
+- The Claude Code hook, the Artifact page hooks: docs/notes/hook.md
 - Chat's parts, selection and Copy, panel sizes, window frame, history budget: docs/notes/chat.md
 - Chat's Details Panel, subagent rows, Changes: docs/notes/chat-details.md
 - Chat's CPU and frames, the conversation list, scrolling, spinners: docs/notes/chat-speed.md
 - Views, the kit, words, Appearance, menus, the ? map, GPUI quirks: docs/notes/ui.md
 - Replying to sessions, held and queued messages, pictures: docs/notes/replies.md
-- Reading transcripts, tail budgets, sessions continued under a new id: docs/notes/transcripts.md
+- Transcripts, tail budgets, sessions continued under a new id: docs/notes/transcripts.md
 - Codex, Antigravity, the tool contract: docs/notes/codex-antigravity.md
 - Account switching, the account log: docs/notes/accounts.md
 - Data folders, logs, the Audit, log events: docs/notes/data-and-logs.md
-- The Inbox: docs/notes/inbox.md
+- The Inbox: docs/notes/inbox.md; Ask: docs/notes/ask.md
 - Tool versions on workers: docs/notes/versions.md
-- The cluster: docs/notes/cluster.md
-- Vault, lanes, Machines, search, pages, delegation, limits, cost: the crate notes, by file
+- Cluster: docs/notes/cluster.md
+- Vault, lanes, Machines, search, pages, delegation, limits, cost: each crate's notes
 - The Swift app, the reference a port matches (read it whole first): [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md)
 - The phone app and its checks: [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md); its wire: protocol/README.md
 - `tools/` (guard, release, agents): tools/AGENTS.md

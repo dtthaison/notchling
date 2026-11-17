@@ -1,4 +1,5 @@
 mod accounts;
+mod ask_cards;
 mod bring_back;
 mod changes;
 mod changes_panel;
@@ -175,6 +176,7 @@ pub struct ChatView {
     pending_session: Option<PendingSession>,
     pending_child: Option<PendingChild>,
     pending_job: Option<PendingJob>,
+    pending_ask: Option<crate::chat::pending_ask::PendingAsk>,
     closed: std::collections::HashMap<String, f64>,
     tasks_seen: std::collections::HashMap<String, crate::chat::tasks_bar::Seen>,
     used: std::collections::HashMap<String, f64>,
@@ -182,6 +184,7 @@ pub struct ChatView {
     accounts: Arc<crate::accounts::store::Accounts>,
     switches: Arc<crate::switches::feed::SwitchFeed>,
     prompt: prompts::State,
+    asks: ask_cards::State,
     composer: composer::State,
     limit_ring: limit_ring::State,
     account_menu: bool,
@@ -240,6 +243,9 @@ impl ChatView {
             .and_then(|v| crate::chat::prompts::Preview::parse(&v))
         {
             view.prompt.apply_preview(preview);
+        }
+        if let Ok(state) = std::env::var(ask_cards::ASK_ENV) {
+            view.asks = ask_cards::State::preview(&state);
         }
         view.tools.sending = switch(SENDING_ENV);
         view.outbox_preview = std::env::var(OUTBOX_ENV)
@@ -405,6 +411,7 @@ impl ChatView {
             accounts,
             switches,
             prompt: prompts::State::new(None, cx),
+            asks: ask_cards::State::default(),
             composer: composer::State::default(),
             limit_ring: limit_ring::State::default(),
             account_menu: false,
@@ -478,6 +485,7 @@ impl ChatView {
             pending_session: None,
             pending_child: None,
             pending_job: None,
+            pending_ask: None,
             closed: std::collections::HashMap::new(),
             used: std::collections::HashMap::new(),
             delegated: std::collections::HashSet::new(),

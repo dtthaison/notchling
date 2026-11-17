@@ -1,6 +1,8 @@
 use notchling_engine::transcript::snapshot::PendingQuestion;
-use notchling_local_api::{ClientError, ErrorCode};
+use notchling_local_api::{ops as api_ops, ClientError, ErrorCode};
+use notchling_locale as t;
 use serde_json::{json, Value};
+use std::io;
 
 pub const OFF_MESSAGE: &str =
     "acting is off: the Swift app owns sessions until the maintainer turns this on";
@@ -31,6 +33,12 @@ pub mod ops {
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
     pub const OUTBOX_RESEND: &str = "outbox.resend";
     pub const OUTBOX_DISCARD: &str = "outbox.discard";
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AskAnswer<'a> {
+    Choice(u8),
+    Text(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,13 +100,36 @@ pub fn after_error(error: &ClientError) -> Option<Acting> {
         ClientError::Api(e) if e.code == ErrorCode::Forbidden && is_off(&e.message) => {
             Some(Acting::Off)
         }
-        ClientError::Api(_) | ClientError::Protocol(_) => None,
+        ClientError::Api(_) | ClientError::Protocol(_) | ClientError::Timeout => None,
+        ClientError::Io(e) if slow_kind(e.kind()) => None,
         ClientError::NotRunning(_)
-        | ClientError::Timeout
         | ClientError::Closed
         | ClientError::Unsupported
         | ClientError::UntrustedServer(_)
         | ClientError::Io(_) => Some(Acting::Detached),
+    }
+}
+
+fn slow_kind(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+    )
+}
+
+fn is_busy(error: &ClientError) -> bool {
+    match error {
+        ClientError::Timeout => true,
+        ClientError::Io(e) => slow_kind(e.kind()),
+        _ => false,
+    }
+}
+
+pub fn failure_message(error: ClientError) -> String {
+    match error {
+        ClientError::Api(api) => api.message,
+        other if is_busy(&other) => t::chat::daemon_busy().to_owned(),
+        other => other.to_string(),
     }
 }
 
@@ -192,6 +223,19 @@ impl Request {
 
     pub fn outbox_discard(session: &str) -> Request {
         Request::new(ops::OUTBOX_DISCARD, json!({ "session": session }))
+    }
+
+    pub fn ask_answer(id: &str, answer: AskAnswer) -> Request {
+        let mut args = json!({ "id": id });
+        match answer {
+            AskAnswer::Choice(n) => args["choice"] = json!(n),
+            AskAnswer::Text(text) => args["text"] = json!(text),
+        }
+        Request::new(api_ops::ASK_ANSWER, args)
+    }
+
+    pub fn ask_dismiss(id: &str) -> Request {
+        Request::new(api_ops::ASK_DISMISS, json!({ "id": id }))
     }
 
     pub fn clearing_box(mut self) -> Request {
@@ -368,6 +412,31 @@ mod tests {
     }
 
     #[test]
+    fn the_ask_requests_have_the_wire_shapes() {
+        assert_eq!(
+            Request::ask_answer("q1", AskAnswer::Choice(2)),
+            Request {
+                op: "ask.answer",
+                args: json!({"id": "q1", "choice": 2})
+            }
+        );
+        assert_eq!(
+            Request::ask_answer("q1", AskAnswer::Text("use the second")),
+            Request {
+                op: "ask.answer",
+                args: json!({"id": "q1", "text": "use the second"})
+            }
+        );
+        assert_eq!(
+            Request::ask_dismiss("q1"),
+            Request {
+                op: "ask.dismiss",
+                args: json!({"id": "q1"})
+            }
+        );
+    }
+
+    #[test]
     fn only_on_makes_a_control_live() {
         assert_eq!(
             Acting::On.control(),
@@ -415,7 +484,6 @@ mod tests {
     fn a_lost_daemon_detaches() {
         let gone = [
             ClientError::NotRunning(io::Error::from(io::ErrorKind::NotFound)),
-            ClientError::Timeout,
             ClientError::Closed,
             ClientError::Unsupported,
             ClientError::UntrustedServer("another user".into()),

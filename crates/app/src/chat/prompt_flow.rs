@@ -127,6 +127,9 @@ pub fn failure_text(message: &str) -> String {
     if said.is_empty() {
         return said;
     }
+    if message.trim() == t::chat::daemon_busy() {
+        return t::chat::busy_may_have_reached().to_owned();
+    }
     if message.contains(DIDNT_ANSWER) || message.contains(CLOSED_CONNECTION) {
         return t::chat::may_have_reached(said.trim_end_matches('.'));
     }
