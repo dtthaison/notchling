@@ -22,6 +22,7 @@ impl Render for ChatView {
             }
         }
         self.sync_prompt(cx);
+        self.sync_asks(cx);
         let inset = super::tasks::shown(self);
         self.sync_tasks(cx);
         if super::tasks::shown(self) != inset {

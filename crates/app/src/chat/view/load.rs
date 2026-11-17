@@ -277,7 +277,9 @@ impl ChatView {
             );
             cx.notify();
         }
-        if crate::chat::activity::clock_due(self.activity_drawn.get(), now_ms()) {
+        if crate::chat::activity::clock_due(self.activity_drawn.get(), now_ms())
+            || self.ask_clock_due()
+        {
             self.redraw_chrome(cx);
         }
         self.inbox_tick(cx);

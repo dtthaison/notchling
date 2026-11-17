@@ -612,3 +612,7 @@ chat-ask-gone = Stopped waiting
 # The note when another answer was taken first. $by is who answered.
 chat-ask-already = Already answered
 chat-ask-already-by = Already answered · { $by }
+# The box and buttons on an open Ask card.
+chat-ask-type-answer = Type an answer…
+chat-ask-send = Send
+chat-ask-dismiss = Dismiss

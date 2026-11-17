@@ -345,6 +345,16 @@ impl SessionSource {
         state.outbox.bubbles_for_in(agent, conversation)
     }
 
+    pub fn ask_rows(&self, agent: &Agent) -> Vec<asks::AskRow> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.asks.rows_for(agent).into_iter().cloned().collect()
+    }
+
+    pub fn asks(&self) -> AskFeed {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.asks.clone()
+    }
+
     pub fn outbox_covers(&self, id: &str) -> bool {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.outbox.covers(id)
