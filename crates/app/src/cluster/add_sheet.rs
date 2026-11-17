@@ -37,6 +37,10 @@ impl AddPassword {
         (!typed.is_empty()).then(|| Secret::new(typed))
     }
 
+    pub fn secret(&self) -> Option<Secret> {
+        (!self.0.is_empty()).then(|| Secret::new(self.0.clone()))
+    }
+
     pub fn dots(&self) -> String {
         "•".repeat(self.len())
     }
@@ -46,6 +50,21 @@ impl fmt::Debug for AddPassword {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<hidden>")
     }
+}
+
+pub fn install(
+    password: &mut AddPassword,
+    run: impl FnOnce(Option<Secret>) -> Result<(), String>,
+) -> Result<(), String> {
+    let started = run(password.secret());
+    if started.is_ok() {
+        password.clear();
+    }
+    started
+}
+
+pub fn may_open(busy: bool, sheet_open: bool) -> bool {
+    !busy && !sheet_open
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,10 +176,12 @@ impl AddView {
         }
     }
 
+    pub fn allows(&self, button: Button) -> bool {
+        self.actions.iter().any(|a| a.button == button && a.enabled)
+    }
+
     pub fn can_install(&self) -> bool {
-        self.actions
-            .iter()
-            .any(|a| a.button == Button::Install && a.enabled)
+        self.allows(Button::Install)
     }
 }
 

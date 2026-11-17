@@ -74,6 +74,13 @@ fn row(id: StepId, title: &str, why: &str, reason: &str, display: &str, admin: b
     }
 }
 
+fn howto(id: StepId, title: &str, why: &str, reason: &str, display: &str) -> PlanRow {
+    PlanRow {
+        howto: true,
+        ..row(id, title, why, reason, display, false)
+    }
+}
+
 fn plan() -> PlanView {
     let rows = vec![
         row(
@@ -83,6 +90,13 @@ fn plan() -> PlanView {
             "sleep is on after 10 minutes",
             "sudo -S /usr/bin/pmset -a sleep 0 disksleep 0 autorestart 1",
             true,
+        ),
+        howto(
+            StepId::NODE_GIT,
+            "Git",
+            "Jobs that work on a repository need git.",
+            "Command Line Tools aren't installed",
+            "On m2, at its screen, run xcode-select --install and accept the Command Line Tools. Then check again.",
         ),
         row(
             StepId::NODE_BINARY,
@@ -124,7 +138,13 @@ fn plan() -> PlanView {
             reason: None,
         },
         blocked: None,
-        after: Vec::new(),
+        after: vec![howto(
+            StepId::NODE_CODEX_LOGIN,
+            "Codex Signed In",
+            "Jobs that use Codex need it signed in on the machine.",
+            "not signed in",
+            "In your own Terminal on m2, run codex login and sign in.",
+        )],
     }
 }
 
@@ -195,7 +215,6 @@ impl ClusterSheetView {
         self.add.tall = true;
         if which == Shown::AddPlan {
             if let Some(sheet) = self.add.sheet.as_mut() {
-                sheet.commands.insert(StepId::NODE_BINARY.raw().to_owned());
                 sheet.password.field().push_str("xxxxxxxxxx");
             }
         }

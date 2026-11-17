@@ -481,8 +481,10 @@ cluster-add-hide-commands = Hide Commands
 cluster-add-admin-tag = Admin
 # Tag on a plan step that you do yourself.
 cluster-add-howto-tag = You do this
+# Label over the admin password field.
+cluster-add-password-label = Admin Password
 # Placeholder of the admin password field; $target is user@host.
-cluster-add-password-placeholder = Admin password for { $target }
+cluster-add-password-placeholder = Admin Password for { $target }
 # Warning when admin steps run as root over ssh; $host is the machine's address.
 cluster-add-root-warning = Admin steps run as root over SSH on { $host }.
 cluster-add-master-label = Can Be Master

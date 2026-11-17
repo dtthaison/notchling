@@ -85,6 +85,7 @@ impl ClusterSheetView {
 
     fn not_joined_row(&self, machine: &NotJoined, a: Appearance, cx: &mut Context<Self>) -> Div {
         let name = machine.name.clone();
+        let busy = self.busy;
         let join = button(
             SharedString::from(format!("not-joined-join-{}", machine.name)),
             t::cluster::not_joined_join(),
@@ -96,7 +97,9 @@ impl ClusterSheetView {
             },
             a,
         )
-        .on_click(cx.listener(move |this, _, _, cx| this.open_join(&name, cx)));
+        .when(!busy, |b| {
+            b.on_click(cx.listener(move |this, _, _, cx| this.open_join(&name, cx)))
+        });
         card(a).p(px(SPACE[2])).child(
             div()
                 .flex()

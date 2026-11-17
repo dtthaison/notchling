@@ -16,7 +16,9 @@ use notchling_locale as t;
 use super::add::AddFlow;
 use super::add_parts::AddParts;
 use super::add_runs::Snap;
-use super::add_sheet::{derived_name, start_flow, view, AddPassword, AddView, Button, Draft};
+use super::add_sheet::{
+    derived_name, install, may_open, start_flow, view, AddPassword, AddView, Button, Draft,
+};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
 use super::view::{field_box, ClusterSheetView};
@@ -25,7 +27,7 @@ use crate::notch::answer::{type_key, Typed};
 
 const SHEET_WIDTH: f32 = 560.0;
 const SHEET_MARGIN: f32 = 60.0;
-const PREVIEW_HEIGHT: f32 = 860.0;
+const PREVIEW_HEIGHT: f32 = 1100.0;
 const NOT_JOINED_EVERY_SECS: u64 = 5;
 
 pub(super) struct AddSheet {
@@ -83,12 +85,12 @@ impl AddSheet {
                 &address,
                 |this, _, event: &TextEditorEvent, cx| match event {
                     TextEditorEvent::Changed => this.add_address_changed(cx),
-                    TextEditorEvent::Submit => this.add_button(Button::Check, cx),
+                    TextEditorEvent::Submit => this.add_submit(Button::Check, cx),
                 },
             );
         let name_events = cx.subscribe(&name, |this, _, event: &TextEditorEvent, cx| match event {
             TextEditorEvent::Changed => this.add_name_changed(cx),
-            TextEditorEvent::Submit => this.add_button(Button::Check, cx),
+            TextEditorEvent::Submit => this.add_submit(Button::Check, cx),
         });
         let (user, names) = parts
             .as_ref()
@@ -144,7 +146,7 @@ fn id_of(button: Button) -> &'static str {
 
 impl ClusterSheetView {
     pub(super) fn open_add(&mut self, cx: &mut Context<Self>) {
-        if self.add.sheet.is_some() {
+        if !may_open(self.busy, self.add.sheet.is_some()) {
             return;
         }
         let parts = self.feed.add_source().parts();
@@ -153,7 +155,7 @@ impl ClusterSheetView {
     }
 
     pub(super) fn open_join(&mut self, name: &str, cx: &mut Context<Self>) {
-        if self.add.sheet.is_some() {
+        if !may_open(self.busy, self.add.sheet.is_some()) {
             return;
         }
         let parts = self.feed.add_source().parts();
@@ -220,6 +222,24 @@ impl ClusterSheetView {
         }
     }
 
+    fn add_shown(&self, cx: &Context<Self>) -> Option<AddView> {
+        let sheet = self.add.sheet.as_ref()?;
+        let snap = sheet.flow.as_deref().and_then(|n| self.feed.adds().get(n));
+        Some(view(
+            snap.as_ref(),
+            &self.add_draft(cx),
+            sheet.password.len(),
+            &sheet.user,
+            &sheet.names,
+        ))
+    }
+
+    fn add_submit(&mut self, which: Button, cx: &mut Context<Self>) {
+        if self.add_shown(cx).is_some_and(|shown| shown.allows(which)) {
+            self.add_button(which, cx);
+        }
+    }
+
     pub(super) fn add_button(&mut self, which: Button, cx: &mut Context<Self>) {
         let draft = self.add_draft(cx);
         let runs = self.feed.adds();
@@ -252,8 +272,7 @@ impl ClusterSheetView {
                 let Some(name) = sheet.flow.clone() else {
                     return;
                 };
-                let password = sheet.password.take();
-                match runs.run(&name, password) {
+                match install(&mut sheet.password, |password| runs.run(&name, password)) {
                     Ok(()) => sheet.error = None,
                     Err(why) => sheet.error = Some(why),
                 }
@@ -305,7 +324,7 @@ impl ClusterSheetView {
         match typed {
             Typed::Ignored => return,
             Typed::Changed => {}
-            Typed::Submit => self.add_button(Button::Install, cx),
+            Typed::Submit => self.add_submit(Button::Install, cx),
         }
         cx.stop_propagation();
         cx.notify();
@@ -339,6 +358,7 @@ impl ClusterSheetView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let busy = self.busy;
         button(
             "cluster-add-machine",
             t::cluster::add_machine(),
@@ -346,7 +366,9 @@ impl ClusterSheetView {
             self.state_for_add(),
             a,
         )
-        .on_click(cx.listener(|this, _, _, cx| this.open_add(cx)))
+        .when(!busy, |b| {
+            b.on_click(cx.listener(|this, _, _, cx| this.open_add(cx)))
+        })
     }
 
     fn state_for_add(&self) -> PartState {
@@ -369,14 +391,7 @@ impl ClusterSheetView {
     ) -> Option<Div> {
         let sheet = self.add.sheet.as_ref()?;
         let snap = sheet.flow.as_deref().and_then(|n| self.feed.adds().get(n));
-        let draft = self.add_draft(cx);
-        let shown = view(
-            snap.as_ref(),
-            &draft,
-            sheet.password.len(),
-            &sheet.user,
-            &sheet.names,
-        );
+        let shown = self.add_shown(cx)?;
         let mut inner = div().flex().flex_col().gap(px(SPACE[1]));
         if sheet.parts.is_none() {
             inner = inner.child(label(

@@ -5,7 +5,8 @@ use super::add::{Phase, Stop};
 use super::add_plan::{Choice, PlanRow, PlanView};
 use super::add_runs::Snap;
 use super::add_sheet::{
-    brief, derived_name, not_joined_line, parse_draft, view, AddPassword, Button, Draft,
+    brief, derived_name, install, may_open, not_joined_line, parse_draft, view, AddPassword,
+    Button, Draft,
 };
 use super::not_joined::NotJoined;
 
@@ -250,4 +251,71 @@ fn not_in_the_cluster_lines_say_the_system() {
     assert!(not_joined_line(&linux).ends_with("Linux"));
     let unknown = NotJoined { os: None, ..mac };
     assert_eq!(not_joined_line(&unknown), "sondoan@m1");
+}
+
+#[test]
+fn a_busy_cluster_sheet_opens_no_add_sheet() {
+    assert!(may_open(false, false));
+    assert!(!may_open(true, false), "busy: no click opens it");
+    assert!(!may_open(false, true), "one sheet at a time");
+}
+
+#[test]
+fn return_does_what_the_button_does_only_when_it_is_enabled() {
+    let empty = view(None, &draft("", ""), 0, "me", &[]);
+    assert!(!empty.allows(Button::Check), "an empty address");
+    let bad = view(None, &draft("root@vps", ""), 0, "me", &[]);
+    assert!(!bad.allows(Button::Check), "an invalid address");
+    let ok = view(None, &draft("agent@vps-sing-1", ""), 0, "me", &[]);
+    assert!(ok.allows(Button::Check));
+    assert!(ok.allows(Button::Cancel));
+
+    let checking = snap(Phase::Checking, None);
+    let busy = view(
+        Some(&checking),
+        &draft("agent@vps-sing-1", ""),
+        0,
+        "me",
+        &[],
+    );
+    assert!(!busy.allows(Button::Check), "no Check while one runs");
+
+    let blocked = snap(Phase::Plan, Some(plan(false, Some("Tailscale first"))));
+    let held = view(Some(&blocked), &draft("", ""), 5, "me", &[]);
+    assert!(!held.allows(Button::Install), "a blocked plan");
+    let needs = snap(Phase::Plan, Some(plan(true, None)));
+    let no_password = view(Some(&needs), &draft("", ""), 0, "me", &[]);
+    assert!(!no_password.allows(Button::Install), "no password typed");
+    let typed = view(Some(&needs), &draft("", ""), 4, "me", &[]);
+    assert!(typed.allows(Button::Install));
+    assert!(typed.allows(Button::CheckAgain));
+}
+
+#[test]
+fn the_password_is_only_taken_when_the_run_starts() {
+    let mut password = AddPassword::default();
+    password.field().push_str("hunter2");
+    let refused = install(&mut password, |typed| {
+        assert_eq!(typed.unwrap().expose(), "hunter2");
+        Err("The plan is blocked.".to_owned())
+    });
+    assert!(refused.is_err());
+    assert_eq!(password.len(), 7, "a refusal keeps what was typed");
+    let started = install(&mut password, |typed| {
+        assert_eq!(typed.unwrap().expose(), "hunter2");
+        Ok(())
+    });
+    assert!(started.is_ok());
+    assert!(password.is_empty(), "a started run clears the field");
+}
+
+#[test]
+fn the_admin_password_field_is_labelled() {
+    assert_eq!(
+        notchling_locale::cluster::add_password_label(),
+        "Admin Password"
+    );
+    assert!(
+        notchling_locale::cluster::add_password_placeholder("me@m1").starts_with("Admin Password")
+    );
 }

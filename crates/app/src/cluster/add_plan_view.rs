@@ -32,8 +32,14 @@ impl ClusterSheetView {
         if let Some(sheet) = &self.add.sheet {
             if plan.needs_password {
                 let focused = sheet.focus.is_focused(window);
-                list =
-                    list.child(
+                list = list
+                    .child(label(
+                        t::cluster::add_password_label(),
+                        TypeRole::Label,
+                        Ink::TextFaint,
+                        a,
+                    ))
+                    .child(
                         div()
                             .id("add-password")
                             .w_full()

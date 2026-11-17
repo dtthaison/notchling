@@ -87,8 +87,8 @@ pub const VIEWS: [ViewSpec; 20] = [
     },
     ViewSpec {
         name: "cluster-add-plan",
-        size: (WIDTH, 900.0),
-        about: "the Add Machine sheet at its plan: four steps with Show Commands open on one, the admin password field, Can Be Master off with its reason, Acting on, Install and Join (made-up data)",
+        size: (WIDTH, 1200.0),
+        about: "the Add Machine sheet at its plan: four steps and a how-to the join doesn't need, the admin password field, Can Be Master off with its reason, Acting on, a how-to to do after it joins, Install and Join (made-up data)",
     },
     ViewSpec {
         name: "cluster-add-running",
