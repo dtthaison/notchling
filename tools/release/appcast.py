@@ -42,8 +42,10 @@ def https_problem(label, value):
 
 
 def signature_problem(value):
+    if value is None:
+        return None
     if not value:
-        return "sparkle:edSignature is missing"
+        return "sparkle:edSignature is empty"
     try:
         raw = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
@@ -254,7 +256,8 @@ def cmd_add(a):
     enclosure.set("url", a.url)
     enclosure.set("length", str(int(a.length)))
     enclosure.set("type", ENCLOSURE_TYPE)
-    enclosure.set(q("edSignature"), a.ed_signature)
+    if a.ed_signature is not None:
+        enclosure.set(q("edSignature"), a.ed_signature)
     channel.append(item)
 
     sort_items(channel)
@@ -405,7 +408,9 @@ def parser():
     add.add_argument("--short", required=True, help="X.Y.Z or X.Y.Z-beta.N")
     add.add_argument("--url", required=True, help="https URL of the dmg")
     add.add_argument("--length", required=True, help="dmg size in bytes")
-    add.add_argument("--ed-signature", required=True, help="base64 Ed25519 signature from sign_update")
+    signing = add.add_mutually_exclusive_group(required=True)
+    signing.add_argument("--ed-signature", default=None, help="base64 Ed25519 signature from sign_update")
+    signing.add_argument("--unsigned", action="store_true", help="write the enclosure with no sparkle:edSignature")
     add.add_argument("--min-system", required=True, help="LSMinimumSystemVersion, e.g. 13.0")
     add.add_argument("--notes-url", required=True, help="https URL of the release notes")
     add.add_argument("--channel", default=None, help="beta; leave out for Stable")

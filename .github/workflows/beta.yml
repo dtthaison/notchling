@@ -4,7 +4,7 @@ name: Beta
 # default branch), signs and notarizes it, attests it, publishes the prerelease `vX.Y.Z-beta.N` and adds it
 # to the update feed. Stable is promote.yml: the same files, never a rebuild. OFF until the maintainer sets
 # the repository variable NOTCHLING_RELEASES to `on` (a missing variable counts as off) and the `release`
-# environment holds the signing secrets; the old flow (legacy/macos/release.sh -> release.yml) keeps working
+# environment holds the signing secrets; the release flow (tools/release/release.py -> release.yml) keeps working
 # until then.
 #
 # Build, then sign apart. Four jobs, each with only what it needs:

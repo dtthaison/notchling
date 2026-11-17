@@ -18,7 +18,7 @@ name: Promote
 #              `environment:` (it runs repository code): moves the feed item to Stable.
 #   fold       that commit's tools/release/fragments.py: opens a pull request. It never pushes to the
 #              default branch, and the branch is named `promote/<tag>`, not `release/...`, so that merging
-#              it does not start the old release.yml.
+#              it does not start release.yml.
 #
 # A click on another branch is refused (that branch's copy of this file would run); the `release`
 # environment's deployment-branch rule is what keeps secrets from such a copy. The jobs that run repository
