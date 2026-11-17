@@ -22,7 +22,7 @@ Replies containing an end-of-paste escape sequence are no longer typed into the 
   - `breaking`: a change that can break stored data, the phone protocol or a setup. Lands under Changed,
     marked **Breaking**. It starts a new major line: the first Beta on it needs the maintainer's click ("Allow a breaking change"); later Betas on that line need nothing, and a Stable never refuses.
   - `internal`: app code changed and users won't notice (a refactor, a test-only change to code under
-    `Sources/`). It is not in the notes or the changelog.
+    `crates/*/src/`). It is not in the notes or the changelog.
 - The text is one short paragraph in the voice of the changelog: plain, about what the user sees, no issue
   numbers needed.
 - Nothing else goes in the front matter.

@@ -1,6 +1,6 @@
 # Notchling
 
-[![Tests](https://github.com/dtthaison/notchling/actions/workflows/build.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/build.yml)
+[![Tests](https://github.com/dtthaison/notchling/actions/workflows/rust.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A macOS menu bar app for people who run several coding agents at once. It shows every Claude Code, Codex and Antigravity session in the camera notch and in one Chat window, keeps the Mac awake while agents work, and switches accounts when a limit runs out. You can read a session, answer its questions and permission prompts, and reply to it without hunting for the right terminal.

@@ -15,8 +15,8 @@ is a protected change: it waits for the maintainer.
 | The agent App | A GitHub App, from Phase 5. Not created yet. | Pushes `agent/**` branches and opens pull requests for queued issues, through the push wrapper on the workers. It has no say in any decision. |
 
 The list of maintainers is in code: `MAINTAINERS` in `tools/guard/guard/gate.py`. A test checks that
-another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). The Promote
-workflow reads the same list. Both files are protected.
+another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). Both files are
+protected.
 
 Write access is given sparingly. Someone who can push a branch to this repository could add a workflow
 on it that posts a false `maintainer-gate` status. Today only `@dtthaison` and TrietKun can. Adding a
@@ -48,8 +48,7 @@ needs exists:
 - the `ANTHROPIC_API_KEY` repository secret, after a spend cap at the provider, and the
   `AGENT_APP_LOGIN` variable;
 - the rulesets, applied;
-- sd's label prefix, and the Morning Actions and Machines changes in the Swift app, which is
-  protected code the maintainer uses every day.
+- sd's label prefix.
 
 Then a week of sampling comes before anything widens.
 [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what turns each part
