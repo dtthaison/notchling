@@ -1,4 +1,5 @@
 use crate::acting_ops::{bad, forbidden, now_ms, ActingOps, HOOK_WAIT};
+use crate::caller_session::{find_session, session_id_in, LINEAGE_DEPTH};
 use crate::hook_output::is_prompt_event;
 use crate::prompts::pass;
 use notchling_engine::sessions::config_dirs;
@@ -6,8 +7,6 @@ use notchling_local_api::{topics, ApiError, Caller, ClientKind};
 use serde_json::Value;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
-
-pub const LINEAGE_DEPTH: usize = 16;
 
 pub type Parents = Box<dyn Fn(u32) -> Option<u32> + Send + Sync>;
 
@@ -46,19 +45,7 @@ impl ActingOps {
     }
 
     pub(crate) fn session_of(&self, pid: u32) -> Option<String> {
-        let folders = self.session_folders();
-        let mut next = (self.parent_of)(pid);
-        for _ in 0..LINEAGE_DEPTH {
-            let p = next.filter(|p| *p > 1)?;
-            if let Some(id) = folders
-                .iter()
-                .find_map(|f| session_id_in(&f.join(format!("{p}.json"))))
-            {
-                return Some(id);
-            }
-            next = (self.parent_of)(p);
-        }
-        None
+        find_session(&self.roots, &*self.parent_of, pid).map(|h| h.session_id)
     }
 
     pub(crate) fn hook_request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -125,18 +112,6 @@ impl ActingOps {
             return Ok(rx.try_recv().unwrap_or_else(|_| pass(why)));
         }
     }
-}
-
-fn session_id_in(path: &std::path::Path) -> Option<String> {
-    std::fs::read(path)
-        .ok()
-        .and_then(|data| serde_json::from_slice::<Value>(&data).ok())
-        .and_then(|s| {
-            s.get("sessionId")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .filter(|id| !id.is_empty())
 }
 
 fn session_file_holds(path: &std::path::Path, session_id: &str) -> bool {

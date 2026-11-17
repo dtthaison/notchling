@@ -17,6 +17,7 @@ pub mod bridge_backend;
 pub mod bridge_cluster;
 pub mod bridge_machines;
 pub mod bridge_ops;
+pub mod caller_session;
 pub mod catalog_ops;
 pub mod cli;
 pub mod clients;
@@ -139,6 +140,7 @@ mod outbox_settle;
 pub mod outbox_verify;
 pub mod pages_cli;
 pub mod pages_ops;
+mod process_facts;
 pub mod prompts;
 pub mod providers_cli;
 pub mod providers_daemon;
@@ -203,6 +205,8 @@ mod awake_follow_tests;
 mod awake_loop_tests;
 #[cfg(test)]
 mod bridge_models_tests;
+#[cfg(test)]
+mod caller_session_tests;
 #[cfg(test)]
 mod catalog_ops_tests;
 #[cfg(test)]
@@ -331,6 +335,8 @@ mod log_retention_tests;
 mod outbox_testkit;
 #[cfg(test)]
 mod pages_ops_tests;
+#[cfg(test)]
+mod process_facts_tests;
 #[cfg(test)]
 mod providers_add_tests;
 #[cfg(test)]

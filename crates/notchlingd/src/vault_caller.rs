@@ -10,6 +10,18 @@ pub trait Processes: Send + Sync {
     fn name(&self, pid: u32) -> Option<String>;
     fn cwd(&self, pid: u32) -> Option<PathBuf>;
     fn resolve(&self, path: &Path) -> Option<PathBuf>;
+    fn start_time(&self, _pid: u32) -> Option<u64> {
+        None
+    }
+    fn argv(&self, _pid: u32) -> Option<Vec<String>> {
+        None
+    }
+    fn stdout_path(&self, _pid: u32) -> Option<PathBuf> {
+        None
+    }
+    fn exe(&self, _pid: u32) -> Option<PathBuf> {
+        None
+    }
 }
 
 pub struct SystemProcesses;
@@ -26,6 +38,18 @@ impl Processes for SystemProcesses {
     }
     fn resolve(&self, path: &Path) -> Option<PathBuf> {
         std::fs::canonicalize(path).ok()
+    }
+    fn start_time(&self, pid: u32) -> Option<u64> {
+        crate::process_facts::start_time(pid)
+    }
+    fn argv(&self, pid: u32) -> Option<Vec<String>> {
+        crate::process_facts::argv(pid)
+    }
+    fn stdout_path(&self, pid: u32) -> Option<PathBuf> {
+        crate::process_facts::stdout_path(pid)
+    }
+    fn exe(&self, pid: u32) -> Option<PathBuf> {
+        crate::process_facts::exe(pid)
     }
 }
 
