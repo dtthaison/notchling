@@ -10,6 +10,9 @@ pub mod agy_elsewhere;
 pub mod agy_ops;
 pub mod agy_phone;
 pub mod agy_sink;
+mod ask_cli;
+mod ask_cli_args;
+mod ask_cli_run;
 mod ask_events;
 mod ask_find;
 mod ask_inbox;
@@ -459,6 +462,9 @@ pub fn run(command: Command) -> i32 {
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
+        Command::Ask { args } => ask_cli::run_ask(&args, None),
+        Command::Asks { args } => ask_cli::run_asks(&args, None),
+        Command::Answer { args } => ask_cli::run_answer(&args, None),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
         Command::HookFence => match Layout::from_env(None) {
             Some(l) => hook_fence::run(&l),
