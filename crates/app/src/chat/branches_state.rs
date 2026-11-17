@@ -28,8 +28,24 @@ pub enum Applied {
     NotRepo,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Received {
+    Stale,
+    Moved,
+    Applied(Applied),
+}
+
+pub fn hidden_switch(before: Option<&str>, after: Option<&str>, feed: &mut Feed) -> bool {
+    if on_switch(before, after) == Switch::Same {
+        return false;
+    }
+    feed.forget();
+    true
+}
+
 #[derive(Debug, Default)]
 pub struct Feed {
+    generation: u64,
     gate: SlowGate,
     folder: Option<String>,
     list: Option<Arc<BranchList>>,
@@ -45,6 +61,40 @@ impl Feed {
         self.failed.clone()
     }
 
+    pub fn list_for(&self, folder: Option<&str>) -> Option<Arc<BranchList>> {
+        self.for_folder(folder).and(self.list.clone())
+    }
+
+    pub fn failed_for(&self, folder: Option<&str>) -> Option<String> {
+        self.for_folder(folder).and(self.failed.clone())
+    }
+
+    fn for_folder(&self, folder: Option<&str>) -> Option<()> {
+        (folder.is_some() && self.folder.as_deref() == folder).then_some(())
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn receive(
+        &mut self,
+        generation: u64,
+        folder: &str,
+        selected: Option<&str>,
+        result: Result<Value, String>,
+        now_ms: i64,
+    ) -> Received {
+        if generation != self.generation {
+            return Received::Stale;
+        }
+        if selected != Some(folder) {
+            self.skip(now_ms);
+            return Received::Moved;
+        }
+        Received::Applied(self.apply(folder, result, now_ms))
+    }
+
     pub fn ask(&mut self, why: Why, folder: Option<&str>, visible: bool, now_ms: i64) -> bool {
         self.gate.ask(why, folder, visible, now_ms)
     }
@@ -54,6 +104,7 @@ impl Feed {
     }
 
     pub fn forget(&mut self) {
+        self.generation += 1;
         self.folder = None;
         self.list = None;
         self.failed = None;

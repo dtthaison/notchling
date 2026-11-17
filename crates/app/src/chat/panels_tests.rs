@@ -118,7 +118,9 @@ mod branches {
     use serde_json::{json, Value};
 
     use crate::chat::branch_list::{panel, PanelInput, PanelState, Tab};
-    use crate::chat::branches_state::{on_switch, Applied, Feed, Shown, Switch};
+    use crate::chat::branches_state::{
+        hidden_switch, on_switch, Applied, Feed, Received, Shown, Switch,
+    };
     use crate::chat::changes_target::{on_close, Target, TargetState};
     use crate::chat::git::Why;
     use crate::chat::git_gates::PENDING_AGAIN_MS;
@@ -278,5 +280,75 @@ mod branches {
         assert!(!feed.ask(Why::Tick, Some("/r"), true, 6_000));
         assert!(feed.ask(Why::Tick, Some("/r"), true, 4_000 + 15_000));
         assert!(!feed.ask(Why::Tick, Some("/r"), false, 90_000));
+    }
+
+    #[test]
+    fn hidden_switch_forgets_the_old_folders_list() {
+        let mut feed = Feed::default();
+        feed.apply("/a", Ok(reply(0, &["a"])), 0);
+        let mut shown = Shown::default();
+        shown.set_input(input_of(&feed));
+        shown.open_row("refs/heads/a");
+        assert!(!hidden_switch(Some("/a"), Some("/a"), &mut feed));
+        assert!(feed.list_for(Some("/a")).is_some());
+        assert!(hidden_switch(Some("/a"), Some("/b"), &mut feed));
+        shown.switched();
+        assert!(feed.list_for(Some("/b")).is_none());
+        assert!(feed.list_for(Some("/a")).is_none());
+        assert_eq!((shown.open(), shown.query()), (None, ""));
+        assert!(feed.ask(Why::Opened, Some("/b"), true, 1));
+        let generation = feed.generation();
+        let got = feed.receive(generation, "/b", Some("/b"), Err("slow".into()), 2);
+        assert_eq!(got, Received::Applied(Applied::Changed));
+        let input = Arc::new(PanelInput {
+            list: feed.list_for(Some("/b")),
+            failed: feed.failed_for(Some("/b")),
+            ..PanelInput::default()
+        });
+        shown.set_input(input);
+        assert!(shown.input().list.is_none());
+        assert_eq!(shown.input().failed.as_deref(), Some("slow"));
+        let model = panel(shown.input(), shown.tab(), shown.query());
+        assert_eq!(model.state, PanelState::Failed("slow".into()));
+    }
+
+    #[test]
+    fn list_for_another_folder_is_none() {
+        let mut feed = Feed::default();
+        feed.apply("/a", Err("slow".into()), 0);
+        assert!(feed.failed_for(Some("/a")).is_some());
+        assert!(feed.failed_for(Some("/b")).is_none());
+        assert!(feed.failed_for(None).is_none());
+        feed.apply("/a", Ok(reply(0, &["a"])), 1);
+        assert!(feed.list_for(Some("/a")).is_some());
+        assert!(feed.list_for(Some("/b")).is_none());
+        assert!(feed.list_for(None).is_none());
+    }
+
+    #[test]
+    fn stale_generation_reply_leaves_the_gate_in_flight() {
+        let mut feed = Feed::default();
+        assert!(feed.ask(Why::Opened, Some("/a"), true, 0));
+        let old = feed.generation();
+        feed.forget();
+        assert_ne!(feed.generation(), old);
+        assert!(feed.ask(Why::Opened, Some("/b"), true, 1));
+        let got = feed.receive(old, "/a", Some("/b"), Ok(reply(0, &["a"])), 2);
+        assert_eq!(got, Received::Stale);
+        assert!(!feed.ask(Why::Opened, Some("/b"), true, 3));
+        assert!(feed.list_for(Some("/a")).is_none() && feed.list_for(Some("/b")).is_none());
+        let got = feed.receive(old, "/b", Some("/b"), Ok(reply(0, &["a"])), 4);
+        assert_eq!(got, Received::Stale);
+        assert!(!feed.ask(Why::Opened, Some("/b"), true, 5));
+    }
+
+    #[test]
+    fn same_generation_reply_for_a_moved_folder_asks_again() {
+        let mut feed = Feed::default();
+        assert!(feed.ask(Why::Opened, Some("/a"), true, 0));
+        let generation = feed.generation();
+        let got = feed.receive(generation, "/a", Some("/b"), Ok(reply(0, &["a"])), 1);
+        assert_eq!(got, Received::Moved);
+        assert!(feed.ask(Why::Folder, Some("/b"), true, 2));
     }
 }

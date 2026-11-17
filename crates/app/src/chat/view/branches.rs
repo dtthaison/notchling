@@ -12,7 +12,7 @@ use super::render_map::WindowRegion;
 use super::{now_ms, ChatView};
 use crate::chat::branch_list::{self, PanelInput};
 use crate::chat::branches_preview;
-use crate::chat::branches_state::{on_switch, Applied, Switch};
+use crate::chat::branches_state::{hidden_switch, on_switch, Applied, Received, Switch};
 use crate::chat::changes_target::Target;
 use crate::chat::git::Why;
 use crate::chat::page_panel::panel_width;
@@ -66,6 +66,7 @@ impl ChatView {
         let Some(folder) = folder else {
             return;
         };
+        let generation = self.repo.branches.generation();
         let request = branch_list::branch_list_request(&folder);
         let acts = self.acts(cx);
         cx.spawn(async move |this, cx| {
@@ -73,27 +74,32 @@ impl ChatView {
                 .background_executor()
                 .spawn(async move { acts.actions.read(&request) })
                 .await;
-            this.update(cx, |view, cx| view.branches_in(folder, result, cx))
-                .ok();
+            this.update(cx, |view, cx| {
+                view.branches_in(generation, folder, result, cx)
+            })
+            .ok();
         })
         .detach();
     }
 
     fn branches_in(
         &mut self,
+        generation: u64,
         folder: String,
         result: Result<Value, String>,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_folder().as_deref() != Some(folder.as_str()) {
-            self.repo.branches.skip(now_ms());
-            self.branches_ask(Why::Folder, cx);
-            return;
-        }
-        match self.repo.branches.apply(&folder, result, now_ms()) {
-            Applied::Same => {}
-            Applied::Changed => self.push_branches(cx),
-            Applied::NotRepo => self.close_branches(cx),
+        let selected = self.selected_folder();
+        let received =
+            self.repo
+                .branches
+                .receive(generation, &folder, selected.as_deref(), result, now_ms());
+        match received {
+            Received::Stale => {}
+            Received::Moved => self.branches_ask(Why::Folder, cx),
+            Received::Applied(Applied::Same) => {}
+            Received::Applied(Applied::Changed) => self.push_branches(cx),
+            Received::Applied(Applied::NotRepo) => self.close_branches(cx),
         }
     }
 
@@ -104,11 +110,17 @@ impl ChatView {
     }
 
     pub(super) fn branches_switched(&mut self, before: Option<String>, cx: &mut Context<Self>) {
-        if !self.repo.branches_shown || self.root.fixture.is_some() {
+        if self.root.fixture.is_some() {
             return;
         }
         let after = self.selected_folder();
         let panel = self.parts.branches.clone();
+        if !self.repo.branches_shown {
+            if hidden_switch(before.as_deref(), after.as_deref(), &mut self.repo.branches) {
+                panel.update(cx, |panel, pcx| panel.switched(pcx));
+            }
+            return;
+        }
         match on_switch(before.as_deref(), after.as_deref()) {
             Switch::Same => panel.update(cx, |panel, pcx| panel.reset_view(pcx)),
             Switch::Reload => {
@@ -131,7 +143,8 @@ impl ChatView {
     }
 
     fn branches_input(&self) -> PanelInput {
-        let list = self.repo.branches.list();
+        let folder = self.selected_folder();
+        let list = self.repo.branches.list_for(folder.as_deref());
         let paths: Vec<(&str, &str)> = list
             .iter()
             .flat_map(|list| list.branches.iter())
@@ -152,7 +165,7 @@ impl ChatView {
             .collect();
         PanelInput {
             list,
-            failed: self.repo.branches.failed(),
+            failed: self.repo.branches.failed_for(folder.as_deref()),
             occupancy,
             session_names,
             minute_ms: now_ms() / MINUTE_MS * MINUTE_MS,
