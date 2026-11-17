@@ -5,6 +5,9 @@ pub mod form;
 #[cfg(target_os = "macos")]
 pub mod form_view;
 pub mod list;
+pub mod pick;
+#[cfg(target_os = "macos")]
+pub mod pick_view;
 #[cfg(target_os = "macos")]
 pub mod prompt_view;
 pub mod renders;

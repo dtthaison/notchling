@@ -93,6 +93,18 @@ impl UpdateSession {
         self.inner().pending.as_ref().map(|p| p.step.title.clone())
     }
 
+    pub fn pending_machine(&self) -> Option<String> {
+        self.inner().pending.as_ref().map(|p| p.machine.clone())
+    }
+
+    pub fn answer_vault(&self) -> bool {
+        let Some(pending) = self.inner().pending.take() else {
+            return false;
+        };
+        pending.answer(AdminAnswer::Vault);
+        true
+    }
+
     pub fn answer(&self, go: bool, password: &mut AddPassword) -> bool {
         let mut inner = self.inner();
         if inner.pending.is_none() || (go && password.is_empty()) {

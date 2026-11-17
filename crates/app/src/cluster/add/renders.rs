@@ -126,6 +126,7 @@ fn plan() -> PlanView {
     PlanView {
         rows,
         needs_password: true,
+        admin_entry: None,
         root_confirm: false,
         can_be_master: Choice {
             on: false,

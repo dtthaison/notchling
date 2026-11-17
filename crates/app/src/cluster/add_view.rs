@@ -25,6 +25,11 @@ use super::not_joined::NotJoined;
 use super::view::{field_box, ClusterSheetView};
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
+use crate::sheets::view::Dismiss;
+use crate::vault::form::Form;
+use crate::vault::pick::{local_entries, VaultPick};
+use crate::vault::pick_view::PickEvent;
+use crate::vault::view::VaultSheetView;
 
 const SHEET_WIDTH: f32 = 560.0;
 const SHEET_MARGIN: f32 = 60.0;
@@ -40,6 +45,7 @@ pub(super) struct AddSheet {
     pub(super) user: String,
     pub(super) names: Vec<String>,
     pub(super) password: AddPassword,
+    pub(super) vault: VaultPick,
     pub(super) focus: FocusHandle,
     pub(super) commands: BTreeSet<String>,
     pub(super) error: Option<String>,
@@ -47,9 +53,15 @@ pub(super) struct AddSheet {
     _name_events: Subscription,
 }
 
+pub(super) struct NestedVault {
+    entity: Entity<VaultSheetView>,
+    _closing: Subscription,
+}
+
 #[derive(Default)]
 pub(super) struct AddUi {
     pub(super) sheet: Option<AddSheet>,
+    nested: Option<NestedVault>,
     pub(super) tall: bool,
     joined: Option<(u64, Instant, Vec<NotJoined>)>,
 }
@@ -106,6 +118,7 @@ impl AddSheet {
             user,
             names,
             password: AddPassword::default(),
+            vault: VaultPick::default(),
             focus: cx.focus_handle(),
             commands: BTreeSet::new(),
             error: None,
@@ -295,18 +308,21 @@ impl ClusterSheetView {
             }
             Button::Close => {
                 self.add.sheet = None;
+                self.add.nested = None;
             }
             Button::Cancel => {
                 if let Some(name) = sheet.flow.clone() {
                     runs.dismiss(&name);
                 }
                 self.add.sheet = None;
+                self.add.nested = None;
             }
             Button::Done => {
                 if let Some(name) = sheet.flow.clone() {
                     runs.dismiss(&name);
                 }
                 self.add.sheet = None;
+                self.add.nested = None;
             }
         }
         cx.notify();
@@ -344,6 +360,91 @@ impl ClusterSheetView {
         }
         cx.stop_propagation();
         cx.notify();
+    }
+
+    pub(super) fn add_vault_event(
+        &mut self,
+        event: PickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let runs = self.feed.adds();
+        let Some(sheet) = self.add.sheet.as_mut() else {
+            return;
+        };
+        let Some(name) = sheet.flow.clone() else {
+            return;
+        };
+        match event {
+            PickEvent::Toggle => {
+                if sheet.vault.toggle() {
+                    self.read_vault_entries(cx);
+                }
+            }
+            PickEvent::Choose(id) => {
+                sheet.error = runs.set_admin_entry(&name, Some(id)).err();
+                sheet.vault.close();
+            }
+            PickEvent::Clear => {
+                sheet.error = runs.set_admin_entry(&name, None).err();
+                sheet.vault.close();
+            }
+            PickEvent::New => self.open_new_entry(window, cx),
+        }
+        cx.notify();
+    }
+
+    pub(super) fn read_vault_entries(&self, cx: &mut Context<Self>) {
+        let (local, switches) = (self.access.local.clone(), self.access.switches.switches());
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { local_entries(&local, &switches) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.update.vault_loaded(result.clone());
+                if let Some(sheet) = view.add.sheet.as_mut() {
+                    sheet.vault.loaded(result);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(super) fn open_new_entry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (vault, switches, cluster) = (
+            self.access.local.clone(),
+            self.access.switches.clone(),
+            self.feed.clone(),
+        );
+        let entity = cx.new(|cx| VaultSheetView::live(vault, switches, cluster, cx));
+        entity.update(cx, |sheet, cx| sheet.open_form(Form::add(), window, cx));
+        let closing = cx.subscribe(&entity, |this, _, _: &Dismiss, cx| {
+            this.add.nested = None;
+            if let Some(sheet) = this.add.sheet.as_mut() {
+                sheet.vault.reread();
+            }
+            this.update.vault_reread();
+            this.read_vault_entries(cx);
+            cx.notify();
+        });
+        self.add.nested = Some(NestedVault {
+            entity,
+            _closing: closing,
+        });
+    }
+
+    pub(super) fn vault_overlay(&self) -> Option<Div> {
+        let nested = self.add.nested.as_ref()?;
+        Some(
+            div()
+                .absolute()
+                .size_full()
+                .occlude()
+                .child(nested.entity.clone()),
+        )
     }
 
     pub(super) fn add_set_master(&mut self, on: bool, cx: &mut Context<Self>) {

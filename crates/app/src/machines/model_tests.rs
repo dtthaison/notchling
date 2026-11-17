@@ -414,6 +414,22 @@ fn an_admin_step_needs_the_password_for_the_one_run() {
 }
 
 #[test]
+fn a_vault_entry_on_the_machine_makes_the_admin_step_ready() {
+    let mut w = off_world(vec![mac("m1")]);
+    w.model.request_set_up(&StepId::STAYS_AWAKE, "m1");
+    assert!(!w.model.password_ready());
+    w.model.set_admin_entry(Some("m1-admin"));
+    assert_eq!(w.model.admin_entry().as_deref(), Some("m1-admin"));
+    assert!(w.model.password_ready());
+    w.model.set_admin_entry(None);
+    assert!(!w.model.password_ready());
+    w.model.set_admin_entry(Some("m1-admin"));
+    let run = w.model.confirm().expect("a run");
+    assert_eq!(run.kind, PlanKind::Fix(StepId::STAYS_AWAKE));
+    assert!(!format!("{:?}", w.model.outcomes).contains("test-password"));
+}
+
+#[test]
 fn an_off_tool_says_so_in_every_check() {
     let w = off_world(vec![mac("m1")]);
     w.model.engine().refresh(None, true);

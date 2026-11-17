@@ -92,6 +92,7 @@ pub mod ops {
     pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
     pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
     pub const VAULT_PENDING: &str = "vault.pending";
+    pub const VAULT_ADMIN: &str = "vault.admin";
 
     pub const CATALOG_GET: &str = "catalog.get";
     pub const CATALOG_ROLES: &str = "catalog.roles";

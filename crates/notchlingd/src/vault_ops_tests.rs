@@ -182,6 +182,7 @@ fn the_tiers_of_each_op() {
         ops::VAULT_REMOVE,
         ops::VAULT_APPROVAL_ANSWER,
         ops::VAULT_REQUEST_CANCEL,
+        ops::VAULT_ADMIN,
     ] {
         assert_eq!(s.ops.spec(op), Some(OpSpec::APP), "{op}");
     }

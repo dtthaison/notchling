@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use notchling_engine::machines::actions::MorningActions;
+use notchling_engine::machines::admin_secret::{AdminSecrets, FromSource, NoAdminSecrets};
 use notchling_engine::machines::catalog;
 use notchling_engine::machines::engine::{Deps, SetupEngine};
 use notchling_engine::machines::github::{GitHubHttp, LiveGitHub, NoGitHub};
@@ -22,6 +23,7 @@ use notchling_engine::vault::url::renew_url;
 use notchling_engine::vault::VaultRequest;
 use notchling_local_api::SOCKET_NAME;
 
+use super::admin_feed::DaemonAdminSecrets;
 use super::cluster_feed::DaemonTokens;
 use super::model::{Parts, VaultList, VaultStamp};
 use super::versions_feed::{fixed_mac, DaemonVersions, FixedVersions, MacVersions};
@@ -152,8 +154,16 @@ impl Setup {
             })
             .flatten()
             .filter(|path| path.is_file());
+        let admin_secrets: Arc<dyn AdminSecrets> = if self.fixture {
+            Arc::new(NoAdminSecrets)
+        } else if self.vault {
+            Arc::new(FromSource(secrets.clone()))
+        } else {
+            Arc::new(DaemonAdminSecrets::new(self.data_dir.join(SOCKET_NAME)))
+        };
         let engine = Arc::new(
             SetupEngine::new(deps, catalog::standard())
+                .with_admin_secrets(admin_secrets)
                 .with_cluster(cluster.clone(), Some(dist_dir(&self.data_dir)))
                 .with_mac_daemon(mac_daemon)
                 .with_downloads(Arc::new(CurlDownloads::new(runner.clone()))),

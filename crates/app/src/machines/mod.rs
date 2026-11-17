@@ -1,3 +1,4 @@
+pub mod admin_feed;
 #[cfg(target_os = "macos")]
 pub mod cards;
 #[cfg(target_os = "macos")]

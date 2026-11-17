@@ -110,6 +110,18 @@ fn an_admin_question_survives_the_sheet_and_waits_to_be_answered() {
 }
 
 #[test]
+fn choosing_a_vault_entry_answers_the_question_without_a_typed_password() {
+    let session = UpdateSession::default();
+    assert!(session.begin());
+    let asked = asking(&session);
+    session.pull();
+    assert_eq!(session.pending_machine().as_deref(), Some("m1"));
+    assert!(session.answer_vault());
+    assert!(matches!(asked.join().unwrap(), AdminAnswer::Vault));
+    assert!(!session.answer_vault(), "nothing left to answer");
+}
+
+#[test]
 fn return_in_an_empty_password_field_asks_nothing_and_cancel_still_cancels() {
     let session = UpdateSession::default();
     assert!(session.begin());

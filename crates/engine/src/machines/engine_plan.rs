@@ -69,6 +69,7 @@ const MAX_SHOWN: usize = 64;
 pub enum AdminAnswer {
     None,
     Password(Secret),
+    Vault,
     RootConfirmed,
 }
 
@@ -78,6 +79,22 @@ impl AdminAnswer {
             AdminAnswer::Password(p) if !p.is_empty() => Some(p),
             _ => None,
         }
+    }
+
+    pub fn pick(typed: Option<Secret>, entry: Option<&str>) -> AdminAnswer {
+        match typed.filter(|p| !p.is_empty()) {
+            Some(p) => AdminAnswer::Password(p),
+            None if entry.is_some_and(|e| !e.is_empty()) => AdminAnswer::Vault,
+            None => AdminAnswer::None,
+        }
+    }
+
+    pub fn ready(typed_len: usize, entry: Option<&str>) -> bool {
+        typed_len > 0 || entry.is_some_and(|e| !e.is_empty())
+    }
+
+    pub(super) fn gives_password(&self) -> bool {
+        self.password().is_some() || matches!(self, AdminAnswer::Vault)
     }
 }
 
@@ -147,8 +164,18 @@ impl SetupEngine {
         let plan = record.plan;
         match (&plan.admin, &admin) {
             (AdminNeed::Refused(why), _) => return Err(why.clone()),
-            (AdminNeed::Password, a) if a.password().is_none() => {
+            (AdminNeed::Password, a) if !a.gives_password() => {
                 return Err("needs the admin password".into())
+            }
+            (AdminNeed::Password, AdminAnswer::Vault)
+                if self
+                    .machine(&plan.machine)
+                    .is_none_or(|m| m.admin_secret().is_none()) =>
+            {
+                return Err(format!(
+                    "{} has no Vault entry for the admin password",
+                    plan.machine
+                ))
             }
             (AdminNeed::RootConfirm, a) if !matches!(a, AdminAnswer::RootConfirmed) => {
                 return Err(format!(

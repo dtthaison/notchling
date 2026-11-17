@@ -18,6 +18,8 @@ use super::updates_state::{Offered, UpdateSession};
 use super::view::ClusterSheetView;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
+use crate::vault::pick::VaultPick;
+use crate::vault::pick_view::{pick_block, PickEvent};
 
 const SHEET_WIDTH: f32 = 560.0;
 const SHEET_MAX_HEIGHT: f32 = super::HEIGHT - 60.0;
@@ -31,11 +33,23 @@ pub(super) struct UpdateUi {
     offered: Offered,
     commands: bool,
     password: AddPassword,
+    vault: VaultPick,
     focus: Option<FocusHandle>,
     seen: Option<(u64, Instant, Option<String>, Vec<UpdateRow>)>,
 }
 
 impl UpdateUi {
+    pub(super) fn vault_loaded(
+        &mut self,
+        result: Result<Vec<notchling_engine::vault::entry::VaultEntry>, String>,
+    ) {
+        self.vault.loaded(result);
+    }
+
+    pub(super) fn vault_reread(&mut self) {
+        self.vault.reread();
+    }
+
     pub(super) fn new(session: Arc<UpdateSession>) -> UpdateUi {
         UpdateUi {
             session,
@@ -44,6 +58,7 @@ impl UpdateUi {
             offered: Offered::default(),
             commands: false,
             password: AddPassword::default(),
+            vault: VaultPick::default(),
             focus: None,
             seen: None,
         }
@@ -255,6 +270,39 @@ impl ClusterSheetView {
             }
         })
         .detach();
+    }
+
+    pub(super) fn update_vault_event(
+        &mut self,
+        event: PickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PickEvent::Toggle => {
+                if self.update.vault.toggle() {
+                    self.read_vault_entries(cx);
+                }
+            }
+            PickEvent::Choose(id) => {
+                let Some(machine) = self.update.session.pending_machine() else {
+                    return;
+                };
+                let Some(parts) = self.feed.add_source().parts() else {
+                    return;
+                };
+                match parts.engine.set_admin_secret(&machine, Some(&id)) {
+                    Ok(()) => {
+                        self.update.vault.close();
+                        self.update.session.answer_vault();
+                    }
+                    Err(why) => self.note = Some((why, true)),
+                }
+            }
+            PickEvent::Clear => self.update.vault.close(),
+            PickEvent::New => self.open_new_entry(window, cx),
+        }
+        cx.notify();
     }
 
     fn answer_update(&mut self, go: bool, cx: &mut Context<Self>) {
@@ -530,6 +578,15 @@ impl ClusterSheetView {
                     })),
             );
         }
+        prompt = prompt.child(pick_block(
+            "update",
+            &self.update.vault,
+            None,
+            true,
+            a,
+            cx,
+            ClusterSheetView::update_vault_event,
+        ));
         prompt.child(
             div()
                 .flex()

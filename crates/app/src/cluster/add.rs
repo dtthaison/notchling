@@ -51,6 +51,7 @@ pub struct AddFlow {
     held: Vec<PlanRow>,
     blocked: Option<String>,
     needs_password: bool,
+    admin_entry: Option<String>,
     root_confirm: bool,
     job: Option<RunJob>,
     primary: Option<Account>,
@@ -112,6 +113,7 @@ impl AddFlow {
             held: Vec::new(),
             blocked: None,
             needs_password: false,
+            admin_entry: None,
             root_confirm: false,
             job: None,
             primary: None,
@@ -395,6 +397,7 @@ impl AddFlow {
             .find(|m| m.name == self.name)
             .map(|m| engine.overlaid(&m))
             .ok_or_else(|| Stop::new(t::cluster::add_no_machine(&self.name), true))?;
+        let admin_entry = machine.admin_secret().map(str::to_owned);
         let own = engine.steps(&machine);
         let sd = machine.sd_worker().is_some();
         let mut node_view = machine;
@@ -456,6 +459,7 @@ impl AddFlow {
         self.shown = shown;
         self.blocked = blocked;
         self.needs_password = needs_password;
+        self.admin_entry = admin_entry;
         self.root_confirm = root_confirm;
         Ok(Phase::Plan)
     }
@@ -464,6 +468,7 @@ impl AddFlow {
         (self.phase == Phase::Plan).then(|| PlanView {
             rows: self.rows.clone(),
             needs_password: self.needs_password,
+            admin_entry: self.admin_entry.clone(),
             root_confirm: self.root_confirm,
             can_be_master: self.master(),
             acting: Choice {
@@ -507,6 +512,25 @@ impl AddFlow {
         })
     }
 
+    pub fn set_admin_entry(&mut self, entry: Option<String>) -> Result<(), String> {
+        if self.phase != Phase::Plan {
+            return Err(t::cluster::add_not_now().into());
+        }
+        let entry = entry.filter(|e| !e.is_empty());
+        commit(&*self.parts.registry, |list| {
+            let Some(m) = list.iter_mut().find(|m| m.name == self.name) else {
+                return Err(t::cluster::add_no_machine(&self.name));
+            };
+            if m.admin_secret() == entry.as_deref() {
+                return Ok(false);
+            }
+            m.set_admin_secret(entry.as_deref());
+            Ok(true)
+        })?;
+        self.admin_entry = entry;
+        Ok(())
+    }
+
     fn stop(&mut self, why: String) -> String {
         self.cancel_plans();
         self.phase = Phase::Stopped(Stop::new(why.clone(), true));
@@ -521,7 +545,10 @@ impl AddFlow {
             return Err(why);
         }
         let password = password.filter(|p| !p.is_empty());
-        if view.needs_password && password.is_none() {
+        let entry = self.admin_entry.clone();
+        if view.needs_password
+            && !AdminAnswer::ready(usize::from(password.is_some()), entry.as_deref())
+        {
             return Err(t::cluster::add_needs_password().into());
         }
         if let Err(why) = self.unchanged() {
@@ -546,9 +573,7 @@ impl AddFlow {
                 continue;
             };
             let answer = match &plan.admin {
-                AdminNeed::Password => password
-                    .clone()
-                    .map_or(AdminAnswer::None, AdminAnswer::Password),
+                AdminNeed::Password => AdminAnswer::pick(password.clone(), entry.as_deref()),
                 AdminNeed::RootConfirm => AdminAnswer::RootConfirmed,
                 AdminNeed::None | AdminNeed::Refused(_) => AdminAnswer::None,
             };

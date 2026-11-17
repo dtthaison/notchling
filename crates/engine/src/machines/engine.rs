@@ -1,3 +1,4 @@
+use super::admin_secret::{AdminSecrets, FromSource};
 use super::engine_plan::ShownRecord;
 use super::github::GitHubHttp;
 use super::masks::Masks;
@@ -105,6 +106,7 @@ pub struct SetupEngine {
     pub(super) dist_dir: Option<PathBuf>,
     pub(super) mac_daemon: Option<PathBuf>,
     pub(super) downloads: Arc<dyn ReleaseDownloads>,
+    pub(super) admin_secrets: Arc<dyn AdminSecrets>,
 }
 
 #[derive(Default)]
@@ -172,6 +174,7 @@ pub fn applying(d: &Detected, m: &Machine) -> Machine {
 
 impl SetupEngine {
     pub fn new(deps: Deps, catalog: Catalog) -> SetupEngine {
+        let admin_secrets: Arc<dyn AdminSecrets> = Arc::new(FromSource(deps.secrets.clone()));
         let engine = SetupEngine {
             deps,
             catalog,
@@ -182,6 +185,7 @@ impl SetupEngine {
             dist_dir: None,
             mac_daemon: None,
             downloads: Arc::new(NoDownloads),
+            admin_secrets,
         };
         engine.load_offers();
         engine
@@ -204,6 +208,11 @@ impl SetupEngine {
 
     pub fn with_downloads(mut self, downloads: Arc<dyn ReleaseDownloads>) -> SetupEngine {
         self.downloads = downloads;
+        self
+    }
+
+    pub fn with_admin_secrets(mut self, admin_secrets: Arc<dyn AdminSecrets>) -> SetupEngine {
+        self.admin_secrets = admin_secrets;
         self
     }
 

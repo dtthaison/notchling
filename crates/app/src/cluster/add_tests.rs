@@ -446,3 +446,6 @@ mod review4;
 
 #[path = "add_sign_in_tests.rs"]
 mod sign_in;
+
+#[path = "add_vault_tests.rs"]
+mod vault;

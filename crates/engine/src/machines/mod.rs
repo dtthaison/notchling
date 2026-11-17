@@ -1,6 +1,7 @@
 pub mod actions;
 mod actions_util;
 pub mod address;
+pub mod admin_secret;
 pub mod catalog;
 pub mod dist_manifest;
 pub mod engine;
@@ -72,6 +73,8 @@ mod tests_actions_gh;
 mod tests_actions_read;
 #[cfg(test)]
 mod tests_address;
+#[cfg(test)]
+mod tests_admin_vault;
 #[cfg(test)]
 mod tests_dist_manifest;
 #[cfg(test)]

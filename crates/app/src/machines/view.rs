@@ -20,6 +20,7 @@ use super::forms::AddForm;
 use super::model::{MachinesModel, Parts, Run, Sheet, Tab};
 use super::renders;
 use crate::notch::answer::{type_key, Typed};
+use crate::vault::pick_view::PickEvent;
 
 const TICK: Duration = Duration::from_millis(500);
 
@@ -294,6 +295,22 @@ impl MachinesView {
         cx.notify();
     }
 
+    pub(super) fn vault_event(&mut self, event: PickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            PickEvent::Toggle => self.model.open_vault_pick(),
+            PickEvent::Choose(id) => {
+                self.model.set_admin_entry(Some(&id));
+                self.model.vault_pick.close();
+            }
+            PickEvent::Clear => {
+                self.model.set_admin_entry(None);
+                self.model.vault_pick.close();
+            }
+            PickEvent::New => {}
+        }
+        cx.notify();
+    }
+
     pub(super) fn cancel_sheet(&mut self, cx: &mut Context<Self>) {
         self.model.cancel_sheet();
         cx.notify();
@@ -450,7 +467,7 @@ impl MachinesView {
     fn submit(&mut self, cx: &mut Context<Self>) {
         let existing = self.model.names();
         let can_add = self.model.can_add();
-        let password_given = self.model.password_len() > 0;
+        let password_given = self.model.password_ready();
         match self.model.sheet() {
             Some(Sheet::Fix(prompt)) => {
                 if prompt.can_run(password_given) {

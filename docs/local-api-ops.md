@@ -1195,13 +1195,14 @@ read earlier are dropped, and no socket beyond the daemon's own is bound.
 | `vault.list` | app | `{}` | `{entries: [Entry]}` |
 | `vault.save` | app | `{entry: Entry, value?: {username?, secret}, replacing?: name, request?: id}` | `{entry, answered}` |
 | `vault.remove` | app | `{name}` | `{removed}` |
+| `vault.admin` | app (the Notchling app only) | `{name, machine}` | `{secret}` |
 | `vault.approval.answer` | app | `{id, decision: "deny"\|"once"\|"always"}` | `{answered}` |
 | `vault.request.cancel` | app | `{id}` | `{answered}` |
 | `vault.pending` | app | `{}` | `{approvals: [..], requests: [..]}`, the pending events below |
 
 The list is the `daemon/vault` document in `notchling.db` (the daemon's own `vault.json`
 moves in once; the Swift app's stays its own); `Entry` is its shape: `{name, kind, note, url?, howTo?, expires?, userVar,
-secretVar, ask?, updated}`. No reply but `vault.use`'s carries a value, and no event ever does.
+secretVar, ask?, updated}`. No reply but `vault.use`'s and `vault.admin`'s carries a value, and no event ever does. `vault.admin` is the app's read of one entry's password for a machine's sudo step (Machines, Use From Vault): the same switch, Ask me first and `vault.secret_used` audit as `vault.use` (reason `sudo on <machine>`), refused to every client but the Notchling app.
 
 **Approval.** `vault.use` of an entry marked ask-first publishes `vault.approval.pending {id,
 names, entries, command, folder, verified}` on the `vault` topic (`command` and `folder` as the

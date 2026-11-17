@@ -30,6 +30,7 @@ pub struct Choice {
 pub struct PlanView {
     pub rows: Vec<PlanRow>,
     pub needs_password: bool,
+    pub admin_entry: Option<String>,
     pub root_confirm: bool,
     pub can_be_master: Choice,
     pub acting: Choice,

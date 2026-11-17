@@ -10,6 +10,7 @@ use super::add_runs::Snap;
 use super::view::ClusterSheetView;
 use crate::machines::sheets_view::checkbox;
 use crate::machines::view::mono_lines;
+use crate::vault::pick_view::pick_block;
 
 impl ClusterSheetView {
     pub(super) fn plan_block(
@@ -59,7 +60,16 @@ impl ClusterSheetView {
                                     window.focus(&sheet.focus);
                                 }
                             })),
-                    );
+                    )
+                    .child(pick_block(
+                        "add",
+                        &sheet.vault,
+                        plan.admin_entry.as_deref(),
+                        true,
+                        a,
+                        cx,
+                        ClusterSheetView::add_vault_event,
+                    ));
             }
         }
         if plan.root_confirm {
