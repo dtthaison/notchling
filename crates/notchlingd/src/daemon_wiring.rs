@@ -361,6 +361,14 @@ impl Handler for Ops {
             return bridge.call(op, args);
         }
         if let Some(codex) = self.codex.as_ref().filter(|c| c.spec(op).is_some()) {
+            if op == ops::CODEX_SEND
+                && args.get("job").is_some_and(|j| !j.is_null())
+                && caller.client != ClientKind::Node
+            {
+                return Err(ApiError::bad_request(
+                    "job is set by the cluster, not by a caller",
+                ));
+            }
             return codex.call(op, args);
         }
         if let Some(agy) = self.agy.as_ref().filter(|a| a.spec(op).is_some()) {

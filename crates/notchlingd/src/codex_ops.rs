@@ -42,6 +42,7 @@ pub struct CodexSetup {
 
 pub trait JobLink: Send + Sync {
     fn session_started(&self, job: &str, session: &str);
+    fn start_failed(&self, job: &str, why: &str);
 }
 
 pub type Resolver = Box<dyn Fn() -> Option<(PathBuf, String)> + Send + Sync>;

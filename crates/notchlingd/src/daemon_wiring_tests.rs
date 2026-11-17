@@ -32,6 +32,28 @@ fn app() -> Caller {
 }
 
 #[test]
+fn only_the_cluster_may_name_a_job_on_codex_send() {
+    let (_root, layout, w) = wired("jobarg");
+    let ops = w.ops(
+        &layout,
+        Arc::new(Mutex::new(json!([]))),
+        FirstScan::open(),
+        Duration::ZERO,
+    );
+    let args = json!({"draft_folder": "/tmp", "text": "x", "job": "job-1"});
+    let refused = ops.call(&app(), ops::CODEX_SEND, &args).unwrap_err();
+    assert_eq!(refused.code, ErrorCode::BadRequest, "{}", refused.message);
+    let node = Caller {
+        tier: Tier::App,
+        client: ClientKind::Node,
+        peer: None,
+        pid: None,
+    };
+    let passed = ops.call(&node, ops::CODEX_SEND, &args).unwrap_err();
+    assert_ne!(passed.code, ErrorCode::BadRequest, "{}", passed.message);
+}
+
+#[test]
 fn every_switch_starts_off_and_every_watcher_is_fed() {
     let (_root, _layout, w) = wired("off");
     for flag in w.switches.all() {

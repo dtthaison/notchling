@@ -55,6 +55,40 @@ impl crate::codex_ops::JobLink for Links {
             .unwrap()
             .push((job.to_string(), session.to_string()));
     }
+
+    fn start_failed(&self, job: &str, why: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((job.to_string(), format!("failed: {why}")));
+    }
+}
+
+#[test]
+fn a_cluster_job_that_never_gets_a_thread_is_reported_failed() {
+    let s = setup("failjob", true);
+    s.ops.set_reply_wait(Duration::from_millis(100));
+    s.ops.runs().set_announce_wait(Duration::from_secs(5));
+    let links = Arc::new(Links(Default::default()));
+    s.ops.set_job_link(links.clone());
+    s.spawner.push(FakeRun::gated(&[]).exiting(1));
+    let reply = s
+        .call(
+            ops::CODEX_SEND,
+            json!({"draft_folder": s.work(), "text": "build it", "job": "job-9"}),
+        )
+        .expect("a reply");
+    assert_eq!(reply["state"], "starting");
+    s.spawner.processes()[0].release();
+    let until = Instant::now() + Duration::from_secs(10);
+    while links.0.lock().unwrap().is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let got = links.0.lock().unwrap().clone();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].0, "job-9");
+    assert!(got[0].1.starts_with("failed: "), "{got:?}");
+    s.idle();
 }
 
 #[test]

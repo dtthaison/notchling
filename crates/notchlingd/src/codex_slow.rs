@@ -151,12 +151,13 @@ impl CodexOps {
             self.reply_wait(),
             move || runs.send(request),
             move |late| {
-                if let (
-                    Some((link, job)),
-                    Ok(Sent::Started { session } | Sent::Queued { session, .. }),
-                ) = (&link, &late)
-                {
-                    link.session_started(job, &row_id(session));
+                if let Some((link, job)) = &link {
+                    match &late {
+                        Ok(Sent::Started { session } | Sent::Queued { session, .. }) => {
+                            link.session_started(job, &row_id(session))
+                        }
+                        Err(e) => link.start_failed(job, &send_error(e.clone()).message),
+                    }
                 }
                 announce_late(room.as_ref(), named.as_deref(), late)
             },

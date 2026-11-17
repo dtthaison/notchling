@@ -211,6 +211,10 @@ impl crate::codex_ops::JobLink for NodeReporter {
             data,
         });
     }
+
+    fn start_failed(&self, job: &str, why: &str) {
+        self.report(job, JobState::Failed, Some(why.to_string()));
+    }
 }
 
 pub struct DispatchOps {

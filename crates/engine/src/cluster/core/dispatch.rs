@@ -399,7 +399,12 @@ impl NodeCore {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .map(|s| text::clean(s, SESSION_MAX));
-            if found.state == JobState::Running && found.session.is_none() && session.is_some() {
+            let open = matches!(found.state, JobState::Dispatching | JobState::Running);
+            if found.spec.tool == Tool::Codex
+                && open
+                && found.session.is_none()
+                && session.is_some()
+            {
                 let command = Command::JobState {
                     id: job.to_string(),
                     state,
@@ -444,6 +449,7 @@ impl NodeCore {
         let node = found.map(|j| j.spec.node.clone());
         let current = found.map(|j| j.state);
         let has_session = found.is_some_and(|j| j.session.is_some());
+        let known = found.and_then(|j| j.session.clone());
         let reply = match result {
             Ok(reply) => reply,
             Err(e) => {
@@ -466,7 +472,8 @@ impl NodeCore {
             .or_else(|| reply.get(second))
             .or_else(|| reply.get("jobId"))
             .and_then(|s| s.as_str())
-            .map(|s| text::clean(s, SESSION_MAX));
+            .map(|s| text::clean(s, SESSION_MAX))
+            .or(known);
         if current == Some(JobState::Dispatching) {
             let command = Command::JobState {
                 id: job.clone(),

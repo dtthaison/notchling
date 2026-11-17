@@ -27,17 +27,17 @@ pub const CODE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 pub const PROMOTE_CALL_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub fn call_timeout_for(op: &str, args: &Value) -> Duration {
-    let forwarded = matches!(
-        op,
-        ops::SESSION_SEND | api_ops::CODEX_SEND | api_ops::CODEX_STOP
-    ) && args
-        .get("id")
-        .and_then(Value::as_str)
+    let forwarded = notchling_engine::cluster::policy::RULES
+        .iter()
+        .filter(|rule| rule.op == op)
+        .find_map(|rule| rule.id_field)
+        .and_then(|field| args.get(field)?.as_str())
         .is_some_and(|id| notchling_engine::cluster::Qualified::parse(id).is_some());
+    let own = call_timeout(op);
     if forwarded {
-        SESSION_CALL_TIMEOUT
+        own.max(SESSION_CALL_TIMEOUT)
     } else {
-        call_timeout(op)
+        own
     }
 }
 
@@ -309,16 +309,28 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn a_send_or_stop_to_a_row_on_another_machine_waits_for_the_forward() {
+    fn a_call_for_a_row_on_another_machine_waits_for_the_forward() {
         let remote = serde_json::json!({"id": "fedcba9876543210/codex:abc"});
         let local = serde_json::json!({"id": "codex:abc"});
         for op in [ops::SESSION_SEND, api_ops::CODEX_SEND, api_ops::CODEX_STOP] {
             assert_eq!(call_timeout_for(op, &remote), SESSION_CALL_TIMEOUT, "{op}");
             assert_eq!(call_timeout_for(op, &local), call_timeout(op), "{op}");
         }
+        let outbox = serde_json::json!({"session": "fedcba9876543210/codex:abc"});
+        let own = serde_json::json!({"session": "codex:abc"});
+        for op in [
+            ops::OUTBOX_LIST,
+            ops::OUTBOX_EDIT,
+            ops::OUTBOX_REMOVE,
+            ops::OUTBOX_RESEND,
+            ops::OUTBOX_DISCARD,
+        ] {
+            assert_eq!(call_timeout_for(op, &outbox), SESSION_CALL_TIMEOUT, "{op}");
+            assert_eq!(call_timeout_for(op, &own), call_timeout(op), "{op}");
+        }
         assert_eq!(
-            call_timeout_for(ops::OUTBOX_LIST, &remote),
-            call_timeout(ops::OUTBOX_LIST)
+            call_timeout_for(api_ops::CLUSTER_DISPATCH, &remote),
+            CODE_CALL_TIMEOUT
         );
     }
 
