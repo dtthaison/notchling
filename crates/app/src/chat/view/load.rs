@@ -200,6 +200,7 @@ impl ChatView {
             self.subagent_rows = loaded.subagent_rows;
             self.subagent_counts = loaded.subagent_counts;
             self.worktrees_after_load(cx);
+            self.branches_after_load(cx);
             if loaded.partial {
                 self.load_again = true;
             } else {
@@ -239,6 +240,7 @@ impl ChatView {
         if self.selected.as_deref() == Some(id) {
             return;
         }
+        let before = self.selected_folder();
         self.selected = Some(id.to_owned());
         self.close_git_diff(cx);
         select::clear();
@@ -266,6 +268,7 @@ impl ChatView {
         self.tools.agy_config.clear();
         self.show_draft(cx);
         self.start_load(cx);
+        self.branches_switched(before, cx);
         self.git_ask(crate::chat::git::Why::Folder, cx);
         cx.notify();
     }

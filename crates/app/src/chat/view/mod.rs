@@ -1,5 +1,7 @@
 mod accounts;
 mod ask_cards;
+mod branches;
+mod branches_panel;
 mod bring_back;
 mod changes;
 mod changes_panel;
@@ -322,13 +324,16 @@ impl ChatView {
     }
 
     pub(super) fn toggle_details(&mut self, cx: &mut Context<Self>) {
-        if self.page.is_open() {
-            self.close_page(cx);
-            return;
-        }
-        if self.repo.changes_shown {
-            self.close_changes(cx);
-            return;
+        use crate::chat::panels::{hide_step, HideStep};
+        match hide_step(
+            self.page.is_open(),
+            self.repo.changes_shown,
+            self.repo.branches_shown,
+        ) {
+            HideStep::ClosePage => return self.close_page(cx),
+            HideStep::CloseChanges => return self.close_changes(cx),
+            HideStep::CloseBranches => return self.close_branches(cx),
+            HideStep::HideDetails => {}
         }
         self.details_hidden = !self.details_hidden;
         self.panels_changed(cx);

@@ -127,6 +127,30 @@ pub fn dragged(side: Side, pointer_x: f32, window: f32, other: f32) -> f32 {
     wanted.clamp(side.min(), side.max().min(room))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HideStep {
+    ClosePage,
+    CloseChanges,
+    CloseBranches,
+    HideDetails,
+}
+
+pub fn hide_step(page: bool, changes: bool, branches: bool) -> HideStep {
+    if page {
+        HideStep::ClosePage
+    } else if changes {
+        HideStep::CloseChanges
+    } else if branches {
+        HideStep::CloseBranches
+    } else {
+        HideStep::HideDetails
+    }
+}
+
+pub fn after_close_changes(branches_shown: bool, back: bool) -> bool {
+    branches_shown && back
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Saved {
     pub sidebar: Option<f32>,

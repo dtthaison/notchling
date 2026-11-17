@@ -62,7 +62,9 @@ impl ChatView {
     }
 
     pub(super) fn close_changes(&mut self, cx: &mut Context<Self>) {
-        changes_target::on_close(&mut self.repo.other, &mut self.repo.changes_from_branches);
+        let back =
+            changes_target::on_close(&mut self.repo.other, &mut self.repo.changes_from_branches);
+        self.back_to_branches(back);
         self.repo.changes_shown = false;
         self.changes_panel()
             .update(cx, |panel, pcx| panel.close_menu(pcx));

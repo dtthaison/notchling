@@ -8,6 +8,7 @@ use super::worktrees_ask::WorktreesState;
 use super::{now_ms, ChatView};
 use crate::acting::Request;
 use crate::chat::branch::{self, BranchModel};
+use crate::chat::branches_state::Feed as BranchesFeed;
 use crate::chat::changes_target::{self, Applied, DiffVia, Target, TargetState};
 use crate::chat::git::{self, DiffText, Gate, GitModel, Why};
 use crate::chat::remote_control::Action;
@@ -36,6 +37,8 @@ pub struct State {
     pub(super) diff_via: Option<DiffVia>,
     pub(super) other: Option<TargetState>,
     pub(super) changes_from_branches: bool,
+    pub(super) branches_shown: bool,
+    pub(super) branches: BranchesFeed,
     pub(super) wt: WorktreesState,
 }
 
@@ -93,6 +96,7 @@ impl ChatView {
     pub(super) fn details_visible(&self) -> bool {
         !self.page.is_open()
             && !self.repo.changes_shown
+            && !self.repo.branches_shown
             && !self.terminal.shown()
             && !self.simulator.shown()
             && !self.details_hidden
@@ -126,6 +130,7 @@ impl ChatView {
             self.push_branch(cx);
         }
         self.worktrees_ask(why, cx);
+        self.branches_ask(why, cx);
         let visible = self.details_visible() || self.changes_visible();
         if !self
             .repo

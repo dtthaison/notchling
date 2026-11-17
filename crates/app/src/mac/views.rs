@@ -42,6 +42,9 @@ pub fn build(
                         if let Ok(how) = std::env::var("NOTCHLING_RENDER_CHANGES") {
                             view.preview_changes(&how, cx);
                         }
+                        if let Ok(state) = std::env::var("NOTCHLING_RENDER_BRANCHES") {
+                            view.preview_branches(&state, cx);
+                        }
                     }
                     view
                 })

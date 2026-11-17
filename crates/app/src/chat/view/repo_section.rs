@@ -19,7 +19,7 @@ pub fn content(section: &GitSection, chat: &WeakEntity<ChatView>, a: Appearance)
         column = column.child(other_row(index, row, chat, a));
     }
     match &section.more {
-        Some(text) => column.child(more_row(text, a)),
+        Some(text) => column.child(more_row(text, chat, a)),
         None => column,
     }
 }
@@ -80,7 +80,7 @@ fn counts(right: Option<(u64, u64)>, a: Appearance) -> Div {
     row
 }
 
-fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
+pub(super) fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
     let mut text = String::new();
     let mut marks: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
     for part in parts {
@@ -131,7 +131,7 @@ fn name_line(branch: &str, ink: Ink, extra: Option<Div>, a: Appearance) -> Div {
     )
 }
 
-fn pill(text: &str, a: Appearance) -> Div {
+pub(super) fn pill(text: &str, a: Appearance) -> Div {
     div()
         .h(px(PILL_HEIGHT - 4.0))
         .px(px(7.0))
@@ -143,7 +143,7 @@ fn pill(text: &str, a: Appearance) -> Div {
         .child(label(text, TypeRole::Meta, Ink::TextFaint, a))
 }
 
-fn working_dot(a: Appearance) -> Div {
+pub(super) fn working_dot(a: Appearance) -> Div {
     div()
         .w(px(DOT))
         .h(px(DOT))
@@ -209,12 +209,17 @@ fn other_row(
     clickable(item, chat, Target::Worktree(row.path.clone()), a)
 }
 
-fn more_row(text: &str, a: Appearance) -> Stateful<Div> {
-    div()
-        .id("git-more")
+fn more_row(text: &str, chat: &WeakEntity<ChatView>, a: Appearance) -> Stateful<Div> {
+    let chat = chat.clone();
+    shell("git-more")
         .flex()
         .items_center()
         .gap(px(4.0))
+        .cursor_pointer()
+        .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
+        .on_click(move |_, _, cx| {
+            chat.update(cx, |this, cx| this.open_branches(cx)).ok();
+        })
         .child(
             label(text, TypeRole::Meta, Ink::TextMuted, a)
                 .line_height(px(ROW_LINE))

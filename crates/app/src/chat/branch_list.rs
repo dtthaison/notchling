@@ -278,7 +278,7 @@ struct Ctx<'a> {
     held: HashMap<&'a str, &'a Occupancy>,
 }
 
-fn held_open(held: &Occupancy) -> &Open {
+pub fn held_open(held: &Occupancy) -> &Open {
     match held {
         Occupancy::Running { open, .. }
         | Occupancy::NeedsInput { open, .. }
@@ -286,7 +286,7 @@ fn held_open(held: &Occupancy) -> &Open {
     }
 }
 
-fn open_id(open: &Open) -> &str {
+pub fn open_id(open: &Open) -> &str {
     match open {
         Open::Session(id) | Open::Subagent(id) => id,
     }

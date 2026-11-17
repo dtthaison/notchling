@@ -111,3 +111,172 @@ fn the_panels_land_in_the_store_and_read_back() {
     save(&file, &saved).expect("the panels are saved");
     assert_eq!(load(&file), Some(saved));
 }
+
+mod branches {
+    use std::sync::Arc;
+
+    use serde_json::{json, Value};
+
+    use crate::chat::branch_list::{panel, PanelInput, PanelState, Tab};
+    use crate::chat::branches_state::{on_switch, Applied, Feed, Shown, Switch};
+    use crate::chat::changes_target::{on_close, Target, TargetState};
+    use crate::chat::git::Why;
+    use crate::chat::git_gates::PENDING_AGAIN_MS;
+    use crate::chat::panels::{after_close_changes, hide_step, HideStep};
+
+    fn reply(pending: u64, names: &[&str]) -> Value {
+        let rows: Vec<Value> = names
+            .iter()
+            .map(|name| json!({"name": name, "ref": format!("refs/heads/{name}"), "local": true}))
+            .collect();
+        json!({"repo": true, "name": "r", "pending": pending, "branches": rows})
+    }
+
+    fn input_of(feed: &Feed) -> Arc<PanelInput> {
+        Arc::new(PanelInput {
+            list: feed.list(),
+            failed: feed.failed(),
+            ..PanelInput::default()
+        })
+    }
+
+    #[test]
+    fn hide_step_order() {
+        assert_eq!(hide_step(true, true, true), HideStep::ClosePage);
+        assert_eq!(hide_step(false, true, true), HideStep::CloseChanges);
+        assert_eq!(hide_step(false, false, true), HideStep::CloseBranches);
+        assert_eq!(hide_step(false, false, false), HideStep::HideDetails);
+        assert_eq!(hide_step(true, false, false), HideStep::ClosePage);
+        assert_eq!(hide_step(false, true, false), HideStep::CloseChanges);
+    }
+
+    #[test]
+    fn changes_from_branches_closes_back_to_branches() {
+        let mut other = Some(TargetState::new(Target::Worktree("/r/lane".into())));
+        let mut from_branches = true;
+        let back = on_close(&mut other, &mut from_branches);
+        assert!(back && other.is_none() && !from_branches);
+        assert!(after_close_changes(true, back));
+        let mut other: Option<TargetState> = None;
+        let mut from_details = false;
+        let back = on_close(&mut other, &mut from_details);
+        assert!(!after_close_changes(true, back));
+        assert!(!after_close_changes(false, true));
+    }
+
+    #[test]
+    fn session_switch_reloads_or_closes() {
+        assert_eq!(on_switch(Some("/r"), Some("/r")), Switch::Same);
+        assert_eq!(on_switch(Some("/r"), Some("/other")), Switch::Reload);
+        assert_eq!(on_switch(None, Some("/other")), Switch::Reload);
+        assert_eq!(on_switch(Some("/r"), None), Switch::Close);
+        let mut feed = Feed::default();
+        assert_eq!(feed.apply("/r", Ok(reply(0, &["a"])), 0), Applied::Changed);
+        let not_repo = json!({"repo": false});
+        assert_eq!(feed.apply("/plain", Ok(not_repo), 1), Applied::NotRepo);
+        assert!(feed.list().is_none());
+    }
+
+    #[test]
+    fn open_row_and_filter_clear_on_switch() {
+        let mut shown = Shown::default();
+        shown.set_input(input_of(&{
+            let mut feed = Feed::default();
+            feed.apply("/r", Ok(reply(0, &["a"])), 0);
+            feed
+        }));
+        assert!(shown.set_tab(Tab::Merged));
+        shown.toggle("refs/heads/a");
+        assert_eq!(shown.open(), Some("refs/heads/a"));
+        assert!(shown.set_query("ask"));
+        assert_eq!(shown.open(), None);
+        shown.toggle("refs/heads/a");
+        shown.toggle("refs/heads/a");
+        assert_eq!(shown.open(), None);
+        shown.open_row("refs/heads/a");
+        shown.switched();
+        assert_eq!((shown.open(), shown.query()), (None, ""));
+        assert_eq!(shown.tab(), Tab::Merged);
+        assert!(shown.input().list.is_none());
+        let model = panel(shown.input(), shown.tab(), shown.query());
+        assert_eq!(model.state, PanelState::Loading);
+    }
+
+    #[test]
+    fn equal_input_is_no_redraw() {
+        let mut feed = Feed::default();
+        feed.apply("/r", Ok(reply(0, &["a", "b"])), 0);
+        let mut shown = Shown::default();
+        assert!(shown.set_input(input_of(&feed)));
+        assert!(!shown.set_input(input_of(&feed)));
+        let again = parse_equal(&mut feed);
+        assert!(!shown.set_input(again));
+    }
+
+    fn parse_equal(feed: &mut Feed) -> Arc<PanelInput> {
+        assert_eq!(
+            feed.apply("/r", Ok(reply(0, &["a", "b"])), 1),
+            Applied::Same
+        );
+        input_of(feed)
+    }
+
+    #[test]
+    fn panel_keeps_its_last_good_list_when_a_call_fails() {
+        let mut feed = Feed::default();
+        feed.apply("/r", Ok(reply(0, &["a"])), 0);
+        let mut shown = Shown::default();
+        shown.set_input(input_of(&feed));
+        let failed = Arc::new(PanelInput {
+            failed: Some("slow".into()),
+            ..PanelInput::default()
+        });
+        shown.set_input(failed);
+        assert!(shown.input().list.is_some());
+        let model = panel(shown.input(), Tab::Working, "");
+        assert_eq!(model.state, PanelState::Ready);
+    }
+
+    #[test]
+    fn unchanged_answer_is_dropped_and_a_failure_keeps_the_list() {
+        let mut feed = Feed::default();
+        assert_eq!(feed.apply("/r", Ok(reply(0, &["a"])), 0), Applied::Changed);
+        assert_eq!(
+            feed.apply("/r", Ok(reply(0, &["a"])), 20_000),
+            Applied::Same
+        );
+        assert_eq!(
+            feed.apply("/r", Err("slow".into()), 40_000),
+            Applied::Changed
+        );
+        assert!(feed.list().is_some() && feed.failed().is_some());
+        assert_eq!(feed.apply("/r", Err("slow".into()), 60_000), Applied::Same);
+        assert_eq!(
+            feed.apply("/r", Ok(reply(0, &["a"])), 80_000),
+            Applied::Changed
+        );
+        assert!(feed.failed().is_none());
+    }
+
+    #[test]
+    fn a_new_folder_forgets_the_list() {
+        let mut feed = Feed::default();
+        feed.apply("/r", Ok(reply(0, &["a"])), 0);
+        assert_eq!(feed.apply("/s", Err("slow".into()), 1), Applied::Changed);
+        assert!(feed.list().is_none());
+    }
+
+    #[test]
+    fn pending_answer_asks_again_after_two_seconds() {
+        let mut feed = Feed::default();
+        assert!(feed.ask(Why::Opened, Some("/r"), true, 0));
+        assert!(!feed.ask(Why::Tick, Some("/r"), true, 500));
+        feed.apply("/r", Ok(reply(2, &["a"])), 1_000);
+        assert!(!feed.ask(Why::Tick, Some("/r"), true, 1_000 + PENDING_AGAIN_MS - 1));
+        assert!(feed.ask(Why::Tick, Some("/r"), true, 1_000 + PENDING_AGAIN_MS));
+        feed.apply("/r", Ok(reply(0, &["a"])), 4_000);
+        assert!(!feed.ask(Why::Tick, Some("/r"), true, 6_000));
+        assert!(feed.ask(Why::Tick, Some("/r"), true, 4_000 + 15_000));
+        assert!(!feed.ask(Why::Tick, Some("/r"), false, 90_000));
+    }
+}

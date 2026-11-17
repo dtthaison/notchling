@@ -78,6 +78,7 @@ pub enum Icon {
     Simulator,
     Diff,
     Server,
+    Cloud,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -98,7 +99,7 @@ impl IconSize {
 pub const WEIGHT: Weight = Weight::Medium;
 
 impl Icon {
-    pub const ALL: [Icon; 75] = [
+    pub const ALL: [Icon; 76] = [
         Icon::Needs,
         Icon::Working,
         Icon::Done,
@@ -174,6 +175,7 @@ impl Icon {
         Icon::Simulator,
         Icon::Diff,
         Icon::Server,
+        Icon::Cloud,
     ];
 
     pub fn symbol(self) -> &'static str {
@@ -253,6 +255,7 @@ impl Icon {
             Icon::Simulator => "ipad.and.iphone",
             Icon::Diff => "plusminus",
             Icon::Server => "server.rack",
+            Icon::Cloud => "cloud",
         }
     }
 
@@ -333,6 +336,7 @@ impl Icon {
             Icon::Simulator => "⌷",
             Icon::Diff => "±",
             Icon::Server => "▤",
+            Icon::Cloud => "☁",
         }
     }
 
@@ -403,6 +407,7 @@ impl Icon {
             Icon::Simulator => "icons/tablet-smartphone.svg",
             Icon::Diff => "icons/diff.svg",
             Icon::Server => "icons/server.svg",
+            Icon::Cloud => "icons/cloud.svg",
             Icon::Resume => "icons/rotate-cw.svg",
             Icon::Send => "icons/arrow-up.svg",
             Icon::Permission => "icons/shield.svg",
@@ -444,7 +449,7 @@ macro_rules! icons {
     };
 }
 
-const SVGS: [(&str, &[u8]); 72] = icons![
+const SVGS: [(&str, &[u8]); 73] = icons![
     "app-window",
     "arrow-down",
     "arrow-left-right",
@@ -465,6 +470,7 @@ const SVGS: [(&str, &[u8]); 72] = icons![
     "circle-help",
     "circle-user",
     "circle-x",
+    "cloud",
     "clock",
     "code-xml",
     "contrast",
