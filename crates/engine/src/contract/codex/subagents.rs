@@ -78,6 +78,9 @@ impl Subagents for CodexSubagents {
         let peeked = codex::peek(&s.path, s.is_running());
         Ok(Glance {
             tokens: peeked.as_ref().and_then(|p| p.context),
+            cwd: codex::meta(&s.path)
+                .map(|m| m.cwd)
+                .filter(|cwd| !cwd.is_empty()),
             recent: peeked.and_then(|p| p.recent),
         })
     }

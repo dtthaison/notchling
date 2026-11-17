@@ -17,6 +17,7 @@ impl Peek for Recorder {
         Facts {
             context: Some(232_300),
             doing: agent.is_running().then(|| "Running tests…".to_owned()),
+            cwd: Some(format!("/w/{}", agent.id)),
         }
     }
 }
@@ -194,4 +195,28 @@ fn a_native_codex_child_is_not_handed_over() {
     assert_eq!(got[0].detail, "Done · sonnet high · worker · 232.3k");
     assert_eq!(got[1].tool, ToolMark::Codex);
     assert_eq!(got[1].detail, "Done · Codex · sonnet high · 232.3k");
+}
+
+#[test]
+fn row_carries_cwd_and_started_ms() {
+    let s = Scratch::new("rows-cwd");
+    let mut agents = world(&s, 3, &[]);
+    agents[2].started = 1_700_000_000.25;
+    let mut rows = SubagentRows::new(Recorder::default());
+    let got = rows_of(&mut rows, &agents, &[2]);
+    assert_eq!(got[0].cwd.as_deref(), Some("/w/a2"));
+    assert_eq!(got[0].started_ms, 1_700_000_000_250);
+}
+
+#[test]
+fn row_facts_cached_with_cwd() {
+    let s = Scratch::new("rows-cwd-cache");
+    let agents = world(&s, 2, &[]);
+    let recorder = Recorder::default();
+    let mut rows = SubagentRows::new(recorder.clone());
+    let first = rows_of(&mut rows, &agents, &[1]);
+    let second = rows_of(&mut rows, &agents, &[1]);
+    assert_eq!(taken(&recorder), ["a1"]);
+    assert_eq!(first[0].cwd, second[0].cwd);
+    assert_eq!(second[0].cwd.as_deref(), Some("/w/a1"));
 }

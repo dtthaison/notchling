@@ -39,6 +39,7 @@ pub struct Roots {
 
 pub struct Glance {
     pub tokens: Option<u64>,
+    pub cwd: Option<String>,
     pub recent: Option<Conversation>,
 }
 

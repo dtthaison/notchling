@@ -336,3 +336,29 @@ fn a_floored_search_does_not_widen_into_what_is_before_it() {
     assert!(found.is_some());
     assert_eq!(looked, [0], "nothing to look at, and it stops at the floor");
 }
+
+fn with_cwd(line: &str, cwd: &str) -> String {
+    line.replacen('{', &format!(r#"{{"cwd":"{cwd}","#), 1)
+}
+
+#[test]
+fn peek_keeps_newest_cwd() {
+    let dir = Dir::new();
+    let lines = vec![
+        with_cwd(&user(1, "one"), "/w/old"),
+        with_cwd(&assistant(2, 5000, 10, "two"), "/w/new"),
+        user(3, "three"),
+    ];
+    let path = dir.file("cwd.jsonl", &lines);
+    let peeked = conversation::peek_subagent(&path, true).expect("read");
+    assert_eq!(peeked.cwd.as_deref(), Some("/w/new"));
+}
+
+#[test]
+fn peek_without_cwd_is_none() {
+    let dir = Dir::new();
+    let lines = vec![user(1, "one"), assistant(2, 5000, 10, "two")];
+    let path = dir.file("nocwd.jsonl", &lines);
+    let peeked = conversation::peek_subagent(&path, true).expect("read");
+    assert_eq!(peeked.cwd, None);
+}

@@ -115,6 +115,7 @@ impl Subagents for AntigravitySubagents {
         let peeked = elsewhere::peek(Path::new(&s.path), s.is_running());
         Ok(Glance {
             tokens: peeked.as_ref().and_then(|p| p.context),
+            cwd: None,
             recent: peeked.and_then(|p| p.recent),
         })
     }

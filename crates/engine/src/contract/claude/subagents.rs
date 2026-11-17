@@ -35,6 +35,7 @@ impl Subagents for ClaudeSubagents {
         let peeked = subagents::peek(s.origin, &s.path, s.is_running());
         Ok(Glance {
             tokens: peeked.as_ref().and_then(|p| p.context),
+            cwd: peeked.as_ref().and_then(|p| p.cwd.clone()),
             recent: peeked.and_then(|p| p.recent),
         })
     }

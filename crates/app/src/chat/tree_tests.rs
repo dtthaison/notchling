@@ -140,6 +140,7 @@ impl Peek for Reads {
         Facts {
             context: Some(1),
             doing: None,
+            cwd: None,
         }
     }
 }

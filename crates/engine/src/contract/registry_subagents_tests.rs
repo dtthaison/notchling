@@ -175,3 +175,36 @@ fn glance_routes_by_the_rows_tool() {
         .unwrap();
     assert!(registry.glance(&missing).is_none());
 }
+
+#[test]
+fn codex_glance_cwd_from_session_meta() {
+    let dir = tree("reg-cwd");
+    let registry = registry();
+    let rows = registry.subagents(&top(&dir), &roots(&dir), now_secs());
+    let child = rows
+        .iter()
+        .find(|r| r.id == format!("codex:{}", FORKED.thread))
+        .expect("the child");
+    assert_eq!(
+        registry.glance(child).expect("glance").cwd.as_deref(),
+        Some("/work/app")
+    );
+}
+
+#[test]
+fn delegated_codex_job_glance_has_its_rollout_cwd() {
+    let dir = tree("reg-job-cwd");
+    let job_thread = thread(5);
+    rollout(&dir, &job_thread);
+    job(&dir, PARENT.thread, &job_thread, 1);
+    let registry = registry();
+    let rows = registry.subagents(&top(&dir), &roots(&dir), now_secs());
+    let delegated = rows
+        .iter()
+        .find(|r| r.id.starts_with("job:"))
+        .expect("the job");
+    assert_eq!(
+        registry.glance(delegated).expect("glance").cwd.as_deref(),
+        Some("/w")
+    );
+}

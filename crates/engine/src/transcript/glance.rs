@@ -1,5 +1,6 @@
 use super::model::{Conversation, ItemKind};
 use super::tail::PARSED_BYTES;
+use super::util::{parse_object, str_of};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::Ordering;
@@ -83,6 +84,7 @@ pub fn widen_from<T>(
 
 pub struct Peeked {
     pub context: Option<u64>,
+    pub cwd: Option<String>,
     pub recent: Option<Conversation>,
 }
 
@@ -104,6 +106,7 @@ pub fn peek_from(
 ) -> Option<Peeked> {
     let mut peeked = Peeked {
         context: None,
+        cwd: None,
         recent: None,
     };
     let mut stepped = recent.is_none();
@@ -111,6 +114,9 @@ pub fn peek_from(
         let lines = window.lines();
         if peeked.context.is_none() {
             peeked.context = lines.iter().rev().find_map(|line| held(line));
+        }
+        if peeked.cwd.is_none() {
+            peeked.cwd = lines.iter().rev().find_map(|line| cwd_of(line));
         }
         if let (Some(parse), false) = (recent, stepped) {
             let conversation = parse(&lines);
@@ -120,6 +126,16 @@ pub fn peek_from(
         ((), peeked.context.is_some() && stepped)
     })?;
     Some(peeked)
+}
+
+fn cwd_of(line: &[u8]) -> Option<String> {
+    if !has(line, b"\"cwd\"") {
+        return None;
+    }
+    let obj = serde_json::Value::Object(parse_object(line)?);
+    str_of(&obj, "cwd")
+        .filter(|cwd| !cwd.is_empty())
+        .map(str::to_owned)
 }
 
 pub fn has(line: &[u8], needle: &[u8]) -> bool {

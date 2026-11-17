@@ -17,6 +17,7 @@ use super::paging::{Item, TreeShown};
 pub struct Facts {
     pub context: Option<u64>,
     pub doing: Option<String>,
+    pub cwd: Option<String>,
 }
 
 impl Facts {
@@ -24,6 +25,7 @@ impl Facts {
         Facts {
             context: Some(conversation.facts.context_tokens),
             doing: None,
+            cwd: None,
         }
     }
 }
@@ -96,6 +98,8 @@ pub fn subagent_row(agent: &Subagent, read: Option<&Facts>) -> SubagentRow {
         doing: read
             .filter(|_| agent.is_running())
             .and_then(|f| f.doing.clone()),
+        cwd: read.and_then(|f| f.cwd.clone()),
+        started_ms: (agent.started * 1000.0) as i64,
         depth: agent.depth.max(1),
         children: 0,
         open: false,
@@ -143,6 +147,7 @@ impl Peek for Disk {
         let glance = self.0.glance(agent);
         Facts {
             context: glance.as_ref().and_then(|g| g.tokens),
+            cwd: glance.as_ref().and_then(|g| g.cwd.clone()),
             doing: glance
                 .and_then(|g| g.recent)
                 .map(|c| super::activity::doing(&c)),
