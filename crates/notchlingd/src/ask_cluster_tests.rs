@@ -109,6 +109,7 @@ fn worker_question_answered_from_home() {
         .expect("the home lists the question");
     assert_eq!(shown["kind"], json!("question"));
     assert!(shown["title"].as_str().unwrap().ends_with(" on m9"));
+    assert_eq!(shown["source"]["node"], json!(node(9).to_string()));
     assert_eq!(shown["detail"], json!("Which?"));
     let done = home
         .rig

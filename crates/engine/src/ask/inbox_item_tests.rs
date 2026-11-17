@@ -95,7 +95,7 @@ fn inbox_item_names_the_asker() {
 fn inbox_item_on_a_worker_ends_with_the_node() {
     let got = item(&row(Asker::Subagent, None), Some("m1"), 1);
     assert_eq!(got.title, "Review Task 3 asks · main on m1");
-    assert_eq!(got.source.node.as_deref(), Some("m1"));
+    assert_eq!(got.source.node, None);
     let mut long = row(Asker::Subagent, None);
     long.label = Some("l".repeat(200));
     let cut_title = item(&long, Some("m1"), 1).title;

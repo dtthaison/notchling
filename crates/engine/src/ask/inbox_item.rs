@@ -90,7 +90,7 @@ pub fn item(row: &Row, node: Option<&str>, now_ms: i64) -> Item {
         title: title(row, node),
         detail: cut(&row.question, DETAIL_CHARS),
         source: Source {
-            node: node.map(str::to_string),
+            node: None,
             session: Some(row.session.clone()),
             job: None,
         },
