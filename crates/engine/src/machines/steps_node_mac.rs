@@ -11,6 +11,7 @@ use super::steps_machine::cut;
 use super::steps_node::{
     arch_word, first_text_line, machine_refusal, os_word, said, value_of, BINARY, BINARY_NEW,
 };
+use super::steps_node_binary::file_hash;
 use super::steps_node_service::stops_work;
 use crate::cluster::build_id;
 use std::path::{Path, PathBuf};
@@ -73,6 +74,7 @@ pub(super) struct Source {
     pub path: PathBuf,
     pub label: String,
     pub what: String,
+    pub digest: Option<String>,
 }
 
 fn missing_dist(os: &str, arch: &str, dist: Option<&Path>, file: &str) -> String {
@@ -102,6 +104,7 @@ pub(super) fn source_for(
                     path: own.clone(),
                     label: "this Mac's own notchling, the one beside the running app".into(),
                     what: "this Mac's".into(),
+                    digest: None,
                 });
             }
         }
@@ -111,6 +114,7 @@ pub(super) fn source_for(
                 label: format!("{file} from this Mac's cluster dist folder"),
                 path,
                 what: "this Mac's".into(),
+                digest: None,
             }),
             None if arch == "x86_64" => Err(BUILD_INTEL.into()),
             None => Err(missing_dist(os, &arch, dist, &file)),
@@ -129,20 +133,30 @@ pub(super) fn source_for(
     }
     match host.build {
         Some(build) => {
-            let same = dist_manifest::read(dir).is_some_and(|manifest| manifest.build == build);
-            if !same {
-                return Err(BUILD_LINUX.into());
-            }
+            let manifest = dist_manifest::read(dir)
+                .filter(|manifest| manifest.build == build)
+                .ok_or_else(|| BUILD_LINUX.to_string())?;
+            let listed = manifest.files.get(&file).ok_or_else(|| {
+                format!("The dist folder's manifest doesn't list {file}. {BUILD_LINUX}")
+            })?;
+            let digest = file_hash(&path).filter(|digest| *digest == listed.sha256);
+            let Some(digest) = digest else {
+                return Err(format!(
+                    "{file} in the dist folder isn't the file its manifest lists. {BUILD_LINUX}"
+                ));
+            };
             Ok(Source {
                 label: format!("{file} from this Mac's cluster dist folder"),
                 path,
                 what: "this Mac's".into(),
+                digest: Some(digest),
             })
         }
         None => Ok(Source {
             label: format!("{file} from this Mac's cluster dist folder"),
             path,
             what: "the dist file's; this Mac has no build id, so the hashes are compared".into(),
+            digest: None,
         }),
     }
 }
@@ -206,9 +220,8 @@ pub(super) fn mac_restart(ctx: &FixContext) -> CommandResult {
 
 pub(super) fn load_script() -> String {
     format!(
-        "launchctl enable system/{NODE_LABEL}\nif {}; then {}; else launchctl bootstrap system {NODE_PLIST}; fi",
-        loaded_test(),
-        kickstart()
+        "if {}; then launchctl bootout system/{NODE_LABEL} || true; fi\nlaunchctl enable system/{NODE_LABEL}\nlaunchctl bootstrap system {NODE_PLIST}",
+        loaded_test()
     )
 }
 

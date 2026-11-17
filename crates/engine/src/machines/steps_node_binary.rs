@@ -14,6 +14,7 @@ use super::steps_node_mac::{
 use super::steps_node_service::{restart_command, stops_work};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
@@ -45,8 +46,26 @@ fn probe_script(m: &Machine) -> String {
     )
 }
 
-fn hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+const MAX_HASHED: u64 = 512 * 1024 * 1024;
+
+fn hash_file(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = file.take(MAX_HASHED + 1);
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    let mut total = 0u64;
+    loop {
+        let n = reader.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > MAX_HASHED {
+            return None;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Some(format!("{:x}", hasher.finalize()))
 }
 
 pub(super) fn file_hash(path: &Path) -> Option<String> {
@@ -62,7 +81,7 @@ pub(super) fn file_hash(path: &Path) -> Option<String> {
     if known.is_some() {
         return known;
     }
-    let digest = hex(&std::fs::read(path).ok()?);
+    let digest = hash_file(path)?;
     cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -117,7 +136,11 @@ fn binary_state(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
         host,
     );
     let want = match &source {
-        Ok(found) => file_hash(&found.path).map(|digest| (digest, found.what.clone())),
+        Ok(found) => found
+            .digest
+            .clone()
+            .or_else(|| file_hash(&found.path))
+            .map(|digest| (digest, found.what.clone())),
         Err(why) if host.build.is_some() && ctx.machine.is_linux() => {
             return CheckResult::fail(why.clone());
         }
@@ -225,7 +248,7 @@ fn binary_fix(ctx: &FixContext) -> FixOutcome {
         os_word(m).unwrap_or_default(),
         arch_word(m).unwrap_or_default()
     );
-    let Some(digest) = file_hash(&source.path) else {
+    let Some(digest) = source.digest.clone().or_else(|| file_hash(&source.path)) else {
         return FixOutcome::fail(format!(
             "Put a notchling build for {}-{} in {} first.",
             os_word(m).unwrap_or_default(),

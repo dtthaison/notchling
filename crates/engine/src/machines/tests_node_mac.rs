@@ -186,6 +186,67 @@ fn linux_needs_manifest_build_equal_to_this_mac() {
     assert!(dev.what.contains("no build id"), "{}", dev.what);
 }
 
+fn manifest_with(dir: &std::path::Path, build: &str, files: &str) {
+    let text = format!("{{\"build\":\"{build}\",\"files\":{files}}}");
+    std::fs::write(dir.join("manifest.json"), text).unwrap();
+}
+
+#[test]
+fn linux_refuses_a_file_the_manifest_does_not_list() {
+    let m = node_linux();
+    let dist = TempDir::new("linux-unlisted");
+    std::fs::write(dist.path().join("notchling-linux-x86_64"), b"abc").unwrap();
+    manifest_with(dist.path(), "abc1234", "{}");
+    let got = source_for(
+        &m,
+        Some(dist.path()),
+        None,
+        host("aarch64", Some("abc1234")),
+    );
+    let why = got.unwrap_err();
+    assert!(why.contains("notchling-linux-x86_64"), "{why}");
+    assert!(why.contains("tools/build-node.sh"), "{why}");
+}
+
+#[test]
+fn linux_refuses_a_file_whose_hash_is_not_the_manifests() {
+    let m = node_linux();
+    let dist = TempDir::new("linux-other-hash");
+    std::fs::write(
+        dist.path().join("notchling-linux-x86_64"),
+        b"changed after the build",
+    )
+    .unwrap();
+    manifest(dist.path(), "abc1234");
+    let got = source_for(
+        &m,
+        Some(dist.path()),
+        None,
+        host("aarch64", Some("abc1234")),
+    );
+    let why = got.unwrap_err();
+    assert!(why.contains("notchling-linux-x86_64"), "{why}");
+    assert!(why.contains("tools/build-node.sh"), "{why}");
+}
+
+#[test]
+fn linux_uses_a_file_whose_name_and_hash_the_manifest_lists() {
+    let m = node_linux();
+    let dist = TempDir::new("linux-listed");
+    let file = dist.path().join("notchling-linux-x86_64");
+    std::fs::write(&file, b"abc").unwrap();
+    manifest(dist.path(), "abc1234");
+    let got = source_for(
+        &m,
+        Some(dist.path()),
+        None,
+        host("aarch64", Some("abc1234")),
+    )
+    .unwrap();
+    assert_eq!(got.path, file);
+    assert_eq!(got.digest.as_deref(), Some(hex(b"abc").as_str()));
+}
+
 #[test]
 fn app_present_no_longer_skips_binary_and_service() {
     let m = mac_with_app();
@@ -417,6 +478,35 @@ fn launchdaemon_fix_refuses_an_unknown_home() {
 }
 
 #[test]
+fn binary_fix_still_kickstarts_without_rereading_the_plist() {
+    let rig = Rig::new(mac_arch(host_arch()));
+    let tmp = TempDir::new("mac-kick");
+    let daemon = tmp.path().join("notchling");
+    std::fs::write(&daemon, BUILD).unwrap();
+    rig.runner.on(
+        |a| a.last().is_some_and(|s| s.contains("shasum -a 256")),
+        ok(&format!("{}  new\n", hex(BUILD))),
+    );
+    let mut ctx = fix_of(&rig, None, None);
+    ctx.step.mac_daemon = Some(daemon);
+    let out = (plan(&step(&rig.machine, &StepId::NODE_BINARY)).run)(&ctx);
+    assert!(out.ok, "{}", out.message);
+    let calls = rig.calls();
+    let admin = admin_calls(&calls);
+    let last = admin.last().expect("an admin call").argv.last().unwrap();
+    assert!(
+        last.contains("launchctl kickstart -k system/dev.notchling.node"),
+        "{last}"
+    );
+    assert!(
+        !last.contains("bootout") && !last.contains("bootstrap"),
+        "{last}"
+    );
+    let shown = plan(&step(&rig.machine, &StepId::NODE_BINARY)).display;
+    assert!(shown.contains("kickstart -k"), "{shown}");
+}
+
+#[test]
 fn old_launch_agent_is_booted_out() {
     let rig = Rig::new(node_mac());
     let ctx = fix_of(&rig, None, None);
@@ -475,18 +565,44 @@ mod launchctl {
     }
 
     #[test]
-    fn loaded_daemon_is_kickstarted() {
+    fn loaded_daemon_is_booted_out_and_bootstrapped_again() {
         let log = run(true);
-        assert!(
-            log.iter().any(|l| l == "enable system/dev.notchling.node"),
-            "{log:?}"
-        );
-        assert!(
+        let at = |want: &str| {
             log.iter()
-                .any(|l| l == "kickstart -k system/dev.notchling.node"),
-            "{log:?}"
+                .position(|l| l == want)
+                .unwrap_or_else(|| panic!("{want}: {log:?}"))
+        };
+        let out = at("bootout system/dev.notchling.node");
+        let enable = at("enable system/dev.notchling.node");
+        let load = at(&format!("bootstrap system {NODE_PLIST}"));
+        assert!(out < enable && enable < load, "{log:?}");
+        assert!(!log.iter().any(|l| l.starts_with("kickstart")), "{log:?}");
+    }
+
+    #[test]
+    fn bootout_that_finds_nothing_loaded_does_not_stop_the_fix() {
+        let dir = TempDir::new("launchctl-node-stub-fail");
+        let log = dir.path().join("log");
+        let stub = dir.path().join("launchctl");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\necho \"$@\" >> \"$LOG\"\nif [ \"$1\" = bootout ]; then exit 3; fi\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let status = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("set -e\n{}", load_script()))
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .env("LOG", &log)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let seen = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            seen.contains(&format!("bootstrap system {NODE_PLIST}")),
+            "{seen}"
         );
-        assert!(!log.iter().any(|l| l.starts_with("bootstrap")), "{log:?}");
     }
 
     #[test]

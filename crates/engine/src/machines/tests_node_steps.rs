@@ -253,7 +253,8 @@ fn service_fix_installs_and_loads_macos() {
     assert!(seen[1].contains("launchctl bootout"));
     assert!(seen[2].contains("sudo -S"));
     assert!(seen[2].contains("launchctl enable system/dev.notchling.node"));
-    assert!(seen[2].contains("launchctl kickstart -k system/dev.notchling.node"));
+    assert!(seen[2].contains("launchctl bootout system/dev.notchling.node"));
+    assert!(!seen[2].contains("kickstart"), "{}", seen[2]);
     assert!(seen[2]
         .contains("launchctl bootstrap system /Library/LaunchDaemons/dev.notchling.node.plist"));
 }
