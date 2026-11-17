@@ -1,5 +1,5 @@
-use super::branch::{read_branch_stat, read_branches};
-use super::branch_file::read_branch_diff;
+use super::branch::{read_branch_stat, read_branches, read_ref_stat};
+use super::branch_file::{read_branch_diff, read_ref_diff};
 use super::read::Failure;
 use crate::control::launcher::{FakeLauncher, LaunchOutput};
 use crate::sessions::testutil::TempDir;
@@ -45,7 +45,7 @@ fn a_stat_runs_only_read_commands_against_the_merge_base() {
     assert_eq!(stat.uncommitted_files, 1);
     assert!(stat.files[0].uncommitted && !stat.files[1].uncommitted);
     let calls = argv(&fake);
-    assert_eq!(calls.len(), 6);
+    assert_eq!(calls.len(), 7);
     assert!(has(&calls[2], "symbolic-ref") && has(&calls[2], "refs/remotes/origin/HEAD"));
     assert!(has(&calls[3], "merge-base") && has(&calls[3], "main") && has(&calls[3], "HEAD"));
     for (at, mode) in [(4, "--name-status"), (5, "--numstat")] {
@@ -103,7 +103,7 @@ fn a_repo_with_no_commit_or_no_base_answers_without_one() {
     ]))));
     let stat = read_branch_stat("/w", None, &fake).unwrap();
     assert_eq!((stat.base, stat.files.len()), (None, 0));
-    assert_eq!(argv(&fake).len(), 2);
+    assert_eq!(argv(&fake).len(), 3);
 
     let fake = FakeLauncher::new();
     no_filters(&fake);
@@ -283,4 +283,194 @@ fn a_file_path_that_leaves_the_repository_is_refused_before_anything_runs() {
         ));
         assert!(fake.commands().is_empty());
     }
+}
+
+const FEATURE: &str = "refs/heads/feature/x";
+
+fn ref_stat_fake() -> FakeLauncher {
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&format!("{SHA}\n"))));
+    fake.push_output(Ok(LaunchOutput::ok(&format!("{SHA}\n"))));
+    fake.push_output(Ok(LaunchOutput::ok(&z(&["M", "a.rs", "A", "n.rs"]))));
+    fake.push_output(Ok(LaunchOutput::ok(&z(&["3\t1\ta.rs", "5\t0\tn.rs"]))));
+    fake
+}
+
+#[test]
+fn ref_stat_runs_no_status() {
+    let fake = ref_stat_fake();
+    let stat = read_ref_stat("/w", Some("main"), FEATURE, &fake).unwrap();
+    assert_eq!(stat.branch.as_deref(), Some("feature/x"));
+    assert_eq!(stat.head.as_deref(), Some("0123456"));
+    assert_eq!(stat.merge_base.as_deref(), Some("0123456"));
+    assert_eq!((stat.added, stat.removed, stat.file_count), (8, 1, 2));
+    assert_eq!((stat.uncommitted_files, stat.changed_at), (0, None));
+    assert!(stat.files.iter().all(|f| !f.uncommitted));
+    let calls = argv(&fake);
+    assert_eq!(calls.len(), 5);
+    for call in &calls {
+        for word in ["status", "symbolic-ref", "HEAD", "ls-files", "--no-index"] {
+            assert!(!has(call, word), "{word}");
+        }
+    }
+    assert!(has(&calls[1], "rev-parse") && has(&calls[1], "--verify"));
+    assert!(has(&calls[1], &format!("{FEATURE}^{{commit}}")));
+    assert!(has(&calls[2], "merge-base") && has(&calls[2], "main") && has(&calls[2], FEATURE));
+}
+
+#[test]
+fn ref_is_before_double_dash() {
+    let fake = ref_stat_fake();
+    read_ref_stat("/w", Some("main"), FEATURE, &fake).unwrap();
+    let diffs: Vec<Vec<String>> = argv(&fake).into_iter().filter(|c| has(c, "diff")).collect();
+    assert_eq!(diffs.len(), 2);
+    for call in diffs {
+        let rev = call.iter().position(|a| a == FEATURE).unwrap();
+        let dashes = call.iter().position(|a| a == "--").unwrap();
+        let base = call.iter().position(|a| a == SHA).unwrap();
+        assert!(base < rev && rev < dashes, "{call:?}");
+        for flag in ["--no-color", "--no-ext-diff", "--no-textconv", "-M", "-z"] {
+            assert!(has(&call, flag), "{flag}");
+        }
+        assert!(has(&call, "--ignore-submodules=all"));
+    }
+
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(SHA)));
+    fake.push_output(Ok(LaunchOutput::ok(&z(&["M", "a.rs"]))));
+    fake.push_output(Ok(LaunchOutput::ok("diff --git a/a.rs b/a.rs\n+y\n")));
+    let diff = read_ref_diff("/w", "main", FEATURE, "a.rs", None, &fake).unwrap();
+    assert!(diff.text.contains("+y") && !diff.untracked);
+    let calls = argv(&fake);
+    assert_eq!(calls.len(), 4);
+    let last = calls.last().unwrap();
+    let rev = last.iter().position(|a| a == FEATURE).unwrap();
+    let dashes = last.iter().position(|a| a == "--").unwrap();
+    let spec = last.iter().position(|a| a == ":(literal)a.rs").unwrap();
+    assert!(rev < dashes && dashes < spec);
+    for flag in ["--no-color", "--no-ext-diff", "--no-textconv", "-M"] {
+        assert!(has(last, flag), "{flag}");
+    }
+    assert!(calls.iter().all(|c| !has(c, "status")));
+}
+
+#[test]
+fn a_ref_outside_heads_and_remotes_is_refused_before_anything_runs() {
+    for rev in ["refs/tags/v1", "main", "HEAD", "-c", "refs/heads/a b", ""] {
+        let fake = FakeLauncher::new();
+        assert!(matches!(
+            read_ref_stat("/w", Some("main"), rev, &fake),
+            Err(Failure::Refused(_))
+        ));
+        assert!(matches!(
+            read_ref_diff("/w", "main", rev, "a.rs", None, &fake),
+            Err(Failure::Refused(_))
+        ));
+        assert!(fake.commands().is_empty(), "{rev}");
+    }
+    let fake = FakeLauncher::new();
+    assert!(matches!(
+        read_ref_stat("/w", Some("--output=/tmp/x"), FEATURE, &fake),
+        Err(Failure::Refused(_))
+    ));
+    assert!(fake.commands().is_empty());
+}
+
+#[test]
+fn ref_stat_without_base_runs_only_the_head_read() {
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&format!("{SHA}\n"))));
+    let stat = read_ref_stat("/w", None, "refs/remotes/origin/far", &fake).unwrap();
+    assert_eq!(stat.branch.as_deref(), Some("origin/far"));
+    assert_eq!(stat.head.as_deref(), Some("0123456"));
+    assert_eq!((stat.base, stat.merge_base), (None, None));
+    assert!(stat.files.is_empty() && !stat.detached);
+    assert_eq!(argv(&fake).len(), 2);
+}
+
+#[test]
+fn a_ref_with_no_common_history_with_the_base_fails() {
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(SHA)));
+    fake.push_output(Ok(LaunchOutput::failed(1, "")));
+    assert_eq!(
+        read_ref_stat("/w", Some("main"), FEATURE, &fake),
+        Err(Failure::Failed(
+            "no common history with that branch".to_owned()
+        ))
+    );
+}
+
+#[test]
+fn stat_changed_at_is_the_newest_changed_file_and_reuses_the_untracked_root() {
+    let t = TempDir::new("branch-changed-at");
+    t.write("repo/old.rs", "a\n");
+    t.write("repo/new.rs", "b\n");
+    t.write("repo/fresh.rs", "c\n");
+    let at = |name: &str, secs: u64| {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(t.path(&format!("repo/{name}")))
+            .unwrap();
+        file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+            .unwrap();
+    };
+    at("old.rs", 1_000);
+    at("new.rs", 2_000);
+    at("fresh.rs", 3_000);
+    let root = t.path("repo").to_string_lossy().into_owned();
+
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&z(&[
+        "# branch.head f",
+        "1 .M N... 100644 100644 100644 a b old.rs",
+        "1 .M N... 100644 100644 100644 a b new.rs",
+    ]))));
+    fake.push_output(Ok(LaunchOutput::ok(SHA)));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok(&root)));
+    let stat = read_branch_stat("/w", Some("main"), &fake).unwrap();
+    assert_eq!(stat.changed_at, Some(2_000_000));
+    assert_eq!(argv(&fake).len(), 6);
+
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&z(&[
+        "# branch.head f",
+        "1 .M N... 100644 100644 100644 a b new.rs",
+        "? fresh.rs",
+    ]))));
+    fake.push_output(Ok(LaunchOutput::ok(SHA)));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok(&root)));
+    let stat = read_branch_stat("/w", Some("main"), &fake).unwrap();
+    assert_eq!(stat.changed_at, Some(3_000_000));
+    let roots = argv(&fake)
+        .iter()
+        .filter(|c| has(c, "--show-toplevel"))
+        .count();
+    assert_eq!(roots, 1);
+
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&z(&[
+        "# branch.head f",
+        "1 .M N... 100644 100644 100644 a b new.rs",
+    ]))));
+    fake.push_output(Ok(LaunchOutput::ok(SHA)));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::failed(128, "")));
+    let stat = read_branch_stat("/w", Some("main"), &fake).unwrap();
+    assert_eq!(
+        (stat.changed_at, stat.base.as_deref()),
+        (None, Some("main"))
+    );
 }

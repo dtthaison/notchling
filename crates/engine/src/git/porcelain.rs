@@ -23,6 +23,8 @@ pub struct Status {
     pub behind: u64,
     pub changes: Vec<Change>,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_at: Option<i64>,
 }
 
 pub fn letter(xy: &str) -> &'static str {

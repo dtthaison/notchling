@@ -1,4 +1,7 @@
-use super::read::{cap, read_diff, read_status, Failure, MAX_DIFF_BYTES, MAX_DIFF_LINES};
+use super::read::{
+    cap, newest_change, read_diff, read_status, Failure, MAX_DIFF_BYTES, MAX_DIFF_LINES,
+};
+use super::{BranchStat, Status};
 use crate::control::launcher::{FakeLauncher, LaunchError, LaunchOutput};
 use crate::sessions::testutil::TempDir;
 use std::time::Duration;
@@ -39,7 +42,7 @@ fn status_runs_the_read_only_commands_with_a_timeout_and_no_prompts() {
     assert_eq!(status.changes[0].added, Some(3));
     assert_eq!(status.changes[0].removed, Some(1));
     let calls = args_of(&fake);
-    assert_eq!(calls.len(), 3);
+    assert_eq!(calls.len(), 4);
     assert!(has(&calls[0], "config") && has(&calls[0], "--get-regexp"));
     for argv in &calls {
         assert_eq!(argv[0], "git");
@@ -445,4 +448,203 @@ mod real {
         let got = read_diff(&cwd, "dir/secret.txt", &*launcher());
         assert!(matches!(got, Err(Failure::Refused(_))), "{got:?}");
     }
+}
+
+fn set_mtime(path: &std::path::Path, secs: u64) {
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+        .unwrap();
+}
+
+fn status_fake(root: &str, records: &[&str]) -> FakeLauncher {
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    let mut all = vec!["# branch.oid abc1234def", "# branch.head main"];
+    all.extend(records);
+    fake.push_output(Ok(LaunchOutput::ok(&z(&all))));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Ok(LaunchOutput::ok(root)));
+    fake
+}
+
+#[test]
+fn changed_at_is_newest_existing_change() {
+    let t = TempDir::new("changed-at-newest");
+    t.write("repo/a.rs", "x");
+    t.write("repo/src/b.rs", "x");
+    t.write("repo/c.rs", "x");
+    set_mtime(&t.path("repo/a.rs"), 1_000);
+    set_mtime(&t.path("repo/src/b.rs"), 3_000);
+    set_mtime(&t.path("repo/c.rs"), 2_000);
+    let root = t.path("repo").to_string_lossy().into_owned();
+    let fake = status_fake(
+        &root,
+        &[
+            "1 .M N... 100644 100644 100644 a b a.rs",
+            "1 .M N... 100644 100644 100644 a b src/b.rs",
+            "1 .D N... 100644 100644 000000 a b gone.rs",
+            "? c.rs",
+        ],
+    );
+    let status = read_status("/w", &fake).unwrap();
+    assert_eq!(status.changed_at, Some(3_000_000));
+    let calls = args_of(&fake);
+    assert_eq!(calls.len(), 4);
+    assert!(has(&calls[3], "rev-parse") && has(&calls[3], "--show-toplevel"));
+}
+
+#[test]
+fn changed_at_none_when_only_deleted() {
+    let t = TempDir::new("changed-at-deleted");
+    t.write("repo/other.rs", "x");
+    let root = t.path("repo").to_string_lossy().into_owned();
+    let fake = status_fake(&root, &["1 .D N... 100644 100644 000000 a b gone.rs"]);
+    let status = read_status("/w", &fake).unwrap();
+    assert_eq!(status.changed_at, None);
+    assert_eq!(status.changes.len(), 1);
+}
+
+#[test]
+fn changed_at_skips_paths_leaving_the_root() {
+    let t = TempDir::new("changed-at-leaving");
+    t.write("repo/in.rs", "x");
+    t.write("outside/new.rs", "x");
+    set_mtime(&t.path("repo/in.rs"), 1_000);
+    set_mtime(&t.path("outside/new.rs"), 9_000);
+    let repo = t.path("repo");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(t.path("outside"), repo.join("link")).unwrap();
+    let root = repo.to_string_lossy().into_owned();
+    let fake = status_fake(
+        &root,
+        &[
+            "1 .M N... 100644 100644 100644 a b in.rs",
+            "1 .M N... 100644 100644 100644 a b link/new.rs",
+        ],
+    );
+    assert_eq!(
+        read_status("/w", &fake).unwrap().changed_at,
+        Some(1_000_000)
+    );
+    assert_eq!(
+        newest_change(&repo, &["../outside/new.rs", "/etc/passwd", ""]),
+        None
+    );
+    assert_eq!(
+        newest_change(&repo, &["in.rs", "../outside/new.rs"]),
+        Some(1_000_000)
+    );
+}
+
+#[test]
+fn newest_change_reads_at_most_the_listed_files() {
+    let t = TempDir::new("changed-at-cap");
+    t.write("repo/first.rs", "x");
+    t.write("repo/late.rs", "x");
+    set_mtime(&t.path("repo/first.rs"), 1_000);
+    set_mtime(&t.path("repo/late.rs"), 9_000);
+    let mut paths: Vec<String> = (0..super::MAX_FILES - 1)
+        .map(|n| format!("missing{n}.rs"))
+        .collect();
+    paths.insert(0, "first.rs".to_owned());
+    paths.push("late.rs".to_owned());
+    let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+    assert_eq!(
+        newest_change(&t.path("repo"), &refs),
+        Some(1_000_000),
+        "the 501st path is not read"
+    );
+}
+
+#[test]
+fn root_read_failure_leaves_changed_at_none() {
+    let record = "1 .M N... 100644 100644 100644 a b a.rs";
+    for root in [LaunchOutput::failed(128, ""), LaunchOutput::ok("")] {
+        let fake = FakeLauncher::new();
+        no_filters(&fake);
+        fake.push_output(Ok(LaunchOutput::ok(&z(&["# branch.head main", record]))));
+        fake.push_output(Ok(LaunchOutput::ok("")));
+        fake.push_output(Ok(root));
+        let status = read_status("/w", &fake).unwrap();
+        assert_eq!(status.changed_at, None);
+        assert_eq!(status.changes.len(), 1);
+    }
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&z(&["# branch.head main", record]))));
+    fake.push_output(Ok(LaunchOutput::ok("")));
+    fake.push_output(Err(LaunchError::Spawn("boom".to_owned())));
+    assert_eq!(read_status("/w", &fake).unwrap().changed_at, None);
+}
+
+#[test]
+fn a_clean_tree_reads_no_root_and_the_reply_has_no_changed_at() {
+    let fake = FakeLauncher::new();
+    no_filters(&fake);
+    fake.push_output(Ok(LaunchOutput::ok(&z(&["# branch.head main"]))));
+    let status = read_status("/w", &fake).unwrap();
+    assert_eq!(status.changed_at, None);
+    assert!(args_of(&fake).iter().all(|c| !has(c, "--show-toplevel")));
+}
+
+#[test]
+fn existing_stat_and_diff_unchanged() {
+    let status = serde_json::to_value(Status::default()).unwrap();
+    let stat = serde_json::to_value(BranchStat::default()).unwrap();
+    assert!(status.get("changed_at").is_none());
+    assert!(stat.get("changed_at").is_none());
+    let mut keys: Vec<&str> = status
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "ahead",
+            "behind",
+            "branch",
+            "changes",
+            "detached",
+            "head",
+            "initial",
+            "truncated",
+            "upstream"
+        ]
+    );
+    let mut keys: Vec<&str> = stat
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "added",
+            "base",
+            "branch",
+            "detached",
+            "file_count",
+            "files",
+            "head",
+            "merge_base",
+            "removed",
+            "truncated",
+            "uncommitted_files"
+        ]
+    );
+    let with = Status {
+        changed_at: Some(5),
+        ..Status::default()
+    };
+    assert_eq!(serde_json::to_value(with).unwrap()["changed_at"], 5);
+    let with = BranchStat {
+        changed_at: Some(7),
+        ..BranchStat::default()
+    };
+    assert_eq!(serde_json::to_value(with).unwrap()["changed_at"], 7);
 }

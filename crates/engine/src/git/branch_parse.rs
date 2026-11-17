@@ -27,6 +27,8 @@ pub struct BranchStat {
     pub file_count: u64,
     pub uncommitted_files: u64,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_at: Option<i64>,
 }
 
 fn letter(code: &str) -> &'static str {

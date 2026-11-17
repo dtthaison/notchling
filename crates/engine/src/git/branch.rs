@@ -2,8 +2,8 @@ use super::branch_parse::{assemble, finish, parse_branches, BranchStat, Branches
 use super::guard::clean_ref;
 use super::porcelain::{parse_status, Status};
 use super::read::{
-    command, drivers, refusal, run, run_capped, whole_records, Failure, MAX_LIST_BYTES,
-    MAX_UNTRACKED_BYTES, STATUS_ARGS,
+    changed_at, command, drivers, refusal, root_of, run, run_capped, whole_records, Failure,
+    MAX_LIST_BYTES, MAX_UNTRACKED_BYTES, STATUS_ARGS,
 };
 use crate::control::Launcher;
 use std::collections::HashSet;
@@ -13,7 +13,7 @@ use std::path::Path;
 const COUNT_BUDGET: u64 = 8 * 1024 * 1024;
 const FALLBACK_BASES: [&str; 2] = ["main", "master"];
 
-const DIFF_FLAGS: [&str; 5] = [
+pub(super) const DIFF_FLAGS: [&str; 5] = [
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
@@ -30,10 +30,11 @@ pub(super) fn merge_base(
     cwd: &str,
     drivers: &[String],
     base: &str,
+    head: &str,
 ) -> Result<Option<String>, Failure> {
     let out = run(
         launcher,
-        &command(cwd, drivers, &["merge-base", base, "HEAD"]),
+        &command(cwd, drivers, &["merge-base", base, head]),
     )?;
     match out.code {
         0 => {
@@ -72,7 +73,7 @@ pub(super) fn resolve_base(
 ) -> Result<Option<(String, String)>, Failure> {
     if let Some(base) = requested {
         let base = clean_ref(base).map_err(|why| Failure::Refused(why.to_owned()))?;
-        return match merge_base(launcher, cwd, drivers, base)? {
+        return match merge_base(launcher, cwd, drivers, base, "HEAD")? {
             Some(sha) => Ok(Some((base.to_owned(), sha))),
             None => Err(base_failure("no such branch")),
         };
@@ -81,7 +82,7 @@ pub(super) fn resolve_base(
     candidates.extend(remote_default(launcher, cwd, drivers));
     candidates.extend(FALLBACK_BASES.iter().map(|b| (*b).to_owned()));
     for candidate in candidates {
-        if let Ok(Some(sha)) = merge_base(launcher, cwd, drivers, &candidate) {
+        if let Ok(Some(sha)) = merge_base(launcher, cwd, drivers, &candidate, "HEAD") {
             return Ok(Some((candidate, sha)));
         }
     }
@@ -138,16 +139,16 @@ fn top_level(cwd: &str, drivers: &[String], launcher: &dyn Launcher) -> Result<S
     Ok(top.output.trim_end_matches(['\n', '\r']).to_owned())
 }
 
-fn diff_list(
+pub(super) fn diff_list(
     launcher: &dyn Launcher,
     cwd: &str,
     drivers: &[String],
     mode: &str,
-    merge_base: &str,
+    revs: &[&str],
 ) -> Result<String, Failure> {
     let mut args = vec!["diff", mode, "-z"];
     args.extend(DIFF_FLAGS);
-    args.push(merge_base);
+    args.extend(revs);
     args.push("--");
     let (out, cut) = run_capped(launcher, &command(cwd, drivers, &args), MAX_LIST_BYTES)?;
     if out.code != 0 {
@@ -173,14 +174,32 @@ pub fn read_branch_stat(
         truncated: status.truncated,
         ..BranchStat::default()
     };
-    if status.initial {
-        return Ok(stat);
+    let mut root: Option<String> = None;
+    compare(&mut stat, &status, base, cwd, &drivers, launcher, &mut root)?;
+    if !status.changes.is_empty() {
+        let root = root.or_else(|| root_of(cwd, &drivers, launcher));
+        stat.changed_at = root.and_then(|root| changed_at(&root, &status.changes));
     }
-    let Some((base, sha)) = resolve_base(launcher, cwd, &drivers, base)? else {
-        return Ok(stat);
+    Ok(stat)
+}
+
+fn compare(
+    stat: &mut BranchStat,
+    status: &Status,
+    base: Option<&str>,
+    cwd: &str,
+    drivers: &[String],
+    launcher: &dyn Launcher,
+    root: &mut Option<String>,
+) -> Result<(), Failure> {
+    if status.initial {
+        return Ok(());
+    }
+    let Some((base, sha)) = resolve_base(launcher, cwd, drivers, base)? else {
+        return Ok(());
     };
-    let names = diff_list(launcher, cwd, &drivers, "--name-status", &sha)?;
-    let counts = diff_list(launcher, cwd, &drivers, "--numstat", &sha)?;
+    let names = diff_list(launcher, cwd, drivers, "--name-status", &[&sha])?;
+    let counts = diff_list(launcher, cwd, drivers, "--numstat", &[&sha])?;
     let uncommitted: HashSet<String> = status
         .changes
         .iter()
@@ -195,15 +214,64 @@ pub fn read_branch_stat(
         .collect();
     let mut untracked: Vec<(String, Option<u64>)> = Vec::new();
     if !new_paths.is_empty() {
-        let root = top_level(cwd, &drivers, launcher)?;
+        let top = top_level(cwd, drivers, launcher)?;
         let mut spent = 0;
         for path in new_paths {
-            let lines = count_lines(Path::new(&root), path, &mut spent);
+            let lines = count_lines(Path::new(&top), path, &mut spent);
             untracked.push((path.to_owned(), lines));
         }
+        *root = Some(top);
     }
     let (files, cut) = assemble(&names, &counts, &uncommitted, untracked);
     stat.base = Some(base);
+    stat.merge_base = Some(sha.chars().take(7).collect());
+    finish(stat, files, cut);
+    Ok(())
+}
+
+pub(super) fn ref_name(rev: &str) -> Result<&str, Failure> {
+    clean_ref(rev).map_err(|why| Failure::Refused(why.to_owned()))?;
+    ["refs/heads/", "refs/remotes/"]
+        .iter()
+        .find_map(|prefix| rev.strip_prefix(prefix))
+        .ok_or_else(|| Failure::Refused("not a branch".to_owned()))
+}
+
+pub fn read_ref_stat(
+    cwd: &str,
+    base: Option<&str>,
+    rev: &str,
+    launcher: &dyn Launcher,
+) -> Result<BranchStat, Failure> {
+    let name = ref_name(rev)?;
+    if let Some(base) = base {
+        clean_ref(base).map_err(|why| Failure::Refused(why.to_owned()))?;
+    }
+    let drivers = drivers(cwd, launcher)?;
+    let tip = format!("{rev}^{{commit}}");
+    let found = run(
+        launcher,
+        &command(cwd, &drivers, &["rev-parse", "--verify", "--quiet", &tip]),
+    )?;
+    let head = found.output.trim();
+    if found.code != 0 || head.is_empty() {
+        return Err(base_failure("no such branch"));
+    }
+    let mut stat = BranchStat {
+        branch: Some(name.to_owned()),
+        head: Some(head.chars().take(7).collect()),
+        ..BranchStat::default()
+    };
+    let Some(base) = base else {
+        return Ok(stat);
+    };
+    let Some(sha) = merge_base(launcher, cwd, &drivers, base, rev)? else {
+        return Err(base_failure("no such branch"));
+    };
+    let names = diff_list(launcher, cwd, &drivers, "--name-status", &[&sha, rev])?;
+    let counts = diff_list(launcher, cwd, &drivers, "--numstat", &[&sha, rev])?;
+    let (files, cut) = assemble(&names, &counts, &HashSet::new(), Vec::new());
+    stat.base = Some(base.to_owned());
     stat.merge_base = Some(sha.chars().take(7).collect());
     finish(&mut stat, files, cut);
     Ok(stat)

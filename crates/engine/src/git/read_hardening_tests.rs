@@ -1,3 +1,5 @@
+use super::branch::read_ref_stat;
+use super::branch_file::read_ref_diff;
 use super::read::{read_diff, read_status, Diff};
 use super::Status;
 use crate::control::{Launcher, RealLauncher};
@@ -201,4 +203,47 @@ fn a_filter_defined_in_a_user_include_file_never_runs() {
     config(&rig, "include.path", &include.to_string_lossy());
     dirty(&rig);
     the_reads_run_nothing(&rig, &["diff", "HEAD", "--numstat"]);
+}
+
+#[test]
+fn a_textconv_program_never_runs_for_a_ref() {
+    let rig = rig("hard-ref-textconv");
+    rig.t.write("repo/.gitattributes", "*.txt diff=x\n");
+    must(&rig.repo, &["add", "."]);
+    must(&rig.repo, &["commit", "-q", "-m", "attributes"]);
+    must(&rig.repo, &["checkout", "-q", "-b", "feat"]);
+    rig.t.write("repo/c.txt", "one\ntwo\n");
+    must(&rig.repo, &["add", "."]);
+    must(&rig.repo, &["commit", "-q", "-m", "work"]);
+    config(&rig, "diff.x.textconv", &script(&rig, "textconv.sh"));
+    assert!(!rig.marker.exists());
+    must(&rig.repo, &["diff", "main", "feat"]);
+    assert!(
+        rig.marker.exists(),
+        "the trap never fires without the guards, so this test would prove nothing"
+    );
+    std::fs::remove_file(&rig.marker).unwrap();
+    let cwd = rig.repo.to_string_lossy().into_owned();
+    let stat = read_ref_stat(&cwd, Some("main"), "refs/heads/feat", &*launcher()).unwrap();
+    assert_eq!((stat.file_count, stat.added), (1, 1));
+    let diff = read_ref_diff(&cwd, "main", "refs/heads/feat", "c.txt", None, &*launcher()).unwrap();
+    assert!(diff.text.contains("+two"), "{}", diff.text);
+    assert!(!rig.marker.exists(), "a program of the repository ran");
+}
+
+#[test]
+fn changed_at_of_a_real_status_is_the_newest_changed_file() {
+    let rig = rig("hard-changed-at");
+    dirty(&rig);
+    bump_mtime(&rig.repo.join("b.txt"));
+    let cwd = rig.repo.to_string_lossy().into_owned();
+    let status = read_status(&cwd, &*launcher()).unwrap();
+    let want = std::fs::symlink_metadata(rig.repo.join("b.txt"))
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    assert_eq!(status.changed_at, Some(want));
 }

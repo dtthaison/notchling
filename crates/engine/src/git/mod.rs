@@ -8,8 +8,8 @@ pub mod refs;
 pub mod sandbox;
 pub mod worktrees;
 
-pub use branch::{read_branch_stat, read_branches};
-pub use branch_file::read_branch_diff;
+pub use branch::{read_branch_stat, read_branches, read_ref_stat};
+pub use branch_file::{read_branch_diff, read_ref_diff};
 pub use branch_parse::{BranchFile, BranchStat, Branches, MAX_BRANCH_FILES};
 pub use porcelain::{Change, Status, MAX_FILES};
 pub use read::{read_diff, read_status, Diff, Failure, MAX_DIFF_BYTES, MAX_DIFF_LINES};

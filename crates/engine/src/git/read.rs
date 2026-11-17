@@ -1,5 +1,5 @@
 use super::guard::{clean_path, stays_inside};
-use super::porcelain::{parse_status, Status};
+use super::porcelain::{parse_status, Change, Status, MAX_FILES};
 use super::sandbox::SAFE_ERROR;
 use crate::control::{Command, LaunchError, LaunchOutput, Launcher};
 use serde::Serialize;
@@ -220,8 +220,42 @@ pub fn read_status(cwd: &str, launcher: &dyn Launcher) -> Result<Status, Failure
                 status.apply_numstat(whole_records(&counts.output, cut));
             }
         }
+        if let Some(root) = root_of(cwd, &drivers, launcher) {
+            status.changed_at = changed_at(&root, &status.changes);
+        }
     }
     Ok(status)
+}
+
+pub(super) fn root_of(cwd: &str, drivers: &[String], launcher: &dyn Launcher) -> Option<String> {
+    let out = run(
+        launcher,
+        &command(cwd, drivers, &["rev-parse", "--show-toplevel"]),
+    )
+    .ok()?;
+    let root = out.output.trim_end_matches(['\n', '\r']);
+    (out.code == 0 && !root.is_empty()).then(|| root.to_owned())
+}
+
+pub(super) fn changed_at(root: &str, changes: &[Change]) -> Option<i64> {
+    let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
+    newest_change(Path::new(root), &paths)
+}
+
+pub(super) fn newest_change(root: &Path, paths: &[&str]) -> Option<i64> {
+    paths
+        .iter()
+        .take(MAX_FILES)
+        .filter(|path| clean_path(path).is_ok() && stays_inside(root, path))
+        .filter_map(|path| {
+            let modified = std::fs::symlink_metadata(root.join(path))
+                .ok()?
+                .modified()
+                .ok()?;
+            let since = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+            i64::try_from(since.as_millis()).ok()
+        })
+        .max()
 }
 
 pub fn read_diff(cwd: &str, path: &str, launcher: &dyn Launcher) -> Result<Diff, Failure> {
