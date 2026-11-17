@@ -1,14 +1,35 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use notchling_engine::accounts::Secret;
+use notchling_engine::machines::steps_tailscale_linux::is_sign_in_link;
 use notchling_locale as t;
 
 use super::add::{AddFlow, Phase, Progress, RunJob};
 use super::add_plan::{PlanRow, PlanView};
 use super::model::ClusterModel;
 use crate::machines::data::now_secs;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct SignInLink(String);
+
+impl SignInLink {
+    pub fn new(url: String) -> Option<SignInLink> {
+        is_sign_in_link(&url).then_some(SignInLink(url))
+    }
+
+    pub fn url(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SignInLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(std::any::type_name::<SignInLink>()).finish()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Snap {
@@ -19,6 +40,7 @@ pub struct Snap {
     pub plan: Option<PlanView>,
     pub rows: Vec<PlanRow>,
     pub log: Vec<String>,
+    pub sign_in: Option<SignInLink>,
 }
 
 impl Snap {
@@ -146,6 +168,10 @@ impl AddRuns {
             (job, flow.engine())
         };
         self.bump();
+        let generation = self.generation.clone();
+        engine.set_on_link(Some(Arc::new(move || {
+            generation.fetch_add(1, Ordering::SeqCst);
+        })));
         let runs = self.clone();
         let name = name.to_owned();
         std::thread::Builder::new()
@@ -178,6 +204,13 @@ impl AddRuns {
                 .cloned();
         };
         let phase = flow.phase().clone();
+        let sign_in = match phase {
+            Phase::Running { .. } => flow
+                .engine()
+                .sign_in_link(flow.name())
+                .and_then(SignInLink::new),
+            _ => None,
+        };
         let log = match phase {
             Phase::Running { .. } | Phase::Joining { .. } | Phase::Stopped(_) => flow.log(),
             _ => Vec::new(),
@@ -190,6 +223,7 @@ impl AddRuns {
             rows: flow.rows().to_vec(),
             phase,
             log,
+            sign_in,
         })
     }
 

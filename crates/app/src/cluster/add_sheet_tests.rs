@@ -59,6 +59,7 @@ fn snap(phase: Phase, plan: Option<PlanView>) -> Snap {
         plan,
         rows: Vec::new(),
         log: vec!["copying".into()],
+        sign_in: None,
     }
 }
 

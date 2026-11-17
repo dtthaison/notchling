@@ -17,7 +17,8 @@ use super::add::AddFlow;
 use super::add_parts::AddParts;
 use super::add_runs::Snap;
 use super::add_sheet::{
-    derived_name, install, may_open, start_flow, view, AddPassword, AddView, Button, Draft,
+    derived_name, install, may_open, sign_in_target, start_flow, view, AddPassword, AddView,
+    Button, Draft,
 };
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
@@ -118,6 +119,7 @@ fn kind_of(button: Button) -> ButtonKind {
     match button {
         Button::Check | Button::Install | Button::Done => ButtonKind::Primary,
         Button::CheckAgain => ButtonKind::Secondary,
+        Button::OpenSignIn => ButtonKind::Secondary,
         Button::Close | Button::Cancel => ButtonKind::Ghost,
     }
 }
@@ -127,6 +129,7 @@ fn title_of(button: Button) -> &'static str {
         Button::Check => t::cluster::add_check(),
         Button::CheckAgain => t::cluster::add_check_again(),
         Button::Install => t::cluster::add_install(),
+        Button::OpenSignIn => t::cluster::add_open_sign_in(),
         Button::Close => t::cluster::add_close(),
         Button::Cancel => t::cluster::add_cancel(),
         Button::Done => t::cluster::add_finish(),
@@ -138,6 +141,7 @@ fn id_of(button: Button) -> &'static str {
         Button::Check => "add-check",
         Button::CheckAgain => "add-check-again",
         Button::Install => "add-install",
+        Button::OpenSignIn => "add-open-sign-in",
         Button::Close => "add-close",
         Button::Cancel => "add-cancel",
         Button::Done => "add-done",
@@ -275,6 +279,18 @@ impl ClusterSheetView {
                 match install(&mut sheet.password, |password| runs.run(&name, password)) {
                     Ok(()) => sheet.error = None,
                     Err(why) => sheet.error = Some(why),
+                }
+            }
+            Button::OpenSignIn => {
+                let target = sheet
+                    .flow
+                    .as_deref()
+                    .and_then(|name| runs.get(name))
+                    .as_ref()
+                    .and_then(sign_in_target)
+                    .map(str::to_owned);
+                if let Some(url) = target {
+                    cx.open_url(&url);
                 }
             }
             Button::Close => {

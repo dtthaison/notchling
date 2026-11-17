@@ -157,6 +157,7 @@ fn snap(phase: Phase, plan: Option<PlanView>, log: &[&str]) -> Snap {
         plan,
         rows: Vec::new(),
         log: log.iter().map(|l| (*l).to_owned()).collect(),
+        sign_in: None,
     }
 }
 

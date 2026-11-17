@@ -117,6 +117,12 @@ impl SubRow {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TailscaleState {
+    Missing,
+    LoggedOut,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Detected {
     pub os: Option<MachineOs>,
@@ -130,6 +136,7 @@ pub struct Detected {
     pub tools: Option<WorkerTools>,
     pub node: Option<String>,
     pub notchling_app: Option<bool>,
+    pub tailscale: Option<TailscaleState>,
 }
 
 impl Detected {
@@ -151,6 +158,7 @@ impl Detected {
         over(&mut d.tools, &new.tools);
         over(&mut d.node, &new.node);
         over(&mut d.notchling_app, &new.notchling_app);
+        over(&mut d.tailscale, &new.tailscale);
         d
     }
 }
@@ -456,11 +464,20 @@ pub struct FixContext {
     pub admin_password: Option<Secret>,
     pub log: Arc<OutputSink>,
     pub masks: Masks,
+    pub links: Option<LinkOffer>,
 }
+
+pub type LinkOffer = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl FixContext {
     pub fn mask(&self, text: &str) -> String {
         self.masks.apply(text)
+    }
+
+    pub fn offer_link(&self, url: &str) {
+        if let Some(offer) = &self.links {
+            offer(url);
+        }
     }
 }
 

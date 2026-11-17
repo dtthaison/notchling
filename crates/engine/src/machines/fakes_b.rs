@@ -166,6 +166,7 @@ impl Rig {
             admin_password: self.password.map(Secret::new),
             log: Arc::new(|_, _| {}),
             masks: self.masks.clone().with_admin(self.password),
+            links: None,
         }
     }
 

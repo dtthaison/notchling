@@ -12,6 +12,7 @@ use super::steps_node_mac::app_closed;
 use super::steps_node_reach::{is_tailscale_ip, reach};
 use super::steps_node_service::service;
 use super::steps_sd::first_line_300;
+use super::steps_tailscale_linux::tagged;
 use crate::cluster::persist::CLUSTER_DIR;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -109,19 +110,26 @@ pub(super) fn first_text_line(text: &str) -> String {
 
 fn parse_tailscale(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let Some(v) = json_from(&out.text) else {
+        let linux = ctx.machine.is_linux();
         if out.code == 126 || out.code == 127 {
-            return CheckResult::fail("Tailscale isn't installed there");
+            let missing = CheckResult::fail("Tailscale isn't installed there");
+            return tagged(missing, linux, out.code, None);
         }
         let why = first_text_line(&out.text);
-        return CheckResult::fail(if why.is_empty() {
-            "Tailscale isn't running there".to_string()
-        } else {
-            format!("Tailscale isn't running there: {why}")
-        });
+        return tagged(
+            CheckResult::fail(if why.is_empty() {
+                "Tailscale isn't running there".to_string()
+            } else {
+                format!("Tailscale isn't running there: {why}")
+            }),
+            linux,
+            out.code,
+            None,
+        );
     };
     let state = v["BackendState"].as_str().unwrap_or("");
     if state != "Running" {
-        return CheckResult::fail(format!(
+        let stopped = CheckResult::fail(format!(
             "Tailscale is {}",
             if state.is_empty() {
                 "not running".to_string()
@@ -129,6 +137,7 @@ fn parse_tailscale(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
                 cut(state)
             }
         ));
+        return tagged(stopped, ctx.machine.is_linux(), out.code, Some(state));
     }
     let address = v["Self"]["TailscaleIPs"]
         .as_array()

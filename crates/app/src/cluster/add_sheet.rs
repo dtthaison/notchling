@@ -4,12 +4,13 @@ use notchling_engine::accounts::Secret;
 use notchling_engine::machines::address;
 use notchling_engine::machines::forms::machine_problems;
 use notchling_engine::machines::registry::MachineOs;
+use notchling_engine::machines::steps_tailscale_linux::is_sign_in_link;
 use notchling_locale as t;
 
 use super::add::{AddFlow, Phase, Stop};
 use super::add_parts::AddParts;
 use super::add_plan::PlanView;
-use super::add_runs::Snap;
+use super::add_runs::{SignInLink, Snap};
 use super::not_joined::NotJoined;
 
 #[derive(Default)]
@@ -72,6 +73,7 @@ pub enum Button {
     Check,
     CheckAgain,
     Install,
+    OpenSignIn,
     Close,
     Cancel,
     Done,
@@ -94,6 +96,13 @@ impl Action {
     fn when(button: Button, enabled: bool) -> Action {
         Action { button, enabled }
     }
+}
+
+pub fn sign_in_target(snap: &Snap) -> Option<&str> {
+    snap.sign_in
+        .as_ref()
+        .map(SignInLink::url)
+        .filter(|url| is_sign_in_link(url))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -237,6 +246,9 @@ pub fn view(
             view.log = snap.log.clone();
             view.note = Some(t::cluster::add_running_note().to_owned());
             view.actions = vec![Action::on(Button::Close)];
+            if sign_in_target(snap).is_some() {
+                view.actions.insert(0, Action::on(Button::OpenSignIn));
+            }
         }
         Phase::Joining { .. } => {
             view.busy = Some(t::cluster::add_joining(&snap.name));

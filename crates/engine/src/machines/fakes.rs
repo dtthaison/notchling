@@ -284,6 +284,7 @@ impl Ctx {
             admin_password: admin.map(Secret::new),
             log: log.sink(),
             masks: self.masks.clone().with_admin(admin),
+            links: None,
         };
         (ctx, log)
     }

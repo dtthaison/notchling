@@ -473,6 +473,8 @@ cluster-add-cancel = Cancel
 cluster-add-close = Close
 cluster-add-finish = Done
 cluster-add-install = Install and Join
+# Button while Tailscale waits for you to sign in; it opens Tailscale's sign-in page in the browser.
+cluster-add-open-sign-in = Open Sign-In Page
 # Spinner line while the machine is read; $target is user@host.
 cluster-add-checking = Checking { $target }…
 # Line over the plan; $name is the machine.

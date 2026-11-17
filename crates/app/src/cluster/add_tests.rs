@@ -440,3 +440,6 @@ mod review;
 
 #[path = "add_review3_tests.rs"]
 mod review3;
+
+#[path = "add_sign_in_tests.rs"]
+mod sign_in;

@@ -45,6 +45,7 @@ pub mod steps_sd_check;
 pub mod steps_sd_service;
 pub mod steps_secret;
 pub mod steps_selfupdate;
+pub mod steps_tailscale_linux;
 mod steps_versions;
 mod steps_xcode;
 pub mod token_creation;
@@ -170,6 +171,8 @@ mod tests_selfupdate;
 mod tests_shell;
 #[cfg(test)]
 mod tests_status;
+#[cfg(test)]
+mod tests_tailscale_linux;
 #[cfg(test)]
 mod tests_token_scope;
 #[cfg(test)]
