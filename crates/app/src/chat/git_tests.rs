@@ -91,6 +91,11 @@ fn only_forty_files_show_and_the_rest_are_counted() {
             })
             .collect(),
         truncated,
+        upstream: None,
+        ahead: 0,
+        behind: 0,
+        initial: false,
+        changed_at: None,
     };
     assert_eq!(many(40, false).hidden_text(), None);
     assert_eq!(
@@ -237,4 +242,19 @@ fn the_preview_has_a_changed_an_added_and_a_removed_file_and_a_diff_with_both_ki
     assert!(m.files.iter().any(|f| f.path == PREVIEW_PATH));
     let kinds: Vec<DiffKind> = preview_diff().runs.iter().map(|r| r.0).collect();
     assert!(kinds.contains(&DiffKind::Added) && kinds.contains(&DiffKind::Removed));
+}
+
+#[test]
+fn status_raw_fields_are_parsed() {
+    let m = parse_status(&json!({
+        "repo": true, "branch": "main", "upstream": "origin/main", "ahead": 2, "behind": 3,
+        "initial": true, "changed_at": 1_700_000_000_000i64, "changes": []
+    }))
+    .unwrap();
+    assert_eq!(m.upstream.as_deref(), Some("origin/main"));
+    assert_eq!((m.ahead, m.behind, m.initial), (2, 3, true));
+    assert_eq!(m.changed_at, Some(1_700_000_000_000));
+    let bare = parse_status(&json!({"repo": true, "branch": "main", "changes": []})).unwrap();
+    assert_eq!((bare.upstream, bare.ahead, bare.behind), (None, 0, 0));
+    assert_eq!((bare.initial, bare.changed_at), (false, None));
 }

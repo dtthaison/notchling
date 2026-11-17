@@ -20,6 +20,11 @@ fn git_model(files: usize, truncated: bool) -> GitModel {
             })
             .collect(),
         truncated,
+        upstream: None,
+        ahead: 0,
+        behind: 0,
+        initial: false,
+        changed_at: None,
     }
 }
 

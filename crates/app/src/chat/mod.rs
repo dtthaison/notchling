@@ -5,6 +5,7 @@ pub mod blocks;
 mod blocks_tests;
 pub mod branch;
 pub mod branch_rows;
+pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
 pub mod claude_picker;
@@ -115,3 +116,4 @@ pub mod used;
 pub mod view;
 #[cfg(test)]
 mod window_words_tests;
+pub mod worktrees;

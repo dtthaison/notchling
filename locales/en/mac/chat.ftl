@@ -430,6 +430,46 @@ chat-changes-file-count = { $count ->
 # $files is the file count line and $count the files not yet committed.
 chat-changes-uncommitted = { $files } · { $count } uncommitted
 
+## Details Panel, Branches
+
+chat-git-this-session = this session
+# $count is the number of uncommitted files, with a plus when git cut its own list.
+chat-git-uncommitted = { $count } uncommitted
+# $age is how long ago, already written.
+chat-git-last-ago = last { $age } ago
+chat-git-last-now = last just now
+# $upstream is the branch being followed, or its remote when the names match.
+chat-git-even-with = even with { $upstream }
+# $count is a commit count written already.
+chat-git-to-push = { $count } to push
+chat-git-only-behind = { $count } behind
+chat-git-push-and-behind = { $ahead } to push, { $behind } behind
+chat-git-no-upstream = no upstream
+chat-git-upstream-gone = upstream gone
+chat-git-base-ahead = { $count } ahead
+chat-git-base-ahead-behind = { $ahead } ahead, { $behind } behind
+# $age is how long it has been running, already written.
+chat-git-running-for = running { $age }
+# $count is how many more sessions or agents work in the same folder.
+chat-git-more-matches = +{ $count }
+chat-git-needs-input = needs input
+chat-git-folder-missing = folder missing
+chat-git-no-common = no common history
+# $default is the main branch's name; $count picks the form; $text is the same number written plainly.
+chat-git-default-and = { $count ->
+    [one] { $default } and { $text } branch
+   *[other] { $default } and { $text } branches
+}
+chat-git-other-branches = { $count ->
+    [one] { $text } other branch
+   *[other] { $text } other branches
+}
+# $rest is the other branches line that follows.
+chat-git-more-worktrees = { $count ->
+    [one] { $text } more worktree · { $rest }
+   *[other] { $text } more worktrees · { $rest }
+}
+
 ## Window
 
 chat-window-hide-details = Hide the session details

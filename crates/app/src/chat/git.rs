@@ -50,6 +50,11 @@ pub struct GitModel {
     pub tracking: Option<String>,
     pub files: Vec<GitFile>,
     pub truncated: bool,
+    pub upstream: Option<String>,
+    pub ahead: u64,
+    pub behind: u64,
+    pub initial: bool,
+    pub changed_at: Option<i64>,
 }
 
 impl GitModel {
@@ -120,6 +125,11 @@ pub fn parse_status(reply: &Value) -> Option<GitModel> {
         tracking,
         files,
         truncated: reply["truncated"].as_bool().unwrap_or(false),
+        upstream: reply["upstream"].as_str().map(str::to_owned),
+        ahead: reply["ahead"].as_u64().unwrap_or(0),
+        behind: reply["behind"].as_u64().unwrap_or(0),
+        initial: reply["initial"].as_bool().unwrap_or(false),
+        changed_at: reply["changed_at"].as_i64(),
     })
 }
 
@@ -291,6 +301,11 @@ pub fn preview_model() -> Arc<GitModel> {
             file("crates/engine/src/old_helper.rs", "D", Some(0), Some(48)),
         ],
         truncated: false,
+        upstream: Some("origin/agent-run-oss".to_owned()),
+        ahead: 2,
+        behind: 0,
+        initial: false,
+        changed_at: None,
     })
 }
 
