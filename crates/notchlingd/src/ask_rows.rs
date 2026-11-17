@@ -37,11 +37,20 @@ pub(crate) fn wire(row: &Row, waiting: bool, with_answer: bool) -> Value {
     Value::Object(out)
 }
 
-pub(crate) fn key_for(agents: &[Agent], session_id: &str) -> String {
+fn agent_of<'a>(agents: &'a [Agent], session_id: &str) -> Option<&'a Agent> {
     agents
         .iter()
-        .find(|agent| agent.session_id().as_deref() == Some(session_id))
-        .map_or_else(|| session_id.to_string(), Agent::outbox_key)
+        .find(|agent| agent.session_id().as_deref() == Some(session_id) || agent.id == session_id)
+}
+
+pub(crate) fn key_for(agents: &[Agent], session_id: &str) -> String {
+    agent_of(agents, session_id).map_or_else(|| session_id.to_string(), Agent::outbox_key)
+}
+
+pub(crate) fn name_for(agents: &[Agent], session_id: &str) -> String {
+    agent_of(agents, session_id)
+        .map(|agent| agent.name.clone())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

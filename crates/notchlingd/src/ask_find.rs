@@ -419,11 +419,7 @@ impl AskOps {
     }
 
     pub(crate) fn session_name(&self, session_id: &str) -> String {
-        self.agents()
-            .into_iter()
-            .find(|agent| agent.session_id().as_deref() == Some(session_id))
-            .map(|agent| agent.name)
-            .unwrap_or_default()
+        crate::ask_rows::name_for(&self.agents(), session_id)
     }
 
     pub(crate) fn claimed(&self, except: &str) -> HashSet<String> {

@@ -1,4 +1,4 @@
-use super::{key_for, wire};
+use super::{key_for, name_for, wire};
 use notchling_engine::ask::{AskState, Asker, By, Mode, Row};
 use notchling_engine::sessions::Agent;
 use serde_json::json;
@@ -158,4 +158,31 @@ fn the_key_is_the_listed_agents_outbox_key_else_the_session_id() {
     assert_eq!(key_for(&agents, "sid-1"), "abcd1234");
     assert_eq!(key_for(&agents, "sid-unknown"), "sid-unknown");
     assert_eq!(key_for(&[], "sid-1"), "sid-1");
+}
+
+fn process(id: &str, name: &str) -> Agent {
+    serde_json::from_value(json!({
+        "id": id, "name": name, "project": "p", "cwd": "/tmp", "group": "working", "label": "",
+        "detail": null, "sinceMs": 0, "target": {"process": 4242}, "suggestedReply": null,
+        "transcriptPath": null, "host": "Terminal", "headless": false,
+        "configDir": null, "command": null, "resumeSessionId": null
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_session_with_no_transcript_path_is_found_by_its_row_id() {
+    let agents = vec![
+        process("sid-t", "build site"),
+        agent("sid-j", "abcd1234", None),
+    ];
+    assert_eq!(name_for(&agents, "sid-t"), "build site");
+    assert_eq!(key_for(&agents, "sid-t"), "sid-t");
+    assert_eq!(
+        key_for(&agents, "sid-j"),
+        "abcd1234",
+        "a job keys on its job id"
+    );
+    assert_eq!(name_for(&agents, "sid-j"), "n");
+    assert_eq!(name_for(&agents, "nobody"), "");
 }
