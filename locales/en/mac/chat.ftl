@@ -476,6 +476,45 @@ chat-git-more-worktrees-only = { $count ->
     [one] { $text } more worktree
    *[other] { $text } more worktrees
 }
+chat-branches-title = Branches
+chat-branches-tab-working = Working
+chat-branches-tab-not-merged = Not Merged
+chat-branches-tab-merged = Merged
+# $tab is the tab's name and $count the number of branches in it.
+chat-branches-tab-count = { $tab } ({ $count })
+chat-branches-filter = Filter Branches
+chat-branches-worktrees = Worktrees
+chat-branches-no-worktree = No Worktree
+chat-branches-main-checkout = main checkout
+chat-branches-local = local
+chat-branches-github-only = GitHub only
+# $remote is the remote's name.
+chat-branches-remote-only = { $remote } only
+# $name is the session's title and $state says running, needs input or idle.
+chat-branches-session = “{ $name }” { $state }
+chat-branches-state-running = running
+chat-branches-state-idle = idle
+# $age is how long ago, already written; $subject is the commit's first line.
+chat-branches-last-commit = last commit { $age } ago
+chat-branches-last-commit-subject = last commit { $age } ago “{ $subject }”
+chat-branches-last-commit-now = last commit just now
+chat-branches-last-commit-now-subject = last commit just now “{ $subject }”
+# $base is the branch it is merged into.
+chat-branches-merged-into = merged into { $base }
+chat-branches-not-merged = not merged
+chat-branches-detached = detached
+# $age is how long ago the remotes were fetched, already written.
+chat-branches-fetched = Remote branches as of { $age } ago
+chat-branches-fetched-now = Remote branches as of just now
+chat-branches-never-fetched = Never fetched
+chat-branches-reading = Reading the branches…
+chat-branches-cant-read = Can't read the branches.
+chat-branches-no-other-worktrees = No other worktrees.
+chat-branches-empty = No branches here.
+chat-branches-no-match = No branches match.
+chat-branches-truncated = Not all branches are shown.
+chat-branches-changes = Changes
+chat-branches-open-session = Open Session
 
 ## Window
 

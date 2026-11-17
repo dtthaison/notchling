@@ -4,6 +4,7 @@ pub mod blocks;
 #[cfg(test)]
 mod blocks_tests;
 pub mod branch;
+pub mod branch_list;
 pub mod branch_rows;
 pub mod changes_target;
 #[cfg(test)]

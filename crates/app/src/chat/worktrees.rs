@@ -309,11 +309,11 @@ pub fn title(running_others: usize, worktrees: usize) -> String {
     counted_title(t::chat::details_git(), running_others, worktrees)
 }
 
-fn faint(text: String) -> SubPart {
+pub(super) fn faint(text: String) -> SubPart {
     SubPart::Faint(text)
 }
 
-fn join(groups: Vec<Vec<SubPart>>) -> Vec<SubPart> {
+pub(super) fn join(groups: Vec<Vec<SubPart>>) -> Vec<SubPart> {
     let mut out: Vec<SubPart> = Vec::new();
     for group in groups.into_iter().filter(|group| !group.is_empty()) {
         if !out.is_empty() {
@@ -368,7 +368,12 @@ fn upstream_label<'a>(upstream: &'a str, branch: Option<&str>) -> &'a str {
     }
 }
 
-fn upstream_part(branch: Option<&str>, upstream: Option<&str>, ahead: u64, behind: u64) -> SubPart {
+pub(super) fn upstream_part(
+    branch: Option<&str>,
+    upstream: Option<&str>,
+    ahead: u64,
+    behind: u64,
+) -> SubPart {
     let Some(upstream) = upstream else {
         return faint(t::chat::git_no_upstream().to_owned());
     };
