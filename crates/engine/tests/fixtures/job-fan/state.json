@@ -1,0 +1,13 @@
+{
+  "state": "working",
+  "inFlight": {"tasks": 3, "queued": 0, "kinds": ["local_bash", "local_agent"], "drainableMonitors": 0},
+  "fan": [
+    {"id": "bshell0001", "kind": "shell", "label": "sleep 600", "startedAt": 1794000000000},
+    {"id": "aagent00000000001", "kind": "agent", "label": "Check the thing", "startedAt": 1794000100000},
+    {"id": "aagent00000000002", "kind": "agent", "label": "Old one", "startedAt": 1794000200000, "doneAt": 1794000300000},
+    {"id": "mmonitor01", "kind": "monitor", "label": "wait tick", "startedAt": 1794000400000},
+    {"id": "", "kind": "shell", "label": "no id", "startedAt": 1794000500000},
+    {"id": "bshell0002", "kind": "shell", "label": "make test", "startedAt": 1794000600000, "doneAt": 1794000700000}
+  ],
+  "tokens": 10
+}

@@ -1,4 +1,4 @@
-use notchling_engine::transcript::model::{Conversation, TaskStatus};
+use notchling_engine::transcript::model::{BackgroundShell, Conversation, TaskStatus};
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 use notchling_locale as t;
@@ -7,7 +7,7 @@ use super::format::tokens;
 use super::markers;
 use super::paging::Counts;
 use super::shell_list::Listing;
-use super::shell_rows::shell_rows;
+use super::shell_rows::shell_rows_with_fan;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskRow {
@@ -204,6 +204,24 @@ pub fn inspector_listed(
     shells: Option<&Listing>,
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Inspector {
+    inspector_with_fan(
+        conversation,
+        &[],
+        subagents,
+        subagent_counts,
+        shells,
+        writers,
+    )
+}
+
+pub fn inspector_with_fan(
+    conversation: &Conversation,
+    fan: &[BackgroundShell],
+    subagents: &[SubagentRow],
+    subagent_counts: Counts,
+    shells: Option<&Listing>,
+    writers: &dyn Fn(&str) -> Vec<i32>,
+) -> Inspector {
     Inspector {
         tasks: task_rows(conversation),
         facts: facts(conversation),
@@ -211,13 +229,14 @@ pub fn inspector_listed(
         subagents: subagents.to_vec(),
         shell_counts: shells.map_or_else(
             || Counts {
-                total: conversation.shells.len(),
+                total: conversation.shells.len() + fan.len(),
                 ..Counts::default()
             },
             |listing| listing.counts,
         ),
-        shells: shell_rows(
+        shells: shell_rows_with_fan(
             conversation,
+            fan,
             shells.map(|listing| listing.ids.as_slice()),
             writers,
         ),

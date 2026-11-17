@@ -59,9 +59,10 @@ fn look(paths: &[String]) -> HashMap<String, Vec<i32>> {
 impl ChatView {
     pub(super) fn refresh_shells(&mut self, more: usize) {
         let probe = &self.shell_probe;
-        self.shells = self.shell_page.show(
+        self.shells = self.shell_page.show_with_fan(
             self.selected.as_deref(),
             &self.conversation,
+            &self.fan_shells,
             more,
             &|path| probe.writing(path),
         );
