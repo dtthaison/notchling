@@ -44,6 +44,7 @@ log_choice! {
         SessionRemoved = "session_removed",
         RestoredUnsure = "restored_unsure",
         Noticed = "noticed",
+        Combined = "combined",
     }
 }
 

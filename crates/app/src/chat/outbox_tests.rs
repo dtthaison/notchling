@@ -542,3 +542,40 @@ fn an_outgoing_text_is_hidden_once_the_feed_shows_its_bubble_one_for_one() {
     assert_eq!(unbubbled(outgoing, &bubbles), ["ok then", "other"]);
     assert_eq!(unbubbled(vec!["x".to_owned()], &[]), ["x"]);
 }
+
+#[test]
+fn a_combined_queued_row_is_one_bubble_in_its_place_and_both_sends_leave_no_ghost() {
+    let mut feed = OutboxFeed::default();
+    let mut list = vec![pending("first")];
+    deliver(&mut list, "first", 100, Some("o1"));
+    let mut first = wire("o1", "s1", "queued", None, "first");
+    first["queuedMs"] = json!(1_000);
+    feed.apply(&changed(first), 200);
+    let mut later = wire("o2", "s1", "queued", None, "later");
+    later["queuedMs"] = json!(2_000);
+    later["position"] = json!(2);
+    feed.apply(&changed(later), 200);
+
+    list.push(pending("second"));
+    assert_eq!(
+        unbubbled(outgoing_texts(&list), &feed.bubbles("s1")),
+        ["second"],
+        "until the answer, the second send shows once"
+    );
+    deliver(&mut list, "second", 300, Some("o1"));
+    let mut joined = wire("o1", "s1", "queued", None, "first\n\nsecond");
+    joined["queuedMs"] = json!(1_000);
+    joined["updatedMs"] = json!(20_000);
+    assert!(feed.apply(&changed(joined), 400));
+    drop_boxed(&mut list, |id| feed.shows(id));
+    assert!(list.is_empty());
+
+    let rows = feed.rows("s1");
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["o1", "o2"], "the joined row keeps its place");
+    let bubbles = feed.bubbles("s1");
+    assert_eq!(bubbles.len(), 2);
+    assert_eq!(bubbles[0].text, "first\n\nsecond");
+    assert_eq!(bubbles[0].status, Status::Queued);
+    assert_eq!(bubbles[0].buttons, [Button::Edit, Button::Remove]);
+}

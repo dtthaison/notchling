@@ -996,7 +996,7 @@ The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](
 
 | Op | Args | Reply |
 | --- | --- | --- |
-| `session.send` | `{id, text, clear_box?: bool, options?: {model?, effort?}, via?}` | `{"outboxId", "session", "state": "queued", "position": n}`; `position` is 1 for the head of the session's mailbox |
+| `session.send` | `{id, text, clear_box?: bool, options?: {model?, effort?}, via?}` | `{"outboxId", "session", "state": "queued", "position": n}`; `position` is 1 for the head of the session's mailbox; when the session's last row was still `queued` and the same kind of message (a prompt, same tool and options, no `clear_box`, under 100 KB together), the text is added to that row after a blank line and the reply is that row's own, with `"combined": true` |
 | `outbox.list` | `{session?}` | `[row...]` in order, every session or one; on a client node whose app follows the `outbox` topic, a list of every session (or of a qualified remote `session`, when it is not forwarded) also holds the remote rows the daemon already knows, after the local ones, each with `session` qualified `<node>/<session>` and in the owner's queue order |
 | `outbox.edit` | `{id, text}` | `{"edited": true}` |
 | `outbox.remove` | `{id}` | `{"removed": true}` |

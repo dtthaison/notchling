@@ -39,6 +39,9 @@ mod outcome_tests;
 #[path = "refusal_tests.rs"]
 mod refusal_tests;
 #[cfg(test)]
+#[path = "store_combine_tests.rs"]
+mod store_combine_tests;
+#[cfg(test)]
 #[path = "store_tests.rs"]
 mod store_tests;
 #[cfg(test)]

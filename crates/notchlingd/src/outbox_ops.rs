@@ -23,7 +23,7 @@ use notchling_events::spec::Outcome;
 use notchling_events::{scope, Event, Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 pub type Wake = Arc<dyn Fn(&str) + Send + Sync>;
@@ -63,6 +63,7 @@ pub struct OutboxOps {
     room: Arc<dyn Room>,
     events: Option<Events>,
     notes: Mutex<HashMap<String, String>>,
+    apart: Mutex<HashSet<String>>,
     wake: Mutex<Option<Wake>>,
     forget: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
@@ -155,6 +156,7 @@ impl OutboxOps {
             room,
             events,
             notes: Mutex::new(HashMap::new()),
+            apart: Mutex::new(HashSet::new()),
             wake: Mutex::new(None),
             forget: Mutex::new(None),
             resume: Mutex::new(None),
@@ -335,6 +337,7 @@ impl OutboxOps {
     }
 
     pub fn publish_removed(&self, id: &str, session: &str, why: &str) {
+        lock(&self.apart).remove(id);
         self.settle.removed(id, why);
         self.set_note(id, None);
         let forget = lock(&self.forget).clone();
@@ -354,10 +357,10 @@ impl OutboxOps {
     }
 
     pub fn emit_then(&self, row: &Row, then: OutboxThen) {
-        self.emit_chars(row, then, row.text.chars().count());
+        self.emit_chars(row, then, row.text.chars().count(), row.via);
     }
 
-    fn emit_chars(&self, row: &Row, then: OutboxThen, chars: usize) {
+    fn emit_chars(&self, row: &Row, then: OutboxThen, chars: usize, via: Via) {
         let Some(events) = &self.events else {
             return;
         };
@@ -366,7 +369,7 @@ impl OutboxOps {
                 session: self.session_ref_of(&row.session),
                 then,
                 chars: Count(chars as u64),
-                via: reply_via(row.via),
+                via: reply_via(via),
             },
             Outcome::Info,
             now_ms(),
@@ -454,6 +457,14 @@ impl OutboxOps {
     }
 
     pub fn send(&self, args: &SendArgs) -> Result<Row, ApiError> {
+        self.save(args, false).map(|(row, _)| row)
+    }
+
+    pub fn send_combining(&self, args: &SendArgs) -> Result<(Row, bool), ApiError> {
+        self.save(args, true)
+    }
+
+    fn save(&self, args: &SendArgs, combine: bool) -> Result<(Row, bool), ApiError> {
         check_text(&args.text)?;
         let target = self.target(&args.id, &args.text)?;
         if !self.saving {
@@ -467,16 +478,36 @@ impl OutboxOps {
             via: args.via,
             clear_box: args.clear_box,
         };
+        if combine {
+            let joined = self
+                .store
+                .combine_except(&new, now_ms(), &|id| lock(&self.apart).contains(id))
+                .map_err(|_| save_failed())?;
+            if let Some(row) = joined {
+                self.publish_changed(&row);
+                self.emit_chars(
+                    &row,
+                    OutboxThen::Combined,
+                    args.text.chars().count(),
+                    args.via,
+                );
+                self.wake_session(&row.session);
+                return Ok((row, true));
+            }
+        }
         let row = self.store.insert(&new, now_ms()).map_err(|e| match e {
             InsertError::Empty => bad(EMPTY),
             InsertError::TooLong => bad(TOO_LONG),
             InsertError::Full => failed("200 messages are already waiting for this session."),
             InsertError::Db(_) => save_failed(),
         })?;
+        if !combine {
+            lock(&self.apart).insert(row.id.clone());
+        }
         self.publish_changed(&row);
         self.emit_then(&row, OutboxThen::Queued);
         self.wake_session(&row.session);
-        Ok(row)
+        Ok((row, false))
     }
 
     fn send_op(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -492,14 +523,18 @@ impl OutboxOps {
             options: args.get("options").filter(|o| o.is_object()).cloned(),
             via,
         };
-        let row = self.send(&send)?;
+        let (row, combined) = self.send_combining(&send)?;
         let position = self.position(&row);
-        Ok(json!({
+        let mut sent = json!({
             "outboxId": row.id,
             "session": row.session,
             "state": "queued",
             "position": position,
-        }))
+        });
+        if combined {
+            sent["combined"] = json!(true);
+        }
+        Ok(sent)
     }
 
     fn list(&self, args: &Value) -> Result<Value, ApiError> {
