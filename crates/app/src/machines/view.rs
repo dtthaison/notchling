@@ -578,7 +578,7 @@ pub(super) fn mono_box(
     scrollable(mono_lines(id, text, max_h, a))
 }
 
-pub(super) fn mono_lines(
+pub(crate) fn mono_lines(
     id: impl Into<SharedString>,
     text: &str,
     max_h: f32,

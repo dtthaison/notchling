@@ -451,3 +451,62 @@ cluster-add-why-claude = Sessions and jobs run Claude Code.
 cluster-add-why-other = Needed to join the cluster.
 # Reason when Join Cluster is pressed for a machine Machines doesn't list; $name is the name.
 cluster-add-no-machine = Machines has no machine named { $name }.
+
+## Add Machine sheet
+
+# Button in the cluster sheet's header that opens the Add Machine sheet.
+cluster-add-machine = Add Machine…
+cluster-add-title = Add Machine
+# Title of the sheet once a machine is chosen; $name is its name.
+cluster-add-title-named = Add { $name }
+cluster-add-intro = Type the machine's SSH address. Check only reads from the machine; nothing is installed until you press Install and Join.
+cluster-add-address-label = SSH Address
+cluster-add-address-placeholder = user@host
+cluster-add-name-label = Name
+# Line under the address field; $target is user@host as it will be used.
+cluster-add-connects-as = Connects as { $target }
+cluster-add-check = Check
+cluster-add-check-again = Check Again
+cluster-add-cancel = Cancel
+cluster-add-close = Close
+cluster-add-finish = Done
+cluster-add-install = Install and Join
+# Spinner line while the machine is read; $target is user@host.
+cluster-add-checking = Checking { $target }…
+# Line over the plan; $name is the machine.
+cluster-add-plan-intro = These steps run on { $name }, one at a time. Nothing has run yet.
+cluster-add-show-commands = Show Commands
+cluster-add-hide-commands = Hide Commands
+# Tag on a plan step that needs the admin password.
+cluster-add-admin-tag = Admin
+# Tag on a plan step that you do yourself.
+cluster-add-howto-tag = You do this
+# Placeholder of the admin password field; $target is user@host.
+cluster-add-password-placeholder = Admin password for { $target }
+# Warning when admin steps run as root over ssh; $host is the machine's address.
+cluster-add-root-warning = Admin steps run as root over SSH on { $host }.
+cluster-add-master-label = Can Be Master
+cluster-add-acting-label = Let it run sessions and jobs
+cluster-add-choices-label = After it joins
+cluster-add-running-note = You can close this. The run goes on, and the Cluster sheet shows it.
+cluster-add-log-label = What it did
+# Row on the cluster sheet while a plan waits for Install and Join; $name is the machine.
+cluster-add-row-waiting = { $name } is ready to add.
+# Row on the cluster sheet while the machine is read; $name is the machine.
+cluster-add-row-checking = Checking { $name }…
+# Row on the cluster sheet when a run stopped; $name is the machine, $why the reason.
+cluster-add-row-stopped = Adding { $name } stopped: { $why }
+cluster-add-row-show = Show
+cluster-add-row-dismiss = Dismiss
+# Shown on the sheet when this build can't add machines, such as a render over fixtures.
+cluster-add-unavailable = Adding machines isn't available here.
+
+## Not in the Cluster
+
+# Heading of the section that lists machines from Machines that aren't members.
+cluster-not-joined-title = Not in the Cluster
+cluster-not-joined-join = Join Cluster…
+# Under a machine in that section; $target is user@host, $os the system such as macOS or Linux.
+cluster-not-joined-line = { $target } · { $os }
+# Under a machine in that section when its system isn't known yet; $target is user@host.
+cluster-not-joined-line-unknown = { $target }

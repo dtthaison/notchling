@@ -37,6 +37,7 @@ fn active(phase: &Phase) -> bool {
 #[derive(Clone)]
 pub struct AddRuns {
     flows: Arc<Mutex<BTreeMap<String, AddFlow>>>,
+    shown: Arc<Mutex<BTreeMap<String, Snap>>>,
     generation: Arc<AtomicU64>,
 }
 
@@ -50,8 +51,29 @@ impl AddRuns {
     pub fn tied_to(generation: Arc<AtomicU64>) -> AddRuns {
         AddRuns {
             flows: Arc::new(Mutex::new(BTreeMap::new())),
+            shown: Arc::new(Mutex::new(BTreeMap::new())),
             generation,
         }
+    }
+
+    pub fn fixed(snaps: Vec<Snap>) -> AddRuns {
+        let runs = AddRuns::default();
+        *runs.shown.lock().unwrap_or_else(|e| e.into_inner()) = snaps
+            .into_iter()
+            .map(|snap| (snap.name.clone(), snap))
+            .collect();
+        runs
+    }
+
+    pub fn briefs(&self) -> Vec<(String, Phase)> {
+        let mut out: Vec<(String, Phase)> = self
+            .flows()
+            .values()
+            .map(|flow| (flow.name().to_owned(), flow.phase().clone()))
+            .collect();
+        let shown = self.shown.lock().unwrap_or_else(|e| e.into_inner());
+        out.extend(shown.values().map(|s| (s.name.clone(), s.phase.clone())));
+        out
     }
 
     fn flows(&self) -> MutexGuard<'_, BTreeMap<String, AddFlow>> {
@@ -138,7 +160,14 @@ impl AddRuns {
 
     pub fn get(&self, name: &str) -> Option<Snap> {
         let flows = self.flows();
-        let flow = flows.get(name)?;
+        let Some(flow) = flows.get(name) else {
+            return self
+                .shown
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(name)
+                .cloned();
+        };
         let phase = flow.phase().clone();
         let log = match phase {
             Phase::Running { .. } | Phase::Joining { .. } | Phase::Stopped(_) => flow.log(),

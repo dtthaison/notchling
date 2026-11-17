@@ -8,6 +8,7 @@ use notchling_locale as t;
 use serde_json::Value;
 
 use super::add_runs::AddRuns;
+use super::add_source::AddSource;
 use super::model::ClusterModel;
 use super::wire::{self, Request};
 use crate::actions::{Socket, Transport};
@@ -127,6 +128,7 @@ pub struct ClusterFeed {
     shared: Arc<Shared>,
     transport: Option<Arc<dyn Transport>>,
     remote_vault: Arc<Vault>,
+    add: Arc<AddSource>,
 }
 
 impl ClusterFeed {
@@ -135,7 +137,17 @@ impl ClusterFeed {
             shared: Arc::new(Shared::new()),
             transport: None,
             remote_vault: Arc::new(Vault::remote_fixed(Vec::new())),
+            add: Arc::new(AddSource::none()),
         }
+    }
+
+    pub fn fixed_adding(model: ClusterModel, add: AddSource, runs: AddRuns) -> ClusterFeed {
+        let mut feed = ClusterFeed::fixed(model);
+        feed.add = Arc::new(add);
+        if let Some(shared) = Arc::get_mut(&mut feed.shared) {
+            shared.adds = runs;
+        }
+        feed
     }
 
     pub fn fixed(model: ClusterModel) -> ClusterFeed {
@@ -161,7 +173,11 @@ impl ClusterFeed {
                     socket: config.socket.clone(),
                     version: config.version.clone(),
                 };
-                ClusterFeed::start(config, Arc::new(transport))
+                let mut feed = ClusterFeed::start(config, Arc::new(transport));
+                if let Some(root) = root {
+                    feed.add = Arc::new(AddSource::for_root(root.clone()));
+                }
+                feed
             }
             None => ClusterFeed::none(),
         }
@@ -190,6 +206,10 @@ impl ClusterFeed {
 
     pub fn adds(&self) -> AddRuns {
         self.shared.adds.clone()
+    }
+
+    pub fn add_source(&self) -> Arc<AddSource> {
+        self.add.clone()
     }
 
     pub fn snapshot(&self) -> ClusterModel {

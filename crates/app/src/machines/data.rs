@@ -48,6 +48,10 @@ impl Setup {
         Some(Setup::of(DataRoot::for_run(data_root)?, live, vault))
     }
 
+    pub fn for_root(root: DataRoot, live: bool, vault: bool) -> Setup {
+        Setup::of(root, live, vault)
+    }
+
     pub fn for_render(data_root: Option<&Path>) -> Setup {
         let root = match data_root {
             Some(dir) => DataRoot::fixture(dir),

@@ -19,6 +19,8 @@ mod model_tests;
 #[cfg(test)]
 mod model_tests_b;
 #[cfg(test)]
+mod model_tests_join;
+#[cfg(test)]
 mod model_tests_node;
 #[cfg(test)]
 mod model_tests_safety;

@@ -2,7 +2,15 @@ pub mod add;
 pub mod add_job;
 pub mod add_parts;
 pub mod add_plan;
+#[cfg(target_os = "macos")]
+mod add_plan_view;
+#[cfg(target_os = "macos")]
+mod add_renders;
 pub mod add_runs;
+pub mod add_sheet;
+pub mod add_source;
+#[cfg(target_os = "macos")]
+mod add_view;
 pub mod feed;
 pub mod install;
 pub mod model;
@@ -10,6 +18,8 @@ pub mod move_sheet;
 #[cfg(target_os = "macos")]
 mod move_view;
 pub mod not_joined;
+#[cfg(target_os = "macos")]
+mod not_joined_view;
 pub mod promote;
 pub mod promote_sheet;
 #[cfg(target_os = "macos")]
@@ -32,6 +42,8 @@ pub const HEIGHT: f32 = 560.0;
 
 #[cfg(test)]
 mod add_rig_tests;
+#[cfg(test)]
+mod add_sheet_tests;
 #[cfg(test)]
 mod add_tests;
 #[cfg(test)]
