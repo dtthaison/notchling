@@ -60,11 +60,7 @@ tools/bundle-next.sh --install  # also quits the running copy and installs it to
 
 `tools/bundle-next.sh` builds the app, its daemon and its terminal host with `cargo` and signs the app ad hoc. `--install` refuses to replace an app that is still the Swift one. Linux node binaries for development come from `tools/build-node.sh`. The retired Swift app builds with `./build.sh`.
 
-To start at login, turn on **Launch at Login** in Settings, or run:
-
-```sh
-/Applications/Notchling.app/Contents/MacOS/Notchling --enable-login-item
-```
+To start it at login, add Notchling in System Settings > General > Login Items.
 
 ## Menu
 
