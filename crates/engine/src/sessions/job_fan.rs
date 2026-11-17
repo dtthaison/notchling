@@ -19,13 +19,22 @@ pub struct FanEntry {
 }
 
 pub fn parse(bytes: &[u8]) -> Vec<FanEntry> {
-    let Ok(state) = serde_json::from_slice::<Value>(bytes) else {
-        return Vec::new();
-    };
-    let Some(fan) = state.get("fan").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    fan.iter().filter_map(entry).collect()
+    try_parse(bytes).unwrap_or_default()
+}
+
+fn try_parse(bytes: &[u8]) -> Option<Vec<FanEntry>> {
+    let state = serde_json::from_slice::<Value>(bytes).ok()?;
+    let mut seen = std::collections::HashSet::new();
+    Some(
+        state
+            .get("fan")
+            .and_then(Value::as_array)
+            .map(|fan| fan.iter().filter_map(entry).collect::<Vec<_>>())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| seen.insert(e.id.clone()))
+            .collect(),
+    )
 }
 
 fn entry(item: &Value) -> Option<FanEntry> {
@@ -83,11 +92,13 @@ impl FanReader {
                 return fan.clone();
             }
         }
-        let fan = Arc::new(
-            std::fs::read(path)
-                .map(|bytes| parse(&bytes))
-                .unwrap_or_default(),
-        );
+        let Some(parsed) = std::fs::read(path).ok().and_then(|bytes| try_parse(&bytes)) else {
+            return self
+                .seen
+                .get(path)
+                .map_or_else(Arc::default, |(_, _, fan)| fan.clone());
+        };
+        let fan = Arc::new(parsed);
         self.seen
             .insert(path.to_path_buf(), (stamp.0, stamp.1, fan.clone()));
         fan

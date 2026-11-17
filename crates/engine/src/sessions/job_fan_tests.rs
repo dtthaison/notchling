@@ -60,3 +60,23 @@ fn an_unchanged_file_is_not_read_again_and_a_changed_one_is() {
     assert!(reader.read(&file).is_empty(), "gone again");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_half_written_file_keeps_the_last_fan_and_a_repeated_id_is_one_entry() {
+    let dir = scratch("half");
+    let file = dir.join("state.json");
+    let mut reader = FanReader::default();
+    std::fs::write(&file, STATE).expect("write");
+    assert_eq!(reader.read(&file).len(), 2);
+    std::fs::write(&file, b"{\"fan\":[{\"id\":").expect("half");
+    assert_eq!(reader.read(&file).len(), 2, "kept until the file parses");
+    std::fs::write(
+        &file,
+        br#"{"fan":[{"id":"b1","kind":"shell","label":"x"},{"id":"b1","kind":"shell","label":"y"}]}"#,
+    )
+    .expect("whole");
+    let fan = reader.read(&file);
+    assert_eq!(fan.len(), 1);
+    assert_eq!(fan[0].label, "x");
+    let _ = std::fs::remove_dir_all(&dir);
+}
