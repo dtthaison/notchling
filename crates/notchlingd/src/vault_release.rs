@@ -29,6 +29,7 @@ pub type Still<'a> = dyn Fn() -> Result<(), String> + 'a;
 pub(super) enum Who<'a> {
     Caller(&'a Caller),
     Grant(&'a ReleaseFor),
+    Machine(&'a str),
 }
 
 pub struct Released {
@@ -226,7 +227,7 @@ fn missing(who: &Who<'_>, name: &str, all: &[VaultEntry]) -> ApiError {
         "No secret by that name.".to_string()
     };
     match who {
-        Who::Grant(_) => failed(which),
+        Who::Grant(_) | Who::Machine(_) => failed(which),
         Who::Caller(_) => {
             let saved = if all.is_empty() {
                 "none".to_string()

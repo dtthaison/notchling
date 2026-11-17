@@ -34,7 +34,7 @@ const MAX_COMMAND: usize = 64 * 1024;
 const MAX_TEXT: usize = 8 * 1024;
 const MAX_SHORT: usize = 2 * 1024;
 
-pub const VAULT_OPS: [&str; 9] = [
+pub const VAULT_OPS: [&str; 10] = [
     ops::VAULT_FIND,
     ops::VAULT_USE,
     ops::VAULT_REQUEST,
@@ -44,6 +44,7 @@ pub const VAULT_OPS: [&str; 9] = [
     ops::VAULT_APPROVAL_ANSWER,
     ops::VAULT_REQUEST_CANCEL,
     ops::VAULT_PENDING,
+    ops::VAULT_ADMIN,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -208,6 +209,7 @@ impl VaultOps {
             ops::VAULT_APPROVAL_ANSWER => self.answer(caller, args),
             ops::VAULT_REQUEST_CANCEL => self.cancel(caller, args),
             ops::VAULT_PENDING => Ok(self.pending()),
+            ops::VAULT_ADMIN => self.admin_secret(caller, args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }
@@ -300,6 +302,56 @@ impl VaultOps {
         Ok(json!({"env": env, "hide": hide}))
     }
 
+    fn admin_secret(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        if caller.tier != Tier::App || caller.client != ClientKind::App {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "only the Notchling app may read the vault for a machine's admin password",
+            ));
+        }
+        let bad = || ApiError::bad_request("vault.admin takes {name, machine}");
+        let name = text(args, "name", MAX_SHORT)?.ok_or_else(bad)?;
+        let machine = text(args, "machine", MAX_SHORT)?.ok_or_else(bad)?;
+        let id = name.to_lowercase();
+        if !self.entries()?.iter().any(|e| e.id() == id) {
+            return Err(failed(format!("{name} isn't in the Vault.")));
+        }
+        let reason = format!("sudo on {machine}");
+        let mut trail = Trail::new(String::new(), reason.clone());
+        let always = || Ok(());
+        let released = self.release_picked(
+            &Who::Machine(&machine),
+            std::slice::from_ref(&name),
+            ("", &reason),
+            (&mut trail, &always),
+        );
+        match released {
+            Ok(pairs) => {
+                let secret = pairs
+                    .into_iter()
+                    .next()
+                    .map(|(_, value)| value.secret)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| failed(format!("{name} has no password saved.")));
+                let result = if secret.is_ok() {
+                    SecretResult::Given
+                } else {
+                    SecretResult::Failed
+                };
+                if !self.note_used(&trail, result, secret.is_ok()) {
+                    return Err(failed(LOG_DOWN));
+                }
+                Ok(json!({"secret": secret?}))
+            }
+            Err((e, result)) => {
+                if !trail.names.is_empty() {
+                    self.note_used(&trail, result, false);
+                }
+                Err(e)
+            }
+        }
+    }
+
     fn save(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let request = text(args, "request", MAX_SHORT)?;
         if request.is_some() {
@@ -383,6 +435,9 @@ mod release;
 #[path = "vault_events.rs"]
 mod vault_events;
 
+#[cfg(test)]
+#[path = "vault_ops_admin_tests.rs"]
+mod admin_tests;
 #[cfg(test)]
 #[path = "vault_ops_events_tests.rs"]
 mod events_tests;

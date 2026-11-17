@@ -188,12 +188,28 @@ pub fn commands(plan: &ShownPlan) -> BTreeMap<String, String> {
         .collect()
 }
 
+pub fn machines_of(plan: &ShownPlan) -> BTreeMap<String, String> {
+    match &plan.kind {
+        PlanKind::UpdateNotchling(names) => plan
+            .steps
+            .iter()
+            .zip(names)
+            .map(|(step, name)| (step.title.clone(), name.clone()))
+            .collect(),
+        _ => BTreeMap::new(),
+    }
+}
+
 pub fn execute(engine: &SetupEngine, plan: &ShownPlan, asks: &AdminAsks) -> FixOutcome {
     if let PlanKind::UpdateNotchling(names) = &plan.kind {
         engine.refresh(Some(names), true);
     }
+    let machines = machines_of(plan);
     match engine.confirm(plan.id, AdminAnswer::None) {
-        Ok(confirmed) => engine.run_with(confirmed, &|step| asks.ask(&step.title, step)),
+        Ok(confirmed) => engine.run_with(confirmed, &|step| {
+            let machine = machines.get(&step.title).unwrap_or(&step.title);
+            asks.ask(machine, step)
+        }),
         Err(why) => FixOutcome::fail(why),
     }
 }

@@ -110,6 +110,31 @@ fn an_admin_question_survives_the_sheet_and_waits_to_be_answered() {
 }
 
 #[test]
+fn choosing_a_vault_entry_answers_the_question_without_a_typed_password() {
+    let session = UpdateSession::default();
+    assert!(session.begin());
+    let asked = asking(&session);
+    session.pull();
+    assert_eq!(session.pending_machine().as_deref(), Some("m1"));
+    let mut partly = typed("partial");
+    assert!(
+        !session.answer_vault("m2", "m2-admin", &mut partly),
+        "another machine's choice never answers this prompt"
+    );
+    assert_eq!(partly.len(), 7, "a refused choice keeps what was typed");
+    assert!(session.answer_vault("m1", "m1-admin", &mut partly));
+    assert!(partly.is_empty(), "choosing an entry drops the typed text");
+    let AdminAnswer::Vault(entry) = asked.join().unwrap() else {
+        panic!("not the Vault")
+    };
+    assert_eq!(entry, "m1-admin");
+    assert!(
+        !session.answer_vault("m1", "m1-admin", &mut partly),
+        "nothing left to answer"
+    );
+}
+
+#[test]
 fn return_in_an_empty_password_field_asks_nothing_and_cancel_still_cancels() {
     let session = UpdateSession::default();
     assert!(session.begin());

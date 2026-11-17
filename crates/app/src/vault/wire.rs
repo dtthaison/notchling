@@ -134,6 +134,7 @@ pub struct Approval {
     pub command: String,
     pub folder: String,
     pub verified: Option<Verified>,
+    pub machine: Option<String>,
 }
 
 impl Approval {
@@ -163,6 +164,11 @@ impl Approval {
             command: text("command"),
             folder: text("folder"),
             verified: data.get("verified").and_then(Verified::from_value),
+            machine: data
+                .get("machine")
+                .and_then(Value::as_str)
+                .filter(|m| !m.is_empty())
+                .map(str::to_owned),
         })
     }
 }

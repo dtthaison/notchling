@@ -95,6 +95,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::VAULT_APPROVAL_ANSWER, Home::Kind("inbox.closed")),
     (ops::VAULT_REQUEST_CANCEL, Home::Kind("inbox.closed")),
     (ops::VAULT_PENDING, Home::Quiet),
+    (ops::VAULT_ADMIN, Home::Kind("vault.secret_used")),
     (ops::CATALOG_GET, Home::Quiet),
     (ops::CATALOG_ROLES, Home::Quiet),
     (ops::INBOX_LIST, Home::Quiet),

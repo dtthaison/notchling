@@ -1,3 +1,4 @@
+use super::admin_secret::failure;
 use super::engine::{lock, SetupEngine};
 use super::engine_plan::{AdminAnswer, ApprovedStep};
 use super::masks::{FixLog, Masks};
@@ -14,7 +15,81 @@ fn fail(m: impl Into<String>) -> FixOutcome {
     FixOutcome::fail(m)
 }
 
+#[derive(Default)]
+pub(super) struct AdminUse {
+    pub(super) secret: Option<Secret>,
+    pub(super) vault: Option<String>,
+}
+
 impl SetupEngine {
+    pub(super) fn answer_for(
+        &self,
+        m: &Machine,
+        shown: &ApprovedStep,
+        ask_admin: &dyn Fn(&ApprovedStep) -> AdminAnswer,
+    ) -> AdminAnswer {
+        match m.admin_secret() {
+            Some(entry) if m.admin() == AdminAccess::Sudo => AdminAnswer::Vault(entry.to_owned()),
+            _ => ask_admin(shown),
+        }
+    }
+
+    pub fn set_admin_secret(&self, machine: &str, entry: Option<&str>) -> Result<(), String> {
+        let _writing = super::registry::write_lock();
+        let mut list = self.deps.store.machines();
+        let Some(m) = list.iter_mut().find(|m| m.name == machine) else {
+            return Err(format!("no machine named {machine}"));
+        };
+        if m.admin_secret() == entry.filter(|e| !e.is_empty()) {
+            return Ok(());
+        }
+        m.set_admin_secret(entry);
+        if self.deps.store.save(&list) {
+            self.changed();
+            Ok(())
+        } else {
+            Err("Couldn't save machines.json.".into())
+        }
+    }
+
+    pub(super) fn admin_use(
+        &self,
+        m: &Machine,
+        needs_admin: bool,
+        admin: &AdminAnswer,
+    ) -> Result<AdminUse, String> {
+        if !(needs_admin && m.admin() == AdminAccess::Sudo) {
+            return Ok(AdminUse::default());
+        }
+        if let Some(typed) = admin.password() {
+            return Ok(AdminUse {
+                secret: Some(typed.clone()),
+                vault: None,
+            });
+        }
+        let AdminAnswer::Vault(shown) = admin else {
+            return Ok(AdminUse::default());
+        };
+        let entry = m
+            .admin_secret()
+            .ok_or_else(|| format!("{} has no Vault entry for the admin password", m.name))?
+            .to_owned();
+        if &entry != shown {
+            return Err(format!(
+                "{}'s Vault entry changed from {shown}; Set up again",
+                m.name
+            ));
+        }
+        match self.admin_secrets.read(&entry, &m.name) {
+            Ok(secret) if !secret.is_empty() => Ok(AdminUse {
+                secret: Some(secret),
+                vault: Some(entry),
+            }),
+            Ok(_) => Err(failure(&entry, "it has no password saved")),
+            Err(why) => Err(failure(&entry, &why)),
+        }
+    }
+
     fn append_log(&self, machine: &str, lines: Vec<String>) {
         append(&self.state, machine, lines);
     }
@@ -61,7 +136,7 @@ impl SetupEngine {
                         m.name
                     ))
                 }
-                AdminAccess::Sudo if admin.password().is_none() => {
+                AdminAccess::Sudo if !admin.gives_password() => {
                     return Some("needs the admin password".into())
                 }
                 _ => {}
@@ -93,10 +168,11 @@ impl SetupEngine {
         if let Some(why) = self.refusal(&step, &m, admin, plan.needs_admin, true, false) {
             return fail(why);
         }
-        let password = (plan.needs_admin && m.admin() == AdminAccess::Sudo)
-            .then(|| admin.password().cloned())
-            .flatten();
-        let outcome = self.perform(id.clone(), &step.title, &m, password, |ctx| (plan.run)(ctx));
+        let used = match self.admin_use(&m, plan.needs_admin, admin) {
+            Ok(used) => used,
+            Err(why) => return fail(why),
+        };
+        let outcome = self.perform_with(id.clone(), &step.title, &m, used, |ctx| (plan.run)(ctx));
         self.refresh(Some(&[machine.to_string()]), true);
         outcome
     }
@@ -137,6 +213,21 @@ impl SetupEngine {
         password: Option<Secret>,
         body: impl FnOnce(&FixContext) -> FixOutcome,
     ) -> FixOutcome {
+        let used = AdminUse {
+            secret: password,
+            vault: None,
+        };
+        self.perform_with(id, title, m, used, body)
+    }
+
+    pub(super) fn perform_with(
+        &self,
+        id: StepId,
+        title: &str,
+        m: &Machine,
+        used: AdminUse,
+        body: impl FnOnce(&FixContext) -> FixOutcome,
+    ) -> FixOutcome {
         let self_update = id.self_update_tool();
         {
             let mut s = lock(&self.state);
@@ -145,6 +236,10 @@ impl SetupEngine {
             }
             s.running.insert(m.name.clone(), id);
         }
+        let AdminUse {
+            secret: password,
+            vault,
+        } = used;
         let masks: Masks = self.masks(m, password.as_ref().map(Secret::expose));
         self.append_log(&m.name, vec![format!("▸ {title}")]);
         self.changed();
@@ -180,7 +275,7 @@ impl SetupEngine {
             s.running.remove(&m.name);
             *s.fixes_ended.entry(m.name.clone()).or_default() += 1;
         }
-        self.audit(&m.name, title, raw.ok);
+        self.audit(&m.name, title, raw.ok, vault.as_deref());
         if let Some(tool) = self_update {
             self.log_self_update(&m.name, tool, title, raw.ok, &message);
         }
@@ -280,7 +375,7 @@ impl SetupEngine {
                 if let Some(why) = shell::admin_refusal(&m) {
                     return fail(format!("{}: {why}", step.title));
                 }
-                answer = ask_admin(shown);
+                answer = self.answer_for(&m, shown, ask_admin);
                 if matches!(answer, AdminAnswer::None) {
                     return fail(format!(
                         "Set up all stopped before {}: cancelled",
@@ -372,10 +467,11 @@ impl SetupEngine {
         if script != expected {
             return fail(format!("{title} needs a look; Set up again"));
         }
-        let password = (needs_admin && m.admin() == AdminAccess::Sudo)
-            .then(|| admin.password().cloned())
-            .flatten();
-        let outcome = self.perform(StepId::RUNNING, title, &m, password, |ctx| {
+        let used = match self.admin_use(&m, needs_admin, admin) {
+            Ok(used) => used,
+            Err(why) => return fail(why),
+        };
+        let outcome = self.perform_with(StepId::RUNNING, title, &m, used, |ctx| {
             let r = if needs_admin {
                 run::admin(ctx, &script, 900)
             } else {
@@ -454,17 +550,20 @@ impl SetupEngine {
         let _ = selfupdate_log::append(data, at_ms, tool, machine, action, ok, message);
     }
 
-    fn audit(&self, machine: &str, title: &str, ok: bool) {
+    fn audit(&self, machine: &str, title: &str, ok: bool, vault: Option<&str>) {
         let Some(path) = &self.deps.audit else {
             return;
         };
-        let line = serde_json::json!({
+        let mut line = serde_json::json!({
             "time": (self.deps.clock)(),
             "op": "machines.fix",
             "machine": machine,
             "fix": title,
             "ok": ok,
         });
+        if let (Some(entry), Some(map)) = (vault, line.as_object_mut()) {
+            map.insert("vault".into(), serde_json::json!([entry]));
+        }
         if let Some(dir) = path.parent() {
             let _ = notchling_platform::files::ensure_private_dir(dir);
         }

@@ -414,7 +414,7 @@ cluster-add-blocked-tailscale = Tailscale has to be connected on { $name } befor
 # Shown by Install and Join when the node account is not allowed; $name is the machine.
 cluster-add-blocked-worker-user = The account on { $name } must not be an admin. Fix it first, then Check Again.
 # Shown when Install and Join is pressed without the admin password.
-cluster-add-needs-password = Type the admin password first.
+cluster-add-needs-password = Type the admin password or use a Vault entry first.
 # Shown when the machine changed after the plan was shown.
 cluster-add-changed = The plan changed after it was shown. Check Again.
 # Shown when a button is pressed that the flow can't take now.
@@ -553,3 +553,33 @@ cluster-update-password-for = Admin password for { $step }
 cluster-update-password-placeholder = Admin password
 # Second sentence of the update line in the Machines window.
 cluster-update-from-cluster = Update them from the Cluster sheet in Notchling.
+
+## Admin password from the Vault
+
+# Button beside an admin password field; it opens the list of Vault entries.
+cluster-vault-use = Use From Vault
+# Item in that list that opens the Vault's own form for a new entry.
+cluster-vault-new = New Entry…
+# Shown in the list while the Vault is read.
+cluster-vault-reading = Reading the Vault…
+# Shown in the list when the Vault has no entries.
+cluster-vault-empty = The Vault has no entries yet.
+# Shown in the list when the Vault can't be read; $error is the reason.
+cluster-vault-read-failed = Couldn't read the Vault: { $error }
+# Detail of a chosen entry that is no longer in the Vault.
+cluster-vault-gone = Not in the Vault
+# Line under the field when an entry is chosen; $name is the entry's name.
+cluster-vault-using = Using { $name } from the Vault. A password typed here is used instead.
+# Button that stops using the chosen entry.
+cluster-vault-stop = Don't Use Vault
+# Kind shown beside an entry in the list.
+cluster-vault-kind-login = Login
+cluster-vault-kind-token = Token
+# Shown in the list when the Vault switch is off.
+cluster-vault-off = The Vault is off. Turn it on in Settings to use an entry.
+# Title of the approval window for Notchling's own sudo step; $names are the entries, $machine the machine.
+cluster-vault-approve-title = Allow Notchling to use { $names } for sudo on { $machine }?
+# Line under that title in the approval window.
+cluster-vault-approve-note = Notchling reads this password only for the sudo step, sends it to the machine over ssh and never shows it.
+# Shown on the sheet when the chosen entry can't be saved on the machine; $error is the reason.
+cluster-vault-save-failed = Couldn't keep that entry for the machine: { $error }

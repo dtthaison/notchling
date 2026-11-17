@@ -679,6 +679,7 @@ impl Render for ClusterSheetView {
         let moving = self.move_overlay(&model, a, cx);
         let adding = self.add_overlay(window, a, cx);
         let updating = self.update_overlay(window, a, cx);
+        let vault_new = self.vault_overlay();
         let on: Handler<Self, SecretsEvent> =
             Rc::new(|this, event, cx| this.secrets_event(event, cx));
         let editor = self.editing.as_ref().map(|e| Editor {
@@ -731,6 +732,7 @@ impl Render for ClusterSheetView {
             .children(moving)
             .children(adding)
             .children(updating)
+            .children(vault_new)
             .part("Cluster View", a, cx)
     }
 }

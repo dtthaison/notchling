@@ -594,3 +594,34 @@ fn two_first_loads_of_a_v1_registry_migrate_it_once() {
     );
     assert_eq!(reg.all().len(), 2);
 }
+
+#[test]
+fn the_vault_entry_for_the_admin_password_round_trips_and_an_old_file_loads_without_it() {
+    let dir = TempDir::new("reg");
+    let reg = registry(&dir, "data");
+    let mut m = Machine::new("m2", "m2.tail", "worker");
+    assert_eq!(m.admin_secret(), None);
+    m.set_admin_secret(Some("m2-admin"));
+    assert!(reg.save(std::slice::from_ref(&m)));
+    assert_eq!(reg.machine("m2").unwrap().admin_secret(), Some("m2-admin"));
+    let text = doc(&reg).unwrap();
+    assert!(text.contains("\"adminSecret\": \"m2-admin\""), "{text}");
+    m.set_admin_secret(None);
+    assert!(reg.save(std::slice::from_ref(&m)));
+    assert!(!doc(&reg).unwrap().contains("adminSecret"));
+    let old = with_old_file(
+        &dir,
+        "old",
+        r#"{"version":2,"machines":[{"name":"m3","host":"m3.tail","user":"worker","admin":"sudo"}]}"#,
+    );
+    assert_eq!(old.machine("m3").unwrap().admin_secret(), None);
+    let empty = with_old_file(
+        &dir,
+        "empty",
+        r#"{"version":2,"machines":[{"name":"m4","host":"h","user":"u","adminSecret":""}]}"#,
+    );
+    assert_eq!(empty.machine("m4").unwrap().admin_secret(), None);
+    let m4 = empty.machine("m4").unwrap();
+    assert!(empty.save(std::slice::from_ref(&m4)));
+    assert!(!doc(&empty).unwrap().contains("adminSecret"));
+}

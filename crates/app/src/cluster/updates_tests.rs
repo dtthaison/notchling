@@ -7,7 +7,9 @@ use serde_json::{json, Value};
 
 use super::add_rig_tests::Rig;
 use super::model::ClusterModel;
-use super::updates::{banner, execute, lines, members, plan, rows_for, run_button, Kind, NotNow};
+use super::updates::{
+    banner, execute, lines, machines_of, members, plan, rows_for, run_button, Kind, NotNow,
+};
 use crate::machines::runs::AdminAsks;
 
 const ME: &str = "a1b2c3d4e5f60718";
@@ -346,4 +348,42 @@ fn a_busy_machine_runs_only_after_update_anyway() {
         state: UpdateState::NeedsBuild("Build the Linux nodes first".into()),
     }];
     assert!(plan(&rig.engine, &nothing, &BTreeSet::new()).is_err());
+}
+
+#[test]
+fn an_admin_question_in_an_update_names_the_machine_not_the_step_title() {
+    use super::updates_state::UpdateSession;
+    let rig = world(&["m1", "m2"]);
+    let rows = ready_rows(&rig, &["m1", "m2"]);
+    let shown = plan(&rig.engine, &rows, &BTreeSet::new()).expect("a plan");
+    let who = machines_of(&shown);
+    assert_eq!(who.len(), 2);
+    let step = shown.steps[1].clone();
+    assert!(
+        step.title.starts_with("Update Notchling on"),
+        "{}",
+        step.title
+    );
+    let session = UpdateSession::default();
+    assert!(session.begin());
+    let asks = session.asks();
+    let machine = who[&step.title].clone();
+    let asked = std::thread::spawn(move || asks.ask(&machine, &step));
+    for _ in 0..400 {
+        if session.pull().1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(session.pending_machine().as_deref(), Some("m2"));
+    assert!(session
+        .pending_target()
+        .unwrap()
+        .starts_with("Update Notchling on"));
+    let mut typed = super::add_sheet::AddPassword::default();
+    assert!(session.answer_vault("m2", "m2-admin", &mut typed));
+    assert!(matches!(
+        asked.join().unwrap(),
+        notchling_engine::machines::engine_plan::AdminAnswer::Vault(e) if e == "m2-admin"
+    ));
 }

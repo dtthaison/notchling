@@ -47,7 +47,7 @@ const OWN_QUIET: [&str; 10] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 112] = [
+const NEVER_QUIET: [&str; 113] = [
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,
@@ -123,6 +123,7 @@ const NEVER_QUIET: [&str; 112] = [
     ops::VAULT_APPROVAL_ANSWER,
     ops::VAULT_REQUEST_CANCEL,
     ops::VAULT_PENDING,
+    ops::VAULT_ADMIN,
     ops::CATALOG_GET,
     ops::INBOX_LIST,
     ops::INBOX_ANSWER,

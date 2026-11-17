@@ -42,6 +42,7 @@ fn plan(needs_password: bool, blocked: Option<&str>) -> PlanView {
     PlanView {
         rows: vec![row(StepId::NODE_BINARY, false)],
         needs_password,
+        admin_entry: None,
         root_confirm: false,
         can_be_master: choice(false),
         acting: choice(true),

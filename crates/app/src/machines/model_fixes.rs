@@ -95,16 +95,14 @@ impl MachinesModel {
         if !matches!(self.sheet, Some(Sheet::Fix(_))) {
             return None;
         }
+        let entry = self.admin_entry();
         let password = self.password.take();
         let Some(Sheet::Fix(prompt)) = self.sheet.take() else {
             return None;
         };
         let answer = match &prompt.plan.admin {
             AdminNeed::RootConfirm => AdminAnswer::RootConfirmed,
-            AdminNeed::Password => match password {
-                Some(p) => AdminAnswer::Password(p),
-                None => AdminAnswer::None,
-            },
+            AdminNeed::Password => AdminAnswer::pick(password, entry.as_deref()),
             AdminNeed::None | AdminNeed::Refused(_) => AdminAnswer::None,
         };
         if prompt.asked {

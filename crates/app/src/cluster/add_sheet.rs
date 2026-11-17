@@ -2,6 +2,7 @@ use std::fmt;
 
 use notchling_engine::accounts::Secret;
 use notchling_engine::machines::address;
+use notchling_engine::machines::engine_plan::AdminAnswer;
 use notchling_engine::machines::forms::machine_problems;
 use notchling_engine::machines::registry::MachineOs;
 use notchling_engine::machines::steps_tailscale_linux::is_sign_in_link;
@@ -229,10 +230,11 @@ pub fn view(
         }
         Phase::Plan => {
             view.plan_intro = Some(t::cluster::add_plan_intro(&snap.name));
-            let ready = snap
-                .plan
-                .as_ref()
-                .is_some_and(|p| p.blocked.is_none() && (!p.needs_password || password_len > 0));
+            let ready = snap.plan.as_ref().is_some_and(|p| {
+                p.blocked.is_none()
+                    && (!p.needs_password
+                        || AdminAnswer::ready(password_len, p.admin_entry.as_deref()))
+            });
             view.plan = snap.plan.clone();
             view.actions = vec![
                 Action::on(Button::Cancel),

@@ -53,13 +53,17 @@ impl VaultOps {
                 crate::vault_caller::verified(self.processes.as_ref(), caller, folder)
             }
             Who::Grant(grant) => json!({"node": grant.node_name, "job": grant.job}),
+            Who::Machine(_) => Value::Null,
         };
-        let event = json!({"id": id, "names": names, "entries": entries, "command": command,
+        let mut event = json!({"id": id, "names": names, "entries": entries, "command": command,
                            "folder": folder, "verified": verified});
+        if let Who::Machine(machine) = who {
+            event["machine"] = json!(machine);
+        }
         self.approvals.describe(&id, &event);
         let by = match who {
             Who::Grant(grant) => Some(*grant),
-            Who::Caller(_) => None,
+            Who::Caller(_) | Who::Machine(_) => None,
         };
         let raised = self.raise_approval(&id, &names, (command, folder), by);
         self.room

@@ -161,6 +161,8 @@ pub struct Machine {
     pub file_vault: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     admin: Option<AdminAccess>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    admin_secret: Option<String>,
     #[serde(default = "claude_worker")]
     pub claude_secret: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,6 +182,7 @@ impl Machine {
             os: None,
             file_vault: false,
             admin: Some(AdminAccess::Sudo),
+            admin_secret: None,
             claude_secret: claude_worker(),
             abilities: None,
             jobs: Vec::new(),
@@ -198,8 +201,19 @@ impl Machine {
         self.admin = Some(access);
     }
 
+    pub fn admin_secret(&self) -> Option<&str> {
+        self.admin_secret.as_deref().filter(|s| !s.is_empty())
+    }
+
+    pub fn set_admin_secret(&mut self, entry: Option<&str>) {
+        self.admin_secret = entry.filter(|s| !s.is_empty()).map(str::to_owned);
+    }
+
     fn settle(&mut self) {
         self.admin = Some(self.admin());
+        if self.admin_secret.as_deref().is_some_and(str::is_empty) {
+            self.admin_secret = None;
+        }
         let name = self.name.clone();
         for job in &mut self.jobs {
             if let Some(s) = &mut job.sd_worker {

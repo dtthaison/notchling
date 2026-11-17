@@ -89,7 +89,10 @@ impl SetupEngine {
         for (name, shown) in names.iter().zip(approved) {
             let mut answer = AdminAnswer::None;
             if shown.needs_admin {
-                answer = ask_admin(shown);
+                answer = match self.machine(name) {
+                    Some(m) => self.answer_for(&m, shown, ask_admin),
+                    None => ask_admin(shown),
+                };
                 if matches!(answer, AdminAnswer::None) {
                     return fail(format!(
                         "The update stopped before {name}: cancelled; {done} machine(s) updated"

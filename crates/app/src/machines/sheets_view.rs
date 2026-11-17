@@ -10,6 +10,7 @@ use super::forms::{
 use super::model::Sheet;
 use super::pieces::FixPrompt;
 use super::view::{busy_line, marked, mono_lines, state_icon, state_mark, text_line, MachinesView};
+use crate::vault::pick_view::pick_block;
 
 fn state(enabled: bool) -> PartState {
     if enabled {
@@ -146,8 +147,20 @@ impl MachinesView {
                     ))
                     .on_click(cx.listener(|this, _, window, _| window.focus(&this.focus))),
             );
+            column = column.child(pick_block(
+                "fix",
+                &self.model.vault_pick,
+                self.model.admin_entry().as_deref(),
+                false,
+                a,
+                cx,
+                MachinesView::vault_event,
+            ));
+            if let Some(error) = &self.model.vault_error {
+                column = column.child(text_line(error, TypeRole::Label, Ink::Expired, a));
+            }
         }
-        let can_run = prompt.can_run(self.model.password_len() > 0);
+        let can_run = prompt.can_run(self.model.password_ready());
         let cancel = button(
             "fix-cancel",
             "Cancel",

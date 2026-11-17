@@ -28,6 +28,7 @@ use super::versions_feed::{MacSide, MacVersions, MacVersionsError};
 use super::versions_model::{
     banner as versions_banner, drift_lines, rows as versions_rows, VersionRow,
 };
+use crate::vault::pick::VaultPick;
 use notchling_engine::versions::Tool;
 
 pub trait Registry: Send + Sync {
@@ -57,6 +58,9 @@ impl Registry for RegistryFiles {
 
 pub trait VaultList: Send + Sync {
     fn entries(&self) -> Vec<VaultEntry>;
+    fn listing(&self) -> Result<Vec<VaultEntry>, String> {
+        Ok(self.entries())
+    }
     fn rename(&self, old: &str, new: &str) -> Result<(), String>;
     fn renew(&self, name: &str, url: Option<&str>) -> Result<(), String>;
     fn stamp(&self) -> Option<VaultStamp> {
@@ -151,6 +155,8 @@ pub struct MachinesModel {
     pub update_notes: BTreeMap<String, String>,
     pub(super) sheet: Option<Sheet>,
     pub(super) password: AdminPassword,
+    pub vault_pick: VaultPick,
+    pub vault_error: Option<String>,
     pub items: Vec<MorningItem>,
     pub done: BTreeMap<String, String>,
     pub github_note: Option<String>,
@@ -185,6 +191,8 @@ impl MachinesModel {
             update_notes: BTreeMap::new(),
             sheet: None,
             password: AdminPassword::default(),
+            vault_pick: VaultPick::default(),
+            vault_error: None,
             items: Vec::new(),
             done: BTreeMap::new(),
             github_note: None,
@@ -246,7 +254,7 @@ impl MachinesModel {
         &self.parts.engine
     }
 
-    fn refresh_machines(&mut self) {
+    pub(super) fn refresh_machines(&mut self) {
         self.registry = self.parts.registry.load();
         self.registry_path = self.parts.registry.path();
         match &self.registry {

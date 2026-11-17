@@ -234,6 +234,15 @@ impl AddRuns {
         self.bump();
     }
 
+    pub fn set_admin_entry(&self, name: &str, entry: Option<String>) -> Result<(), String> {
+        let result = match self.flows().get_mut(name) {
+            Some(flow) => flow.set_admin_entry(entry),
+            None => Err(t::cluster::add_not_now().to_owned()),
+        };
+        self.bump();
+        result
+    }
+
     pub fn set_acting(&self, name: &str, on: bool) {
         if let Some(flow) = self.flows().get_mut(name) {
             flow.set_acting(on);

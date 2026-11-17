@@ -1,8 +1,10 @@
 use std::fmt;
+use std::sync::Arc;
 
 use notchling_engine::accounts::Secret;
+use notchling_engine::machines::engine_plan::AdminAnswer;
 
-use super::model::{MachinesModel, Sheet};
+use super::model::{MachinesModel, Sheet, VaultList};
 
 #[derive(Default)]
 pub struct AdminPassword(String);
@@ -47,6 +49,8 @@ impl MachinesModel {
 
     pub(super) fn set_sheet(&mut self, sheet: Option<Sheet>) {
         self.password.clear();
+        self.vault_pick = Default::default();
+        self.vault_error = None;
         self.sheet = sheet;
     }
 
@@ -59,5 +63,38 @@ impl MachinesModel {
 
     pub fn password_len(&self) -> usize {
         self.password.0.chars().count()
+    }
+}
+
+impl MachinesModel {
+    fn sheet_machine(&self) -> Option<String> {
+        match &self.sheet {
+            Some(Sheet::Fix(prompt)) => Some(prompt.plan.machine.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn admin_entry(&self) -> Option<String> {
+        let name = self.sheet_machine()?;
+        self.machine(&name)?.admin_secret().map(str::to_owned)
+    }
+
+    pub fn password_ready(&self) -> bool {
+        AdminAnswer::ready(self.password_len(), self.admin_entry().as_deref())
+    }
+
+    pub fn set_admin_entry(&mut self, entry: Option<&str>) {
+        let Some(name) = self.sheet_machine() else {
+            return;
+        };
+        self.vault_error = self.parts.engine.set_admin_secret(&name, entry).err();
+        if self.vault_error.is_none() && entry.is_some() {
+            self.password.0.clear();
+        }
+        self.refresh_machines();
+    }
+
+    pub fn open_vault_pick(&mut self) -> Option<Arc<dyn VaultList>> {
+        self.vault_pick.toggle().then(|| self.parts.vault.clone())
     }
 }
