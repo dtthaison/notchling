@@ -53,7 +53,7 @@ fn check(ctx: &StepContext) -> CheckResult {
             } else {
                 &ran.err
             };
-            let line = first_line_300(&first_text_line(said), &|s| ctx.mask(s));
+            let line = first_line_300(&first_text_line(&ctx.mask(said)), &|s| ctx.mask(s));
             CheckResult::fail(if line.is_empty() {
                 format!("no answer from {addr}:{port}")
             } else {
