@@ -37,6 +37,9 @@ pub enum Row {
     CommandOutput {
         text: String,
     },
+    ShellLive {
+        text: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

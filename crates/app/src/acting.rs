@@ -23,6 +23,7 @@ pub mod ops {
     pub const SESSION_MOVE: &str = "session.move";
     pub const SESSION_COMMAND: &str = "session.command";
     pub const SESSION_QUESTION: &str = "session.question";
+    pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
     pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
     pub const CLUSTER_FOLLOW: &str = "cluster.follow";
     pub const CLUSTER_RETURN: &str = "cluster.return";
@@ -289,6 +290,13 @@ impl Request {
 
     pub fn question(id: &str) -> Request {
         Request::new(ops::SESSION_QUESTION, json!({ "id": id }))
+    }
+
+    pub fn shell_output(id: &str, command: &str) -> Request {
+        Request::new(
+            ops::SESSION_SHELL_OUTPUT,
+            json!({ "id": id, "command": command }),
+        )
     }
 
     pub fn interrupt(id: &str) -> Request {

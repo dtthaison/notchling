@@ -109,6 +109,9 @@ mod run_command_tests;
 pub mod scroll_trace;
 pub mod selection;
 pub mod shell_list;
+pub mod shell_live;
+#[cfg(test)]
+mod shell_live_tests;
 pub mod shell_rows;
 pub mod sidebar;
 pub mod sidebar_ask;

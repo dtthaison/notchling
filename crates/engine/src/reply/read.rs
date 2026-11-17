@@ -1,11 +1,13 @@
 use super::exec::{Failure, Pty};
 use super::keys::{timing::*, LEFT, RIGHT};
 use crate::terminal::ask_dialog::{self, Page};
+use crate::terminal::{input_box, shell_output};
 use crate::transcript::snapshot::{PendingQuestion, QuestionItem};
 use std::time::Duration;
 
 pub const NEXT_PAGE_MS: u64 = 2_500;
 pub const BACK_MS: u64 = 2_500;
+pub const SHELL_ATTACH_MS: u64 = 1_500;
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -47,6 +49,15 @@ pub fn read_question(pty: &mut dyn Pty, job: &str) -> Result<Option<PendingQuest
         return Ok(None);
     }
     Ok(Some(question_from(job, &pages)))
+}
+
+pub fn read_shell_output(pty: &mut dyn Pty, command: &str) -> Vec<String> {
+    pty.wait_attached(ms(ATTACH_QUIET_MS), ms(SHELL_ATTACH_MS), ms(ATTACH_BUSY_MS));
+    let lines = pty.screen();
+    if input_box::starting(&lines, pty.cursor()) {
+        return Vec::new();
+    }
+    shell_output::output_below(&lines, command, usize::from(COLS))
 }
 
 fn write(pty: &mut dyn Pty, keys: &str) -> Result<(), Failure> {

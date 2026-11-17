@@ -361,6 +361,25 @@ pub fn spans(text: &str) -> Vec<Span> {
     out
 }
 
+pub fn url_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let bytes = text.as_bytes();
+    let mut links = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let word_start = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if word_start && (rest.starts_with("https://") || rest.starts_with("http://")) {
+            if let Some(len) = bare_url(rest) {
+                links.push((i..i + len, rest[..len].to_owned()));
+                i += len;
+                continue;
+            }
+        }
+        i += rest.chars().next().map_or(1, char::len_utf8);
+    }
+    links
+}
+
 fn bare_url(rest: &str) -> Option<usize> {
     let scheme = if rest.starts_with("https://") { 8 } else { 7 };
     let mut end = rest

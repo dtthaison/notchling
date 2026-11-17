@@ -262,6 +262,7 @@ impl ChatView {
         });
         self.mark_used(id);
         self.conversation = Arc::default();
+        self.shell_live.reset();
         self.subagents.clear();
         self.subagent_rows.clear();
         self.subagent_counts = Default::default();
@@ -339,6 +340,7 @@ impl ChatView {
             self.redraw_conversation(cx);
         }
         shell_probe::tick(self, cx);
+        shell_live::tick(self, cx);
         let running = opinions::any_running(self, cx);
         let was_running =
             self.conversation_state(cx, |s| std::mem::replace(&mut s.opinions_running, running));

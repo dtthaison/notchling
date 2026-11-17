@@ -61,6 +61,7 @@ pub(super) fn keys_of(shown: &Conversation, tail: &[Row]) -> Vec<SharedString> {
         | Row::User {
             outbox: Some(_), ..
         } => SharedString::from(format!("sending-{k}")),
+        Row::ShellLive { .. } => SharedString::from("shell-live"),
         _ => SharedString::from(format!("queued-{k}")),
     }));
     keys

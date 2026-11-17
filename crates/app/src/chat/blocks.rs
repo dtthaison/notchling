@@ -33,7 +33,7 @@ pub fn plain_blocks(row: &Row, id: &str, message: Option<&[Part]>, shown: &Shown
             }
             out
         }
-        Row::CommandOutput { text } => vec![text.clone()],
+        Row::CommandOutput { text } | Row::ShellLive { text } => vec![text.clone()],
         Row::Thinking { .. } | Row::TurnEnd { .. } | Row::Notice { .. } => Vec::new(),
     }
 }

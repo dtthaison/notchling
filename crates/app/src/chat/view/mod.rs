@@ -44,6 +44,7 @@ mod row_select;
 pub mod scroll_probe;
 mod select;
 mod sheets;
+mod shell_live;
 mod shell_probe;
 mod sidebar;
 mod simulator;
@@ -200,6 +201,7 @@ pub struct ChatView {
     details_hidden: bool,
     panels: panels::State,
     shell_probe: shell_probe::Probe,
+    shell_live: crate::chat::shell_live::Live,
     page: page_panel::State,
     repo: repo::State,
     terminal: terminal::State,
@@ -465,6 +467,7 @@ impl ChatView {
             details_hidden: false,
             panels: Default::default(),
             shell_probe: shell_probe::Probe::default(),
+            shell_live: crate::chat::shell_live::Live::default(),
             page: page_panel::State::default(),
             repo: repo::State::default(),
             terminal: terminal::State::default(),

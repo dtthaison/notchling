@@ -16,9 +16,9 @@ use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
 };
-use notchling_engine::reply::read::read_question;
+use notchling_engine::reply::read::{read_question, read_shell_output};
 use notchling_engine::sessions::jobs::config_dir_for_job;
-use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
+use notchling_engine::sessions::{fresh, Agent, AgentGroup, AgentTarget, Probes, Roots};
 use notchling_engine::terminal::input_box;
 use notchling_events::kinds::agents::{AnswerKind, PromptKind};
 use notchling_events::kinds::choices::DoneOrFailed;
@@ -263,6 +263,7 @@ impl ActingOps {
             ops::SETTINGS_GET_ACTING | ops::SESSION_QUESTION | ops::HOOK_REQUEST => {
                 Some(OpSpec::AGENT)
             }
+            ops::SESSION_SHELL_OUTPUT => Some(OpSpec::APP),
             op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -287,6 +288,7 @@ impl ActingOps {
                 Ok(Value::Array(fit_list(list)))
             }
             ops::SESSION_QUESTION => self.question(caller, args),
+            ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
             ops::SESSION_HELD_DISCARD => self.held_discard(args),
@@ -349,16 +351,35 @@ impl ActingOps {
         self.typing_locks().for_job(&typing_key(agent))
     }
 
+    fn fresh_of(&self, current: &Agent) -> Agent {
+        self.agents_now()
+            .into_iter()
+            .find(|a| a.id == current.id)
+            .unwrap_or_else(|| current.clone())
+    }
+
+    fn try_locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> Option<R> {
+        let lock = self.typing_lock(agent);
+        let one = match lock.try_lock() {
+            Ok(one) => one,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        let fresh = self.fresh_of(agent);
+        if typing_key(&fresh) != typing_key(agent) {
+            return None;
+        }
+        let result = then(&fresh);
+        drop(one);
+        Some(result)
+    }
+
     fn locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> R {
         let mut current = agent.clone();
         loop {
             let lock = self.typing_lock(&current);
             let one = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let fresh = self
-                .agents_now()
-                .into_iter()
-                .find(|a| a.id == current.id)
-                .unwrap_or_else(|| current.clone());
+            let fresh = self.fresh_of(&current);
             if typing_key(&fresh) == typing_key(&current) {
                 let result = then(&fresh);
                 drop(one);
@@ -727,7 +748,57 @@ impl ActingOps {
             })
         })
     }
+
+    fn shell_output(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        if !self.acting.is_on() {
+            return Err(forbidden(ACTING_OFF));
+        }
+        if caller.tier != Tier::App {
+            return Err(forbidden("reading a session's screen is for the app only"));
+        }
+        let command = text_arg(args, "command")?;
+        if command.trim().is_empty() || command.len() > SHELL_COMMAND_MAX {
+            return Err(bad("command is the shell command the session is running"));
+        }
+        let agent = self.agent(args)?;
+        let no_terminal = || bad("this session has no terminal to read");
+        if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
+            return Err(no_terminal());
+        }
+        let read = self.try_locked(&agent, |agent| {
+            let job = match &agent.target {
+                AgentTarget::Job(now) if agent.can_reply() => now.clone(),
+                _ => return Err(no_terminal()),
+            };
+            if !self.running_now(&job) {
+                return Ok(None);
+            }
+            let config_dir =
+                config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
+            let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
+            let lines = read_shell_output(pty.as_mut(), command);
+            Ok(Some((lines, pty)))
+        });
+        match read {
+            None => Ok(json!({"lines": [], "busy": true})),
+            Some(Err(e)) => Err(e),
+            Some(Ok(None)) => Ok(json!({"lines": []})),
+            Some(Ok(Some((lines, pty)))) => {
+                drop(pty);
+                Ok(json!({ "lines": lines }))
+            }
+        }
+    }
+
+    fn running_now(&self, job: &str) -> bool {
+        matches!(
+            fresh::job_status(&self.roots, &Probes::from_proc(), job).as_deref(),
+            Some("busy" | "shell")
+        )
+    }
 }
+
+const SHELL_COMMAND_MAX: usize = 64 * 1024;
 
 fn answer_of(decision: &str) -> AnswerKind {
     match decision {

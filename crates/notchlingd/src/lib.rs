@@ -217,6 +217,8 @@ mod acting_ops_tests;
 #[cfg(test)]
 mod acting_permission_tests;
 #[cfg(test)]
+mod acting_shell_output_tests;
+#[cfg(test)]
 mod activity_ops_tests;
 #[cfg(test)]
 mod agy_phone_tests;
