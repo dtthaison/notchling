@@ -1,7 +1,7 @@
 # Privacy policy
 
 What data leaves a computer running Notchling: where it goes, when, and why. It was checked against the
-code on 2026-11-07: the Swift app in `legacy/macos/Sources/` and the phone app in `apps/flutter/`. Changing this file is a
+code on 2026-11-07: the Swift app (retired since, and removed from the tree; the git history has it) and the phone app in `apps/flutter/`. Changing this file is a
 protected change: it waits for the maintainer. A pull request that adds a network call updates this
 page in the same pull request.
 
@@ -10,7 +10,7 @@ page in the same pull request.
 - Notchling has no server. It sends nothing to the project or its maintainer, unless you turn on the tunnel and leave its default hostname and team, which are the maintainer's (see Tunnel below).
 - There is **no telemetry today**: no analytics, no crash reports and no usage statistics. The app
   checks for a newer release by reading one public file (see Update check below); you can turn that off.
-  The Swift app has no third-party packages.
+  The Rust app's dependencies are pinned in `Cargo.lock` and checked by `cargo-deny`.
 - Its own calls go only to services you already use, with your own logins, for the features listed
   below: Anthropic, OpenAI (ChatGPT), GitHub and, if you set up the tunnel, Cloudflare. It also
   reaches the machines you list in Machines, over `ssh`, and the other machines of a cluster you create or join, over Tailscale (see The cluster). Web pages you open load what they link to.

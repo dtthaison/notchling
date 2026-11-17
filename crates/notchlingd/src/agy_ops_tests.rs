@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 pub(crate) const RECORDING: &str =
-    include_str!("../../../legacy/macos/Tests/NotchlingTests/Fixtures/acp-agy.jsonl");
+    include_str!("../../engine/tests/fixtures/notchling/acp-agy.jsonl");
 pub(crate) const SESSION: &str = "d67413c2-a0f3-4381-8a8e-e98b541d6d76";
 pub(crate) const ROW: &str = "agy:d67413c2-a0f3-4381-8a8e-e98b541d6d76";
 

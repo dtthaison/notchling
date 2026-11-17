@@ -1,13 +1,13 @@
 # Notchling
 
-[![Tests](https://github.com/dtthaison/notchling/actions/workflows/build.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/build.yml)
+[![Tests](https://github.com/dtthaison/notchling/actions/workflows/rust.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A macOS menu bar app for people who run several coding agents at once. It shows every Claude Code, Codex and Antigravity session in the camera notch and in one Chat window, keeps the Mac awake while agents work, and switches accounts when a limit runs out. You can read a session, answer its questions and permission prompts, and reply to it without hunting for the right terminal.
 
 Notchling is free and open source, and isn't affiliated with Anthropic, OpenAI or Google.
 
-Notchling 2.0 is written in Rust and replaces the Swift app, which is retired (its code stays in `legacy/macos/`). It is for Macs with Apple silicon. [CHANGELOG.md](CHANGELOG.md) says what is new.
+Notchling 2.0 is written in Rust and replaces the Swift app, which is retired. It is for Macs with Apple silicon. [CHANGELOG.md](CHANGELOG.md) says what is new.
 
 **Some parts are off until you turn them on.** The daemon starts with its switches off, every time: **Act on Sessions**, **Phone Bridge**, **Logins and Lanes**, **Secret Vault**, **Install Hooks and Skills** and the cluster. The first five are in Settings, in the Daemon section; the cluster has a **Turn On** button in the Cluster sheet. A feature below says which switch it needs.
 
@@ -99,7 +99,7 @@ tools/bundle-next.sh            # builds build/next/Notchling.app
 tools/bundle-next.sh --install  # also quits the running copy and installs it to /Applications
 ```
 
-`tools/bundle-next.sh` builds the app, its daemon and its terminal host with `cargo` and signs the app ad hoc. `--install` refuses to replace an app that is still the Swift one. Linux node binaries for development come from `tools/build-node.sh`. The retired Swift app builds with `./build.sh`.
+`tools/bundle-next.sh` builds the app, its daemon and its terminal host with `cargo` and signs the app ad hoc. `--install` refuses to replace an app that is still the Swift one. Linux node binaries for development come from `tools/build-node.sh`.
 
 To start it at login, add Notchling in System Settings > General > Login Items.
 

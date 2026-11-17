@@ -21,11 +21,10 @@ SWIFT_NEW = "legacy/macos"
 
 HISTORY = (
     "docs/superpowers/", "docs/plans/", "docs/decisions/", "CHANGELOG.md",
-    "tools/guard/tests/fixtures/notes-before-phase3.txt",
     "tools/guard/tests/fixtures/zones-before-phase4.json",
     "tools/guard/tests/test_layout.py",
 )
-OWN_FOLDERS = (SWIFT_NEW + "/", PHONE_NEW + "/")
+OWN_FOLDERS = (PHONE_NEW + "/",)
 ZONE_MOVED_SINCE = ("apps/flutter/lib/l10n/",)
 
 OLD_SWIFT = re.compile(r"(?<![\w/])(?:Sources/(?:Notchling|ConsoleCore|hostd|AGENTS\.md)|Tests/(?:NotchlingTests|ConsoleCoreTests))")
@@ -89,40 +88,18 @@ class LayoutTests(unittest.TestCase):
         self.files = tracked()
 
     def test_old_paths_are_gone(self):
-        gone = [p for p in self.files if p != "build.sh" and any(p == n or p.startswith(n + "/") for n in SWIFT_MOVED)]
+        gone = [p for p in self.files if any(p == n or p.startswith(n + "/") for n in SWIFT_MOVED)]
         gone += [p for p in self.files if p.startswith(PHONE_OLD + "/")]
         self.assertEqual(gone, [])
 
     def test_new_paths_exist(self):
-        want = [
-            "Sources/Notchling", "Sources/ConsoleCore", "Sources/hostd", "Sources/AGENTS.md", "Tests/NotchlingTests",
-            "Tests/ConsoleCoreTests", "Demo/make-demo.sh", "Icon", "Pet", "Info.plist", "release.sh", "build.sh",
-        ]
         have = set(self.files)
-        for w in want:
-            full = SWIFT_NEW + "/" + w
-            self.assertTrue(full in have or any(p.startswith(full + "/") for p in have), full)
         for w in ["pubspec.yaml", "AGENTS.md", "DESIGN.md", "lib", "test", "tool"]:
             full = PHONE_NEW + "/" + w
             self.assertTrue(full in have or any(p.startswith(full + "/") for p in have), full)
 
-    def test_root_keeps_package_and_viz(self):
-        for p in ["Package.swift", "build.sh", "viz/viz.js"]:
-            self.assertIn(p, self.files)
-
-    def test_root_build_sh_is_a_wrapper(self):
-        text = (ROOT / "build.sh").read_text()
-        code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-        self.assertLessEqual(len(code), 4, code)
-        self.assertTrue(any("exec" in ln and "legacy/macos/build.sh" in ln and '"$@"' in ln for ln in code), code)
-
-    def test_package_swift_points_into_legacy(self):
-        text = (ROOT / "Package.swift").read_text()
-        paths = re.findall(r'path: "([^"]+)"', text)
-        self.assertTrue(paths)
-        for p in paths:
-            self.assertTrue(p.startswith(SWIFT_NEW + "/"), p)
-            self.assertTrue((ROOT / p).is_dir(), p)
+    def test_root_keeps_viz(self):
+        self.assertIn("viz/viz.js", self.files)
 
     def test_no_old_path_is_named_outside_the_moved_folders(self):
         hits: List[Tuple[str, int, str]] = []
@@ -155,7 +132,7 @@ class LayoutTests(unittest.TestCase):
         zones = load(ROOT / "tools" / "guard" / "zones.json")
         have = set(self.files)
         self.assertGreater(len(before), 700)
-        self.assertGreater(len(survivors(before, have)), len(before) // 2)
+        self.assertGreater(len(survivors(before, have)), 100)
         diffs = zone_diffs(before, zones, have)
         self.assertEqual(diffs, [], "\n".join(diffs[:20]))
 

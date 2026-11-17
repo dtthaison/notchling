@@ -1,6 +1,6 @@
 # Replies
 
-Typing into a session from Chat, the notch or the phone: when a reply waits, how it is typed, pictures, and every way it failed before. The Swift app's reply and question notes are in `legacy/macos/Sources/AGENTS.md`, its recorded fixtures in [recording.md](../recording.md).
+Typing into a session from Chat, the notch or the phone: when a reply waits, how it is typed, pictures, and every way it failed before. The recorded terminal fixtures are in `crates/engine/tests/fixtures/notchling/terminal/`; [recording.md](../recording.md) says how they were made.
 
 Part of the Rust app's notes, moved from `crates/AGENTS.md`; the index is in the root `AGENTS.md`. Keep it true: change the note with the code, and add what bites you under Things that bit before.
 

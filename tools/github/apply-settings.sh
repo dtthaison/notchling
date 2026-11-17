@@ -117,8 +117,7 @@ echo "  main: repository admins may merge a pull request without the review (pul
 echo "    never a push), because the maintainer is the only code owner and can't approve his own."
 echo "  release-tags: the GitHub Actions app (15368) may create v* tags, because gh release create"
 echo "    makes the tag with GITHUB_TOKEN. Only a workflow holding contents: write can use it: release.yml,"
-echo "    beta.yml's publish job and promote.yml's release, appcast and fold jobs, none of them with"
-echo "    signing secrets (a guard test pins that)."
+echo "    which holds no signing secrets (a guard test pins that)."
 
 echo
 echo "Manual step: set a hard monthly spend limit at the model provider's console (a spend limit"

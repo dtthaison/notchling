@@ -1,13 +1,9 @@
 use super::poller::{health, LastReport};
 use super::status::{parse_status_date, Job, NeedsYouEntry, ReadyEntry, StuckEntry, WorkerStatus};
 
-const FULL: &str =
-    include_str!("../../../../legacy/macos/Tests/NotchlingTests/Fixtures/worker-status.json");
-const OLD: &str =
-    include_str!("../../../../legacy/macos/Tests/NotchlingTests/Fixtures/worker-status-old.json");
-const PAUSED: &str = include_str!(
-    "../../../../legacy/macos/Tests/NotchlingTests/Fixtures/worker-status-paused.json"
-);
+const FULL: &str = include_str!("../../tests/fixtures/notchling/worker-status.json");
+const OLD: &str = include_str!("../../tests/fixtures/notchling/worker-status-old.json");
+const PAUSED: &str = include_str!("../../tests/fixtures/notchling/worker-status-paused.json");
 
 const NOW: f64 = 1_800_000_000.0;
 

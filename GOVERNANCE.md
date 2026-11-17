@@ -15,8 +15,8 @@ is a protected change: it waits for the maintainer.
 | The agent App | A GitHub App, from Phase 5. Not created yet. | Pushes `agent/**` branches and opens pull requests for queued issues, through the push wrapper on the workers. It has no say in any decision. |
 
 The list of maintainers is in code: `MAINTAINERS` in `tools/guard/guard/gate.py`. A test checks that
-another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). The Promote
-workflow reads the same list. Both files are protected.
+another account's approval does not pass the gate (`tools/guard/tests/test_gate.py`). Both files are
+protected.
 
 Write access is given sparingly. Someone who can push a branch to this repository could add a workflow
 on it that posts a false `maintainer-gate` status. Today only `@dtthaison` and TrietKun can. Adding a
@@ -48,34 +48,26 @@ needs exists:
 - the `ANTHROPIC_API_KEY` repository secret, after a spend cap at the provider, and the
   `AGENT_APP_LOGIN` variable;
 - the rulesets, applied;
-- sd's label prefix, and the Morning Actions and Machines changes in the Swift app, which is
-  protected code the maintainer uses every day.
+- sd's label prefix.
 
 Then a week of sampling comes before anything widens.
 [docs/policies/automation.md](docs/policies/automation.md#phase-5-so-far) says what turns each part
 on, in order; [docs/agents/worker-setup.md](docs/agents/worker-setup.md) has the steps on each worker.
 
-## Releases in Phase 6
+## Releases
 
-The Beta and Promote workflows are built and off. Every job stops at its first step until the
-repository variable `NOTCHLING_RELEASES` is `on`. Until then releases are cut by hand with
-`legacy/macos/release.sh` ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)).
+Releases are cut by hand with `tools/release/release.py` and published by `release.yml`
+([CONTRIBUTING.md](CONTRIBUTING.md#releasing)). The daily Beta and one-click Stable workflows built the
+retired Swift app and were removed; they are in the git history.
 
-- **A Beta** is cut by the daily schedule, or by a click from anyone with write access. Only a
-  maintainer may allow a breaking change in one, and only to start a new major line: the workflow checks
-  the account against `MAINTAINERS`. Later Betas on that line need no approval.
-- **Promoting a Beta to Stable** is for a maintainer only. `promote.yml` refuses any account not in
-  `MAINTAINERS`, and any run not started from `main`.
-- **The keys and the switch are the maintainer's:** the kill switch, the `release` environment (only
-  the `sign` job uses it), its signing secrets and the offline backup of the update signing key. In a personal account's
-  repository only the owner can set Actions variables, secrets and environments.
-- **Agents never touch the release path.** The build job runs repository code with no secrets, and
-  the signing job runs none.
+- **The keys are the maintainer's:** the signing secrets and the offline backup of the update signing
+  key. In a personal account's repository only the owner can set Actions variables, secrets and
+  environments.
+- **Agents never touch the release path.** The release workflow uses no secrets but its own token.
 - Anyone with write access can replace the update feed (an asset of the `appcast` release); Sparkle's
   signature check is what protects what installs ([automation.md](docs/policies/automation.md#ruling-the-feed-stays-on-the-appcast-release)).
 - Anyone with write access can delete a release; the `release-tags` ruleset, once applied, protects
-  only the `v*` tags. Never delete the `appcast` release or a promoted Beta's release: installed copies would lose
-  the feed or the download.
+  only the `v*` tags. Never delete the `appcast` release: installed copies would lose the feed.
 
 [docs/policies/automation.md](docs/policies/automation.md#releases-so-far) says what turns each part
 on, in order, and what isn't built yet.

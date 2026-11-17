@@ -245,7 +245,7 @@ class Repo(unittest.TestCase):
         self.git("init", "-q", "-b", "main")
         self.write("README.md", "hi\n")
         self.write("changes/README.md", "about fragments\n")
-        self.write("legacy/macos/Sources/A.swift", "a\n")
+        self.write("crates/app/src/a.rs", "a\n")
         self.base = self.commit("base")
 
     def git(self, *args):
@@ -272,7 +272,7 @@ class Repo(unittest.TestCase):
 
 class CheckTests(Repo):
     def test_app_code_without_fragment_fails(self):
-        for path in ("legacy/macos/Sources/Notch/B.swift", "apps/flutter/lib/main.dart",
+        for path in ("apps/flutter/lib/main.dart",
                      "crates/engine/src/lib.rs", "crates/platform/mac/src/x.rs"):
             with self.subTest(path):
                 self.git("reset", "-q", "--hard", self.base)
@@ -284,7 +284,7 @@ class CheckTests(Repo):
                 self.assertIn("changes/", err)
 
     def test_non_app_changes_pass(self):
-        for path in ("docs/x.md", "legacy/macos/Tests/T.swift", "crates/engine/Cargo.toml",
+        for path in ("docs/x.md", "crates/engine/Cargo.toml",
                      "crates/engine/tests/it.rs", "apps/flutter/test/t.dart", ".github/workflows/x.yml"):
             with self.subTest(path):
                 self.git("reset", "-q", "--hard", self.base)
@@ -293,7 +293,7 @@ class CheckTests(Repo):
                 self.assertEqual(self.check()[0], 0)
 
     def test_added_fragment_passes(self):
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.write("changes/fix-notch.md", frag("fix"))
         self.commit("change")
         self.assertEqual(self.check()[0], 0)
@@ -305,7 +305,7 @@ class CheckTests(Repo):
         self.assertEqual(self.check()[0], 0)
 
     def test_added_fragment_must_parse(self):
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.write("changes/bad.md", "no front matter")
         self.commit("change")
         code, _, err = self.check()
@@ -318,7 +318,7 @@ class CheckTests(Repo):
         self.assertEqual(self.check()[0], 1)
 
     def test_readme_edit_is_not_a_fragment(self):
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.write("changes/README.md", "more text\n")
         self.commit("change")
         self.assertEqual(self.check()[0], 1)
@@ -327,7 +327,7 @@ class CheckTests(Repo):
         self.write("changes/old.md", frag("fix"))
         self.base = self.commit("old fragment")
         self.write("changes/old.md", frag("fix", "Edited."))
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.commit("change")
         self.assertEqual(self.check()[0], 1)
 
@@ -335,17 +335,17 @@ class CheckTests(Repo):
         self.write("changes/old.md", frag("fix"))
         self.base = self.commit("old fragment")
         (self.root / "changes/old.md").unlink()
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.commit("change")
         self.assertEqual(self.check()[0], 1)
 
     def test_no_changelog_label_skips(self):
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.commit("change")
         self.assertEqual(self.check("--label", "no-changelog")[0], 0)
 
     def test_other_labels_do_not_skip(self):
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         self.commit("change")
         self.assertEqual(self.check("--label", "bug", "--label", "docs")[0], 1)
 
@@ -355,7 +355,7 @@ class CheckTests(Repo):
         self.assertEqual(self.check("--label", "no-changelog")[0], 1)
 
     def test_deleting_app_code_counts(self):
-        (self.root / "legacy/macos/Sources/A.swift").unlink()
+        (self.root / "crates/app/src/a.rs").unlink()
         self.commit("delete")
         self.assertEqual(self.check()[0], 1)
 
@@ -369,7 +369,7 @@ class CheckTests(Repo):
         self.write("docs/x.md", "x\n")
         self.commit("pr")
         self.git("checkout", "-q", "main")
-        self.write("legacy/macos/Sources/Notch/B.swift", "x\n")
+        self.write("apps/flutter/lib/b.dart", "x\n")
         main_tip = self.commit("main moves on")
         code, _, _ = run_cli(["check", "--base", main_tip, "--head", "pr", "--repo", str(self.root)])
         self.assertEqual(code, 0)

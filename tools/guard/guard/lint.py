@@ -6,18 +6,15 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from guard import locale_lint
-from guard.source import strip_code, strip_comments
+from guard.source import strip_code
 from guard.tomldeps import lines_naming_outside_macos
 from guard.zones import glob_regex
 
-EXCLUDE = ("legacy/macos/Tests/**", "legacy/macos/Demo/**", "tools/**", "apps/flutter/test/**")
+EXCLUDE = ("tools/**", "apps/flutter/test/**", "crates/engine/tests/fixtures/notchling/**", "crates/engine/tests/fixtures/console/**")
 BASELINE = Path("tools/guard/lint-baseline.json")
-NOTCH_VIEWS = tuple(f"legacy/macos/Sources/Notchling/Notch/{n}.swift" for n in
-                    ("NotchView", "NotchRows", "NotchPeek", "NotchDetail", "NotchCardParts", "TabPerch")) + \
-              ("legacy/macos/Sources/Notchling/Notch/Pet/**",)
 
 Found = List[Tuple[int, str]]
 Check = Callable[[str, List[str], Path], Found]
@@ -57,43 +54,6 @@ def _code_matches(*patterns: str) -> Check:
         return [(i + 1, l.strip()) for i, l in enumerate(lines)
                 if any(r.search(strip_code(path, l)) for r in regs)]
     return check
-
-
-def _pointer_cursor(path: str, lines: List[str], repo: Path) -> Found:
-    out = []
-    for i, l in enumerate(lines):
-        if ".onTapGesture" in strip_code(path, l):
-            window = " ".join(strip_code(path, x) for x in lines[i:i + 4])
-            if ".pointerCursor()" not in window:
-                out.append((i + 1, l.strip()))
-    return out
-
-
-_MIGRATED_CACHE: Dict[str, frozenset] = {}
-DEFAULTS_KEY = [re.compile(r"(?i)defaults[^\n]*forKey:\s*\"([^\"]+)\""), re.compile(r"@AppStorage\(\"([^\"]+)\"")]
-
-
-def migrated_keys(repo: Path) -> frozenset:
-    path = Path(repo) / "legacy/macos/Sources/Notchling/App/AppDelegate.swift"
-    cache_key = str(path)
-    if cache_key not in _MIGRATED_CACHE:
-        text = path.read_text() if path.exists() else ""
-        start = text.find("func migrateFromAwake")
-        m = re.search(r"for key in \[([^\]]*)\]", text[start:]) if start >= 0 else None
-        _MIGRATED_CACHE[cache_key] = frozenset(re.findall(r"\"([^\"]+)\"", m.group(1))) if m else frozenset()
-    return _MIGRATED_CACHE[cache_key]
-
-
-def _defaults_migrated(path: str, lines: List[str], repo: Path) -> Found:
-    keys = migrated_keys(repo) | {"migratedFromAwake"}
-    out = []
-    for i, l in enumerate(lines):
-        text = strip_comments(path, l)
-        for r in DEFAULTS_KEY:
-            for m in r.finditer(text):
-                if m.group(1) not in keys:
-                    out.append((i + 1, l.strip()))
-    return out
 
 
 def _gpui_macos_only(path: str, lines: List[str], repo: Path) -> Found:
@@ -170,45 +130,21 @@ def _log_one_writer(path: str, lines: List[str], repo: Path) -> Found:
 
 
 RULES: List[Rule] = [
-    Rule("LINT-CORE-NO-NOTCHLING", "ConsoleCore must stay free of Notchling types (it's shared with hostd)",
-         ("legacy/macos/Sources/ConsoleCore/**",), _code_matches(r"^\s*(@testable\s+)?import\s+Notchling\b"),
-         ("legacy/macos/Sources/ConsoleCore/A.swift", "import Notchling\n"), ("legacy/macos/Sources/ConsoleCore/A.swift", "import Foundation\n")),
-    Rule("LINT-CORE-MACOS13", "ConsoleCore targets macOS 13: no @Observable or macOS 14+ checks",
-         ("legacy/macos/Sources/ConsoleCore/**",), _code_matches(r"@Observable\b", r"[#@]available\(macOS 1[4-9]"),
-         ("legacy/macos/Sources/ConsoleCore/A.swift", "@Observable final class Store {}\n"),
-         ("legacy/macos/Sources/ConsoleCore/A.swift", "final class Store: ObservableObject {}\n")),
-    Rule("LINT-NO-FORCE-UNWRAP", "No force-unwraps, try! or as! outside probes and tests",
-         ("legacy/macos/Sources/**/*.swift",), _code_matches(r"[\w\)\]]!(?!=)", r"\b(try|as)!"),
-         ("legacy/macos/Sources/Notchling/A.swift", "let a = b!\n"), ("legacy/macos/Sources/Notchling/A.swift", "guard let a = b else { return }\n")),
-    Rule("LINT-KIT-TOKENS", "Views use the design kit's Kit* tokens, not raw colors or font sizes",
-         ("legacy/macos/Sources/Notchling/Chat/Views/**",) + NOTCH_VIEWS,
-         _code_matches(r"Color\((red|white|hue|\.sRGB)", r"\.font\(\.system\(size:",
-                       r"Color\.(red|green|blue|orange|yellow|purple|pink|gray|black|white)\b"),
-         ("legacy/macos/Sources/Notchling/Chat/Views/A.swift", "Text(x).foregroundColor(Color.red)\n"),
-         ("legacy/macos/Sources/Notchling/Chat/Views/A.swift", "Text(x).foregroundColor(KitInk.danger)\n")),
-    Rule("LINT-DEFAULTS-MIGRATED", "Every UserDefaults key is in AppDelegate.migrateFromAwake's list",
-         ("legacy/macos/Sources/Notchling/**",), _defaults_migrated,
-         ("legacy/macos/Sources/Notchling/A.swift", 'UserDefaults.standard.bool(forKey: "newSetting")\n'),
-         ("legacy/macos/Sources/Notchling/A.swift", 'UserDefaults.standard.bool(forKey: "mode")\n')),
-    Rule("LINT-POINTER-CURSOR", "Clickable views show the pointing hand (.pointerCursor() or a kit style)",
-         ("legacy/macos/Sources/Notchling/**",), _pointer_cursor,
-         ("legacy/macos/Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n"),
-         ("legacy/macos/Sources/Notchling/A.swift", "row\n    .onTapGesture { open() }\n    .pointerCursor()\n")),
     Rule("LINT-NO-APPLESCRIPT", "No NSAppleScript or osascript (notifications show Script Editor's name)",
-         ("legacy/macos/Sources/**/*.swift", "crates/**/*.rs"), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
-         ("legacy/macos/Sources/Notchling/A.swift", "let s = NSAppleScript(source: src)\n"),
-         ("legacy/macos/Sources/Notchling/A.swift", "// never osascript\n")),
+         ("crates/**/*.rs",), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
+         ("crates/app/src/a.rs", "use osascript::run;\n"),
+         ("crates/app/src/a.rs", "// never osascript\n")),
     Rule("LINT-GPUI-MACOS-ONLY", "gpui is a dependency only under [target.'cfg(target_os = \"macos\")'.dependencies] "
          "(Linux needs system libraries CI doesn't install yet; Windows is unverified)",
          ("Cargo.toml", "crates/**/Cargo.toml"), _gpui_macos_only,
          ("crates/kit/Cargo.toml", '[dependencies]\ngpui = { version = "=0.2.2", features = ["runtime_shaders"] }\n'),
          ("crates/kit/Cargo.toml", '[target.\'cfg(target_os = "macos")\'.dependencies]\ngpui = { version = "=0.2.2" }\n')),
     Rule("LINT-FILE-SIZE", "Files stay under 1,000 lines",
-         ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(1000),
-         ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1001), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 1000)),
+         ("crates/**", "apps/flutter/lib/**"), _file_size(1000),
+         ("crates/app/src/a.rs", "x\n" * 1001), ("crates/app/src/a.rs", "x\n" * 1000)),
     Rule("LINT-FILE-SIZE-WARN", "Files over 600 lines should be split",
-         ("legacy/macos/Sources/**", "crates/**", "apps/flutter/lib/**"), _file_size(600),
-         ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 601), ("legacy/macos/Sources/Notchling/A.swift", "x\n" * 600), warn=True),
+         ("crates/**", "apps/flutter/lib/**"), _file_size(600),
+         ("crates/app/src/a.rs", "x\n" * 601), ("crates/app/src/a.rs", "x\n" * 600), warn=True),
     Rule("LINT-LOCALE-LITERAL", "In an area that has moved to locales/, words come from a message, not a string literal",
          ("crates/app/src/**/*.rs", "crates/kit/src/**/*.rs", "apps/flutter/lib/**/*.dart"), locale_lint.literal,
          ("crates/app/src/notch/a.rs", 'fn f() { div().child("Reply to Claude") }\n'),

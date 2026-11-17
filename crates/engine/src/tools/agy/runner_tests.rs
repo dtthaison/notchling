@@ -4,8 +4,7 @@ use crate::transcript::model::ItemKind;
 use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
-const RECORDING: &str =
-    include_str!("../../../../../legacy/macos/Tests/NotchlingTests/Fixtures/acp-agy.jsonl");
+const RECORDING: &str = include_str!("../../../tests/fixtures/notchling/acp-agy.jsonl");
 const SESSION: &str = "d67413c2-a0f3-4381-8a8e-e98b541d6d76";
 
 #[derive(Default)]

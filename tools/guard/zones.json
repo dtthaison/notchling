@@ -1,24 +1,6 @@
 {
   "_comment": "The auto-merge zone from the design's 'The line'. Everything else waits for the maintainer. Later entries win; '!' takes a path back out. The five '!**/' lines close each list: AGENTS.md, CLAUDE.md, .claude/, .gitattributes and CODEOWNERS are protected wherever they sit, new or not. Changing this file is a protected change.",
   "auto": [
-    "legacy/macos/Sources/Notchling/Chat/Views/**",
-    "legacy/macos/Sources/Notchling/Notch/NotchView.swift",
-    "legacy/macos/Sources/Notchling/Notch/NotchRows.swift",
-    "legacy/macos/Sources/Notchling/Notch/NotchPeek.swift",
-    "legacy/macos/Sources/Notchling/Notch/NotchDetail.swift",
-    "legacy/macos/Sources/Notchling/Notch/NotchCardParts.swift",
-    "legacy/macos/Sources/Notchling/Notch/TabPerch.swift",
-    "legacy/macos/Sources/Notchling/Notch/Pet/**",
-    "legacy/macos/Sources/Notchling/Search/**",
-    "legacy/macos/Sources/Notchling/DesignKit/**",
-    "legacy/macos/Sources/Notchling/Pages/PagesWindow.swift",
-    "legacy/macos/Sources/Notchling/Chat/ConversationReader.swift",
-    "legacy/macos/Sources/Notchling/Agents/TranscriptReader.swift",
-    "legacy/macos/Sources/Notchling/Agents/CodexSessions.swift",
-    "legacy/macos/Sources/Notchling/Agents/ACPTranscript.swift",
-    "legacy/macos/Sources/ConsoleCore/ChatTranscript.swift",
-    "legacy/macos/Sources/ConsoleCore/SubagentReader.swift",
-    "legacy/macos/Sources/ConsoleCore/TranscriptFacts.swift",
     "docs/**",
     "!docs/goals.md",
     "!docs/rules.md",
@@ -50,8 +32,6 @@
     "!**/CODEOWNERS"
   ],
   "new_files_only": [
-    "legacy/macos/Tests/**",
-    "legacy/macos/Fixtures/**",
     "apps/flutter/test/**",
     "!apps/flutter/**/flutter_test_config.dart",
     "!apps/flutter/**/dart_test.yaml",

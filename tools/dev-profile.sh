@@ -13,7 +13,7 @@ REAL_HOME=${REAL_HOME:-${HOME:-}}
 
 case "${1:-}" in
     --copy-login) echo "dev-profile: --copy-login is not implemented. The profile starts empty; sign in inside it." >&2; exit 2 ;;
-    claude|app|shell) ;;
+    claude|shell) ;;
     *) usage ;;
 esac
 CMD=$1
@@ -50,19 +50,6 @@ case "$CMD" in
         CLAUDE=$(find_claude)
         [[ -n "$CLAUDE" ]] || { echo "dev-profile: claude not found on PATH" >&2; exit 1; }
         profile_env "$CLAUDE" "$@"
-        ;;
-    app)
-        ROOT=$(cd "$(dirname "$0")/.." && pwd)
-        BUNDLE="$ROOT/build/Notchling Dev.app"
-        [[ -x "$BUNDLE/Contents/MacOS/Notchling" ]] || { echo "dev-profile: no dev build. Run ./build.sh --dev first." >&2; exit 1; }
-        ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUNDLE/Contents/Info.plist" 2>/dev/null || true)
-        [[ "$ID" == "local.notchling.dev" ]] || { echo "dev-profile: '$BUNDLE' has bundle id '$ID', not local.notchling.dev. Refusing." >&2; exit 1; }
-        CLAUDE=$(find_claude)
-        if [[ -n "$CLAUDE" && ! -e "$PROFILE/.local/bin/claude" ]]; then
-            mkdir -p "$PROFILE/.local/bin"
-            ln -s "$CLAUDE" "$PROFILE/.local/bin/claude"
-        fi
-        profile_env "$BUNDLE/Contents/MacOS/Notchling" "$@"
         ;;
     shell)
         profile_env "${SHELL:-/bin/zsh}" "$@"

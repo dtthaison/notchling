@@ -1,5 +1,7 @@
 # Recording phase: reply behaviors and their fixtures
 
+History: the Swift app and `tools/record-reply-fixtures.sh` that made these recordings were removed from the tree (the git history has them), and the paths below name the Swift tree as it was. The recordings now sit in `crates/engine/tests/fixtures/notchling/terminal/`.
+
 Before E3 (terminal and replies) moves to Rust, every reply behavior in `legacy/macos/Sources/AGENTS.md` ("Things that bit before") gets terminal byte fixtures, while the Swift app can still produce them ([design spec](superpowers/specs/2026-11-07-agent-run-open-source-design.md), Parts). E3's port is done when its Rust code reproduces these behaviors against the same bytes, and the live-test mode (`crates/engine/tests/live_reply.rs`) passes against a real job.
 
 Paths are from the repository root. `Sw` = `legacy/macos/Sources/Notchling/`, `T` = `legacy/macos/Tests/NotchlingTests/`, `F` = `T` + `Fixtures/terminal/`.

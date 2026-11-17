@@ -1,6 +1,6 @@
 # Notchling: instructions for agents
 
-Notchling is a macOS menu bar app that shows Claude Code, Codex and Antigravity sessions in the camera notch, keeps the Mac awake and switches accounts. Chat is the full-size view of a session; a phone app (`apps/flutter/`) answers sessions over the Mac's bridge. The app is Rust (`crates/`: a GPUI app over the `notchling` daemon); the retired Swift app is in `legacy/macos/`. [README.md](README.md) is the user's view.
+Notchling is a macOS menu bar app that shows Claude Code, Codex and Antigravity sessions in the camera notch, keeps the Mac awake and switches accounts. Chat is the full-size view of a session; a phone app (`apps/flutter/`) answers sessions over the Mac's bridge. The app is Rust (`crates/`: a GPUI app over the `notchling` daemon). [README.md](README.md) is the user's view.
 
 Claude Code loads this file in every session through `CLAUDE.md`, which holds only `@AGENTS.md` (no other `CLAUDE*.md`: `GUARD-CLAUDE-MD`). Keep it short and import nothing: details go in the files of the index below; read the one for your change first.
 
@@ -10,10 +10,10 @@ Claude Code loads this file in every session through `CLAUDE.md`, which holds on
 cargo test --workspace --locked   # then clippy, fmt and deny as crates/AGENTS.md lists them
 tools/test-python.sh              # every Python suite, as CI runs them
 PYTHONPATH=tools/guard python3 -m guard lint   # and rules, pins, codeowners --check, rulesets, claudemd, featuremap
-swift test                        # the Swift app's tests; ./build.sh builds it, tools/bundle-next.sh the Rust app
+tools/bundle-next.sh              # builds the app bundle
 ```
 
-Run the tests after a change to logic, and add a test with any new pure logic or parser. Never pass `--install` to `./build.sh` or `tools/bundle-next.sh`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs.
+Run the tests after a change to logic, and add a test with any new pure logic or parser. Never pass `--install` to `tools/bundle-next.sh`: it quits the running app and replaces `/Applications/Notchling.app`. Only the maintainer installs.
 
 ## Hard rules
 
@@ -65,6 +65,5 @@ Only a queued issue (`notchling:queued`), on a branch `agent/<issue>-<slug>`; a 
 - Tool versions on workers: docs/notes/versions.md
 - Cluster: docs/notes/cluster.md
 - Vault, lanes, Machines, search, pages, delegation, limits, cost: each crate's notes
-- The Swift app, the reference a port matches (read it whole first): [legacy/macos/Sources/AGENTS.md](legacy/macos/Sources/AGENTS.md)
 - The phone app and its checks: [apps/flutter/AGENTS.md](apps/flutter/AGENTS.md); its wire: protocol/README.md
 - `tools/` (guard, release, agents): tools/AGENTS.md

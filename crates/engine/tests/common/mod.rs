@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn notchling_fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../legacy/macos/Tests/NotchlingTests/Fixtures")
+        .join("tests/fixtures/notchling")
         .join(name)
 }
 
 pub fn console_fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../legacy/macos/Tests/ConsoleCoreTests/Fixtures")
+        .join("tests/fixtures/console")
         .join(name)
 }
 

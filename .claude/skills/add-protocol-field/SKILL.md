@@ -7,21 +7,20 @@ The protocol is written down in `protocol/` (read `protocol/README.md` first): t
 
 **Additive only.** Add an optional field or a new op. Older phones and Macs ignore what they don't know. Never rename or remove a field, change its type, or make an optional one required. A breaking change needs the maintainer and a protocol version bump; it is not this skill.
 
-1. **Name it and say what it means.** One line: the field, its type, who sends it, what an older peer does without it. Look for an existing field that already carries it (`SessionDTO`, `ChatMessageDTO` in `legacy/macos/Sources/ConsoleCore/Bridge/BridgeProtocol.swift`).
+1. **Name it and say what it means.** One line: the field, its type, who sends it, what an older peer does without it. Look for an existing field that already carries it (`Session`, `ChatMessage` in the schema, and `crates/engine/src/bridge/wire.rs`).
 
 2. **Schema first.** In `protocol/agentconsole.v1.schema.json` add the field to its definition (`Session`, `ChatMessage`, ...) as optional (not in `required`), with a `description`, and a `default` where a reader has one. A new op is a `<Name>Request` (with `"op": {"const": ...}`), a `<Name>Response`, and an entry in the `Request` union. Use only what `tools/protocol/gen.py` reads (its docstring lists it); anything else it refuses.
 
-3. **Fixtures.** Add the field to the Mac's canned data in `legacy/macos/Tests/ConsoleCoreTests/ProtocolFixturesTests.swift`, keeping one example of the message without it (an older peer), then rewrite the captured files and read the diff: `PROTOCOL_FIXTURES_WRITE=1 swift test --filter ProtocolFixturesTests`. A new op also needs a request fixture in `protocol/fixtures/` (`<Name>Request.json`, written by hand from what the phone sends) that the test sends. Fixture files are named after the schema definition they exemplify, plus an optional `.variant`.
+3. **Fixtures.** Add the field to the Mac's canned data in `crates/engine/src/bridge/fixtures_data.rs`, keeping one example of the message without it (an older peer), and write or update the matching file in `protocol/fixtures/` by hand; `crates/engine/src/bridge/fixtures_tests.rs` runs the router against the canned backend and compares every answer and event with its fixture. A new op also needs a request fixture in `protocol/fixtures/` (`<Name>Request.json`, written by hand from what the phone sends) that the test sends. Fixture files are named after the schema definition they exemplify, plus an optional `.variant`.
 
 4. **Regenerate the types.** `python3 tools/protocol/gen.py` rewrites `crates/protocol/src/generated.rs` and `apps/flutter/lib/core/protocol/generated.dart`. Commit them as they come out; never edit them by hand (`python3 tools/protocol/gen.py --check` fails, rule `GUARD-PROTOCOL-GEN`).
 
-5. **Send it and read it.** The Mac encodes with the hand-written DTOs and fills the field in (today: `LiveBridgeBackend.enrich` in `legacy/macos/Sources/Notchling/Phone/LiveBridgeBackend.swift`): an optional property on the DTO in `BridgeProtocol.swift`, `nil` left out of the JSON, with a doc comment saying older phones ignore it. `ConsoleCore` stays free of Notchling types and macOS 14 APIs. The phone reads it with a fallback for when it's missing, in `apps/flutter/lib/core/protocol/models.dart` (`strOrNull` or an `is Map` check, never `str`, which expects it to be there).
+5. **Send it and read it.** The Mac fills the field in through the generated types in `crates/protocol/src/generated.rs` (see `crates/engine/src/bridge/live.rs` and `wire.rs`): an optional field, left out of the JSON when it has no value. The phone reads it with a fallback for when it's missing, in `apps/flutter/lib/core/protocol/models.dart` (`strOrNull` or an `is Map` check, never `str`, which expects it to be there).
 
-6. **Document it.** Add it to the additive fields list in the Phone section of `legacy/macos/Sources/AGENTS.md`.
+6. **Document it.** Describe it in `protocol/README.md` where the message is described.
 
 7. **Checks.**
    ```sh
-   swift test
    python3 tools/protocol/gen.py --check
    python3 -m unittest discover -s tools/protocol/tests -t tools/protocol
    cargo test --workspace --locked

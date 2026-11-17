@@ -14,26 +14,25 @@ def chg(path, status="M", old=None):
 
 class ZoneTests(unittest.TestCase):
     def test_view_in_zone(self):
-        self.assertTrue(Z.in_zone("legacy/macos/Sources/Notchling/Chat/Views/ChatRow.swift"))
+        self.assertTrue(Z.in_zone("crates/app/src/chat/view/row.rs"))
 
     def test_model_protected(self):
-        self.assertFalse(Z.in_zone("legacy/macos/Sources/Notchling/Chat/Model/ChatModel.swift"))
+        self.assertFalse(Z.in_zone("crates/engine/src/reply/plan.rs"))
 
     def test_notch_controller_protected(self):
-        self.assertFalse(Z.in_zone("legacy/macos/Sources/Notchling/Notch/NotchController.swift"))
+        self.assertFalse(Z.in_zone("crates/notchlingd/src/main.rs"))
 
     def test_notch_views_in_zone(self):
-        for name in ["NotchView", "NotchRows", "NotchPeek", "NotchDetail", "NotchCardParts", "TabPerch"]:
-            self.assertTrue(Z.in_zone(f"legacy/macos/Sources/Notchling/Notch/{name}.swift"), name)
-        self.assertTrue(Z.in_zone("legacy/macos/Sources/Notchling/Notch/Pet/Walk.swift"))
+        for name in ["view", "pet", "perch"]:
+            self.assertTrue(Z.in_zone(f"crates/app/src/notch/{name}.rs"), name)
+        self.assertTrue(Z.in_zone("crates/kit/src/button.rs"))
 
     def test_transcript_readers_in_zone(self):
-        for p in ["legacy/macos/Sources/Notchling/Chat/ConversationReader.swift", "legacy/macos/Sources/Notchling/Agents/TranscriptReader.swift",
-                  "legacy/macos/Sources/ConsoleCore/ChatTranscript.swift"]:
+        for p in ["crates/engine/src/transcript/reader.rs", "crates/engine/src/search/rank.rs"]:
             self.assertTrue(Z.in_zone(p), p)
 
     def test_reply_sender_protected(self):
-        self.assertFalse(Z.in_zone("legacy/macos/Sources/Notchling/Agents/ReplySender.swift"))
+        self.assertFalse(Z.in_zone("crates/engine/src/reply/plan.rs"))
 
     def test_docs_in_zone_but_manual_protected(self):
         self.assertTrue(Z.in_zone("docs/chat-design.md"))
@@ -60,39 +59,40 @@ class ZoneTests(unittest.TestCase):
         self.assertEqual(protected_paths([chg("crates/app/src/view.rs", "M")], Z), [])
 
     def test_guard_and_github_protected(self):
-        for p in ["tools/guard/zones.json", ".github/workflows/guard.yml", ".github/CODEOWNERS", "build.sh",
-                  "CLAUDE.md", "AGENTS.md", "legacy/macos/Sources/Notchling/AGENTS.md", ".claude/settings.json"]:
+        for p in ["tools/guard/zones.json", ".github/workflows/guard.yml", ".github/CODEOWNERS",
+                  "CLAUDE.md", "AGENTS.md", "crates/app/AGENTS.md", ".claude/settings.json"]:
             self.assertFalse(Z.in_zone(p), p)
 
     def test_star_does_not_cross_folders(self):
-        self.assertFalse(Z.in_zone("legacy/macos/Sources/Notchling/Notch/Pet2/x.swift"))
+        self.assertFalse(Z.in_zone("locales/en/consent.ftl"))
+        self.assertTrue(Z.in_zone("locales/en/mac/consent.ftl"))
 
     def test_new_test_ok_edit_not(self):
-        self.assertEqual(protected_paths([chg("legacy/macos/Tests/NotchlingTests/NewTests.swift", "A")], Z), [])
-        self.assertEqual(protected_paths([chg("legacy/macos/Tests/NotchlingTests/ChatTests.swift", "M")], Z),
-                         ["legacy/macos/Tests/NotchlingTests/ChatTests.swift"])
-        self.assertEqual(protected_paths([chg("legacy/macos/Tests/NotchlingTests/ChatTests.swift", "D")], Z),
-                         ["legacy/macos/Tests/NotchlingTests/ChatTests.swift"])
+        self.assertEqual(protected_paths([chg("apps/flutter/test/chat/new_test.dart", "A")], Z), [])
+        self.assertEqual(protected_paths([chg("apps/flutter/test/chat/chat_test.dart", "M")], Z),
+                         ["apps/flutter/test/chat/chat_test.dart"])
+        self.assertEqual(protected_paths([chg("apps/flutter/test/chat/chat_test.dart", "D")], Z),
+                         ["apps/flutter/test/chat/chat_test.dart"])
 
     def test_rename_out_of_protected_is_protected(self):
-        self.assertEqual(protected_paths([chg("legacy/macos/Sources/Notchling/Search/X.swift", "R",
-                                              old="legacy/macos/Sources/Notchling/Vault/X.swift")], Z),
-                         ["legacy/macos/Sources/Notchling/Vault/X.swift"])
+        self.assertEqual(protected_paths([chg("crates/engine/src/search/x.rs", "R",
+                                              old="crates/engine/src/reply/x.rs")], Z),
+                         ["crates/engine/src/reply/x.rs"])
 
     def test_rename_into_protected_is_protected(self):
-        self.assertEqual(protected_paths([chg("legacy/macos/Sources/Notchling/Vault/X.swift", "R",
-                                              old="legacy/macos/Sources/Notchling/Search/X.swift")], Z),
-                         ["legacy/macos/Sources/Notchling/Vault/X.swift"])
+        self.assertEqual(protected_paths([chg("crates/engine/src/reply/x.rs", "R",
+                                              old="crates/engine/src/search/x.rs")], Z),
+                         ["crates/engine/src/reply/x.rs"])
 
     def test_deleting_zone_file_ok(self):
-        self.assertEqual(protected_paths([chg("legacy/macos/Sources/Notchling/Search/Old.swift", "D")], Z), [])
+        self.assertEqual(protected_paths([chg("crates/engine/src/search/old.rs", "D")], Z), [])
 
     def test_spec_protected_files_in_zone_folders_are_protected(self):
-        for p in ["docs/AGENTS.md", "docs/CLAUDE.md", "legacy/macos/Sources/Notchling/Search/CLAUDE.md",
-                  "legacy/macos/Sources/Notchling/Search/AGENTS.md", "legacy/macos/Sources/Notchling/Search/.claude/skills/x/SKILL.md",
-                  "docs/.claude/settings.json", "legacy/macos/Sources/Notchling/Search/.gitattributes",
+        for p in ["docs/AGENTS.md", "docs/CLAUDE.md", "crates/app/src/CLAUDE.md",
+                  "crates/app/src/AGENTS.md", "crates/app/src/.claude/skills/x/SKILL.md",
+                  "docs/.claude/settings.json", "crates/app/src/.gitattributes",
                   "apps/flutter/lib/features/chat/.gitattributes", "docs/.gitattributes", "docs/CODEOWNERS",
-                  "legacy/macos/Sources/Notchling/Notch/Pet/CODEOWNERS"]:
+                  "crates/app/src/notch/CODEOWNERS"]:
             self.assertFalse(Z.in_zone(p), p)
 
     def test_lookalike_names_stay_in_zone(self):
@@ -102,7 +102,7 @@ class ZoneTests(unittest.TestCase):
     def test_leading_double_star_matches_at_the_root_too(self):
         rx = glob_regex("**/AGENTS.md")
         self.assertTrue(rx.match("AGENTS.md"))
-        self.assertTrue(rx.match("legacy/macos/Sources/x/AGENTS.md"))
+        self.assertTrue(rx.match("crates/x/AGENTS.md"))
         self.assertFalse(rx.match("XAGENTS.md"))
         self.assertFalse(rx.match("docs/NOTAGENTS.md"))
         rx = glob_regex("**/.claude/**")
@@ -122,8 +122,8 @@ class ZoneTests(unittest.TestCase):
         self.assertTrue(z.in_zone("a/b.md"))
 
     def test_new_file_cannot_be_a_spec_protected_file(self):
-        for p in ["legacy/macos/Tests/AGENTS.md", "legacy/macos/Fixtures/CLAUDE.md", "apps/flutter/test/.claude/x.md",
-                  "legacy/macos/Tests/NotchlingTests/.gitattributes", "legacy/macos/Fixtures/.gitattributes", "apps/flutter/test/CODEOWNERS"]:
+        for p in ["apps/flutter/test/AGENTS.md", "apps/flutter/test/CLAUDE.md", "apps/flutter/test/.claude/x.md",
+                  "apps/flutter/test/chat/.gitattributes", "apps/flutter/test/.gitattributes", "apps/flutter/test/CODEOWNERS"]:
             self.assertEqual(protected_paths([chg(p, "A")], Z), [p], p)
 
     def test_new_flutter_test_config_and_dart_test_yaml_are_protected(self):
@@ -138,24 +138,24 @@ class ZoneTests(unittest.TestCase):
     def test_case_shadowed_zone_folders(self):
         for p in ["docs/Decisions/x.md", "docs/DECISIONS/x.md", "apps/flutter/lib/features/Pairing/pair.dart",
                   "docs/Rules.md", "docs/Goals.md", "docs/Agents.md", "docs/claude.md",
-                  "legacy/macos/Sources/Notchling/Search/.GitAttributes", "docs/.CLAUDE/x"]:
+                  "crates/app/src/.GitAttributes", "docs/.CLAUDE/x"]:
             self.assertEqual(case_shadowed([chg(p, "A")], Z), [p], p)
 
     def test_case_shadowed_leaves_ordinary_paths_alone(self):
-        for p in ["docs/chat-design.md", "legacy/macos/Sources/Notchling/Chat/Views/ChatRow.swift", "apps/flutter/lib/features/chat/a.dart",
+        for p in ["docs/chat-design.md", "crates/app/src/chat/view/row.rs", "apps/flutter/lib/features/chat/a.dart",
                   "docs/Chat-Design.md"]:
             self.assertEqual(case_shadowed([chg(p, "A")], Z), [], p)
 
     def test_case_shadowed_skips_what_is_protected_anyway(self):
         self.assertEqual(case_shadowed([chg("docs/rules.md", "M")], Z), [])
-        self.assertEqual(case_shadowed([chg("legacy/macos/Sources/Notchling/Vault/X.swift", "M")], Z), [])
+        self.assertEqual(case_shadowed([chg("crates/engine/src/reply/x.rs", "M")], Z), [])
 
     def test_case_shadowed_checks_rename_origin(self):
         self.assertEqual(case_shadowed([chg("docs/ok.md", "R", old="docs/Decisions/a.md")], Z),
                          ["docs/Decisions/a.md"])
 
     def test_case_shadowed_new_test_file_ok(self):
-        self.assertEqual(case_shadowed([chg("legacy/macos/Tests/NotchlingTests/chattests.swift", "A")], Z), [])
+        self.assertEqual(case_shadowed([chg("apps/flutter/test/chat/chattests.dart", "A")], Z), [])
 
 
 if __name__ == "__main__":

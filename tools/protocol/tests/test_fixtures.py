@@ -11,10 +11,8 @@ from schema_validate import validate
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_FILE = ROOT / "protocol/agentconsole.v1.schema.json"
 FIXTURES = ROOT / "protocol/fixtures"
-ROUTER = ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeRouter.swift"
 RUST_ROUTER = ROOT / "crates/engine/src/bridge/router.rs"
 RUST_HUB = ROOT / "crates/engine/src/bridge/hub.rs"
-HUB = ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeHub.swift"
 
 SCHEMA = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
 DEFS = SCHEMA["$defs"]
@@ -119,9 +117,7 @@ class BadExampleTests(unittest.TestCase):
 
 class RouterCoverageTests(unittest.TestCase):
     def test_every_op_of_the_router_is_in_the_schema_with_a_fixture(self):
-        text = ROUTER.read_text(encoding="utf-8")
-        ops = set(re.findall(r'^\s*case "([a-z][A-Za-z.]*)":', text, re.M))
-        ops |= {"hello", "pair"}
+        ops = {"hello", "pair"}
         rust = RUST_ROUTER.read_text(encoding="utf-8")
         ops |= set(re.findall(r'^\s*"([a-z][A-Za-z.]*)" => ', rust, re.M))
         self.assertGreater(len(ops), 18)
@@ -134,26 +130,10 @@ class RouterCoverageTests(unittest.TestCase):
         self.assertEqual(sorted(in_schema - fixture_ops), [])
 
     def test_every_event_the_hub_sends_is_in_the_schema(self):
-        text = HUB.read_text(encoding="utf-8") + ROUTER.read_text(encoding="utf-8")
-        events = set(re.findall(r'BridgeWire\.event\("([a-z]+)"', text))
-        events |= set(re.findall(r'wire::event\("([a-z]+)"', RUST_HUB.read_text(encoding="utf-8")))
+        events = set(re.findall(r'wire::event\("([a-z]+)"', RUST_HUB.read_text(encoding="utf-8")))
         in_schema = {DEFS[r["$ref"].split("/")[-1]]["properties"]["event"]["const"] for r in DEFS["Event"]["oneOf"]}
         self.assertGreaterEqual(len(events), 4)
         self.assertEqual(sorted(events - in_schema), [])
-
-    def test_every_error_code_of_the_router_is_in_the_schema(self):
-        text = (ROOT / "legacy/macos/Sources/ConsoleCore/Bridge/BridgeProtocol.swift").read_text(encoding="utf-8")
-        block = re.search(r"enum BridgeErrorCode[^{]*\{(.*?)\n\}", text, re.S).group(1)
-        codes = set()
-        for line in block.splitlines():
-            line = line.strip()
-            if not line.startswith("case "):
-                continue
-            for part in line[5:].split(","):
-                match = re.match(r'`?(\w+)`?(?: = "(\w+)")?$', part.strip())
-                codes.add(match.group(2) or match.group(1))
-        rust_only = {"primary_unreachable"}
-        self.assertEqual(codes | rust_only, set(DEFS["ErrorCode"]["enum"]))
 
 
 if __name__ == "__main__":

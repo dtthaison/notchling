@@ -7,9 +7,9 @@
 <!-- What did you run and look at? For a bug fix, name the test that fails on main and passes here. Screenshots help for anything visual. -->
 
 - [ ] Tests added for the change (a new test file; an edit to an existing test waits for the maintainer)
-- [ ] `swift test` passes
+- [ ] `cargo test --workspace --locked` passes (and clippy and fmt)
 - [ ] Guard passes: `PYTHONPATH=tools/guard python3 -m guard lint` (and `pins`, `codeowners --check`, `rulesets`, `rules`, plus the guard tests if `tools/guard/` changed)
-- [ ] `./build.sh` builds without warnings I added
+- [ ] `tools/bundle-next.sh` builds without warnings I added
 - [ ] If `apps/flutter/` changed: `flutter analyze` and `flutter test` pass
 - [ ] If users would see it: tried in the running app (macOS version: )
 - [ ] Changelog: a line under [Unreleased] in CHANGELOG.md, if users would notice (per-PR fragments replace this in Phase 6)

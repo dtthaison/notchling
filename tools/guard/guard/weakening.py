@@ -8,11 +8,11 @@ from guard.capability import Trip
 from guard.changes import Change
 
 TEST_PATHS = [re.compile(p) for p in (
-    r"^legacy/macos/Tests/", r"^legacy/macos/Fixtures/", r"^apps/flutter/test/", r"^tools/guard/tests/",
+    r"^apps/flutter/test/", r"^tools/guard/tests/",
     r"^crates/[^/]+/tests/", r"(^|/)goldens/.*\.png$",
 )]
 SKIPS = [re.compile(p) for p in (
-    r"\bXCTSkip\b", r"#\[ignore\b", r"\bskip:\s*(true|['\"])", r"@Skip\(",
+    r"#\[ignore\b", r"\bskip:\s*(true|['\"])", r"@Skip\(",
     r"\binvokeTest\b", r"\bdefaultTestSuite\b", r"\btestInvocations\b", r"\bgoldenFileComparator\b",
 )]
 

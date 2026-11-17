@@ -295,13 +295,12 @@ pub fn is_list(a: &[String]) -> bool {
 use super::step::InstalledPlugin;
 
 pub fn templates_fixture() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../legacy/macos/Tests/NotchlingTests/Fixtures/worker-templates")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notchling/worker-templates")
 }
 
 pub fn fixture_file(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../legacy/macos/Tests/NotchlingTests/Fixtures")
+        .join("tests/fixtures/notchling")
         .join(name)
 }
 

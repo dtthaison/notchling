@@ -14,13 +14,11 @@ accounts when a limit runs out. It works with Claude Code first, and with Codex 
 
 Today it is:
 
-- a macOS app in Swift (macOS 13 or later);
-- `hostd`, the session host that keeps terminals alive when the app quits;
+- a Rust engine that runs as a service (`notchlingd`) on every computer;
+- one GPUI desktop app for macOS, Linux and Windows;
 - a Flutter phone app, which people build themselves for now.
 
-It is being rebuilt: a Rust engine that runs as a service (`notchlingd`) on every computer, one GPUI
-desktop app for macOS, Linux and Windows, and the same Flutter phone app.
-[ARCHITECTURE.md](../ARCHITECTURE.md) describes both.
+[ARCHITECTURE.md](../ARCHITECTURE.md) describes it.
 
 The project is meant to run with agents doing most of the work. They take issues, fix bugs, add
 features and open pull requests, and checks decide what may land without the maintainer.
