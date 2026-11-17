@@ -81,3 +81,22 @@ fn the_node_field_is_absent_unless_set_and_old_rows_read() {
     assert_eq!(row["node"]["online"], false);
     assert_eq!(serde_json::from_value::<Agent>(row).unwrap(), a);
 }
+
+#[test]
+fn agent_without_worktree_path_serializes_without_it() {
+    let mut a = sample(AgentTarget::Job("ab".into()), None);
+    let plain = serde_json::to_value(&a).unwrap();
+    assert!(plain.get("worktreePath").is_none(), "{plain}");
+    a.worktree_path = Some("/w/lane".into());
+    let row = serde_json::to_value(&a).unwrap();
+    assert_eq!(row["worktreePath"], "/w/lane");
+    assert_eq!(serde_json::from_value::<Agent>(row).unwrap(), a);
+}
+
+#[test]
+fn agent_from_older_peer_reads() {
+    let mut row = serde_json::to_value(sample(AgentTarget::Job("ab".into()), None)).unwrap();
+    row.as_object_mut().unwrap().remove("worktreePath");
+    let back: Agent = serde_json::from_value(row).unwrap();
+    assert_eq!(back.worktree_path, None);
+}

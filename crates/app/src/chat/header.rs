@@ -89,6 +89,7 @@ mod tests {
                 resume_session_id: None,
                 at_prompt: false,
                 node: None,
+                worktree_path: None,
             },
             tool: crate::chat::data::Tool::Claude,
             transcript: None,

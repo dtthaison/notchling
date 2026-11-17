@@ -512,6 +512,7 @@ fn job_agent(id: &str, job: &str) -> Agent {
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     }
 }
 

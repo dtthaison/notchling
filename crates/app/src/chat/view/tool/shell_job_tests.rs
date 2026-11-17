@@ -25,6 +25,7 @@ fn row(id: &str, command: Option<&str>) -> Session {
             resume_session_id: None,
             at_prompt: false,
             node: None,
+            worktree_path: None,
         },
         tool: Tool::Claude,
         transcript: None,

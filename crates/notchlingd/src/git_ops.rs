@@ -48,8 +48,9 @@ pub fn live_folders(
             .as_array()
             .map(|rows| {
                 rows.iter()
-                    .filter_map(|row| row["cwd"].as_str())
-                    .filter(|cwd| !cwd.is_empty())
+                    .flat_map(|row| [row["cwd"].as_str(), row["worktreePath"].as_str()])
+                    .flatten()
+                    .filter(|folder| !folder.is_empty())
                     .map(PathBuf::from)
                     .collect()
             })

@@ -365,3 +365,25 @@ fn resume_flags_only_when_no_job_to_continue() {
         vec!["--bg", "--resume", "conv"]
     );
 }
+
+#[test]
+fn job_worktree_path_reaches_agent() {
+    let j = job(
+        "working",
+        json!({"worktreePath": "/Users/me/app/.claude/worktrees/music"}),
+    );
+    let a = agent_from_job(&j, "ab", None, &none);
+    assert_eq!(
+        a.worktree_path.as_deref(),
+        Some("/Users/me/app/.claude/worktrees/music")
+    );
+    assert_eq!(a.cwd, "/Users/me/app");
+}
+
+#[test]
+fn empty_worktree_path_is_none() {
+    let j = job("working", json!({"worktreePath": ""}));
+    assert_eq!(agent_from_job(&j, "ab", None, &none).worktree_path, None);
+    let bare = job("working", json!({}));
+    assert_eq!(agent_from_job(&bare, "ab", None, &none).worktree_path, None);
+}

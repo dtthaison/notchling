@@ -323,3 +323,24 @@ fn a_real_repository_in_a_session_folder_reads_through_the_ops() {
     assert_eq!(fresh["untracked"], true);
     assert!(fresh["text"].as_str().unwrap().contains("+fresh"));
 }
+
+#[test]
+fn a_sessions_worktree_path_is_a_known_folder() {
+    let t = TempDir::new("gitops-worktree-folders");
+    let sessions = Arc::new(Mutex::new(json!([
+        {"id": "a", "cwd": "/w/main", "worktreePath": "/w/main/.claude/worktrees/lane"},
+        {"id": "b", "cwd": "/w/other", "worktreePath": ""},
+        {"id": "c", "worktreePath": "/w/only"},
+    ])));
+    let titles: crate::pages_ops::Titles = Arc::new(Vec::new);
+    let list = live_folders(sessions, titles, t.path("codex"), true)();
+    assert_eq!(
+        list,
+        [
+            PathBuf::from("/w/main"),
+            PathBuf::from("/w/main/.claude/worktrees/lane"),
+            PathBuf::from("/w/only"),
+            PathBuf::from("/w/other"),
+        ]
+    );
+}

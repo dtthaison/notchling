@@ -493,6 +493,7 @@ fn row(job: &str, e: &Entry) -> Option<Value> {
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     };
     let mut value = serde_json::to_value(agent).ok()?;
     value["tool"] = json!("shell");

@@ -224,6 +224,7 @@ mod tests {
             resume_session_id: None,
             at_prompt: false,
             node: None,
+            worktree_path: None,
         };
         let lines = session_lines(&[a]);
         assert_eq!(lines.len(), 1);

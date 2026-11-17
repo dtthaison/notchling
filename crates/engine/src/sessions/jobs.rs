@@ -122,6 +122,9 @@ pub fn agent_from_job(
         resume_session_id: str_field(job, "resumeSessionId").map(String::from),
         at_prompt,
         node: None,
+        worktree_path: str_field(job, "worktreePath")
+            .filter(|p| !p.is_empty())
+            .map(String::from),
     }
 }
 
@@ -178,6 +181,7 @@ pub fn agent_from_session(s: &Value, host_app: &dyn Fn(u32) -> Option<String>) -
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     })
 }
 

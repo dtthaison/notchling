@@ -226,6 +226,7 @@ pub fn draft_session(provider: &str, folder: &str, now_ms: i64) -> Option<Sessio
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     };
     Some(Session {
         agent,
@@ -501,6 +502,7 @@ mod tests {
             resume_session_id: None,
             at_prompt: false,
             node: None,
+            worktree_path: None,
         }
     }
 

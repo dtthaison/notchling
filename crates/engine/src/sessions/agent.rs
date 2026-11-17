@@ -39,6 +39,8 @@ pub struct Agent {
     pub at_prompt: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +110,7 @@ pub(crate) fn sample(target: AgentTarget, transcript: Option<&str>) -> Agent {
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     }
 }
 

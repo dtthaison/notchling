@@ -23,6 +23,7 @@ fn waiting(needs: &str) -> Agent {
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     }
 }
 

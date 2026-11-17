@@ -23,6 +23,7 @@ fn agent(id: &str, since_ms: i64) -> Agent {
         resume_session_id: None,
         at_prompt: false,
         node: None,
+        worktree_path: None,
     }
 }
 
