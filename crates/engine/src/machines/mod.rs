@@ -103,6 +103,8 @@ mod tests_node_app;
 #[cfg(test)]
 mod tests_node_final;
 #[cfg(test)]
+mod tests_node_keychain;
+#[cfg(test)]
 mod tests_node_logins;
 #[cfg(test)]
 mod tests_node_profile;

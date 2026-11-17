@@ -9,6 +9,9 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 pub const AGY_LOGIN_FILE: &str = ".gemini/jetski-standalone-oauth-token";
 pub const CODEX_COMMAND: &str = "codex login --device-auth";
 pub const AGY_COMMAND: &str = "agy";
+pub const KEYCHAIN_PROGRAM: &str = "/usr/bin/security";
+pub const KEYCHAIN_ARGS: [&str; 5] = ["find-generic-password", "-s", "gemini", "-a", "antigravity"];
+const KEYCHAIN_REDIRECTS: [&str; 4] = [">/dev/null", "2>/dev/null", "2>", "1"];
 pub const FORBIDDEN: [&str; 4] = ["refresh", "logout", "setup-token", "--with-api-key"];
 
 pub fn codex_signed_in(exit: i32, stdout: &str) -> bool {
@@ -52,6 +55,35 @@ pub fn agy_state(os: &str, files: &dyn Fn(&Path) -> bool, home: &Path) -> Option
     }
 }
 
+pub fn keychain_argv() -> Vec<String> {
+    std::iter::once(KEYCHAIN_PROGRAM)
+        .chain(KEYCHAIN_ARGS)
+        .map(String::from)
+        .collect()
+}
+
+pub fn keychain_command() -> String {
+    keychain_argv().join(" ")
+}
+
+pub fn keychain_state(exit: i32) -> Option<bool> {
+    (exit == 0).then_some(true)
+}
+
+fn security_allowed(words: &[String], i: usize) -> bool {
+    let rest = &words[i + 1..];
+    words[i] == KEYCHAIN_PROGRAM
+        && rest.len() >= KEYCHAIN_ARGS.len()
+        && rest[..KEYCHAIN_ARGS.len()] == KEYCHAIN_ARGS
+        && rest[KEYCHAIN_ARGS.len()..]
+            .iter()
+            .all(|w| KEYCHAIN_REDIRECTS.contains(&w.as_str()))
+}
+
+fn is_security(word: &str) -> bool {
+    word.rsplit('/').next() == Some("security")
+}
+
 fn commands(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
     let cut = |c: char| matches!(c, ';' | '&' | '|' | '(' | ')' | '`' | '\n' | '\r');
     text.split(cut).map(|part| {
@@ -67,6 +99,7 @@ pub fn read_only(text: &str) -> bool {
         words.iter().enumerate().all(|(i, word)| {
             !FORBIDDEN.contains(&word.as_str())
                 && (word != "login" || words.get(i + 1).map(String::as_str) == Some("status"))
+                && (!is_security(word) || security_allowed(&words, i))
         })
     })
 }
@@ -104,7 +137,15 @@ pub fn probe(
         }
     }
     if src.agy_installed {
-        if let Some(state) = agy_state(src.os, files, src.home) {
+        let state = agy_state(src.os, files, src.home).or_else(|| {
+            let argv = keychain_argv();
+            if src.os != "macos" || !argv_read_only(&argv) {
+                return None;
+            }
+            run.run(&argv, TIMEOUT)
+                .and_then(|(exit, _)| keychain_state(exit))
+        });
+        if let Some(state) = state {
             out.insert(Tool::Agy, state);
         }
     }
@@ -179,6 +220,10 @@ pub fn needed_text(tool: Tool, node: &str) -> (String, String) {
 #[cfg(test)]
 #[path = "logins_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "logins_keychain_tests.rs"]
+mod keychain_tests;
 
 #[cfg(test)]
 #[path = "logins_own_tests.rs"]
