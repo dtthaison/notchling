@@ -2,6 +2,7 @@ use crate::daemon::Ops;
 use crate::install_ops::*;
 use crate::op_group::OpGroup;
 use crate::switches::{SwitchFlag, INSTALL, INSTALL_OFF};
+use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::install::{hook_command, ToolRoots};
 use notchling_local_api::{ops, ErrorCode, Handler, OpSpec};
 use notchling_platform::paths::Os;
@@ -149,7 +150,7 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
         .unwrap()
         .contains("add PreToolUse (AskUserQuestion)"));
     let skills = plan["skills"].as_array().unwrap();
-    assert_eq!(skills.len(), 6);
+    assert_eq!(skills.len(), 9);
     assert!(skills.iter().all(|s| s["action"] == "write"));
     assert_eq!(dir.tree(), before);
     assert_eq!(settings_text(&dir), USER_SETTINGS);
@@ -254,6 +255,9 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
         (".gemini/config", "notchling-delegate"),
         (".claude", "notchling-settings"),
         (".codex", "notchling-settings"),
+        (".claude", "notchling-ask"),
+        (".codex", "notchling-ask"),
+        (".gemini/config", "notchling-ask"),
     ] {
         let skill = dir.path(&format!("home/{tool}/skills/{name}"));
         assert!(skill.join("SKILL.md").is_file(), "{tool} {name}");
@@ -519,7 +523,8 @@ fn the_layout_puts_every_tool_where_the_swift_app_looked() {
         vec![
             ("notchling-delegate", 3),
             ("notchling-pages", 1),
-            ("notchling-settings", 2)
+            ("notchling-settings", 2),
+            ("notchling-ask", 3)
         ]
     );
     assert!(InstallSetup::from_layout(&fixture, None).skills.is_empty());
@@ -567,4 +572,25 @@ fn applying_only_skill_names_writes_skills_and_leaves_settings_json_alone() {
     assert!(dir
         .path("home/.claude/skills/notchling-delegate/SKILL.md")
         .exists());
+}
+
+#[test]
+fn default_skills_has_ask_for_three_tools() {
+    let skills = default_skills(Path::new(BINARY), Path::new("/nowhere"));
+    let ask = skills
+        .iter()
+        .find(|s| s.name == "notchling-ask")
+        .expect("notchling-ask is a default skill");
+    assert_eq!(
+        ask.tools,
+        [SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity]
+    );
+    let claude = (ask.text)(SkillTool::Claude);
+    assert!(claude.contains(BINARY));
+    assert!(claude.contains("run_in_background: true"));
+    assert!((ask.text)(SkillTool::Codex).contains("`--write` delegate jobs"));
+    assert!(claude.starts_with(&format!(
+        "---\nname: notchling-ask\ndescription: {}",
+        notchling_engine::ask::skill::DESCRIPTION
+    )));
 }

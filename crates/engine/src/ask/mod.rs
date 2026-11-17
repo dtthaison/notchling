@@ -3,6 +3,7 @@ mod find;
 mod inbox_item;
 mod model;
 mod rules;
+pub mod skill;
 mod store;
 mod words;
 
@@ -35,6 +36,9 @@ mod model_tests;
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod rules_tests;
+#[cfg(test)]
+#[path = "skill_tests.rs"]
+mod skill_tests;
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod store_tests;

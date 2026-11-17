@@ -2,6 +2,7 @@ use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::switches::{SwitchFlag, INSTALL_OFF};
+use notchling_engine::ask::skill::{text as ask_text, NAME as ASK_NAME};
 use notchling_engine::delegate::skill::{content as delegate_text, SkillTool};
 use notchling_engine::install::{
     self, Action, FileError, FilePlan, Found, SkillPlan, SkillSpec, ToolRoots, Want, Wanted,
@@ -59,6 +60,7 @@ pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
     let for_delegate = binary.to_string_lossy().into_owned();
     let for_pages = for_delegate.clone();
     let for_settings = for_delegate.clone();
+    let for_ask = for_delegate.clone();
     let codex_home = codex_home.to_path_buf();
     vec![
         SkillSpec {
@@ -78,6 +80,11 @@ pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
             name: settings_skill::NAME.to_string(),
             tools: settings_skill::TOOLS.to_vec(),
             text: Box::new(move |tool| settings_skill::content(&for_settings, tool)),
+        },
+        SkillSpec {
+            name: ASK_NAME.to_string(),
+            tools: vec![SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity],
+            text: Box::new(move |tool| ask_text(&for_ask, tool)),
         },
     ]
 }
