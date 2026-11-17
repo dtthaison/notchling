@@ -294,6 +294,58 @@ mod real {
     }
 
     #[test]
+    fn the_reader_under_the_sandbox_runs_no_repository_program() {
+        use crate::git::reader::Reader;
+        let rig = rig("sb-reader");
+        rig.t
+            .write("repo/.gitattributes", "*.txt diff=x filter=x\n");
+        must(&rig.repo, &["add", "."]);
+        must(&rig.repo, &["commit", "-q", "-m", "attributes"]);
+        must(&rig.repo, &["checkout", "-q", "-b", "feat"]);
+        rig.t.write("repo/c.txt", "one\ntwo\n");
+        must(&rig.repo, &["add", "."]);
+        must(&rig.repo, &["commit", "-q", "-m", "work"]);
+        for (key, name) in [
+            ("filter.x.clean", "clean.sh"),
+            ("filter.x.process", "process.sh"),
+            ("diff.x.textconv", "textconv.sh"),
+            ("diff.external", "external.sh"),
+            ("core.fsmonitor", "monitor.sh"),
+        ] {
+            must(&rig.repo, &["config", key, &script(&rig, name)]);
+        }
+        let hook = rig.repo.join(".git/hooks/post-index-change");
+        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        std::fs::copy(script(&rig, "hook.sh"), &hook).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dirty(&rig);
+        let launcher = sandboxed();
+        let cwd = rig.repo.to_string_lossy().into_owned();
+        let reader = Reader::open(&cwd, &launcher).unwrap();
+        let rev = |name: &str| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&rig.repo)
+                .args(["rev-parse", name])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        };
+        let (feat, main) = (rev("feat"), rev("main"));
+        reader.common_dir().unwrap();
+        assert_eq!(reader.worktrees().unwrap().0.len(), 1);
+        assert!(reader.refs().unwrap().0.len() >= 2);
+        assert!(reader.ahead_behind_all("main").unwrap().is_some());
+        assert_eq!(reader.left_right("main", &feat).unwrap().unwrap().ahead, 1);
+        assert_eq!(reader.lines("main", &feat).unwrap().unwrap().files, 1);
+        assert_eq!(reader.related(&main, &feat), Ok(true));
+        assert_eq!(reader.commit_facts(&feat).unwrap().1, "work");
+        assert!(!rig.marker.exists(), "a program started under the reader");
+    }
+
+    #[test]
     fn a_filter_added_between_the_runs_cannot_start() {
         let rig = rig("sb-gap");
         let launcher = sandboxed();

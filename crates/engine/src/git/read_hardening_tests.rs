@@ -1,6 +1,7 @@
 use super::branch::read_ref_stat;
 use super::branch_file::read_ref_diff;
 use super::read::{read_diff, read_status, Diff};
+use super::reader::Reader;
 use super::Status;
 use crate::control::{Launcher, RealLauncher};
 use crate::sessions::testutil::TempDir;
@@ -246,4 +247,119 @@ fn changed_at_of_a_real_status_is_the_newest_changed_file() {
         .unwrap()
         .as_millis() as i64;
     assert_eq!(status.changed_at, Some(want));
+}
+
+fn commit_on_feat(rig: &Rig) {
+    rig.t
+        .write("repo/.gitattributes", "*.txt diff=x filter=x\n");
+    must(&rig.repo, &["add", "."]);
+    must(&rig.repo, &["commit", "-q", "-m", "attributes"]);
+    must(&rig.repo, &["checkout", "-q", "-b", "feat"]);
+    rig.t.write("repo/c.txt", "one\ntwo\n");
+    must(&rig.repo, &["add", "."]);
+    must(&rig.repo, &["commit", "-q", "-m", "work"]);
+    must(
+        &rig.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            &rig.t.path("lane").to_string_lossy(),
+            "main",
+        ],
+    );
+}
+
+fn head_of(rig: &Rig, name: &str) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&rig.repo)
+        .args(["rev-parse", name])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_owned()
+}
+
+fn the_reader_runs_nothing(rig: &Rig, control: &[&str]) {
+    assert!(!rig.marker.exists());
+    git(&rig.repo, control);
+    assert!(
+        rig.marker.exists(),
+        "the trap never fires without the guards, so this test would prove nothing"
+    );
+    std::fs::remove_file(&rig.marker).unwrap();
+    let cwd = rig.repo.to_string_lossy().into_owned();
+    let l = launcher();
+    let reader = Reader::open(&cwd, &*l).unwrap();
+    let feat = head_of(rig, "feat");
+    let main = head_of(rig, "main");
+    assert_eq!(reader.worktrees().unwrap().0.len(), 2);
+    assert!(reader.refs().unwrap().0.len() >= 2);
+    let all = reader.ahead_behind_all("main").unwrap().unwrap();
+    assert_eq!(all["refs/heads/feat"].ahead, 1);
+    assert_eq!(reader.left_right("main", &feat).unwrap().unwrap().ahead, 1);
+    let lines = reader.lines("main", &feat).unwrap().unwrap();
+    assert_eq!((lines.added, lines.files), (1, 1));
+    assert_eq!(reader.related(&main, &feat), Ok(true));
+    assert_eq!(reader.commit_facts(&feat).unwrap().1, "work");
+    assert!(!rig.marker.exists(), "a program of the repository ran");
+}
+
+#[test]
+fn the_reader_never_runs_a_clean_filter() {
+    let rig = rig("hard-reader-clean");
+    commit_on_feat(&rig);
+    config(&rig, "filter.x.clean", &script(&rig, "clean.sh"));
+    rig.t.write("repo/c.txt", "one\ntwo\nthree\n");
+    the_reader_runs_nothing(&rig, &["diff", "HEAD", "--numstat"]);
+}
+
+#[test]
+fn the_reader_never_runs_a_process_filter() {
+    let rig = rig("hard-reader-process");
+    commit_on_feat(&rig);
+    config(&rig, "filter.x.process", &script(&rig, "process.sh"));
+    config(&rig, "filter.x.required", "true");
+    rig.t.write("repo/c.txt", "one\ntwo\nthree\n");
+    the_reader_runs_nothing(&rig, &["diff", "HEAD", "--numstat"]);
+}
+
+#[test]
+fn the_reader_never_runs_a_post_index_change_hook() {
+    let rig = rig("hard-reader-hook");
+    commit_on_feat(&rig);
+    let hook = rig.repo.join(".git/hooks/post-index-change");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::copy(script(&rig, "hook.sh"), &hook).unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    rig.t.write("repo/c.txt", "one\ntwo\nthree\n");
+    bump_mtime(&rig.repo.join("a.txt"));
+    the_reader_runs_nothing(&rig, &["status"]);
+}
+
+#[test]
+fn the_reader_never_runs_an_fsmonitor_program() {
+    let rig = rig("hard-reader-fsmonitor");
+    commit_on_feat(&rig);
+    config(&rig, "core.fsmonitor", &script(&rig, "monitor.sh"));
+    rig.t.write("repo/c.txt", "one\ntwo\nthree\n");
+    the_reader_runs_nothing(&rig, &["status"]);
+}
+
+#[test]
+fn the_reader_never_runs_a_textconv_program() {
+    let rig = rig("hard-reader-textconv");
+    commit_on_feat(&rig);
+    config(&rig, "diff.x.textconv", &script(&rig, "textconv.sh"));
+    the_reader_runs_nothing(&rig, &["diff", "main", "feat"]);
+}
+
+#[test]
+fn the_reader_never_runs_an_external_diff_program() {
+    let rig = rig("hard-reader-external");
+    commit_on_feat(&rig);
+    config(&rig, "diff.external", &script(&rig, "external.sh"));
+    the_reader_runs_nothing(&rig, &["diff", "main", "feat"]);
 }

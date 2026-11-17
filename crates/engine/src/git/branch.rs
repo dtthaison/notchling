@@ -11,7 +11,7 @@ use std::io::Read;
 use std::path::Path;
 
 const COUNT_BUDGET: u64 = 8 * 1024 * 1024;
-const FALLBACK_BASES: [&str; 2] = ["main", "master"];
+pub(super) const FALLBACK_BASES: [&str; 2] = ["main", "master"];
 
 pub(super) const DIFF_FLAGS: [&str; 5] = [
     "--no-color",
@@ -46,7 +46,11 @@ pub(super) fn merge_base(
     }
 }
 
-fn remote_default(launcher: &dyn Launcher, cwd: &str, drivers: &[String]) -> Option<String> {
+pub(super) fn remote_default(
+    launcher: &dyn Launcher,
+    cwd: &str,
+    drivers: &[String],
+) -> Option<String> {
     let out = run(
         launcher,
         &command(
