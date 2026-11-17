@@ -9,8 +9,8 @@ use notchling_engine::machines::registry::{
 };
 use notchling_engine::machines::runner::{Call, ScriptedRunner};
 use notchling_engine::machines::step::{
-    Cadence, CheckResult, Detected, FixOutcome, FixPlan, MacFacts, NoCluster, NoOpener, Probe,
-    SetupStep, StepFix, StepId,
+    Cadence, CheckResult, ClusterTokens, Detected, FixOutcome, FixPlan, MacFacts, NoCluster,
+    NoOpener, Probe, SetupStep, StepFix, StepId,
 };
 use serde_json::{json, Value};
 
@@ -398,6 +398,24 @@ impl Rig {
             runner,
             engine,
         }
+    }
+
+    pub fn real_in(machines: Vec<Machine>, cluster: Arc<dyn ClusterTokens>) -> Rig {
+        let rig = Rig::new(machines);
+        let deps = Deps {
+            runner: rig.runner.clone(),
+            secrets: Arc::new(notchling_engine::machines::step::NoSecrets),
+            http: Arc::new(NoGitHub),
+            opener: Arc::new(NoOpener),
+            store: rig.registry.clone(),
+            mac: Arc::new(MacFacts::default),
+            clock: Arc::new(|| T0),
+            scratch: std::env::temp_dir().join("notchling-add-tests"),
+            offers_data: None,
+            audit: None,
+        };
+        let engine = Arc::new(SetupEngine::new(deps, standard()).with_cluster(cluster, None));
+        Rig { engine, ..rig }
     }
 
     pub fn real(machines: Vec<Machine>) -> Rig {

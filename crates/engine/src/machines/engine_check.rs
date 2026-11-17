@@ -14,6 +14,17 @@ use super::step::{
 use crate::lanes::quote;
 use std::collections::{BTreeMap, BTreeSet};
 
+fn blocked(raw: &BTreeMap<StepId, CheckResult>, id: &StepId, text: String) -> CheckResult {
+    let result = CheckResult::cant_tell(text);
+    match raw.get(id).and_then(|r| r.detected.other_cluster.clone()) {
+        Some(other_cluster) => result.detected(Detected {
+            other_cluster: Some(other_cluster),
+            ..Detected::default()
+        }),
+        None => result,
+    }
+}
+
 pub(super) fn nonce() -> Option<String> {
     use ring::rand::{SecureRandom, SystemRandom};
     let mut b = [0u8; 8];
@@ -134,7 +145,7 @@ impl SetupEngine {
                     let need = s.needs.first().map(title).unwrap_or("another step".into());
                     done.insert(
                         s.id.clone(),
-                        CheckResult::cant_tell(format!("waits for {need}")),
+                        blocked(&raw, &s.id, format!("waits for {need}")),
                     );
                 }
                 break;
@@ -149,7 +160,7 @@ impl SetupEngine {
                 if let Some(need) = blocking {
                     done.insert(
                         s.id.clone(),
-                        CheckResult::cant_tell(format!("waits for {}", title(need))),
+                        blocked(&raw, &s.id, format!("waits for {}", title(need))),
                     );
                     continue;
                 }

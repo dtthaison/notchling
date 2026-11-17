@@ -1,7 +1,8 @@
 use notchling_engine::machines::registry::MachineAbilities;
-use notchling_engine::machines::step::{CheckResult, StepId};
+use notchling_engine::machines::step::{CheckResult, ClusterTokens, StepId};
 use notchling_engine::versions::knob::sha256_hex;
 use notchling_engine::versions::Tool;
+use std::sync::Arc;
 
 use super::planned;
 use crate::cluster::add::{AddFlow, Phase};
@@ -104,4 +105,47 @@ fn a_node_only_machine_keeps_its_self_update_row() {
         !self_update_ids(&flow).is_empty(),
         "a node-only machine has its own self-update step"
     );
+}
+
+struct Home;
+
+impl ClusterTokens for Home {
+    fn join_token(&self) -> Result<String, String> {
+        Err("no token in tests".into())
+    }
+    fn cluster_id(&self) -> Result<Option<String>, String> {
+        Ok(Some("home-cluster".into()))
+    }
+    fn can_be_master(&self, _machine: &str) -> Option<bool> {
+        None
+    }
+}
+
+#[test]
+fn a_machine_in_another_cluster_stops_the_add_even_when_its_binary_differs() {
+    let rig = Rig::real_in(vec![], Arc::new(Home));
+    rig.answer_batches(|probe| {
+        if probe.contains("cluster status --json") {
+            return (
+                r#"{"me":"0123456789abcdef","cluster":{"id":"rival-cluster","name":"rival"}}"#
+                    .to_string(),
+                0,
+            );
+        }
+        if probe.contains("--version") {
+            return ("notchling 0.0.1 (other-build)".to_string(), 0);
+        }
+        answer(probe)
+    });
+    let mut flow = rig.flow("agent@box");
+    rig.check(&mut flow);
+    let Phase::Stopped(stop) = flow.phase() else {
+        panic!("{:?}", flow.phase());
+    };
+    assert!(
+        stop.reason.contains("in another cluster, rival"),
+        "{stop:?}"
+    );
+    assert!(!stop.check_again);
+    assert!(flow.plan().is_none());
 }

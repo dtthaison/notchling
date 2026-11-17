@@ -137,6 +137,7 @@ pub struct Detected {
     pub node: Option<String>,
     pub notchling_app: Option<bool>,
     pub tailscale: Option<TailscaleState>,
+    pub other_cluster: Option<String>,
 }
 
 impl Detected {
@@ -159,6 +160,7 @@ impl Detected {
         over(&mut d.node, &new.node);
         over(&mut d.notchling_app, &new.notchling_app);
         over(&mut d.tailscale, &new.tailscale);
+        over(&mut d.other_cluster, &new.other_cluster);
         d
     }
 }

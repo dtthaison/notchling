@@ -228,11 +228,14 @@ fn parse_joined(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     };
     if theirs != want {
         let name = v["cluster"]["name"].as_str().unwrap_or("");
-        return seen(CheckResult::fail(if name.is_empty() {
+        let text = if name.is_empty() {
             "in another cluster".to_string()
         } else {
             format!("in another cluster, {}", cut(name))
-        }));
+        };
+        let mut result = seen(CheckResult::fail(text.clone()));
+        result.detected.other_cluster = Some(text);
+        return result;
     }
     let name = v["cluster"]["name"].as_str().unwrap_or("");
     seen(CheckResult::pass(if name.is_empty() {

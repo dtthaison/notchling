@@ -314,6 +314,9 @@ impl AddFlow {
         if let Some(why) = unsupported(&detected) {
             return Err(Stop::new(why, false));
         }
+        if let Some(text) = &detected.other_cluster {
+            return Err(Stop::new(t::cluster::add_other_cluster(text), false));
+        }
         if let Some(joined) = results.get(&StepId::NODE_JOINED) {
             if joined.state.is_fail() && says(joined.state.text(), &["in", "another", "cluster"]) {
                 let why = t::cluster::add_other_cluster(joined.state.text());
