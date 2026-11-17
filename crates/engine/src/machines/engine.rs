@@ -91,6 +91,7 @@ pub(super) struct State {
     pub shown: BTreeMap<u64, ShownRecord>,
     pub revision: u64,
     pub tools_saved: BTreeMap<String, WorkerTools>,
+    pub sign_in: BTreeMap<String, String>,
 }
 
 pub struct SetupEngine {
@@ -98,8 +99,10 @@ pub struct SetupEngine {
     pub(super) catalog: Catalog,
     pub(super) state: Arc<Mutex<State>>,
     pub(super) on_change: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub(super) on_link: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub(super) tokens: Arc<dyn ClusterTokens>,
     pub(super) dist_dir: Option<PathBuf>,
+    pub(super) mac_daemon: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -172,8 +175,10 @@ impl SetupEngine {
             catalog,
             state: Arc::new(Mutex::new(State::default())),
             on_change: Mutex::new(None),
+            on_link: Mutex::new(None),
             tokens: Arc::new(NoCluster),
             dist_dir: None,
+            mac_daemon: None,
         };
         engine.load_offers();
         engine
@@ -186,6 +191,11 @@ impl SetupEngine {
     ) -> SetupEngine {
         self.tokens = tokens;
         self.dist_dir = dist_dir;
+        self
+    }
+
+    pub fn with_mac_daemon(mut self, mac_daemon: Option<PathBuf>) -> SetupEngine {
+        self.mac_daemon = mac_daemon;
         self
     }
 
@@ -224,6 +234,12 @@ impl SetupEngine {
             .insert(id, result);
         state.revision += 1;
     }
+    pub fn sign_in_link(&self, machine: &str) -> Option<String> {
+        lock(&self.state).sign_in.get(machine).cloned()
+    }
+    pub fn set_on_link(&self, f: Option<Arc<dyn Fn() + Send + Sync>>) {
+        *self.on_link.lock().unwrap_or_else(|e| e.into_inner()) = f;
+    }
     pub fn running(&self, machine: &str) -> Option<StepId> {
         lock(&self.state).running.get(machine).cloned()
     }
@@ -258,6 +274,7 @@ impl SetupEngine {
     pub fn steps(&self, m: &Machine) -> Vec<SetupStep> {
         let all = self.current_machines();
         let list = (self.catalog.steps)(&self.overlaid(m), &all);
+        let list = self.with_tailscale_fix(list, m);
         super::steps_master::only_masters(
             list,
             self.tokens.as_ref(),
@@ -272,8 +289,14 @@ impl SetupEngine {
             .and_then(|d| d.node.clone())
     }
 
+    fn with_tailscale_fix(&self, list: Vec<SetupStep>, m: &Machine) -> Vec<SetupStep> {
+        let state = super::steps_tailscale_linux::state_of(&self.results(&m.name));
+        super::steps_tailscale_linux::with_fix(list, m, state)
+    }
+
     pub(super) fn step_list(&self, m: &Machine) -> Vec<SetupStep> {
         let list = (self.catalog.steps)(m, &self.current_machines());
+        let list = self.with_tailscale_fix(list, m);
         let list = super::steps_master::only_masters(
             list,
             self.tokens.as_ref(),
@@ -319,6 +342,7 @@ impl SetupEngine {
             masks: masks.clone(),
             tokens: self.tokens.clone(),
             dist_dir: self.dist_dir.clone(),
+            mac_daemon: self.mac_daemon.clone(),
             node: self.node_of(&m.name),
         }
     }
@@ -460,10 +484,32 @@ impl SetupEngine {
     }
 
     pub fn check_draft(&self, draft: &Machine) -> BTreeMap<StepId, CheckResult> {
+        self.check_draft_with(draft, false, None)
+    }
+
+    pub fn check_draft_slow(&self, draft: &Machine) -> BTreeMap<StepId, CheckResult> {
+        self.check_draft_with(draft, true, None)
+    }
+
+    pub fn check_draft_join(
+        &self,
+        draft: &Machine,
+        has_sd_job: bool,
+    ) -> BTreeMap<StepId, CheckResult> {
+        let only = has_sd_job.then_some(super::steps_node::is_sd_join_step as fn(&StepId) -> bool);
+        self.check_draft_with(draft, true, only)
+    }
+
+    fn check_draft_with(
+        &self,
+        draft: &Machine,
+        slow: bool,
+        only: Option<fn(&StepId) -> bool>,
+    ) -> BTreeMap<StepId, CheckResult> {
         let mut m = draft.clone();
         m.jobs.clear();
         let masks = self.masks(&m, None);
-        let e = self.evaluate(&m, false, false, &masks);
+        let e = self.evaluate_in(&m, slow, false, &masks, only);
         e.results
             .into_iter()
             .map(|(k, v)| (k, v.masked(&masks)))

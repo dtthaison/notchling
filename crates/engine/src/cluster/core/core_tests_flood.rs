@@ -149,7 +149,7 @@ fn issue(hub: &mut Hub, home: &NodeId, minter: &NodeId, secret: String) {
     hub.local(
         home,
         LocalCmd::IssueToken {
-            secret,
+            secret: secret.into(),
             minter: minter.clone(),
         },
     );
@@ -506,7 +506,7 @@ fn strangers_dropping_do_not_disturb_a_join_in_progress() {
     hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: "s3".to_string(),
+            secret: "s3".to_string().into(),
             minter: m5.clone(),
         },
     );
@@ -563,7 +563,7 @@ fn a_denied_joiner_leaves_nothing_behind_once_it_drops() {
     hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: "s3".to_string(),
+            secret: "s3".to_string().into(),
             minter: m5.clone(),
         },
     );

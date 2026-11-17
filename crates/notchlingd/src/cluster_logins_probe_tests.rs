@@ -121,6 +121,10 @@ struct Rig {
 }
 
 fn rig(answers: &[Option<(i32, &str)>], agy: bool, files: Files) -> Rig {
+    rig_on("linux", answers, agy, files)
+}
+
+fn rig_on(os: &str, answers: &[Option<(i32, &str)>], agy: bool, files: Files) -> Rig {
     let notes = Arc::new(Fake::default());
     let status = Status::new(answers);
     let now = Arc::new(AtomicI64::new(1_000));
@@ -136,7 +140,7 @@ fn rig(answers: &[Option<(i32, &str)>], agy: bool, files: Files) -> Rig {
             notes.clone(),
             Arc::new(move || clock.load(Ordering::SeqCst)),
         ),
-        ("w 1".to_string(), "linux".to_string()),
+        ("w 1".to_string(), os.to_string()),
     );
     Rig {
         installed,
@@ -252,6 +256,55 @@ fn antigravity_is_probed_by_file_and_flips_the_same_way() {
         .iter()
         .collect()
     );
+}
+
+fn keychain_calls(r: &Rig) -> Vec<Vec<String>> {
+    lock(&r.status.calls)
+        .iter()
+        .filter(|a| a.first().is_some_and(|p| p.ends_with("security")))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn mac_keychain_item_is_a_login_and_flips_like_a_file() {
+    let r = rig_on("macos", &[ON, ON, OFF], true, no_files());
+    r.probe.refresh();
+    assert_eq!(r.probe.logins().get(&Tool::Agy), Some(&true));
+    assert!(r.notes.raised().is_empty());
+    assert_eq!(keychain_calls(&r).len(), 1);
+}
+
+#[test]
+fn mac_without_file_or_item_has_no_antigravity_entry_and_raises_nothing() {
+    let r = rig_on("macos", &[ON, Some((44, "")), None], true, no_files());
+    r.probe.refresh();
+    assert_eq!(r.probe.logins().get(&Tool::Agy), None);
+    assert!(r.notes.raised().is_empty());
+    assert_eq!(keychain_calls(&r).len(), 1);
+}
+
+#[test]
+fn a_mac_login_file_asks_no_keychain_and_linux_never_does() {
+    let present: Files = Arc::new(|_| true);
+    let r = rig_on("macos", &[ON], true, present);
+    r.probe.refresh();
+    assert!(keychain_calls(&r).is_empty());
+    let r = rig_on("linux", &[ON], true, no_files());
+    r.probe.refresh();
+    assert!(keychain_calls(&r).is_empty());
+}
+
+#[test]
+fn the_keychain_check_is_one_exact_argv_that_never_reads_the_secret() {
+    let r = rig_on("macos", &[ON, Some((0, ""))], true, no_files());
+    r.probe.refresh();
+    let calls = keychain_calls(&r);
+    assert_eq!(calls, [notchling_engine::cluster::logins::keychain_argv()]);
+    for argv in &calls {
+        assert!(argv.iter().all(|w| w != "-w" && w != "-g"), "{argv:?}");
+        assert_eq!(argv[1], "find-generic-password");
+    }
 }
 
 fn wait_for(r: &Rig, calls: usize) {

@@ -191,6 +191,7 @@ pub const RULES: &[Rule] = &[
     rule("node.load", MEMBER, OriginTier::Node, None, false),
     rule("node.reach", MEMBER, OriginTier::Node, None, false),
     client_home("cluster.join.token"),
+    rule("cluster.invite", CLIENT, OriginTier::App, None, true),
     rule("cluster.dispatch", MEMBER, OriginTier::Agent, None, true),
     home_app("install.plan"),
     home_app("install.apply"),

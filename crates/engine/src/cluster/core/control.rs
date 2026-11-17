@@ -5,12 +5,14 @@ use serde_json::{json, Value};
 
 use super::record::Pushed;
 use super::{
-    shown_members, Effect, Joining, LocalCmd, NodeCore, Target, Then, ATTACH_CALL_MS, CALL_MS,
-    DELEGATE_CALL_MS,
+    shown_members, shown_name, Effect, Joining, LocalCmd, NodeCore, Target, Then, ATTACH_CALL_MS,
+    CALL_MS, DELEGATE_CALL_MS,
 };
 use crate::cluster::failover::armed_at_current;
 use crate::cluster::grants::SecretAllow;
 use crate::cluster::id::NodeId;
+use crate::cluster::invite::Invite;
+use crate::cluster::join::TOKEN_TTL_MS;
 use crate::cluster::main_sessions::{aliases, reconcile};
 use crate::cluster::members::{Desired, Member, MemberState, Term};
 use crate::cluster::state::{Command, CommandError};
@@ -92,8 +94,34 @@ impl NodeCore {
                 } else if !self.may_mint(&minter) {
                     Err(refusal("forbidden", "only a member makes join tokens"))
                 } else {
-                    self.tokens.issue(secret, minter, &self.me, self.wall_ms);
+                    self.tokens
+                        .issue(secret.into_inner(), minter, &self.me, self.wall_ms);
                     Ok(json!({}))
+                };
+                self.finish(target, result, out);
+            }
+            LocalCmd::Invite {
+                secret,
+                invite,
+                minter,
+            } => {
+                let result = if !self.is_home() {
+                    Err(refusal("forbidden", "only the primary makes invites"))
+                } else if !self.may_mint(&minter) {
+                    Err(refusal("forbidden", "only a member makes invites"))
+                } else {
+                    let invite = Invite {
+                        name: shown_name(&invite.name, &invite.node),
+                        ..invite
+                    };
+                    self.tokens.issue_invite(
+                        secret.into_inner(),
+                        minter,
+                        &self.me,
+                        self.wall_ms,
+                        invite,
+                    );
+                    Ok(json!({"expiresMs": self.wall_ms + TOKEN_TTL_MS}))
                 };
                 self.finish(target, result, out);
             }

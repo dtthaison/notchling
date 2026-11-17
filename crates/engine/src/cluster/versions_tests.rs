@@ -157,3 +157,25 @@ fn promote_needs_same_build() {
         Compat::Refuse(t) if t.contains("isn't installed")
     ));
 }
+
+#[test]
+fn versions_without_build_reads_as_none() {
+    let mut value = serde_json::to_value(versions("linux")).expect("json");
+    value.as_object_mut().expect("object").remove("build");
+    let parsed: super::versions::Versions = serde_json::from_value(value).expect("an older peer");
+    assert_eq!(parsed.build, None);
+    assert!(serde_json::to_value(&parsed)
+        .expect("json")
+        .get("build")
+        .is_none());
+}
+
+#[test]
+fn versions_round_trip_with_build() {
+    let mut node = versions("linux");
+    node.build = Some("0a32aaca1234-dirty".to_string());
+    let value = serde_json::to_value(&node).expect("json");
+    assert_eq!(value["build"], "0a32aaca1234-dirty");
+    let back: super::versions::Versions = serde_json::from_value(value).expect("round trip");
+    assert_eq!(back, node);
+}

@@ -2,18 +2,25 @@ use super::engine::Catalog;
 use super::registry::{Machine, MachineOs};
 use super::step::{SetupStep, StepId};
 use super::{
-    steps_machine, steps_master, steps_node, steps_node_logins, steps_repo, steps_sd, steps_secret,
-    steps_selfupdate, steps_versions, token_scope,
+    steps_git, steps_machine, steps_master, steps_node, steps_node_logins, steps_repo, steps_sd,
+    steps_secret, steps_selfupdate, steps_versions, token_scope,
 };
 use std::sync::Arc;
 
 pub fn steps(m: &Machine, all: &[Machine]) -> Vec<SetupStep> {
     let mut out = Vec::new();
+    let node_only = m.node.is_some() && m.sd_worker().is_none();
     for step in steps_machine::all(m) {
+        if node_only && [StepId::BASE_TOOLS, StepId::XCODE].contains(&step.id) {
+            continue;
+        }
         let after = step.id == StepId::CLAUDE_CODE;
         let reachable = step.id == StepId::REACHABLE;
         out.push(step);
         if reachable && m.node.is_some() {
+            if node_only {
+                out.push(steps_git::step(m));
+            }
             out.extend(steps_node::steps(m));
             out.extend(steps_master::steps(m));
             out.extend(steps_node_logins::steps(m));

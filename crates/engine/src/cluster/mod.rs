@@ -1,5 +1,6 @@
 pub mod ack_book;
 pub mod blob;
+pub mod build_id;
 pub mod claims;
 pub mod core;
 pub mod failover;
@@ -10,6 +11,7 @@ mod grant_files_sys;
 pub mod grants;
 pub mod held;
 pub mod id;
+pub mod invite;
 pub mod jobs;
 pub mod join;
 pub mod login_files;
@@ -48,6 +50,8 @@ pub use versions::{compat, Compat, Purpose, Versions};
 #[cfg(test)]
 mod blob_tests;
 #[cfg(test)]
+mod build_id_tests;
+#[cfg(test)]
 mod claims_tests;
 #[cfg(test)]
 mod failover_lease_tests;
@@ -70,6 +74,8 @@ mod held_tests;
 #[cfg(test)]
 mod id_tests;
 #[cfg(test)]
+mod invite_tests;
+#[cfg(test)]
 mod jobs_tests;
 #[cfg(test)]
 mod join_tests;
@@ -83,6 +89,8 @@ mod move_home_unfenced_tests;
 mod outward_tests;
 #[cfg(test)]
 mod policy_inbox_tests;
+#[cfg(test)]
+mod policy_invite_tests;
 #[cfg(test)]
 mod policy_promote_tests;
 #[cfg(test)]

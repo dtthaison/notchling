@@ -6,6 +6,8 @@ use notchling_engine::machines::step::{ClusterTokens, StepId};
 
 use super::model::MachinesModel;
 
+pub const JOIN_LINE: &str = "Join it from the Cluster sheet in Notchling";
+
 pub struct ClusterAsk {
     tokens: Arc<dyn ClusterTokens>,
     asks: Vec<(String, Option<String>)>,
@@ -31,6 +33,30 @@ impl MachinesModel {
             None => false,
         });
         saved.is_ok() && on
+    }
+
+    pub fn join_cluster(&mut self, machine: &str) -> bool {
+        match self.machine(machine) {
+            Some(m) if m.node.is_none() => self.set_node(machine, true),
+            _ => false,
+        }
+    }
+
+    pub fn request_join_plan(&mut self, machine: &str) {
+        self.request_set_up_all(machine);
+    }
+
+    pub fn join_line(&self, machine: &Machine) -> Option<&'static str> {
+        if !self.node_on(machine) {
+            return None;
+        }
+        let joined = self
+            .parts
+            .engine
+            .results(&machine.name)
+            .get(&StepId::NODE_JOINED)
+            .is_some_and(|r| r.state.is_pass());
+        (!joined).then_some(JOIN_LINE)
     }
 
     pub fn cluster_ask(&self) -> ClusterAsk {

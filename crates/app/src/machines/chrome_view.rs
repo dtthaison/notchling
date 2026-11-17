@@ -185,6 +185,15 @@ impl MachinesView {
                 ),
             );
         }
+        if let Some(text) = self.model.update_banner() {
+            column = column.child(
+                Self::banner(Icon::Info, text, Ink::AccentText, None, a).part(
+                    "Update Machines Banner",
+                    a,
+                    cx,
+                ),
+            );
+        }
         let busy = self
             .model
             .machines

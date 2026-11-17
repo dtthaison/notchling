@@ -16,6 +16,7 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
+use super::add_view::AddUi;
 use super::feed::ClusterFeed;
 use super::install::{applied_note, plan_of, Plan};
 use super::model::ClusterModel;
@@ -27,6 +28,7 @@ use super::renders::{
 };
 use super::secrets::VaultAccess;
 use super::secrets_view::{editor_body, editor_footer, editor_title, Editor, SecretsEvent};
+use super::updates_view::UpdateUi;
 use super::view_secrets::{secrets_fixture, Editing};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
@@ -61,6 +63,8 @@ pub struct ClusterSheetView {
     pub(super) names: Names,
     pub(super) removing: Option<String>,
     pub(super) installing: Option<InstallAsk>,
+    pub(super) add: AddUi,
+    pub(super) update: UpdateUi,
     name: Entity<TextEditor>,
     token: Entity<TextEditor>,
     pub(super) busy: bool,
@@ -148,6 +152,7 @@ impl ClusterSheetView {
                 this.join(cx);
             }
         });
+        let updates = feed.updates();
         ClusterSheetView {
             feed,
             access,
@@ -162,6 +167,8 @@ impl ClusterSheetView {
             names: Names::new(),
             removing: None,
             installing: None,
+            add: AddUi::default(),
+            update: UpdateUi::new(updates),
             name: editor,
             token,
             busy: false,
@@ -477,6 +484,9 @@ impl ClusterSheetView {
                 .on_click(cx.listener(|this, _, _, cx| this.copy_token(cx))),
             );
         }
+        if model.cluster_name().is_some() && !model.can_turn_on() {
+            row = row.child(self.add_machine_button(a, cx));
+        }
         div()
             .flex()
             .flex_col()
@@ -637,10 +647,13 @@ impl Render for ClusterSheetView {
             body = body.child(self.connection(&model, a, cx));
             body = body.children(self.move_running_line(&model, a, cx));
             body = body.children(self.promote_running_line(&model, a, cx));
+            body = body.children(self.add_rows(a, cx));
+            body = body.children(self.update_banner_row(&model, a, cx));
             body = body.children(self.waiting_block(&model, a, cx));
             for row in model.rows() {
                 body = body.child(self.node_row(&row, a, cx));
             }
+            body = body.children(self.not_joined_block(&model, a, cx));
             body = body.children(self.copies_block(&model, a, cx));
         }
         if let Some((text, error)) = &self.note {
@@ -664,6 +677,8 @@ impl Render for ClusterSheetView {
         let take_back = self.take_back_alert(&model, a, cx);
         let continuing = self.continue_alert(&model, a, cx);
         let moving = self.move_overlay(&model, a, cx);
+        let adding = self.add_overlay(window, a, cx);
+        let updating = self.update_overlay(window, a, cx);
         let on: Handler<Self, SecretsEvent> =
             Rc::new(|this, event, cx| this.secrets_event(event, cx));
         let editor = self.editing.as_ref().map(|e| Editor {
@@ -714,6 +729,8 @@ impl Render for ClusterSheetView {
             .children(take_back)
             .children(continuing)
             .children(moving)
+            .children(adding)
+            .children(updating)
             .part("Cluster View", a, cx)
     }
 }
@@ -739,7 +756,7 @@ impl Render for ClusterRender {
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let which = shown(name)?;
-    let feed = Arc::new(ClusterFeed::fixed(model_of(which)));
+    let feed = Arc::new(super::add::renders::feed_for(which, model_of(which)));
     let access = VaultAccess {
         local: Arc::new(Vault::fixed(Vec::new())),
         switches: Arc::new(SwitchFeed::fixed(Switches::all_on())),
@@ -785,6 +802,7 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
                 Plan::Say { text, problem } => sheet.note = Some((text, problem)),
             }
         }
+        sheet.preview_add(which, cx);
         if which == Shown::Secrets {
             sheet.editing = Some(secrets_fixture(&sheet.feed.snapshot()));
         }

@@ -246,6 +246,7 @@ pub fn deliver(usage: &SecretUsage, ctx: &FixContext) -> FixOutcome {
         admin_password: None,
         log: Arc::new(move |channel, chunk| feed.feed(channel, chunk)),
         masks: masks.clone(),
+        links: None,
     };
     let result = run::script(
         &safe,

@@ -28,6 +28,16 @@ pub fn machine_problems(name: &str, host: &str, user: &str, existing: &[String])
     out
 }
 
+pub fn name_problem(name: &str) -> Option<&'static str> {
+    if !is_name(name) {
+        Some(NAME_PROBLEM)
+    } else if ends_in_replaced_key_date(name) {
+        Some(DATED_PROBLEM)
+    } else {
+        None
+    }
+}
+
 pub fn ends_in_replaced_key_date(name: &str) -> bool {
     let b = name.as_bytes();
     b.len() > 9 && b[b.len() - 9] == b'-' && b[b.len() - 8..].iter().all(u8::is_ascii_digit)

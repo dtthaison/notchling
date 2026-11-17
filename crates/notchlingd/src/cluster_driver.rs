@@ -1,8 +1,8 @@
 use self::status::answer;
 use crate::acting_ops::Room;
 use crate::cluster_node::{
-    lock, wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, JoinAsk, LocalCalls, NetSide,
-    Parts, Shared, Submit,
+    lock, wire_error, Answer, ClusterLog, ClusterSetup, Hooks, In, InviteJoin, JoinAsk, LocalCalls,
+    NetSide, Parts, Shared, Submit,
 };
 use notchling_cluster_net::{Conn, Listener};
 use notchling_engine::bridge::net::crypto::{hex, random_bytes, random_token};
@@ -31,6 +31,7 @@ const ADDRS_EVERY: Duration = Duration::from_secs(30);
 enum Reply {
     Wait(Answer),
     Token(Answer, String),
+    Invite(Answer, String, String),
     Load(NodeId),
 }
 
@@ -280,6 +281,7 @@ impl Driver {
             In::Local(cmd, answer) => self.local_cmd(cmd, answer),
             In::Create(name, answer) => self.create(name, answer),
             In::Token(minter, answer) => self.token(minter, answer),
+            In::Invite(minter, invite, answer) => self.invite(minter, invite, answer),
             In::Join(token, headless, answer) => self.join(&token, headless, answer),
             In::Core(input) => self.step(input),
             In::Link(on) => self.set_link(on),
@@ -418,7 +420,7 @@ impl Driver {
         self.step(Input::Local {
             id,
             cmd: LocalCmd::IssueToken {
-                secret,
+                secret: secret.into(),
                 minter: minter.unwrap_or_else(|| self.me.clone()),
             },
         });
@@ -582,6 +584,33 @@ impl Driver {
                     .name("cluster-join-ask".into())
                     .spawn(move || hooks.join_request(ask, submit));
             }
+            Effect::InviteJoined {
+                node,
+                name,
+                os,
+                arch,
+                minter,
+                minter_name,
+            } => {
+                self.audit.step(
+                    ClusterStep::InviteJoined,
+                    Some(node.as_str()),
+                    None,
+                    Outcome::Ok,
+                );
+                let hooks = self.hooks.clone();
+                let joined = InviteJoin {
+                    node,
+                    name,
+                    os,
+                    arch,
+                    minter,
+                    minter_name,
+                };
+                let _ = std::thread::Builder::new()
+                    .name("cluster-invite-joined".into())
+                    .spawn(move || hooks.invite_joined(joined));
+            }
             Effect::SteppedDown { home, .. } => self.audit.step(
                 ClusterStep::SteppedDown,
                 Some(home.as_str()),
@@ -599,6 +628,14 @@ impl Driver {
                 if let Ok(value) = result {
                     self.loads.insert(node, value);
                 }
+            }
+            Reply::Invite(answer, token, maker) => {
+                if result.is_ok() {
+                    self.audit
+                        .step(ClusterStep::Invited, Some(&maker), None, Outcome::Ok);
+                }
+                self.later
+                    .push((Reply::Invite(answer, token, maker), result));
             }
             other => self.later.push((other, result)),
         }
@@ -640,6 +677,8 @@ impl Driver {
     }
 }
 
+#[path = "cluster_driver_invite.rs"]
+mod invite;
 #[path = "cluster_driver_links.rs"]
 mod links;
 #[path = "cluster_driver_status.rs"]

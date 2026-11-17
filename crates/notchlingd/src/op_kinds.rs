@@ -126,6 +126,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::CLUSTER_TAKE_BACK, Home::Called),
     (ops::CLUSTER_CONTINUE_HERE, Home::Called),
     (ops::CLUSTER_SIDE_COPY_HIDE, Home::Called),
+    (ops::CLUSTER_INVITE, Home::Called),
     (ops::CLUSTER_FOLLOW, Home::Called),
     (ops::CLUSTER_DISPATCH, Home::Called),
     (ops::SHELL_STOP, Home::Called),

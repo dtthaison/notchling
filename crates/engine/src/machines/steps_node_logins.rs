@@ -2,7 +2,7 @@ use super::registry::Machine;
 use super::step::{
     Cadence, CheckResult, Probe, RemoteOutput, SetupStep, StepContext, StepFix, StepId,
 };
-use crate::cluster::logins::{agy_state, codex_state, how_to, AGY_LOGIN_FILE};
+use crate::cluster::logins::{agy_state, codex_state, how_to, keychain_command, AGY_LOGIN_FILE};
 use crate::versions::Tool;
 use std::path::Path;
 
@@ -10,6 +10,7 @@ const NONE: &str = "@@none";
 const PRESENT: &str = "@@present";
 const MISSING: &str = "@@missing";
 const TIMEOUT: &str = "@@timeout";
+const KEYCHAIN: &str = "@@keychain";
 const EXIT: &str = "@@exit=";
 
 pub(super) const WAIT_TENTHS: u32 = 50;
@@ -21,6 +22,16 @@ pub(super) fn codex_script(tenths: u32) -> String {
 }
 
 pub(super) const AGY_SCRIPT: &str = "command -v agy >/dev/null 2>&1 || { echo @@none; exit 0; }; if [ -s \"$HOME/.gemini/jetski-standalone-oauth-token\" ]; then echo @@present; else echo @@missing; fi";
+
+pub(super) fn agy_script(mac: bool) -> String {
+    if !mac {
+        return AGY_SCRIPT.to_string();
+    }
+    format!(
+        "command -v agy >/dev/null 2>&1 || {{ echo @@none; exit 0; }}; if [ -s \"$HOME/.gemini/jetski-standalone-oauth-token\" ]; then echo @@present; else echo @@missing; if {} >/dev/null 2>&1; then echo {KEYCHAIN}; fi; fi",
+        keychain_command()
+    )
+}
 
 pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
     let mac = !m.is_linux();
@@ -38,7 +49,7 @@ pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
             "Antigravity signed in",
             vec![StepId::REACHABLE],
             Cadence::EveryRefresh,
-            Probe::remote(AGY_SCRIPT, move |out, ctx| parse_agy(out, ctx, mac)),
+            Probe::remote(agy_script(mac), move |out, ctx| parse_agy(out, ctx, mac)),
             StepFix::HowTo(how_to(Tool::Agy, &m.name)),
         ),
     ]
@@ -79,11 +90,14 @@ fn parse_agy(out: &RemoteOutput, _ctx: &StepContext, mac: bool) -> CheckResult {
     }
     let file = |_: &Path| present;
     let os = if mac { "macos" } else { "linux" };
+    if mac && !present && seen(KEYCHAIN) {
+        return CheckResult::pass("signed in (Keychain)");
+    }
     match agy_state(os, &file, Path::new("/")) {
         Some(true) => CheckResult::pass("signed in"),
         Some(false) => CheckResult::fail(format!("not signed in (no {AGY_LOGIN_FILE})")),
         None => CheckResult::cant_tell(
-            "no login file there; on a Mac Antigravity may keep its login in the Keychain, which Notchling doesn't read",
+            "no login file or Keychain item found there; over ssh a Mac may not show its login Keychain",
         ),
     }
 }

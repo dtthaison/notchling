@@ -26,7 +26,7 @@ fn row_label(text: &str, width: f32, a: Appearance) -> Div {
         .child(label(text, TypeRole::Label, Ink::TextMuted, a))
 }
 
-fn checkbox<V: 'static>(
+pub(crate) fn checkbox<V: 'static>(
     id: SharedString,
     title: &str,
     on_now: bool,

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::snaps::snap_violation;
 use super::world::World;
 use crate::cluster::id::NodeId;
-use crate::cluster::members::Term;
+use crate::cluster::members::{MemberState, Term};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Violation {
@@ -24,6 +24,7 @@ pub enum Violation {
     AnswerTwice { item: String },
     ReleasedOffPrimary { node: NodeId, term: Term },
     ReleasedWithoutAllow { job: String },
+    ActiveWithoutApproval { node: NodeId, member: NodeId },
 }
 
 pub fn check(world: &World) -> Result<(), Violation> {
@@ -52,6 +53,14 @@ pub fn check(world: &World) -> Result<(), Violation> {
         if let Some(seen) = world.highest_seen(&id) {
             if state.term < *seen {
                 return Err(Violation::TermWentDown { node: id });
+            }
+        }
+        for m in state.members.values() {
+            if m.state == MemberState::Active && !world.is_approved(&m.id) {
+                return Err(Violation::ActiveWithoutApproval {
+                    node: id,
+                    member: m.id.clone(),
+                });
             }
         }
         let mut keys = BTreeSet::new();

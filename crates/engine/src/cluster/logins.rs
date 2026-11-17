@@ -9,6 +9,9 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 pub const AGY_LOGIN_FILE: &str = ".gemini/jetski-standalone-oauth-token";
 pub const CODEX_COMMAND: &str = "codex login --device-auth";
 pub const AGY_COMMAND: &str = "agy";
+pub const KEYCHAIN_PROGRAM: &str = "/usr/bin/security";
+pub const KEYCHAIN_ARGS: [&str; 5] = ["find-generic-password", "-s", "gemini", "-a", "antigravity"];
+const KEYCHAIN_TAIL: &str = " >/dev/null 2>&1;";
 pub const FORBIDDEN: [&str; 4] = ["refresh", "logout", "setup-token", "--with-api-key"];
 
 pub fn codex_signed_in(exit: i32, stdout: &str) -> bool {
@@ -52,6 +55,38 @@ pub fn agy_state(os: &str, files: &dyn Fn(&Path) -> bool, home: &Path) -> Option
     }
 }
 
+pub fn keychain_argv() -> Vec<String> {
+    std::iter::once(KEYCHAIN_PROGRAM)
+        .chain(KEYCHAIN_ARGS)
+        .map(String::from)
+        .collect()
+}
+
+pub fn keychain_command() -> String {
+    keychain_argv().join(" ")
+}
+
+pub fn keychain_state(exit: i32) -> Option<bool> {
+    (exit == 0).then_some(true)
+}
+
+fn security_only_as_allowed(text: &str) -> bool {
+    let allowed = keychain_command();
+    let lower = text.to_ascii_lowercase();
+    lower.match_indices("security").all(|(i, _)| {
+        let Some(start) = i.checked_sub(KEYCHAIN_PROGRAM.len() - "security".len()) else {
+            return false;
+        };
+        let Some(rest) = text
+            .get(start..)
+            .and_then(|from| from.strip_prefix(allowed.as_str()))
+        else {
+            return false;
+        };
+        rest.is_empty() || rest.starts_with(KEYCHAIN_TAIL)
+    })
+}
+
 fn commands(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
     let cut = |c: char| matches!(c, ';' | '&' | '|' | '(' | ')' | '`' | '\n' | '\r');
     text.split(cut).map(|part| {
@@ -63,12 +98,18 @@ fn commands(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
 }
 
 pub fn read_only(text: &str) -> bool {
-    commands(text).all(|words: Vec<String>| {
-        words.iter().enumerate().all(|(i, word)| {
-            !FORBIDDEN.contains(&word.as_str())
-                && (word != "login" || words.get(i + 1).map(String::as_str) == Some("status"))
+    let unquoted: String = text
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '"' | '\\'))
+        .collect();
+    security_only_as_allowed(text)
+        && security_only_as_allowed(&unquoted)
+        && commands(text).all(|words: Vec<String>| {
+            words.iter().enumerate().all(|(i, word)| {
+                !FORBIDDEN.contains(&word.as_str())
+                    && (word != "login" || words.get(i + 1).map(String::as_str) == Some("status"))
+            })
         })
-    })
 }
 
 pub fn argv_read_only(argv: &[String]) -> bool {
@@ -104,7 +145,15 @@ pub fn probe(
         }
     }
     if src.agy_installed {
-        if let Some(state) = agy_state(src.os, files, src.home) {
+        let state = agy_state(src.os, files, src.home).or_else(|| {
+            let argv = keychain_argv();
+            if src.os != "macos" || !argv_read_only(&argv) {
+                return None;
+            }
+            run.run(&argv, TIMEOUT)
+                .and_then(|(exit, _)| keychain_state(exit))
+        });
+        if let Some(state) = state {
             out.insert(Tool::Agy, state);
         }
     }
@@ -179,6 +228,10 @@ pub fn needed_text(tool: Tool, node: &str) -> (String, String) {
 #[cfg(test)]
 #[path = "logins_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "logins_keychain_tests.rs"]
+mod keychain_tests;
 
 #[cfg(test)]
 #[path = "logins_own_tests.rs"]

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-pub const USAGE: &str = "Usage: notchling cluster status [--json]\n       notchling cluster join --token-stdin [--json]";
+pub const USAGE: &str = "Usage: notchling cluster status [--json]\n       notchling cluster join --token-stdin [--json]\n       notchling cluster reach <addr> <port>";
 pub const TOKEN_ON_STDIN: &str = "pass the token on stdin: notchling cluster join --token-stdin";
 
 const TOKEN_MAX: usize = 4096;
@@ -17,6 +17,7 @@ pub const TROUBLE: i32 = 2;
 pub enum Sub {
     Status,
     Join,
+    Reach { addr: std::net::Ipv4Addr, port: u16 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,9 +50,13 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         ["status"] => Sub::Status,
         ["join"] if stdin => Sub::Join,
         ["join", ..] => return Err(TOKEN_ON_STDIN.to_string()),
+        ["reach", addr, port] => crate::cluster_reach::parse(addr, port)?,
         _ => return Err(USAGE.to_string()),
     };
     if stdin && sub != Sub::Join {
+        return Err(USAGE.to_string());
+    }
+    if matches!(sub, Sub::Reach { .. }) && (json || socket.is_some()) {
         return Err(USAGE.to_string());
     }
     Ok(Args { sub, json, socket })
@@ -138,6 +143,9 @@ pub fn run_with(
             return TROUBLE;
         }
     };
+    if let Sub::Reach { addr, port } = parsed.sub {
+        return crate::cluster_reach::run(addr, port, out, err);
+    }
     let token = match parsed.sub {
         Sub::Join => match read_token(input) {
             Ok(token) => Some(token),
@@ -151,6 +159,7 @@ pub fn run_with(
     let reply = connect(parsed.socket.as_deref()).and_then(|mut client| {
         client.set_timeout(CALL_TIMEOUT + CALL_TIMEOUT);
         match (&parsed.sub, token) {
+            (Sub::Reach { .. }, _) => Err(ClientError::Unsupported),
             (Sub::Status, _) => client.call(ops::CLUSTER_STATUS, json!({})),
             (Sub::Join, token) => client.call(ops::CLUSTER_JOIN, json!({"token": token})),
         }
@@ -168,6 +177,7 @@ pub fn run_with(
     } else {
         match parsed.sub {
             Sub::Status => status_lines(&reply).join("\n"),
+            Sub::Reach { .. } => String::new(),
             Sub::Join if text(&reply, "state") == "joined" => "Joined the cluster.".to_string(),
             Sub::Join => {
                 "Asked to join; the cluster's primary must allow it in its Inbox.".to_string()

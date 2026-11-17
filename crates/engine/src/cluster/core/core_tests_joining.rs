@@ -14,7 +14,7 @@ fn pending_joiner() -> (Hub, NodeId, NodeId) {
     hub.local(
         &m5,
         LocalCmd::IssueToken {
-            secret: "hush-secret".to_string(),
+            secret: "hush-secret".to_string().into(),
             minter: m5.clone(),
         },
     );

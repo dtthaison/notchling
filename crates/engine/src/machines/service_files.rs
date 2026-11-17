@@ -107,6 +107,77 @@ pub fn render(
     Ok(files)
 }
 
+pub const NODE_LABEL: &str = "dev.notchling.node";
+pub const NODE_LOG: &str = "Library/Application Support/Notchling/notchlingd.log";
+
+pub fn node_launchdaemon(user: &str, home: &str, binary: &str) -> Result<String, String> {
+    if user == "root" {
+        return Err("the node must not run as root".into());
+    }
+    if !is_safe_user(user) {
+        return Err("the node user name isn't a plain account name".into());
+    }
+    if !shell::is_safe_machine_path(home) {
+        return Err("the home folder isn't a safe path".into());
+    }
+    if !shell::is_safe_machine_path(binary) {
+        return Err("the Notchling path isn't a safe absolute path".into());
+    }
+    let (user, home, binary) = (xml(user), xml(home), xml(binary));
+    let path = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin");
+    let log = format!("{home}/{NODE_LOG}");
+    Ok(format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{NODE_LABEL}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{binary}</string>
+		<string>daemon</string>
+	</array>
+	<key>UserName</key>
+	<string>{user}</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>{home}</string>
+		<key>PATH</key>
+		<string>{path}</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>{log}</string>
+	<key>StandardErrorPath</key>
+	<string>{log}</string>
+</dict>
+</plist>
+"#
+    ))
+}
+
+fn xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 fn is_safe_user(user: &str) -> bool {
     let mut c = user.chars();
     (1..=32).contains(&user.len())

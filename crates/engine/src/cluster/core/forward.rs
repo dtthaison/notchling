@@ -294,6 +294,7 @@ impl NodeCore {
                     Target::Peer(minter, _) if op == "cluster.join.token" => {
                         json!({"minter": minter})
                     }
+                    Target::Peer(minter, _) if op == "cluster.invite" => with_minter(args, minter),
                     _ => args,
                 };
                 let call = self.next_local;
@@ -573,4 +574,14 @@ fn relayed(e: WireError) -> WireError {
         return WireError::new(PEER_STALE_TERM, e.message);
     }
     e
+}
+
+fn with_minter(mut args: Value, minter: &NodeId) -> Value {
+    match args.as_object_mut() {
+        Some(map) => {
+            map.insert("minter".to_string(), json!(minter));
+            args
+        }
+        None => json!({"minter": minter}),
+    }
 }

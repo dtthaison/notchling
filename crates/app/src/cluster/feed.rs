@@ -7,7 +7,10 @@ use notchling_local_api::{topics, Client, ClientError, ClientKind, ConnectOption
 use notchling_locale as t;
 use serde_json::Value;
 
+use super::add_runs::AddRuns;
+use super::add_source::AddSource;
 use super::model::ClusterModel;
+use super::updates_state::UpdateSession;
 use super::wire::{self, Request};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -20,17 +23,22 @@ const MOVE_REFRESH_EVERY: Duration = Duration::from_secs(1);
 struct Shared {
     model: Mutex<ClusterModel>,
     last: Mutex<Value>,
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
     stop: AtomicBool,
+    adds: AddRuns,
+    updates: Arc<UpdateSession>,
 }
 
 impl Shared {
     fn new() -> Shared {
+        let generation = Arc::new(AtomicU64::new(0));
         Shared {
             model: Mutex::default(),
             last: Mutex::new(Value::Null),
-            generation: AtomicU64::new(0),
+            adds: AddRuns::tied_to(generation.clone()),
+            generation,
             stop: AtomicBool::new(false),
+            updates: Arc::new(UpdateSession::default()),
         }
     }
 
@@ -50,6 +58,7 @@ impl Shared {
         self.remember(status);
         let me = status.get("me").and_then(Value::as_str).unwrap_or("");
         let next = ClusterModel::from_status(status, me);
+        self.adds.seen(&next);
         let mut model = self.model();
         if *model != next {
             *model = next;
@@ -92,7 +101,7 @@ impl Shared {
     }
 }
 
-const READ_ONLY_KEYS: [&str; 4] = ["replication", "move", "promote", "waiting"];
+const READ_ONLY_KEYS: [&str; 5] = ["replication", "move", "promote", "waiting", "jobs"];
 
 pub(super) fn carried(last: &Value, event: &Value) -> Value {
     let mut next = event.clone();
@@ -122,6 +131,7 @@ pub struct ClusterFeed {
     shared: Arc<Shared>,
     transport: Option<Arc<dyn Transport>>,
     remote_vault: Arc<Vault>,
+    add: Arc<AddSource>,
 }
 
 impl ClusterFeed {
@@ -130,11 +140,23 @@ impl ClusterFeed {
             shared: Arc::new(Shared::new()),
             transport: None,
             remote_vault: Arc::new(Vault::remote_fixed(Vec::new())),
+            add: Arc::new(AddSource::none()),
         }
+    }
+
+    pub fn fixed_adding(model: ClusterModel, add: AddSource, runs: AddRuns) -> ClusterFeed {
+        let mut feed = ClusterFeed::fixed(model.clone());
+        feed.add = Arc::new(add);
+        if let Some(shared) = Arc::get_mut(&mut feed.shared) {
+            runs.seen(&model);
+            shared.adds = runs;
+        }
+        feed
     }
 
     pub fn fixed(model: ClusterModel) -> ClusterFeed {
         let feed = ClusterFeed::none();
+        feed.shared.adds.seen(&model);
         *feed.shared.model() = model;
         feed
     }
@@ -156,7 +178,11 @@ impl ClusterFeed {
                     socket: config.socket.clone(),
                     version: config.version.clone(),
                 };
-                ClusterFeed::start(config, Arc::new(transport))
+                let mut feed = ClusterFeed::start(config, Arc::new(transport));
+                if let Some(root) = root {
+                    feed.add = Arc::new(AddSource::for_root(root.clone()));
+                }
+                feed
             }
             None => ClusterFeed::none(),
         }
@@ -181,6 +207,18 @@ impl ClusterFeed {
 
     pub fn generation(&self) -> u64 {
         self.shared.generation.load(Ordering::SeqCst)
+    }
+
+    pub fn adds(&self) -> AddRuns {
+        self.shared.adds.clone()
+    }
+
+    pub fn updates(&self) -> Arc<UpdateSession> {
+        self.shared.updates.clone()
+    }
+
+    pub fn add_source(&self) -> Arc<AddSource> {
+        self.add.clone()
     }
 
     pub fn snapshot(&self) -> ClusterModel {

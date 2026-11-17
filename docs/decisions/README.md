@@ -42,6 +42,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-phone-push.md) | Phone push: FCM, ids only, sent by the primary or by any Can Be Master machine while it is silent; dropped for v1 (no phone push) | Dropped |
 | [XXXX](XXXX-outbox.md) | The Outbox: messages to a session saved first, one postman per session, delivered like the terminal, never twice | Proposed |
 | [XXXX](XXXX-cluster-secrets-and-logins.md) | Cluster secrets and Worker logins: one vault on the vault node, grants as private files, nothing renewed | Proposed |
+| [XXXX](XXXX-ssh-join.md) | Add Machine over SSH: machines added from the Cluster sheet run only the headless daemon as a service and join through an app-tier invite bound to one node id | Accepted |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
