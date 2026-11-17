@@ -111,10 +111,10 @@ Click the cup in the menu bar:
 |---|---|
 | Claude Code | The account in use |
 | Open Chat (⌘O) | The Chat window |
-| Update Available: <version>… | Only when a newer release is out; opens its page |
 | Keep Mac Awake | Off, Always On, While Agents Are Working, and Keep Display On |
 | Settings… (⌘,) | Accounts, token cost and every setting |
 | About | About Notchling, and Welcome… |
+| Update Available: <version>… | Only when a newer release is out; opens its page |
 | Quit Notchling | |
 
 ## How it works

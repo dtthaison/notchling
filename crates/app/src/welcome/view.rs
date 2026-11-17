@@ -393,7 +393,6 @@ impl AboutView {
             this.update(cx, |view, cx| {
                 view.checking = false;
                 view.outcome = Some(outcome.clone());
-                crate::mac::update_watch::publish(cx, &outcome);
                 cx.notify();
             })
             .ok();
