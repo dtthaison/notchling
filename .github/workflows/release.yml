@@ -17,7 +17,7 @@ name: Release
 #            id to be the app's, then creates the release and updates the feed.
 #
 # The feed is the asset `appcast.xml` of the release tagged `appcast` (a prerelease, never "latest").
-# Runs queue in the group beta.yml uses, so two never edit the feed at once. Event fields reach the
+# Runs queue in one group, so two never edit the feed at once. Event fields reach the
 # shell only through `env:`.
 on:
   pull_request:
