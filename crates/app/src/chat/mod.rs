@@ -30,6 +30,7 @@ pub mod format;
 #[cfg(test)]
 mod format_words_tests;
 pub mod git;
+pub mod git_gates;
 pub mod header;
 pub mod history;
 pub mod html_preview;
