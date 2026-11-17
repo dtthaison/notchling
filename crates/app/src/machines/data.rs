@@ -28,7 +28,7 @@ use super::cluster_feed::{DaemonTokens, NOT_RUNNING};
 use super::model::{Parts, VaultList, VaultStamp};
 use super::versions_feed::{fixed_mac, DaemonVersions, FixedVersions, MacVersions};
 use crate::chat::data::DataRoot;
-use crate::switches::{Switch, Switches};
+use crate::switches::Switches;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Setup {
@@ -229,8 +229,8 @@ fn open_url(runner: &dyn Runner, url: &str) {
 const SWITCH_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub fn vault_state(reply: &serde_json::Value) -> Result<(), String> {
-    match Switches::from_reply(reply).message(Switch::Vault) {
-        Some(why) => Err(why.to_owned()),
+    match crate::vault::pick::unavailable(&Switches::from_reply(reply)) {
+        Some(why) => Err(why),
         None => Ok(()),
     }
 }
@@ -394,7 +394,7 @@ mod tests {
         assert_eq!(vault_state(&json!({"vault": true})), Ok(()));
         assert_eq!(
             vault_state(&json!({"vault": false})),
-            Err(Switch::Vault.off_message().to_owned())
+            Err(notchling_locale::cluster::vault_off().to_owned())
         );
         let dir = std::env::temp_dir().join(format!("notchling-pick-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

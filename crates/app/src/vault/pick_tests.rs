@@ -82,7 +82,7 @@ fn the_local_vault_is_read_only_while_its_switch_is_on() {
     assert_eq!(local_entries(&vault, &Switches::all_on()).unwrap().len(), 3);
     assert_eq!(
         local_entries(&vault, &Switches::all_off()).unwrap_err(),
-        crate::switches::Switch::Vault.off_message()
+        t::cluster::vault_off()
     );
     assert!(local_entries(&vault, &Switches::detached()).is_err());
 }

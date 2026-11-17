@@ -132,9 +132,19 @@ pub fn using_line(chosen: &str) -> String {
     t::cluster::vault_using(chosen)
 }
 
+pub fn unavailable(switches: &Switches) -> Option<String> {
+    if !switches.attached {
+        switches.message(Switch::Vault).map(str::to_owned)
+    } else if !switches.is_on(Switch::Vault) {
+        Some(t::cluster::vault_off().to_owned())
+    } else {
+        None
+    }
+}
+
 pub fn local_entries(local: &Vault, switches: &Switches) -> Result<Vec<VaultEntry>, String> {
-    if let Some(why) = switches.message(Switch::Vault) {
-        return Err(why.to_owned());
+    if let Some(why) = unavailable(switches) {
+        return Err(why);
     }
     local.refresh(switches);
     let snapshot = local.snapshot();

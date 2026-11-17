@@ -437,6 +437,22 @@ fn a_vault_entry_on_the_machine_makes_the_admin_step_ready() {
 }
 
 #[test]
+fn opening_the_vault_list_reads_nothing_on_the_calling_thread() {
+    let mut w = off_world(vec![mac("m1")]);
+    assert!(
+        w.model.open_vault_pick().is_some(),
+        "the caller reads it away"
+    );
+    assert!(w.model.vault_pick.is_open());
+    assert_eq!(
+        w.model.vault_pick.note(),
+        Some(crate::vault::pick::PickNote::Reading)
+    );
+    assert!(w.model.open_vault_pick().is_none());
+    assert!(!w.model.vault_pick.is_open());
+}
+
+#[test]
 fn an_off_tool_says_so_in_every_check() {
     let w = off_world(vec![mac("m1")]);
     w.model.engine().refresh(None, true);

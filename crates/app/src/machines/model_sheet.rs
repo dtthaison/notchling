@@ -1,9 +1,10 @@
 use std::fmt;
+use std::sync::Arc;
 
 use notchling_engine::accounts::Secret;
 use notchling_engine::machines::engine_plan::AdminAnswer;
 
-use super::model::{MachinesModel, Sheet};
+use super::model::{MachinesModel, Sheet, VaultList};
 
 #[derive(Default)]
 pub struct AdminPassword(String);
@@ -93,10 +94,7 @@ impl MachinesModel {
         self.refresh_machines();
     }
 
-    pub fn open_vault_pick(&mut self) {
-        if self.vault_pick.toggle() {
-            let listing = self.parts.vault.listing();
-            self.vault_pick.loaded(listing);
-        }
+    pub fn open_vault_pick(&mut self) -> Option<Arc<dyn VaultList>> {
+        self.vault_pick.toggle().then(|| self.parts.vault.clone())
     }
 }

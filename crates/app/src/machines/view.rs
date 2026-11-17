@@ -297,7 +297,15 @@ impl MachinesView {
 
     pub(super) fn vault_event(&mut self, event: PickEvent, _: &mut Window, cx: &mut Context<Self>) {
         match event {
-            PickEvent::Toggle => self.model.open_vault_pick(),
+            PickEvent::Toggle => {
+                if let Some(vault) = self.model.open_vault_pick() {
+                    Self::background(
+                        cx,
+                        move || vault.listing(),
+                        |view, listing, _| view.model.vault_pick.loaded(listing),
+                    );
+                }
+            }
             PickEvent::Choose(id) => {
                 self.model.set_admin_entry(Some(&id));
                 self.model.vault_pick.close();
