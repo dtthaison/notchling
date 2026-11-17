@@ -46,7 +46,7 @@ fn the_branch_ops_are_app_tier_quiet_reads_and_part_of_the_group() {
         assert!(GIT_OPS.contains(&op), "{op}");
     }
     assert_eq!(OpSpec::APP_QUIET.tier, Tier::App);
-    assert_eq!(GIT_OPS.len(), 5);
+    assert_eq!(GIT_OPS.len(), 6);
 }
 
 #[test]

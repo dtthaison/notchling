@@ -1,4 +1,5 @@
 use crate::every_session::EverySession;
+use crate::git_cache::GitCache;
 use crate::op_group::OpGroup;
 use crate::pages_ops::Titles;
 use notchling_engine::control::Launcher;
@@ -13,12 +14,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const GIT_OPS: [&str; 5] = [
+pub const GIT_OPS: [&str; 6] = [
     ops::GIT_STATUS,
     ops::GIT_DIFF,
     ops::GIT_BRANCH_DIFF_STAT,
     ops::GIT_BRANCH_DIFF_FILE,
     ops::GIT_BRANCHES,
+    ops::GIT_WORKTREES,
 ];
 
 const KNOWN_FOR: Duration = Duration::from_secs(5);
@@ -28,12 +30,13 @@ const CODEX_DAYS: i64 = 14;
 pub type Folders = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
 pub struct GitOps {
-    launcher: Arc<dyn Launcher>,
+    pub(crate) launcher: Arc<dyn Launcher>,
     folders: Folders,
     known: Mutex<Option<(Instant, Vec<PathBuf>)>>,
+    pub(crate) cache: Arc<Mutex<GitCache>>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -89,7 +92,7 @@ pub fn listed_folders(base: Folders, every: Arc<EverySession>) -> Folders {
     })
 }
 
-fn failed(failure: Failure) -> ApiError {
+pub(crate) fn failed(failure: Failure) -> ApiError {
     match failure {
         Failure::Refused(why) => ApiError::new(ErrorCode::Forbidden, why),
         Failure::NotRepo => ApiError::new(ErrorCode::Failed, "not a git repository"),
@@ -120,6 +123,7 @@ impl GitOps {
             launcher,
             folders,
             known: Mutex::new(None),
+            cache: Arc::new(Mutex::new(GitCache::default())),
         }
     }
 
@@ -222,6 +226,7 @@ impl OpGroup for GitOps {
                 optional_arg(args, "from"),
             ),
             ops::GIT_BRANCHES => self.branches(&real),
+            ops::GIT_WORKTREES => self.worktrees(&real, args),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

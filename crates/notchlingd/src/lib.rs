@@ -95,6 +95,8 @@ pub mod every_session;
 pub mod git_args;
 pub mod git_cache;
 pub mod git_ops;
+pub mod git_view;
+pub mod git_worktrees;
 pub mod grant_broker;
 pub mod grant_calls;
 pub mod grant_janitor;
@@ -293,6 +295,10 @@ mod git_ops_branch_tests;
 mod git_ops_listed_tests;
 #[cfg(test)]
 mod git_ops_tests;
+#[cfg(all(test, unix))]
+mod git_ops_worktrees_tests;
+#[cfg(all(test, unix))]
+mod git_testkit;
 #[cfg(test)]
 mod hook_fence_tests;
 #[cfg(test)]
