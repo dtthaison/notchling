@@ -62,6 +62,7 @@ Only a queued issue (`notchling:queued`), on a branch `agent/<issue>-<slug>`; a 
 - Account switching, the account log: docs/notes/accounts.md
 - Data folders, logs, the Audit, log events: docs/notes/data-and-logs.md
 - The Inbox: docs/notes/inbox.md
+- Ask, an agent asks you a question: docs/notes/ask.md
 - Tool versions on workers: docs/notes/versions.md
 - The cluster: docs/notes/cluster.md
 - Vault, lanes, Machines, search, pages, delegation, limits, cost: the crate notes, by file

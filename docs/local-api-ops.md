@@ -163,6 +163,70 @@ shares one answered state with Chat. A pending permission is a `prompts.list` ro
 `agy-perm:<row id>:<rpc id>`. Nothing is answered by the daemon on its own; turning acting off
 closes every session, which cancels what was waiting.
 
+## `ask_ops.rs`
+
+Ask ([design](superpowers/specs/2026-11-16-ask-design.md), [decision](decisions/XXXX-ask.md), [note](notes/ask.md)): an agent saves a question in the daemon's `asks` table with `notchling ask`, the person answers on a card, and the answer goes to the command that waits. Served by `AskOps` (`ask_ops.rs`, `ask_main.rs`, `ask_waiters.rs`). `ask.open`, `ask.answer` and `ask.dismiss` are refused with `forbidden` and [`ACTING_OFF`] while the `acting` switch is off; `ask.wait`, `ask.mine` and `ask.list` are not, and open questions keep waiting while it is off.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `ask.open` | agent | `{question, key, choices?: [text, ...], mainMayAnswer?: bool, wait?: bool, deadlineMs?}` | `{"id", "state": "open"}`; the id is `q` and 32 hex characters |
+| `ask.wait` | agent, the asking process only | `{id, waitMs?}` | `{"state": "open"}`, `{"state": "answered", "answer", "choice"?, "by"?}`, or `{"state": "dismissed"}`, `{"state": "expired"}`, `{"state": "gone"}` |
+| `ask.mine` | agent | `{waitMs?}` | `[row, ...]`: the open questions the caller's session's main session may answer, without their answers |
+| `ask.answer` | agent and app | `{id, choice?: n, text?}`, one of the two | `{"answered": true}`, or `{"answered": false, "state", "by"?}` when the question is no longer open or another answer was taken first |
+| `ask.dismiss` | app | `{id}` | `{"dismissed": true}`, or `{"dismissed": false, "state", "by"?}` |
+| `ask.list` | app | `{session?}` | `[row, ...]` in the order they were asked, open and closed (a closed one stays 24 hours); `session` is a row id from `sessions.list` or a session key |
+
+`ask.open`:
+
+- The session comes from the kernel, never from an argument: the peer's parents are walked (at most 16) to the Claude Code process whose `sessions/<pid>.json` names a session (`caller_session.rs`). The folder, the branch (`.git/HEAD`, worktrees included) and the process's start time come from the kernel too.
+- `question` is at most 2,000 characters. `choices` is 2 to 6 texts of at most 120 characters, none empty. `wait: true` is a blocking ask (`mode` `wait`), else `background`; `deadlineMs` (ms since 1970) belongs to a blocking ask and is when the row expires. `key` is 1 to 64 characters, made by the `ask` command for itself; with the caller's pid it makes a retried open return the same question: `{id, state}` with the row's current state, nothing saved, nothing emitted.
+- 20 open questions per session and 100 in all.
+- The reply comes at once. The finder then looks for which agent asked, off the op thread (below), and the Inbox item is raised when it settles.
+
+`ask.wait` is served only to the asking process: the caller's pid and start time must equal the row's. `waitMs` is 0 to 50,000 (default and cap 50,000). It replies at once when the row is `answered`, `delivered`, `dismissed`, `expired` or `gone`, else when an answer or an end comes, else `{"state": "open"}` at the end of `waitMs`. A reply that carries an answer moves an `answered` row to `delivered`. The same process asking again gets the same answer (a `delivered` row still hands it over), so a reply lost on the way loses nothing. A closed socket ends the wait; the 1 s tick then decides whether the asker is gone.
+
+`ask.mine` needs a session as `ask.open` does. It lists the rows that are `open`, have `mainMayAnswer`, whose asker is `subagent`, `codex` or `antigravity` (never `main` or `unknown`), and whose session is the caller's. Without `waitMs` it answers at once; with it (at most 50,000) it waits until the list is not empty or the time ends. It waits on one slot every publish wakes.
+
+`ask.answer`, the person (app tier: Chat, the notch; the Inbox's answer comes through `inbox.answer`): any `open` question. `choice` is the 1-based number of a choice; `text` is up to 10 KB. An agent (agent tier) is taken only when all of these hold: the question is `open` with `mainMayAnswer`, its asker is `subagent`, `codex` or `antigravity`, the caller's kernel session is the question's session, and the caller is the main session: the finder must find the caller's own `notchling answer` command (command match, up to 5 s) in the session's own transcript and in no subagent's. The answer is recorded `by: main`. A caller that fails any of these gets `forbidden` `Only the person answers this question.`; that includes an agent in no session, another session, a sibling subagent, and any question from `main` or `unknown`. A question that is no longer `open` is not an error: it replies `{"answered": false, "state", "by"?}`.
+
+First answer wins: the daemon marks the question in memory under one lock, then one conditional write (`WHERE state = 'open'`) saves it. A second answer or a dismiss that finds the mark replies with the state and the winner's `by` (`mac`, `phone`, `main`) and writes nothing. A mark whose write fails is dropped, so a daemon that stops between the mark and the write finds the question `open` again.
+
+`ask.dismiss` refuses an agent with `forbidden` `Only the person answers this question.` and otherwise takes the same mark. The next `ask.wait` replies `{"state": "dismissed"}`.
+
+Refusals, exact words. `bad_request` unless noted:
+
+- `ask.open`: `Ask a question first.`; `That question is over 2,000 characters.`; `Give 2 to 6 choices.`; `A choice is empty or over 120 characters.`; `On a Worker, give choices (--choice): the answer comes from your Mac's Inbox.` (only on a node that is a Worker in its cluster); `key is needed`; `forbidden` `Notchling can't tell which session is asking.` (no Claude Code session in the parents, or no pid); `failed` `20 questions from this session are already waiting.`; `failed` `100 questions are already waiting.`; `failed` `Couldn't save the question.`. A refusal after the session is known saves nothing and records one `session.ask` event with `then: refused` and counts only; a refusal before it records the session as `unknown`.
+- `ask.wait`: `id is needed`; `No such question.`; `forbidden` `Only the command that asked can wait for this answer.`.
+- `ask.mine`: `forbidden` `Notchling can't tell which session is asking.`; `failed` `Couldn't read the questions.`.
+- `ask.answer`: `id is needed`; `No such question.`; `Answer with a choice or text.` (neither, both, empty text, or a `choice` of 0); `That answer is over 10 KB.`; `No such choice.` (a number past the choices, or choices none); `forbidden` `Only the person answers this question.`; `failed` `Couldn't save the answer.`.
+- `ask.dismiss`: `id is needed`; `No such question.`; `forbidden` `Only the person answers this question.`; `failed` `Couldn't save the answer.`.
+- `ask.list`: `failed` `Couldn't save the answer.` when the store can't be read (the words are shared with the writes).
+- Every gated op: `forbidden` [`ACTING_OFF`].
+
+A row on the wire: `{id, session, sessionId?, asker, agentId?, label?, agentType?, model?, folder?, branch?, question, choices?, mainMayAnswer, mode, state, waiting, answer?, choice?, by?, createdMs, updatedMs, closedMs?}`. `asker` is `main`, `subagent`, `codex`, `antigravity` or `unknown`; `mode` is `background` or `wait`; `state` is `open`, `answered` (taken, not yet handed to the asker), `delivered` (the asker got it), `dismissed`, `expired` or `gone`. `session` is the session key (`Agent::outbox_key()`: the job's short id, else the row id; until a scan lists the session it is the Claude Code `sessionId`, and the next scan re-keys the rows). `waiting` says a waiter is connected. `answer` is on `ask.list` and the topic only (app tier), never on `ask.mine`. `label`, `agentType` and `model` are the agent's, from its transcript, and say who asked; they prove nothing.
+
+Who asked (the finder, off the op thread, again on each file event in the session's transcript folder, for 10 s from the open; without a watcher every 500 ms): a delegated Codex or Antigravity job is a process on the walk whose executable is this `notchling` and whose command line is `notchling delegate codex` or `agy`; the row is `codex` or `antigravity`, labelled `Codex job · delegated by «name»` (the delegator found the same way) or just `Codex job`. Otherwise, over the session's transcript and its subagents' (written in the last 10 minutes, at most 64 files, each read from its last 256 KB): if the asking process's stdout is a regular file named `….output` and a transcript holds a Bash tool result whose background-launch path is that file (compared canonical), that transcript's agent asked; else the Bash `tool_use` whose command, split into simple commands at `&&`, `||`, `;`, `|` and newlines and into shell words, holds one whose words after the program equal the process's command line after its program (the program matched by the file name `notchling`; a `$`, a backtick or `<<` outside single quotes never matches; `tool_use` ids another open question holds are skipped; at most 10 minutes older than the open). One transcript matches: the main one makes the asker `main`, a subagent's makes it `subagent`. None, or more than one: `unknown` (after the 10 s). A found asker is saved and published as `ask.changed`; the `tool_use_id` is kept on the row, and for a delegated job it is empty.
+
+Topic `asks` (app tier, so an agent never reads a question or an answer): `ask.changed {row}` after every insert or change (the row as above, with `answer`), and `ask.removed {id, session}` when the hourly sweep deletes a closed row (24 hours after `closedMs`, with its answer). A client reads `ask.list` once and follows the topic.
+
+Timing. A 1 s tick checks every `open` or `answered` row: a blocking ask (`mode` `wait`) past its `deadlineMs` is `expired`; a row with no waiter connected whose asking process has ended (no such pid, or a start time that differs; with no start time saved, no pid and no parent either) is `gone`. A connected waiter is never checked. Restart: `AskOps::load` runs between bind and serving, after the Inbox's load; it records `restored` for every `open` or `answered` row and raises each open one in the Inbox again under a fresh id (the old copy is dropped), so the `ask` command's reconnect with the same id finds its question and an answer given meanwhile is handed over at its next `ask.wait`.
+
+The Inbox. One item per open question, raised once the finder settles: kind `question`, id `ask:<question id>:<ms>`, title `<label> asks · <branch>` (the label is the agent's name, `This session` for the main session, `This session or one of its subagents` for `unknown`; cut to 80 characters), detail the question cut to 400 characters, no expiry. Actions in order: one per choice (`choice_1` to `choice_6`, the label cut to 60 characters, none primary), Answer in Chat (`open`, primary when there are no choices, holds `{ask, session}`), Dismiss (`cancel`). The item's responder only takes the mark and queues the write for the loop, so the Inbox never shows an answer that was not taken; it refuses while `acting` is off and `open` is refused from a phone, as for every item. An answer resolves the item Answered with the choice's action (none for typed text) and `answered_by`; a dismiss resolves it Answered with Dismiss; `expired` and `gone` withdraw it. The answer text is never in the item.
+
+Events, audit and Activity carry `session.ask`: `session`, `then` (`asked`, `found`, `answered`, `delivered`, `dismissed`, `expired`, `gone`, `refused`, `restored`), `asker`, `by` (`mac`, `phone`, `main`, `none`), `mode`, and the counts `chars`, `choices`, `answer_chars` and `waited` (ms), never the question or the answer. `ask.wait`, `ask.mine` and `ask.list` are not quiet ops.
+
+Command line (`ask_cli.rs`, `ask_cli_args.rs`, `ask_cli_run.rs`):
+
+```
+notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] [--socket <path>] -- <question>
+notchling asks [--wait] [--json] [--socket <path>]
+notchling answer <id> (--choice <n> | -- <text>) [--socket <path>]
+```
+
+- `ask` makes a random `key`, retries `ask.open` for 60 s while the daemon is down, prints `Asked (<id>). Waiting for the answer.` on stderr, then calls `ask.wait` with `waitMs` 50,000 in a loop (a call times out at 60 s). If the daemon goes away it reconnects after 1, 2, 5 and 10 s, then every 10 s, and asks again with the same id. `--wait` sends `wait: true` and a `deadlineMs`: `--timeout` seconds (default 900) from now, and never later than `NOTCHLING_DELEGATE_DEADLINE_MS` minus 60 s when that variable is set (the Codex and Antigravity delegates set it); without `--wait` it waits without end. Answered: stdout `Answer: <text>` and `From: you (Mac)`, `From: you (phone)` or `From: the main session`, exit 0. `--json` prints `{"id","state","answer","choice","by"}` on stdout instead, for every closed state. Dismissed: stderr `No answer: the question was dismissed.`, exit 2. Expired or the deadline: `No answer in time.`, exit 124. `gone`: `The question is no longer waiting.`, exit 1. A refusal or no daemon (stderr: `Notchling isn't running. Ask the user to open it, then try again.`): exit 3. A usage error or anything else: exit 1.
+- `asks` calls `ask.mine`; `--wait` loops on `waitMs` 50,000 until a question is listed. It prints each as `<id>  «label» (<asker>) · <branch> · <waited>` (`12s`, `3m`, `1h 5m`), the question, and `  <n>. <choice>` lines; `No questions waiting.` when none; `--json` prints the rows. Exit 3 with no daemon or on a refusal.
+- `answer` prints `Answered.` (exit 0), `Already answered · Mac.`, `· Phone.` or `· Main session.` (exit 2), or `Already <state>.` when the question closed some other way (exit 2); a refusal or no daemon is exit 3.
+
 ## `awake_ops.rs`
 
 What the menu bar cup shows: whether the daemon holds the Mac's power assertion now. App tier, read only,
