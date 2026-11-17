@@ -101,6 +101,7 @@ machines: Fix round 3: 99d7646a (engine machines:: 660 pass; app machines:: 74 p
 machines: Final re-review (agy, gemini-4-hydrogen high, fix round 3 99d7646a): Approved — both findings fixed, no regressions (file inspection; the coordinator's checks: engine machines:: 660, app machines:: 74, clippy/fmt/guard clean). Lane done; open items for the maintainer in the final report.
 
 daemon: Maintainer accepted 2026-11-15: R7 and R10 stand as proposed — Codex jobs and secrets on a dispatch stay refused until their plans (Codex-in-cluster, plan C).
+daemon: Amendment 2026-11-18 (maintainer approved): R7 ends. Codex jobs on Workers run in 2.0 (`cluster.dispatch tool: codex`, `codex.send` with `draft_folder` on the node, the Worker's own login and sandbox; `CODEX_LATER` is gone). R7 protected scope only. R10's secrets half stays for Codex alone: a Codex dispatch with `secrets` is refused in the daemon and the core (`CODEX_SECRETS`), because `codex.send` is not a grant start op; R10 for the other tools ended in plan C as recorded there. A Codex delegate stays refused (`CODEX_DELEGATE`).
 daemon: Maintainer accepted 2026-11-15: R14 stands as proposed — a removed Worker keeps its work folder (<data>/cluster/work), since deleting it could lose work not yet returned.
 daemon: Maintainer accepted 2026-11-15: R15 stands as proposed — node.sessions is client-only (a client or the home, origin Node), narrowing plan B Task 4's "any Member" row.
 app: Maintainer accepted 2026-11-15: the B16 sheet gets a hint when the cluster switch is off (wave 2).

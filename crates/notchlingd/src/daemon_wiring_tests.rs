@@ -411,6 +411,18 @@ fn with_shell_and_agy() -> Value {
     json!([crate::cluster_sessions::agent_row("s1"), shell_row(), agy])
 }
 
+fn codex_row() -> Value {
+    let mut row = crate::cluster_sessions::agent_row("codex:c1");
+    row["tool"] = json!("codex");
+    row
+}
+
+fn with_shell_codex_and_agy() -> Value {
+    let mut rows = with_shell_and_agy();
+    rows.as_array_mut().unwrap().push(codex_row());
+    rows
+}
+
 #[test]
 fn remote_shell_rows_come_only_when_asked_for() {
     let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
@@ -439,6 +451,65 @@ fn remote_shell_rows_come_only_when_asked_for() {
         .call(&node, ops::SESSIONS_LIST, &json!({"remote": "shell"}))
         .unwrap();
     assert_eq!(own, json!([{"id": "mine"}]));
+}
+
+#[test]
+fn remote_codex_rows_come_only_when_asked_for_and_apart_from_the_shell_ones() {
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let ops = Ops::new(local).with_cluster(None, remote_with("codex", with_shell_codex_and_agy()));
+    let asked = |remote: Value| {
+        ops.call(&app(), ops::SESSIONS_LIST, &json!({"remote": remote}))
+            .unwrap()
+    };
+    let (s1, shell, codex) = (
+        "00000000000000a1/s1",
+        "00000000000000a1/shell:j1",
+        "00000000000000a1/codex:c1",
+    );
+    assert_eq!(listed_ids(&asked(json!("codex"))), vec!["mine", s1, codex]);
+    assert_eq!(listed_ids(&asked(json!("shell"))), vec!["mine", s1, shell]);
+    assert_eq!(
+        listed_ids(&asked(json!(["shell", "codex"]))),
+        vec!["mine", s1, shell, codex]
+    );
+    let plain = ops.call(&app(), ops::SESSIONS_LIST, &json!({})).unwrap();
+    assert_eq!(listed_ids(&plain), vec!["mine", s1]);
+    for bad in [json!("agy"), json!(["codex", "agy"]), json!([1]), json!(7)] {
+        let got = ops.call(&app(), ops::SESSIONS_LIST, &json!({"remote": bad}));
+        assert!(got.is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_change_in_remote_codex_rows_is_announced_apart_from_the_others() {
+    let room = Arc::new(FakeRoom::default());
+    let local = Arc::new(Mutex::new(json!([{"id": "mine"}])));
+    let remote = remote_with(
+        "codex-event",
+        json!([crate::cluster_sessions::agent_row("s1")]),
+    );
+    let publisher = publisher(&room, &remote, local);
+    publisher.publish();
+    assert!(
+        room.named("sessions.remote.codex").is_empty(),
+        "no Codex rows, nothing to say"
+    );
+    remote.mark_dirty(&peer(true).id);
+    remote.sync(&[peer(true)], &Rows(with_shell_codex_and_agy()), 1);
+    publisher.publish();
+    publisher.publish();
+    let sent = room.named("sessions.remote.codex");
+    assert_eq!(sent.len(), 1, "a repeat is dropped");
+    assert_eq!(listed_ids(&sent[0]), vec!["00000000000000a1/codex:c1"]);
+    assert_eq!(room.named("sessions.remote.shell").len(), 1);
+    assert_eq!(
+        room.named("sessions.changed").len(),
+        1,
+        "other clients' event is unchanged"
+    );
+    remote.clear();
+    publisher.publish();
+    assert_eq!(room.named("sessions.remote.codex").last(), Some(&json!([])));
 }
 
 #[test]

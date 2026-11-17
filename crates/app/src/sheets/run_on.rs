@@ -1,5 +1,5 @@
 use notchling_engine::bridge::net::crypto::{hex, random_bytes};
-use notchling_engine::cluster::shell_job::{AGY_LATER, CODEX_LATER, MAX_COMMAND};
+use notchling_engine::cluster::shell_job::{AGY_LATER, MAX_COMMAND};
 use notchling_engine::cluster::{compat, Compat, Purpose, Tool as ClusterTool, Versions};
 use notchling_locale as t;
 use serde_json::{json, Value};
@@ -55,7 +55,7 @@ impl Remote {
     }
 
     pub fn takes_text(self) -> bool {
-        matches!(self, Remote::Agy | Remote::Shell)
+        matches!(self, Remote::Agy | Remote::Shell | Remote::Codex)
     }
 
     pub fn text_title(self) -> &'static str {
@@ -184,8 +184,6 @@ impl RunOn {
         };
         if !c.online {
             row.reason = Some(t::cluster::node_offline(&c.name));
-        } else if tool == ClusterTool::Codex {
-            row.reason = Some(CODEX_LATER.to_owned());
         } else if tool == ClusterTool::Agy {
             row.reason = Some(AGY_LATER.to_owned());
         } else {
@@ -290,7 +288,7 @@ impl NewSession {
             return false;
         }
         if !target.remote.takes_text() {
-            return !matches!(target.remote, Remote::Codex);
+            return true;
         }
         let text = target.text.trim();
         !text.is_empty()
@@ -316,8 +314,8 @@ impl NewSession {
         let text = self.target.text.trim();
         match self.target.remote {
             Remote::Shell => args["command"] = json!(text),
-            Remote::Agy => args["text"] = json!(text),
-            Remote::Claude | Remote::Codex => {}
+            Remote::Agy | Remote::Codex => args["text"] = json!(text),
+            Remote::Claude => {}
         }
         self.stage = Stage::Starting;
         Some(Request::cluster_dispatch(args))

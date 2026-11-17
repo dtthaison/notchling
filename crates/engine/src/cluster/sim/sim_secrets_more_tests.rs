@@ -583,7 +583,7 @@ fn a_partitioned_stale_primary_still_releases_known_window() {
         .trace()
         .iter()
         .any(|l| l.contains("secrets Stats") && l.contains("split_accepts: 1")));
-    let (world, result) = run_world(116, 300, Plant::default());
+    let (world, result) = run_world(124, 300, Plant::default());
     assert_eq!(result, Ok(()));
     let s = world.secrets().stats();
     assert!(s.stale_releases >= 1 && s.split_accepts == 0, "{s:?}");

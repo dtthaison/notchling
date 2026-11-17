@@ -5,7 +5,7 @@ use crate::cluster_workspace_send::{code_mode, Code, CodeSender};
 use crate::op_group::OpGroup;
 use crate::shell_jobs::{Reporter, ShellJobs};
 use notchling_engine::cluster::core::{ATTACH_CALL_MS, CALL_MS};
-use notchling_engine::cluster::shell_job::{CODEX_LATER, MAX_COMMAND};
+use notchling_engine::cluster::shell_job::{CODEX_SECRETS, MAX_COMMAND};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{JobSpec, JobState, LocalCmd, NodeId, Qualified, Tool};
 use notchling_engine::vault::valid_name;
@@ -57,8 +57,8 @@ fn plain_spec(node: NodeId, args: &Value) -> Result<JobSpec, ApiError> {
         Some("claude") => Tool::Claude,
         Some("agy") => Tool::Agy,
         Some("shell") => Tool::Shell,
-        Some("codex") => return Err(bad(CODEX_LATER)),
-        _ => return Err(bad("tool is claude, agy or shell")),
+        Some("codex") => Tool::Codex,
+        _ => return Err(bad("tool is claude, codex, agy or shell")),
     };
     let cwd = opt_text(args, "cwd")?
         .filter(|c| c.starts_with('/') && c.len() <= CWD_MAX && !c.contains('\0'))
@@ -84,7 +84,17 @@ fn plain_spec(node: NodeId, args: &Value) -> Result<JobSpec, ApiError> {
             nothing_else(args, &["model", "text"], "a shell job")?;
             json!({"command": nonblank(command, "command", MAX_COMMAND)?})
         }
-        Tool::Codex => return Err(bad(CODEX_LATER)),
+        Tool::Codex => {
+            nothing_else(args, &["command"], "a Codex session")?;
+            let mut fields = serde_json::Map::new();
+            fields.insert("text".into(), json!(nonblank(text, "text", TEXT_MAX)?));
+            for key in ["model", "effort"] {
+                if let Some(word) = opt_text(args, key)?.filter(|w| !w.trim().is_empty()) {
+                    fields.insert(key.into(), json!(word));
+                }
+            }
+            Value::Object(fields)
+        }
     };
     Ok(JobSpec {
         node,
@@ -135,7 +145,7 @@ fn secret_names(args: &Value) -> Result<Vec<String>, ApiError> {
 }
 
 pub fn build(args: &Value, tier: OriginTier) -> Result<(String, JobSpec), ApiError> {
-    let usage = "cluster.dispatch takes {\"node\": id, \"key\": text, \"tool\": claude|agy|shell, \"cwd\": path, ...} or {\"node\", \"key\", \"delegate\": [args]}";
+    let usage = "cluster.dispatch takes {\"node\": id, \"key\": text, \"tool\": claude|codex|agy|shell, \"cwd\": path, ...} or {\"node\", \"key\", \"delegate\": [args]}";
     let key = opt_text(args, "key")?
         .filter(|k| !k.trim().is_empty() && k.len() <= KEY_MAX)
         .ok_or_else(|| bad(usage))?;
@@ -150,6 +160,9 @@ pub fn build(args: &Value, tier: OriginTier) -> Result<(String, JobSpec), ApiErr
     };
     if !secrets.is_empty() && spec.is_delegate() {
         return Err(bad("a delegate job takes no secrets"));
+    }
+    if !secrets.is_empty() && spec.tool == Tool::Codex {
+        return Err(bad(CODEX_SECRETS));
     }
     spec.secrets = secrets;
     if tier != OriginTier::App && !spec.is_delegate() {

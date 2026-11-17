@@ -372,8 +372,7 @@ fn a_delegate_may_run_longer_than_a_start_call() {
     assert_eq!(state_of(&hub, &m5, "d"), JobState::Dispatching);
 }
 
-#[test]
-fn a_peers_dispatch_for_codex_is_refused() {
+fn peer_hub() -> (Hub, NodeId, NodeId) {
     let mut hub = Hub::new();
     let m5 = hub.add("m5", "macos", true);
     let m1 = hub.add("m1", "macos", true);
@@ -382,9 +381,53 @@ fn a_peers_dispatch_for_codex_is_refused() {
     hub.join_as("m5", "m1", "macos", true, true);
     hub.join("m5", "w1", "linux", false);
     hub.link(&m1, &w1);
-    let effects = hub.local(&m1, dispatch_cmd("k", "w1", Tool::Codex));
-    let a = answers(&effects);
-    assert!(a.is_empty());
+    (hub, m5, m1)
+}
+
+#[test]
+fn a_peers_dispatch_for_codex_starts_codex_send_on_the_worker() {
+    let (mut hub, _m5, m1) = peer_hub();
+    let codex = spec(
+        "w1",
+        Tool::Codex,
+        json!({"text": "fix it", "model": "gpt-6.1-sol"}),
+    );
+    let effects = hub.local(&m1, dispatch_as("k", codex, OriginTier::App));
+    assert!(answers(&effects).is_empty());
+    let (_, op, args) = last_run(&hub, "w1");
+    assert_eq!(op, "codex.send");
+    assert_eq!(args["draft_folder"], "/srv/repo");
+    assert_eq!(args["text"], "fix it");
+    assert_eq!(args["model"], "gpt-6.1-sol");
+    assert_eq!(args["job"], json!(job_id("k")));
+    assert!(args.get("folder").is_none() && args.get("cwd").is_none());
+}
+
+#[test]
+fn a_codex_start_reply_names_the_session_by_its_row_id() {
+    let (mut hub, m5, w1) = pair();
+    let codex = spec("w1", Tool::Codex, json!({"text": "fix it"}));
+    hub.local(&m5, dispatch_as("k", codex, OriginTier::App));
+    let (call, _, _) = last_run(&hub, "w1");
+    hub.run(
+        &w1,
+        Input::LocalDone {
+            call,
+            result: Ok(json!({"id": "codex:abc", "session": "abc", "state": "started"})),
+        },
+    );
+    let job = &hub.core(&m5).state().expect("state").jobs[&job_id("k")];
+    assert_eq!(job.state, JobState::Running);
+    assert_eq!(job.session.as_deref(), Some("codex:abc"));
+}
+
+#[test]
+fn a_codex_job_that_asks_for_secrets_is_refused_with_a_reason() {
+    let (mut hub, m5, m1) = peer_hub();
+    let mut codex = spec("w1", Tool::Codex, json!({"text": "fix it"}));
+    codex.secrets = vec!["gh".to_string()];
+    let effects = hub.local(&m1, dispatch_as("k", codex, OriginTier::App));
+    assert!(answers(&effects).is_empty());
     let reply = hub
         .seen
         .iter()
@@ -395,10 +438,50 @@ fn a_peers_dispatch_for_codex_is_refused() {
         })
         .expect("m1 hears back");
     assert!(
-        matches!(&reply, Err(e) if e.message == "Codex jobs on another machine come in a later version"),
+        matches!(&reply, Err(e) if e.message == "Codex jobs on another machine take no secrets"),
         "{reply:?}"
     );
     assert!(hub.core(&m5).state().expect("state").jobs.is_empty());
+}
+
+fn codex_refusal_when(change: impl FnOnce(&mut crate::cluster::versions::Versions)) -> String {
+    let (mut hub, m5, _w1) = pair();
+    let mut versions = hub.core(&m5).state().expect("state").members[&id("w1")]
+        .versions
+        .clone()
+        .expect("versions");
+    change(&mut versions);
+    hub.run(
+        &id("w1"),
+        Input::Local {
+            id: 9,
+            cmd: LocalCmd::SetVersions { versions },
+        },
+    );
+    let codex = spec("w1", Tool::Codex, json!({"text": "x"}));
+    let effects = hub.local(&m5, dispatch_as("k", codex, OriginTier::App));
+    let refused = match answers(&effects)[0] {
+        Err(e) => e.message.clone(),
+        Ok(v) => panic!("dispatched: {v}"),
+    };
+    assert!(hub.core(&m5).state().expect("state").jobs.is_empty());
+    refused
+}
+
+#[test]
+fn the_home_refuses_a_codex_job_on_a_node_signed_out_of_codex() {
+    let refused = codex_refusal_when(|v| {
+        v.logins.insert(crate::versions::Tool::Codex, false);
+    });
+    assert_eq!(refused, "Codex isn't signed in on w1");
+}
+
+#[test]
+fn the_home_refuses_a_codex_job_on_a_node_without_codex() {
+    let refused = codex_refusal_when(|v| {
+        v.tools.remove(&crate::versions::Tool::Codex);
+    });
+    assert_eq!(refused, "Codex isn't installed on w1");
 }
 
 #[test]

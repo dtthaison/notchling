@@ -218,14 +218,21 @@ fn every_tool(args: &Value) -> Result<bool, ApiError> {
     }
 }
 
-fn with_remote_shell(args: &Value) -> Result<bool, ApiError> {
-    match args.get("remote") {
-        None | Some(Value::Null) => Ok(false),
-        Some(Value::String(kind)) if kind == "shell" => Ok(true),
-        Some(_) => Err(ApiError::bad_request(
-            "sessions.list takes {\"remote\": \"shell\"}",
-        )),
+fn with_remote_kinds(args: &Value) -> Result<(bool, bool), ApiError> {
+    let usage = "sessions.list takes {\"remote\": \"shell\" | \"codex\" | [\"shell\", \"codex\"]}";
+    let kinds: Vec<&str> = match args.get("remote") {
+        None | Some(Value::Null) => return Ok((false, false)),
+        Some(Value::String(kind)) => vec![kind.as_str()],
+        Some(Value::Array(list)) => list
+            .iter()
+            .map(|k| k.as_str().ok_or_else(|| ApiError::bad_request(usage)))
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(ApiError::bad_request(usage)),
+    };
+    if kinds.iter().any(|k| *k != "shell" && *k != "codex") {
+        return Err(ApiError::bad_request(usage));
     }
+    Ok((kinds.contains(&"shell"), kinds.contains(&"codex")))
 }
 
 fn tagged(list: Value, tool: &str) -> Vec<Value> {
@@ -243,7 +250,7 @@ fn tagged(list: Value, tool: &str) -> Vec<Value> {
 impl Ops {
     fn sessions_list(&self, caller: &Caller, args: &Value) -> Result<(Value, bool), ApiError> {
         let every = every_tool(args)?;
-        let shell = with_remote_shell(args)?;
+        let (shell, codex) = with_remote_kinds(args)?;
         let landed = self.first.wait(self.first_wait);
         let list = self
             .sessions
@@ -266,8 +273,8 @@ impl Ops {
             Some(remote) if caller.client != ClientKind::Node && every => {
                 Ok((remote.merge_all(&list), landed))
             }
-            Some(remote) if caller.client != ClientKind::Node && shell => {
-                Ok((remote.merge_shell(&list), landed))
+            Some(remote) if caller.client != ClientKind::Node && (shell || codex) => {
+                Ok((remote.merge_kinds(&list, shell, codex), landed))
             }
             Some(remote) if caller.client != ClientKind::Node => Ok((remote.merge(&list), landed)),
             _ => Ok((list, landed)),

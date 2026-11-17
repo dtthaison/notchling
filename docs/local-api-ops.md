@@ -365,7 +365,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
 | `cluster.continue_here` | app (the phone with acting and the bridge on; never an agent) | `{id}` | `{id, claimed: true}`: this machine claims a session that waits for another machine (a new claim, `n + 1`, journaled at the primary), its Waiting gate goes and its `session_waits` item closes. `"That session isn't waiting"` when `waiting` doesn't list it; a plain error (`"Couldn't claim <id> on this machine: <reason>"`) when the primary can't be reached, and the session keeps waiting. The app and the phone confirm before they call it |
 | `cluster.side_copy.hide` | app | `{session, node}` | `{hidden: true}`; hides the side copy from lists (recorded at the primary with an App-tier origin). Nothing on disk changes |
 | `cluster.follow` | app | `{id: "<node>/<session>"}` | `{following: true, id, until}` (`until` in ms; see Remote sessions) |
-| `cluster.dispatch` | agent (the app for anything but a delegate; see Dispatch) | `{node, key, tool: "claude" \| "agy" \| "shell", cwd, model?, text?, command?, code?: "folder" \| "send", secrets?}` or `{node, key, delegate: [args]}` | `{job, state, session, qualified, warning}`; a delegate adds `{exit, out, err}` |
+| `cluster.dispatch` | agent (the app for anything but a delegate; see Dispatch) | `{node, key, tool: "claude" \| "codex" \| "agy" \| "shell", cwd, model?, effort?, text?, command?, code?: "folder" \| "send", secrets?}` or `{node, key, delegate: [args]}` | `{job, state, session, qualified, warning}`; a delegate adds `{exit, out, err}` |
 | `shell.stop` | app | `{id: "shell:<job>"}`, or `"<node>/shell:<job>"` for a job on another node | `{stopped: bool}` |
 | `cluster.return` | app | `{job}` | `{job, branch: "notchling/<node name slug>/<job>", node: <the node's name>}` |
 | `cluster.allow.set` | app | `{node, names?, any?}` | `{}`; `names` replaces the vault secrets a job on that machine may carry, `any` allows every name; a field left out stays as it was; relayed to the home from a client |
@@ -504,7 +504,7 @@ from the app in this run, or `cluster.join` (below), or a restart of a headless 
   its rows with `online: false`; a node that left the member list loses them. A Worker's list never carries
   another node's rows. A remote row must read as `Agent` (unknown fields are dropped), and its node comes only
   from the link that proved it, never from the row. Claude Code rows come in the default list and in
-  `sessions.changed`; Codex, Antigravity and shell rows only with `tools: "all"`. `sessions.list {remote: "shell"}` (additive; anything else but `null` is `bad_request`) adds the linked members' shell rows to the default list and nothing else, for a client that shows them; the daemon then also sends `sessions.remote.shell` on topic `sessions` whenever that set changes (data: the whole current list of remote shell rows, `[]` once the last is gone; never sent while there are none and there never were). `sessions.changed` is unchanged.
+  `sessions.changed`; Codex, Antigravity and shell rows only with `tools: "all"`. `sessions.list {remote: "shell"}` (additive; anything else but `null` is `bad_request`) adds the linked members' shell rows to the default list and nothing else, for a client that shows them; the daemon then also sends `sessions.remote.shell` on topic `sessions` whenever that set changes (data: the whole current list of remote shell rows, `[]` once the last is gone; never sent while there are none and there never were). `remote` also takes `"codex"` (the linked members' Codex rows, `<node>/codex:<id>`, whose `transcriptPath` is the mirror like any remote row) or a list of the two, `["shell", "codex"]`; `sessions.remote.codex` is the same kind of event for the Codex rows. `sessions.changed` is unchanged.
 - A shell job on this node is a row with `id: "shell:<job>"`, `tool: "shell"`, `host: "Shell"`,
   `target: {process: <pid>}`, `command` the command line, `name` its first line cut to 60 characters, `label`
   `Running`, `Done`, `Stopped` or `Failed` (`group` `working` or `completed`, `detail` the reason when there is
@@ -536,7 +536,10 @@ delegate's repeat has no `exit`, `out` or `err`). With `code: "send"` the daemon
 key, so a repeat sends it again; the prepare finds the job's worktree and reuses it untouched.
 
 - `tool: "claude"` takes `cwd` (absolute) and `model?` (becomes `--model`); `tool: "agy"` takes `cwd` and `text`
-  (the first message, at most 64 KB); `tool: "shell"` takes `cwd` and `command` (at most 64 KB). A field another
+  (the first message, at most 64 KB); `tool: "codex"` takes `cwd`, `text` (the first message, at most 64 KB) and
+  `model?`, `effort?` (the Worker checks them against its own Codex model list) and starts `codex.send
+  {draft_folder, text, job}` on the node, which runs Codex under that machine's own login, sandbox and network
+  setting; `tool: "shell"` takes `cwd` and `command` (at most 64 KB). A field another
   tool owns is `bad_request`. `session` in the reply is the session's id on that node and `qualified` its
   `<node>/<id>`; for a shell job it is `shell:<job>`. `state` is `dispatching`, `running`, `done`, `failed`,
   `interrupted` or `lost`.
@@ -561,9 +564,12 @@ key, so a repeat sends it again; the prepare finds the job's worktree and reuses
   "`<name>` is not a member", "was removed", "is not approved yet", "is offline", "hasn't reported its
   versions", a protocol or schema mismatch, a tool that isn't installed, and Claude Code on Linux ("isn't proven
   yet") or Windows.
-- Codex is refused ("Codex jobs on another machine come in a later version") in the daemon and again in the
-  core, and so is a non-empty `secrets` list ("Secrets for jobs on another machine come in a later version"):
-  one refusal each to remove in a later version.
+- A Codex job with a non-empty `secrets` list is refused ("Codex jobs on another machine take no secrets") in the
+  daemon and again in the core: a Worker can't hand a grant to a Codex job, since `codex.send` is not one of the
+  start ops that note a job's grants. A Codex delegate (`delegate: ["codex", ...]`) is still refused ("Codex
+  delegated jobs on another machine come in a later version"). A node without Codex, or where `codex login
+  status` says signed out, is refused by `compat` ("Codex isn't installed on `<name>`", "Codex isn't signed in on
+  `<name>`").
 - Allow `cluster.dispatch` and `cluster.return` 300 s, `cluster.follow` and `shell.stop` 60 s (the app's
   `call_timeout`).
 - A job's end reaches the home as a `jobs` peer event (`job.state {job, state, detail}`: done, failed or

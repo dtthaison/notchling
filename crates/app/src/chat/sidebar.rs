@@ -29,6 +29,10 @@ pub struct RowAccount {
     pub lane: bool,
 }
 
+pub fn shows_account(id: &str, tool: Tool) -> bool {
+    tool == Tool::Claude || notchling_engine::cluster::Qualified::parse(id).is_none()
+}
+
 pub fn row_account(tool: Tool, config_dir: Option<&str>, s: &Snapshot) -> Option<RowAccount> {
     let named = |email: &str, lane: bool| {
         (!email.is_empty()).then(|| RowAccount {
@@ -241,7 +245,11 @@ pub fn sidebar_model(
     let accounts: Vec<Option<RowAccount>> = sections
         .iter()
         .flat_map(|s| &s.rows)
-        .map(|r| row_account(r.tool, r.config_dir.as_deref(), snapshot))
+        .map(|r| {
+            shows_account(&r.id, r.tool)
+                .then(|| row_account(r.tool, r.config_dir.as_deref(), snapshot))
+                .flatten()
+        })
         .collect();
     SidebarModel {
         sections,

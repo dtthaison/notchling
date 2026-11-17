@@ -1,3 +1,4 @@
+use notchling_engine::cluster::Qualified;
 use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::ops;
 use serde_json::{json, Value};
@@ -18,6 +19,8 @@ pub enum RowTool {
 
 impl RowTool {
     pub fn of(row_id: &str) -> RowTool {
+        let bare = Qualified::parse(row_id).map(|q| q.id);
+        let row_id = bare.as_deref().unwrap_or(row_id);
         if row_id.starts_with(CODEX_PREFIX) || row_id.starts_with(CODEX_DRAFT_PREFIX) {
             RowTool::Codex
         } else if row_id.starts_with(AGY_PREFIX) || row_id.starts_with(AGY_DRAFT_PREFIX) {
@@ -232,6 +235,8 @@ mod tests {
         assert_eq!(RowTool::of("agy:abc"), RowTool::Agy);
         assert_eq!(RowTool::of("agy-new:u1"), RowTool::Agy);
         assert_eq!(RowTool::of("aa11bb22"), RowTool::Claude);
+        assert_eq!(RowTool::of("00000000000000a1/codex:abc"), RowTool::Codex);
+        assert_eq!(RowTool::of("00000000000000a1/aa11bb22"), RowTool::Claude);
         assert!(is_draft("codex-new:u1") && is_draft("agy-new:u1"));
         assert!(!is_draft("codex:abc"));
         assert_eq!(RowTool::Agy.name(), "Antigravity");

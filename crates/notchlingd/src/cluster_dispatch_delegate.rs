@@ -1,7 +1,7 @@
 use crate::acting_ops::bad;
 use crate::cluster_node::DELEGATE_WAIT;
 use crate::layout::Layout;
-use notchling_engine::cluster::shell_job::CODEX_LATER;
+use notchling_engine::cluster::shell_job::CODEX_DELEGATE;
 use notchling_engine::delegate::command::{self, Context};
 use notchling_engine::delegate::options::{
     self, take_machine, to_args, Parsed, Tool, MAX_REMOTE_TIMEOUT_SECS,
@@ -94,7 +94,7 @@ pub fn check(args: &[String]) -> Result<Parsed, ApiError> {
     }
     let parsed = options::parse(args, Path::new("/"), None).map_err(|e| bad(e.message))?;
     if parsed.options.tool == Tool::Codex {
-        return Err(bad(CODEX_LATER));
+        return Err(bad(CODEX_DELEGATE));
     }
     if !head.contains(&"--folder") {
         return Err(bad("--folder is needed for a job on another machine"));

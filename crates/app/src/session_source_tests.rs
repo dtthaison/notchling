@@ -313,8 +313,12 @@ mod over_a_socket {
                 .unwrap_or_else(|e| e.into_inner())
                 .push(args.clone());
             let mut rows = vec![agent("a")];
-            if args.get("remote").and_then(Value::as_str) == Some("shell") {
+            let asked = args.get("remote").and_then(Value::as_array);
+            if asked.is_some_and(|kinds| kinds.contains(&Value::from("shell"))) {
                 rows.push(shell_agent("00000000000000a1/shell:j1"));
+            }
+            if asked.is_some_and(|kinds| kinds.contains(&Value::from("codex"))) {
+                rows.push(agent("00000000000000a1/codex:c1"));
             }
             Ok(serde_json::to_value(rows).expect("rows"))
         }
@@ -348,9 +352,11 @@ mod over_a_socket {
         assert_eq!(ids(&view), ["a"], "the notch's rows stay as they were");
         let shells: Vec<_> = view.shells.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(shells, ["00000000000000a1/shell:j1"]);
+        let remote_codex: Vec<_> = view.remote_codex.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(remote_codex, ["00000000000000a1/codex:c1"]);
         assert_eq!(
             asked.lock().unwrap()[0],
-            serde_json::json!({"remote": "shell"})
+            serde_json::json!({"remote": ["shell", "codex"]})
         );
         let next =
             serde_json::to_value(vec![shell_agent("00000000000000a1/shell:j2")]).expect("rows");
@@ -366,6 +372,31 @@ mod over_a_socket {
             .0
             .publish("sessions", "sessions.remote.shell", &serde_json::json!([]));
         wait_for(&source, "the shells gone", |v| v.shells.is_empty());
+        let moved = serde_json::to_value(vec![
+            agent("00000000000000a1/codex:c2"),
+            agent("codex:local"),
+        ])
+        .expect("rows");
+        running
+            .0
+            .publish("sessions", "sessions.remote.codex", &moved);
+        let view = wait_for(&source, "the Codex change", |v| {
+            v.remote_codex
+                .iter()
+                .any(|a| a.id == "00000000000000a1/codex:c2")
+        });
+        assert_eq!(
+            view.remote_codex.len(),
+            1,
+            "a local row is not another machine's"
+        );
+        assert_eq!(ids(&view), ["a"]);
+        running
+            .0
+            .publish("sessions", "sessions.remote.codex", &serde_json::json!([]));
+        wait_for(&source, "the Codex rows gone", |v| {
+            v.remote_codex.is_empty()
+        });
         stop(running);
     }
 
@@ -542,16 +573,20 @@ fn only_another_machines_shell_rows_are_split_off() {
         shell("00000000000000a1/s1", None),
         shell("shell:local", Some("make")),
         shell("00000000000000a1/agy:a", Some("x")),
+        shell("00000000000000a1/codex:c1", None),
+        shell("codex:local", None),
     ];
-    let (rest, shells) = split_shells(rows);
+    let (rest, shells, codex) = split_remote(rows);
     let ids = |rows: &[Agent]| rows.iter().map(|a| a.id.clone()).collect::<Vec<_>>();
     assert_eq!(ids(&shells), ["00000000000000a1/shell:j1"]);
+    assert_eq!(ids(&codex), ["00000000000000a1/codex:c1"]);
     assert_eq!(
         ids(&rest),
         [
             "00000000000000a1/s1",
             "shell:local",
-            "00000000000000a1/agy:a"
+            "00000000000000a1/agy:a",
+            "codex:local"
         ]
     );
 }
