@@ -2,7 +2,7 @@ use super::conversation::MAX_LINE;
 use super::glance::has;
 use super::scan::{scan_lines, Line};
 use super::shells::Stops;
-use super::subagents::{notification_statuses, result_end};
+use super::subagents::{notification_statuses, result_end, resume_end};
 use super::tail::RAW_BYTES;
 use super::util::{parse_object, str_of};
 use serde_json::Value;
@@ -60,7 +60,8 @@ fn scan(path: &str, size: u64) -> HashMap<String, String> {
 fn note(line: &[u8], into: &mut HashMap<String, String>, stops: &mut Stops) {
     let notified = has(line, b"<task-notification>");
     let stop_call = has(line, b"TaskStop") || has(line, b"KillShell");
-    let result = has(line, b"tool_result") && (has(line, b"\"agentId\"") || stops.waits_in(line));
+    let result = has(line, b"tool_result")
+        && (has(line, b"\"agentId\"") || has(line, b"\"resumedAgentId\"") || stops.waits_in(line));
     if !notified && !stop_call && !result {
         return;
     }
@@ -128,6 +129,9 @@ fn results(obj: &Value, into: &mut HashMap<String, String>, stops: &mut Stops) {
             for id in ids {
                 into.insert(id.to_string(), ended.to_string());
             }
+        }
+        if let Some((agent, word)) = resume_end(is_error, result) {
+            into.insert(agent.to_string(), word.to_string());
         }
         stops.result(str_of(block, "tool_use_id"), is_error, into);
     }

@@ -4,7 +4,7 @@ use super::user::{model_id_in_confirmation, user_item};
 use crate::transcript::scan::HEAD_BYTES;
 use crate::transcript::shells;
 use crate::transcript::snapshot::{self, PendingQuestion};
-use crate::transcript::subagents::{notification_statuses, result_end};
+use crate::transcript::subagents::{notification_statuses, result_end, resume_end};
 use crate::transcript::tail::LineParser;
 use crate::transcript::util::{count_of, date_field, parse_object, str_of};
 use crate::transcript::{glance::has, model::*};
@@ -467,6 +467,11 @@ impl Parser {
                     .finished_agents
                     .insert(id.to_string(), ended.to_string());
             }
+        }
+        if let Some((agent, word)) = resume_end(is_error, result) {
+            self.c
+                .finished_agents
+                .insert(agent.to_string(), word.to_string());
         }
         self.stops
             .result(tool_use_id, is_error, &mut self.c.finished_agents);
