@@ -48,7 +48,11 @@ pub enum Phase {
 
 #[derive(Clone, Debug)]
 pub enum Probe {
-    Draft { machine: Box<Machine>, round: u64 },
+    Draft {
+        machine: Box<Machine>,
+        round: u64,
+        sd: bool,
+    },
 }
 
 pub struct Reply {
@@ -67,10 +71,10 @@ impl fmt::Debug for Reply {
 
 impl Probe {
     pub fn run(&self, engine: &SetupEngine) -> Reply {
-        let Probe::Draft { machine, round } = self;
+        let Probe::Draft { machine, round, sd } = self;
         Reply {
             round: *round,
-            results: engine.check_draft_slow(machine),
+            results: engine.check_draft_join(machine, *sd),
         }
     }
 }

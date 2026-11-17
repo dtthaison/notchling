@@ -12,6 +12,7 @@ use notchling_engine::machines::registry::{
     write_lock, AdminAccess, Machine, MachineOs, NodeChoices, NodeSettings, RegistryState,
 };
 use notchling_engine::machines::step::{CheckResult, Detected, StepId};
+use notchling_engine::machines::steps_node::is_sd_join_step;
 use notchling_locale as t;
 
 use super::add_parts::{Account, AddParts};
@@ -267,10 +268,12 @@ impl AddFlow {
                 choices: self.choices(),
             });
         }
+        let sd = machine.sd_worker().is_some();
         machine.jobs.clear();
         Probe::Draft {
             machine: Box::new(machine),
             round: self.round,
+            sd,
         }
     }
 
@@ -327,10 +330,22 @@ impl AddFlow {
         if app_learned {
             return Ok(Settled::Again);
         }
+        let sd = self.has_sd_job();
         for (id, result) in results {
+            if sd && !is_sd_join_step(&id) {
+                continue;
+            }
             self.parts.engine.show(&self.name, id, result);
         }
         self.plan_rows().map(Settled::Phase)
+    }
+
+    fn has_sd_job(&self) -> bool {
+        self.parts
+            .registry
+            .all()
+            .iter()
+            .any(|m| m.name == self.name && m.sd_worker().is_some())
     }
 
     fn register(&self, detected: &Detected) -> Result<bool, Stop> {
@@ -378,11 +393,13 @@ impl AddFlow {
             .map(|m| engine.overlaid(&m))
             .ok_or_else(|| Stop::new(t::cluster::add_no_machine(&self.name), true))?;
         let own = engine.steps(&machine);
+        let sd = machine.sd_worker().is_some();
         let mut node_view = machine;
         node_view.jobs.clear();
         let steps: Vec<_> = engine
             .steps(&node_view)
             .into_iter()
+            .filter(|s| !sd || is_sd_join_step(&s.id))
             .filter(|s| {
                 own.iter()
                     .any(|o| o.id == s.id && discriminant(&o.fix) == discriminant(&s.fix))

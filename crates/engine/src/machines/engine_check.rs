@@ -29,7 +29,18 @@ impl SetupEngine {
         use_prior: bool,
         masks: &Masks,
     ) -> Evaluation {
-        let first = self.evaluate_once(m, slow, use_prior, masks);
+        self.evaluate_in(m, slow, use_prior, masks, None)
+    }
+
+    pub(super) fn evaluate_in(
+        &self,
+        m: &Machine,
+        slow: bool,
+        use_prior: bool,
+        masks: &Masks,
+        only: Option<fn(&StepId) -> bool>,
+    ) -> Evaluation {
+        let first = self.evaluate_once(m, slow, use_prior, masks, only);
         let build = Detected {
             os: first.detected.os,
             home: first.detected.home.clone(),
@@ -42,13 +53,23 @@ impl SetupEngine {
         if first.unreachable || learned == *m {
             return first;
         }
-        let mut second = self.evaluate_once(&learned, slow, use_prior, masks);
+        let mut second = self.evaluate_once(&learned, slow, use_prior, masks, only);
         second.slow_ran |= first.slow_ran;
         second
     }
 
-    fn evaluate_once(&self, m: &Machine, slow: bool, use_prior: bool, masks: &Masks) -> Evaluation {
-        let list = self.step_list(m);
+    fn evaluate_once(
+        &self,
+        m: &Machine,
+        slow: bool,
+        use_prior: bool,
+        masks: &Masks,
+        only: Option<fn(&StepId) -> bool>,
+    ) -> Evaluation {
+        let mut list = self.step_list(m);
+        if let Some(keep) = only {
+            list.retain(|s| keep(&s.id));
+        }
         let ctx = self.context(m, masks);
         let prior = if use_prior {
             lock(&self.state)

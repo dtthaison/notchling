@@ -484,18 +484,32 @@ impl SetupEngine {
     }
 
     pub fn check_draft(&self, draft: &Machine) -> BTreeMap<StepId, CheckResult> {
-        self.check_draft_with(draft, false)
+        self.check_draft_with(draft, false, None)
     }
 
     pub fn check_draft_slow(&self, draft: &Machine) -> BTreeMap<StepId, CheckResult> {
-        self.check_draft_with(draft, true)
+        self.check_draft_with(draft, true, None)
     }
 
-    fn check_draft_with(&self, draft: &Machine, slow: bool) -> BTreeMap<StepId, CheckResult> {
+    pub fn check_draft_join(
+        &self,
+        draft: &Machine,
+        has_sd_job: bool,
+    ) -> BTreeMap<StepId, CheckResult> {
+        let only = has_sd_job.then_some(super::steps_node::is_sd_join_step as fn(&StepId) -> bool);
+        self.check_draft_with(draft, true, only)
+    }
+
+    fn check_draft_with(
+        &self,
+        draft: &Machine,
+        slow: bool,
+        only: Option<fn(&StepId) -> bool>,
+    ) -> BTreeMap<StepId, CheckResult> {
         let mut m = draft.clone();
         m.jobs.clear();
         let masks = self.masks(&m, None);
-        let e = self.evaluate(&m, slow, false, &masks);
+        let e = self.evaluate_in(&m, slow, false, &masks, only);
         e.results
             .into_iter()
             .map(|(k, v)| (k, v.masked(&masks)))

@@ -42,6 +42,16 @@ pub(super) fn steps(m: &Machine) -> Vec<SetupStep> {
     out
 }
 
+pub fn is_sd_join_step(id: &StepId) -> bool {
+    *id != StepId::NODE_GIT
+        && (*id == StepId::REACHABLE
+            || *id == StepId::WORKER_USER
+            || *id == StepId::STAYS_AWAKE
+            || *id == StepId::FILEVAULT
+            || id.raw().starts_with("node-")
+            || super::steps_master::is_master_step(id))
+}
+
 fn tailscale(m: &Machine) -> SetupStep {
     SetupStep::new(
         StepId::NODE_TAILSCALE,
