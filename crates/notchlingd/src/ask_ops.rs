@@ -332,16 +332,14 @@ impl AskOps {
         if !self.saving {
             return Err(refuse(failed(SAVE_QUESTION_FAILED)));
         }
-        let session = self.session_key(&hit);
         let known = self
             .store
-            .list(Some(&session))
-            .map_err(|_| failed(SAVE_QUESTION_FAILED))?
-            .into_iter()
-            .find(|row| row.key == key && row.pid == pid);
+            .by_key(key, pid)
+            .map_err(|_| failed(SAVE_QUESTION_FAILED))?;
         if let Some(row) = known {
             return Ok(json!({"id": row.id, "state": row.state.as_str()}));
         }
+        let session = self.session_key(&hit);
         let folder = self.procs.cwd(pid);
         let new = New {
             key: key.to_string(),
@@ -432,7 +430,9 @@ impl AskOps {
         by: By,
     ) -> Result<Taken, ApiError> {
         let wrote = self.store.answer(id, answer, choice, by, self.now());
-        self.drop_mark(id);
+        if !matches!(wrote, Ok(true)) {
+            self.drop_mark(id);
+        }
         match wrote {
             Err(_) => Err(failed(SAVE_ANSWER_FAILED)),
             Ok(false) => self.lost(id),
@@ -446,33 +446,46 @@ impl AskOps {
     }
 
     pub fn dismiss(&self, id: &str) -> Result<bool, ApiError> {
+        Ok(self.dismiss_taken(id)? == Taken::Won)
+    }
+
+    pub fn dismiss_taken(&self, id: &str) -> Result<Taken, ApiError> {
         let row = self.row(id)?;
-        if may_answer(&row, &Who::Person).is_err() {
-            return Ok(false);
+        if let Err(refused) = may_answer(&row, &Who::Person) {
+            let state = match refused {
+                Refused::NotOpen(state) => state,
+                Refused::PersonOnly => row.state,
+            };
+            return Ok(Taken::Lost { state, by: row.by });
         }
         let mark = Mark {
             state: AskState::Dismissed,
             by: None,
         };
-        if self.take(id, mark).is_some() {
-            return Ok(false);
+        if let Some(taken) = self.take(id, mark) {
+            return Ok(Taken::Lost {
+                state: taken.state,
+                by: taken.by,
+            });
         }
         self.finish_dismiss(id)
     }
 
-    pub(crate) fn finish_dismiss(&self, id: &str) -> Result<bool, ApiError> {
+    pub(crate) fn finish_dismiss(&self, id: &str) -> Result<Taken, ApiError> {
         let closed = self
             .store
             .close(id, &[AskState::Open], AskState::Dismissed, self.now());
-        self.drop_mark(id);
+        if !matches!(closed, Ok(true)) {
+            self.drop_mark(id);
+        }
         match closed {
             Err(_) => Err(failed(SAVE_ANSWER_FAILED)),
-            Ok(false) => Ok(false),
+            Ok(false) => self.lost(id),
             Ok(true) => {
                 if let Ok(Some(changed)) = self.store.get(id) {
                     self.moved(&changed, AskThen::Dismissed);
                 }
-                Ok(true)
+                Ok(Taken::Won)
             }
         }
     }
@@ -498,11 +511,16 @@ impl AskOps {
             return Err(forbidden(PERSON_ONLY));
         }
         let id = id_arg(args)?;
-        if self.dismiss(id)? {
-            return Ok(json!({"dismissed": true}));
-        }
-        let state = self.row(id)?.state;
-        Ok(json!({"dismissed": false, "state": state.as_str()}))
+        Ok(match self.dismiss_taken(id)? {
+            Taken::Won => json!({"dismissed": true}),
+            Taken::Lost { state, by } => {
+                let mut out = json!({"dismissed": false, "state": state.as_str()});
+                if let Some(by) = by {
+                    out["by"] = json!(by.as_str());
+                }
+                out
+            }
+        })
     }
 
     fn list_op(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {

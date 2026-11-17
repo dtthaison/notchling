@@ -79,6 +79,16 @@ fn same_key_and_pid_returns_the_same_row() {
 }
 
 #[test]
+fn by_key_finds_a_row_in_any_session_for_that_pid_only() {
+    let store = AskStore::in_memory_for_tests();
+    let first = store.insert(&new("k", "s"), 1).unwrap();
+    store.rekey("s", "elsewhere").unwrap();
+    assert_eq!(store.by_key("k", 100).unwrap().unwrap().id, first.id);
+    assert_eq!(store.by_key("k", 101).unwrap(), None);
+    assert_eq!(store.by_key("other", 100).unwrap(), None);
+}
+
+#[test]
 fn same_key_other_pid_is_a_new_row() {
     let store = AskStore::in_memory_for_tests();
     let first = store.insert(&new("k", "s"), 1).unwrap();

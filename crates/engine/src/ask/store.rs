@@ -205,6 +205,16 @@ impl AskStore {
         fetch(&self.lock(), id)
     }
 
+    pub fn by_key(&self, key: &str, pid: u32) -> Result<Option<Row>, String> {
+        let db = self.lock();
+        let rows = select(
+            &db,
+            "WHERE key = ?1 AND pid = ?2 ORDER BY n LIMIT 1",
+            &[&key, &i64::from(pid)],
+        )?;
+        Ok(rows.into_iter().next())
+    }
+
     pub fn list(&self, session: Option<&str>) -> Result<Vec<Row>, String> {
         let db = self.lock();
         match session {

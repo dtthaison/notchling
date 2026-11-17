@@ -83,6 +83,7 @@ impl AskOps {
         for row in rows {
             self.waiters.release(&row.id);
             lock(&self.raised).remove(&row.id);
+            self.drop_mark(&row.id);
             self.room.publish(
                 notchling_local_api::topics::ASKS,
                 notchling_local_api::topics::ASK_REMOVED,
