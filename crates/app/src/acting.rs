@@ -1,6 +1,8 @@
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_local_api::{ops as api_ops, ClientError, ErrorCode};
+use notchling_locale as t;
 use serde_json::{json, Value};
+use std::io;
 
 pub const OFF_MESSAGE: &str =
     "acting is off: the Swift app owns sessions until the maintainer turns this on";
@@ -98,13 +100,36 @@ pub fn after_error(error: &ClientError) -> Option<Acting> {
         ClientError::Api(e) if e.code == ErrorCode::Forbidden && is_off(&e.message) => {
             Some(Acting::Off)
         }
-        ClientError::Api(_) | ClientError::Protocol(_) => None,
+        ClientError::Api(_) | ClientError::Protocol(_) | ClientError::Timeout => None,
+        ClientError::Io(e) if slow_kind(e.kind()) => None,
         ClientError::NotRunning(_)
-        | ClientError::Timeout
         | ClientError::Closed
         | ClientError::Unsupported
         | ClientError::UntrustedServer(_)
         | ClientError::Io(_) => Some(Acting::Detached),
+    }
+}
+
+fn slow_kind(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+    )
+}
+
+fn is_busy(error: &ClientError) -> bool {
+    match error {
+        ClientError::Timeout => true,
+        ClientError::Io(e) => slow_kind(e.kind()),
+        _ => false,
+    }
+}
+
+pub fn failure_message(error: ClientError) -> String {
+    match error {
+        ClientError::Api(api) => api.message,
+        other if is_busy(&other) => t::chat::daemon_busy().to_owned(),
+        other => other.to_string(),
     }
 }
 
@@ -459,7 +484,6 @@ mod tests {
     fn a_lost_daemon_detaches() {
         let gone = [
             ClientError::NotRunning(io::Error::from(io::ErrorKind::NotFound)),
-            ClientError::Timeout,
             ClientError::Closed,
             ClientError::Unsupported,
             ClientError::UntrustedServer("another user".into()),

@@ -227,7 +227,7 @@ impl Actions {
                 if let Some(acting) = acting::after_error(&e) {
                     self.set(acting);
                 }
-                Err(e.to_string())
+                Err(acting::failure_message(e))
             }
         }
     }
@@ -257,7 +257,7 @@ impl Actions {
                         message: api.message,
                         data: api.data,
                     },
-                    other => SendFailure::said(&other.to_string()),
+                    other => SendFailure::said(&acting::failure_message(other)),
                 }
             })
     }
@@ -280,10 +280,7 @@ impl Actions {
                 if let Some(Acting::Detached) = acting::after_error(&e) {
                     self.set(Acting::Detached);
                 }
-                match e {
-                    ClientError::Api(api) => api.message,
-                    other => other.to_string(),
-                }
+                acting::failure_message(e)
             })
     }
 }
@@ -619,3 +616,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "actions_busy_tests.rs"]
+mod busy_tests;

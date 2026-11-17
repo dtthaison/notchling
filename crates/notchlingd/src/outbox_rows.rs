@@ -18,6 +18,9 @@ pub(crate) fn wire(row: &Row, position: usize, note: Option<&str>) -> Value {
     if let Some(why) = row.why {
         out["why"] = json!(why.as_str());
     }
+    if let (State::Unsure, Some(attempt)) = (row.state, row.attempt_ms) {
+        out["attemptMs"] = json!(attempt);
+    }
     if let Some(note) = note {
         if row.state == State::Box {
             out["box"] = json!(note);
