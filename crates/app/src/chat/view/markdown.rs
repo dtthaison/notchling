@@ -14,7 +14,7 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::row_select::{self, SelState};
-use crate::chat::markdown::{LinkPress, Span};
+use crate::chat::markdown::{url_links, LinkPress, Span};
 use crate::chat::markdown_cache::{spans_text, Inline, Item, Part};
 use crate::chat::run_command::{self, RunHow};
 use crate::mac::gate;
@@ -90,6 +90,17 @@ fn inline(
         }
         start = end;
     }
+    linked_text(key, sel, full, runs, links, a)
+}
+
+fn linked_text(
+    key: &str,
+    sel: &Sel,
+    full: String,
+    runs: Vec<TextRun>,
+    links: Vec<(std::ops::Range<usize>, String)>,
+    a: Appearance,
+) -> AnyElement {
     let plain_text = full.clone();
     let styled = StyledText::new(SharedString::from(full)).with_runs(runs);
     let text_layout = styled.layout().clone();
@@ -228,6 +239,21 @@ fn run_button(key: &str, command: String, a: Appearance, cx: &App) -> impl IntoE
 }
 
 pub fn mono_box(key: &str, sel: &Sel, title: &str, text: &str, error: bool, a: Appearance) -> Div {
+    framed(
+        key,
+        title,
+        text,
+        error,
+        plain(&format!("{key}-text"), sel, text, a),
+        a,
+    )
+}
+
+pub fn linked_box(key: &str, sel: &Sel, title: &str, text: &str, a: Appearance) -> Div {
+    framed(key, title, text, false, plain_links(key, sel, text, a), a)
+}
+
+fn framed(key: &str, title: &str, text: &str, error: bool, body: AnyElement, a: Appearance) -> Div {
     let title_ink = if error { Ink::Expired } else { Ink::TextMuted };
     let (fill, edge) = if error {
         let red = Ink::Expired.color(a);
@@ -261,8 +287,47 @@ pub fn mono_box(key: &str, sel: &Sel, title: &str, text: &str, error: bool, a: A
                 .pb(px(10.0))
                 .kit_type(TypeRole::Mono)
                 .ink(Ink::Text, a)
-                .child(plain(&format!("{key}-text"), sel, text, a)),
+                .child(body),
         )
+}
+
+fn plain_links(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {
+    let links = url_links(text);
+    if links.is_empty() {
+        return plain(&format!("{key}-text"), sel, text, a);
+    }
+    let run_of = |len: usize, linked: bool| {
+        let color = if linked {
+            hsla(Ink::AccentText.color(a))
+        } else {
+            hsla(Ink::Text.color(a))
+        };
+        TextRun {
+            len,
+            font: font(MONO_FONT),
+            color,
+            background_color: None,
+            underline: linked.then(|| UnderlineStyle {
+                thickness: px(1.0),
+                color: Some(color),
+                wavy: false,
+            }),
+            strikethrough: None,
+        }
+    };
+    let mut runs = Vec::new();
+    let mut at = 0;
+    for (range, _) in &links {
+        if range.start > at {
+            runs.push(run_of(range.start - at, false));
+        }
+        runs.push(run_of(range.len(), true));
+        at = range.end;
+    }
+    if at < text.len() {
+        runs.push(run_of(text.len() - at, false));
+    }
+    linked_text(key, sel, text.to_owned(), runs, links, a)
 }
 
 pub fn plain(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {

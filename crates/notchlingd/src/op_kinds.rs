@@ -37,6 +37,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::SETTINGS_GET_ACTING, Home::Quiet),
     (ops::PROMPTS_LIST, Home::Quiet),
     (ops::SESSION_QUESTION, Home::Called),
+    (ops::SESSION_SHELL_OUTPUT, Home::Quiet),
     (ops::HOOK_REQUEST, Home::Called),
     (ops::CODEX_SEND, Home::Called),
     (ops::CODEX_STOP, Home::Called),

@@ -90,6 +90,8 @@ chat-images = { $count ->
    *[other] { $count } images
 }
 chat-output = Output
+# The title of the live text under a shell command that has not finished; its output is read off the session's terminal.
+chat-output-running = Running…
 chat-error = Error
 chat-loading = Loading…
 chat-no-sessions-yet = No sessions yet

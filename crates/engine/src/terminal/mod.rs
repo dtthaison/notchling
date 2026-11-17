@@ -8,6 +8,7 @@ mod live;
 pub mod permission_dialog;
 pub mod pty;
 mod screen;
+pub mod shell_output;
 mod width;
 
 pub use ask_dialog::dialog_open;

@@ -16,7 +16,7 @@ use notchling_engine::reply::plan::{self, Decision, Expected, Plan, PlanError};
 use notchling_engine::reply::question::{
     choices_from_json, hook_answers, PendingQuestion, QuestionItem,
 };
-use notchling_engine::reply::read::read_question;
+use notchling_engine::reply::read::{read_question, read_shell_output};
 use notchling_engine::sessions::jobs::config_dir_for_job;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, Roots};
 use notchling_engine::terminal::input_box;
@@ -263,6 +263,7 @@ impl ActingOps {
             ops::SETTINGS_GET_ACTING | ops::SESSION_QUESTION | ops::HOOK_REQUEST => {
                 Some(OpSpec::AGENT)
             }
+            ops::SESSION_SHELL_OUTPUT => Some(OpSpec::APP),
             op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -287,6 +288,7 @@ impl ActingOps {
                 Ok(Value::Array(fit_list(list)))
             }
             ops::SESSION_QUESTION => self.question(caller, args),
+            ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
             ops::SESSION_HELD_DISCARD => self.held_discard(args),
@@ -727,7 +729,41 @@ impl ActingOps {
             })
         })
     }
+
+    fn shell_output(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        if !self.acting.is_on() {
+            return Err(forbidden(ACTING_OFF));
+        }
+        if caller.tier != Tier::App {
+            return Err(forbidden("reading a session's screen is for the app only"));
+        }
+        let command = text_arg(args, "command")?;
+        if command.trim().is_empty() || command.len() > SHELL_COMMAND_MAX {
+            return Err(bad("command is the shell command the session is running"));
+        }
+        let agent = self.agent(args)?;
+        let no_terminal = || bad("this session has no terminal to read");
+        if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
+            return Err(no_terminal());
+        }
+        self.locked(&agent, |agent| {
+            let job = match &agent.target {
+                AgentTarget::Job(now) if agent.can_reply() => now.clone(),
+                _ => return Err(no_terminal()),
+            };
+            if agent.group != AgentGroup::Working {
+                return Ok(json!({"lines": []}));
+            }
+            let config_dir =
+                config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
+            let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
+            let lines = read_shell_output(pty.as_mut(), command);
+            Ok(json!({ "lines": lines }))
+        })
+    }
 }
+
+const SHELL_COMMAND_MAX: usize = 64 * 1024;
 
 fn answer_of(decision: &str) -> AnswerKind {
     match decision {

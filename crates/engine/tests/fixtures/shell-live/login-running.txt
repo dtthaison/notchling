@@ -1,0 +1,51 @@
+cursor 46 2 true
+
+ ▐▛███▛█   Claude Code v2.1.326
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/work
+
+
+❯ Reply with just the word ok.
+
+⏺ ok
+
+✻ Worked for 2s · done 10:02 AM
+
+! gcloud auth application-default login --scopes=https://www.example.invalid/auth/cloud-platform
+  ⎿  Running… (4s)
+     Your browser has been opened to visit:
+
+         https://accounts.example.invalid/o/oauth2/auth?response_type=code&client_id=000000000000-fakeclientid.apps.example.invalid&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F&scope=openid+https%3A%
+     2F%2Fwww.example.invalid%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.example.invalid%2Fauth%2Fcloud-platform&state=FakeStateValue0123456789&access_type=offline&code_challenge=FakeChallengeValue0123
+     456789&code_challenge_method=S256
+
+✽ Running… (esc to interrupt)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  work > Haiku 5.5 | 59.3k tokens | someone@example.invalid

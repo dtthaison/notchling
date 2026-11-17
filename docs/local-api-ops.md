@@ -60,6 +60,7 @@ hook's request. Built and switched off: while [`Acting`] is off every acting op 
 | `prompts.list` | app | `{}` | `[prompt...]` |
 | `settings.get_acting` | agent | `{}` | `{"acting": bool}` |
 | `session.question` | agent (a held prompt), app (the screen) | `{id}` | `{"promptId", "items"}` for a held question; else, for the app with acting on, the job's screen read (`{"id": "screen:…", "items"}`, `{"items": []}` when no question shows) |
+| `session.shell_output` | app (acting on) | `{id, command}` | `{"lines": [string]}`: what the running shell command `command` (a Claude Code `!` row) has drawn under its echo on the job's terminal, read through an attach that types nothing; `[]` when the job isn't working, the command isn't on the screen or it printed nothing yet. A quiet read (not in the audit) |
 | `hook.request` | agent, `client: "hook"` only, from a process a Claude Code session started | `{event, waitMs?}` | a decision (`prompts`) |
 
 An `id` is a row id from `sessions.list`. A held prompt is answered by its own id from

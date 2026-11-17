@@ -400,6 +400,15 @@ fn row_element(
                 a,
             ))
             .part_at("Command Output", Corner::TopTrailing, a, cx),
+        Row::ShellLive { text } => div()
+            .child(markdown::linked_box(
+                &format!("{id}-cmd"),
+                sel,
+                t::chat::output_running(),
+                text,
+                a,
+            ))
+            .part_at("Command Output", Corner::TopTrailing, a, cx),
     }
 }
 

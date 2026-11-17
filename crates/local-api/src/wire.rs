@@ -26,6 +26,7 @@ pub mod ops {
     pub const SETTINGS_GET_ACTING: &str = "settings.get_acting";
     pub const PROMPTS_LIST: &str = "prompts.list";
     pub const SESSION_QUESTION: &str = "session.question";
+    pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
     pub const HOOK_REQUEST: &str = "hook.request";
 
     pub const CODEX_SEND: &str = "codex.send";

@@ -68,6 +68,7 @@ pub fn key_of(items: &[ChatItem], ix: usize, row: &Row) -> SharedString {
             let k = ix - items.len();
             match row {
                 Row::User { sending: true, .. } => SharedString::from(format!("sending-{k}")),
+                Row::ShellLive { .. } => SharedString::from("shell-live"),
                 _ => SharedString::from(format!("queued-{k}")),
             }
         }

@@ -178,13 +178,17 @@ impl ChatView {
         let outboxed = self
             .selected_session()
             .is_some_and(|s| !is_draft(&s.agent.id));
-        tail_rows(
+        let mut tail = tail_rows(
             &shown.queued,
             hidden,
             &self.outbox_bubbles(),
             &self.outgoing_texts(),
             outboxed,
-        )
+        );
+        if let Some(live) = self.shell_live_row(shown) {
+            tail.insert(0, live);
+        }
+        tail
     }
 
     pub(super) fn outbox_bubbles(&self) -> Vec<Bubble> {
