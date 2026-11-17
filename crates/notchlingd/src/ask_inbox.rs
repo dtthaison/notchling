@@ -49,10 +49,15 @@ impl AskOps {
         });
     }
 
-    fn queued(&self, id: &str, msg: Msg) -> bool {
-        lock(&self.pending).insert(id.to_string());
+    fn queued(&self, id: &str, mark: Mark, msg: Msg) -> bool {
+        let mut pending = lock(&self.pending);
+        if self.waiters.is_closed() || self.take(id, mark).is_some() {
+            return false;
+        }
+        pending.insert(id.to_string());
         if self.tx.send(msg).is_err() {
-            lock(&self.pending).remove(id);
+            pending.remove(id);
+            drop(pending);
             self.drop_mark(id);
             return false;
         }
@@ -76,16 +81,13 @@ impl AskOps {
             state: AskState::Answered,
             by: Some(by),
         };
-        if self.take(id, mark).is_some() {
-            return false;
-        }
         let msg = Msg::Answer {
             id: id.to_string(),
             answer,
             choice,
             by,
         };
-        self.queued(id, msg)
+        self.queued(id, mark, msg)
     }
 
     pub(crate) fn queue_dismiss(&self, id: &str) -> bool {
@@ -102,10 +104,7 @@ impl AskOps {
             state: AskState::Dismissed,
             by: None,
         };
-        if self.take(id, mark).is_some() {
-            return false;
-        }
-        self.queued(id, Msg::Dismiss(id.to_string()))
+        self.queued(id, mark, Msg::Dismiss(id.to_string()))
     }
 
     pub(crate) fn apply(&self, msg: Msg) {

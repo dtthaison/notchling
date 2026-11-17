@@ -149,7 +149,10 @@ impl AskOps {
     }
 
     pub fn close(&self) {
-        self.waiters.close();
+        {
+            let _pending = lock(&self.pending);
+            self.waiters.close();
+        }
         if let Some(finder) = self.finder.get() {
             finder.stop();
         }
