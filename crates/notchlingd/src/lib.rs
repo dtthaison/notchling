@@ -282,7 +282,7 @@ mod event_assert;
 mod every_session_cap_tests;
 #[cfg(test)]
 mod every_session_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod git_args_tests;
 #[cfg(test)]
 mod git_ops_branch_tests;
