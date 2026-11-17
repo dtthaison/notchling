@@ -52,6 +52,7 @@ fn selectable(
     layout: TextLayout,
     child: AnyElement,
     a: Appearance,
+    links: Vec<(std::ops::Range<usize>, String)>,
 ) -> AnyElement {
     match sel {
         Sel::Row {
@@ -60,9 +61,12 @@ fn selectable(
             let block = next.get();
             next.set(block.saturating_add(1));
             row_select::selectable((*row).clone(), block, text, layout, child, a, state)
+                .links(links)
                 .into_any_element()
         }
-        Sel::File => super::select::selectable(key, text, layout, child, a).into_any_element(),
+        Sel::File => super::select::selectable(key, text, layout, child, a)
+            .links(links)
+            .into_any_element(),
     }
 }
 
@@ -98,8 +102,10 @@ fn inline(
             text_layout,
             styled.into_any_element(),
             a,
+            Vec::new(),
         );
     }
+    let noted = links.clone();
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
     let layout = styled.layout().clone();
     let hand = ranges.clone();
@@ -129,6 +135,7 @@ fn inline(
         text_layout,
         linked.into_any_element(),
         a,
+        noted,
     )
 }
 
@@ -268,6 +275,7 @@ pub fn plain(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {
         layout,
         styled.into_any_element(),
         a,
+        Vec::new(),
     )
 }
 
@@ -310,6 +318,7 @@ fn paragraph(key: &str, sel: &Sel, text: &Inline, ink: Ink, a: Appearance) -> Di
 
 fn image(key: &str, path: &str, a: Appearance) -> impl IntoElement {
     let to = path.to_owned();
+    let copy = to.clone();
     let (w, h) = image_shape(path).unwrap_or((4, 3));
     div()
         .id(SharedString::from(format!("md-img-{key}-{path}")))
@@ -322,6 +331,9 @@ fn image(key: &str, path: &str, a: Appearance) -> impl IntoElement {
         .overflow_hidden()
         .cursor_pointer()
         .on_click(move |_, window, cx| super::page_panel::follow_link(&to, window, cx))
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            super::page_panel::right_click_path(&copy, event.position, window, cx)
+        })
         .child(
             img(std::path::PathBuf::from(path))
                 .size_full()
