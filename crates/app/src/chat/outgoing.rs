@@ -39,13 +39,20 @@ impl Outgoing {
     }
 
     fn dated_copy(&self, conversation: &Conversation) -> bool {
-        let text = comparable(&self.text);
-        let since = self.sent_at as f64 - CLOCK_SLACK_MS;
-        conversation.items.iter().any(|item| {
-            matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text)
-                && item.date.is_some_and(|d| d * 1000.0 >= since)
-        })
+        dated_since(
+            &self.text,
+            self.sent_at as f64 - CLOCK_SLACK_MS,
+            conversation,
+        )
     }
+}
+
+pub fn dated_since(text: &str, since_ms: f64, conversation: &Conversation) -> bool {
+    let text = comparable(text);
+    conversation.items.iter().any(|item| {
+        matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text)
+            && item.date.is_some_and(|d| d * 1000.0 >= since_ms)
+    })
 }
 
 fn copies(text: &str, conversation: &Conversation) -> usize {
