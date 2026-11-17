@@ -4,13 +4,13 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
-Notchling 2.0 is a new app. It is written in Rust, so Chat is faster, and it replaces the Swift app, which is retired. It is for Macs with Apple silicon, and it is ad hoc signed, not notarized (macOS asks you to allow it once). The big new thing is the Cluster: your own Macs and Linux machines work as one, and sessions, questions and secrets follow you between them.
+Notchling 2.0 is a new app, written in Rust, and it replaces the Swift app, which is retired. It is for Macs with Apple silicon, and it is ad hoc signed, not notarized (macOS asks you to allow it once). The big new thing is the Cluster: your own Macs and Linux machines join one cluster, and you see and answer their sessions from one place.
 
 - Cluster: your machines join one cluster over Tailscale, and sessions on other machines show in Chat with their replies, answers and prompts.
 - Add Machine over SSH installs Notchling on a Mac or Linux machine and joins it; Machines still runs your overnight workers.
 - Ask: an agent can put a question to you with `notchling ask`, and your answer goes straight back to it.
 - The Inbox: a bell in Chat collects what needs you, from every machine, and answering anywhere answers once.
-- Standby snapshots and Move to <machine> Now keep a copy of your sessions on another machine and hand the primary over when your laptop is gone.
+- Standby snapshots keep a copy of your sessions on another Mac. Moving the primary to it (Move to <machine> Now) is built and stays off until the resume proof is recorded; failover is by hand.
 - The Secret Vault reaches your Workers: jobs there use the secrets you allow, and only the Mac that holds the vault hands them out.
 - Git branches in Chat's Details Panel: every worktree of the repository, with a Branches panel for what is working, not merged or merged.
 - Chat: long sessions with pictures read fully again, and messages you send are kept and go in as soon as the session can take them.
