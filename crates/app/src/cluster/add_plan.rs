@@ -111,6 +111,37 @@ pub fn needed(steps: &[SetupStep]) -> BTreeSet<StepId> {
     out
 }
 
+pub fn held_rows(
+    steps: &[SetupStep],
+    results: &BTreeMap<StepId, CheckResult>,
+    needed: &BTreeSet<StepId>,
+    listed: &[PlanRow],
+) -> Vec<PlanRow> {
+    steps
+        .iter()
+        .filter(|s| needed.contains(&s.id) && !listed.iter().any(|r| r.id == s.id))
+        .filter_map(|step| {
+            let StepFix::HowTo(text) = &step.fix else {
+                return None;
+            };
+            let result = results.get(&step.id)?;
+            if result.state.is_pass() {
+                return None;
+            }
+            Some(PlanRow {
+                id: step.id.clone(),
+                title: step.title.clone(),
+                why: why(&step.id).to_owned(),
+                reason: result.state.text().to_owned(),
+                display: text.clone(),
+                admin: false,
+                howto: true,
+                waiting: result.state.is_waiting(),
+            })
+        })
+        .collect()
+}
+
 pub fn rows(steps: &[SetupStep], results: &BTreeMap<StepId, CheckResult>) -> Listed {
     let joined_at = steps.iter().position(|s| s.id == StepId::NODE_JOINED);
     let mut before = Vec::new();
@@ -141,7 +172,7 @@ pub fn rows(steps: &[SetupStep], results: &BTreeMap<StepId, CheckResult>) -> Lis
             howto,
             waiting,
         };
-        if howto && joined_at.is_some_and(|j| at > j) {
+        if howto && step.id != StepId::WORKER_USER && joined_at.is_some_and(|j| at > j) {
             after.push(row);
         } else if step.id == StepId::NODE_JOINED {
             last = Some(row);

@@ -70,7 +70,7 @@ impl Probe {
         let Probe::Draft { machine, round } = self;
         Reply {
             round: *round,
-            results: engine.check_draft(machine),
+            results: engine.check_draft_slow(machine),
         }
     }
 }
@@ -114,10 +114,18 @@ pub enum End {
 }
 
 impl RunJob {
+    pub(super) fn fixes(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|i| matches!(i, Item::Fix { .. }))
+            .count()
+    }
+
     pub fn execute(self, engine: &SetupEngine, report: &dyn Fn(Progress)) -> End {
-        let of = self.items.len();
+        let of = self.fixes();
+        let mut fixed = 0;
         let result = |id: &StepId| engine.results(&self.machine).get(id).cloned();
-        for (at, item) in self.items.into_iter().enumerate() {
+        for item in self.items {
             match item {
                 Item::HowTo { id, title, howto } => {
                     let now = result(&id);
@@ -136,8 +144,9 @@ impl RunJob {
                     if result(&id).is_some_and(|r| r.state.is_pass()) {
                         continue;
                     }
+                    fixed += 1;
                     report(Progress {
-                        step: at + 1,
+                        step: fixed,
                         of,
                         title: title.clone(),
                     });

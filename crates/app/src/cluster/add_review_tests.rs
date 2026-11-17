@@ -111,7 +111,7 @@ fn app_yes_plans_app_closed() {
 }
 
 #[test]
-fn sd_machine_plan_has_no_sd_steps_and_keeps_git() {
+fn sd_machine_plan_has_no_sd_steps_and_leaves_git_to_base_tools() {
     let rig = Rig::real(vec![sd_machine("vps-sing-1", "agent")]);
     rig.answer_batches(|probe| {
         let said = if probe.contains("uname -m") {
@@ -133,7 +133,10 @@ fn sd_machine_plan_has_no_sd_steps_and_keeps_git() {
     let ids: Vec<StepId> = plan.rows.iter().map(|r| r.id.clone()).collect();
     assert!(!ids.contains(&StepId::CLAUDE_LOGIN), "{ids:?}");
     assert!(!ids.contains(&StepId::SERVICE), "{ids:?}");
-    assert!(ids.contains(&StepId::NODE_GIT), "Git is kept: {ids:?}");
+    assert!(
+        !ids.contains(&StepId::NODE_GIT),
+        "Base tools covers git: {ids:?}"
+    );
     assert!(plan.blocked.is_none(), "{:?}", plan.blocked);
     assert_eq!(rig.saved("vps-sing-1").unwrap().jobs, before.jobs);
 }

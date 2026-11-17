@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::mem::discriminant;
 use std::sync::Arc;
 
 use notchling_engine::accounts::Secret;
@@ -15,7 +16,8 @@ use notchling_locale as t;
 
 use super::add_parts::{Account, AddParts};
 use super::add_plan::{
-    master_default, needed, primary_account, rows, says, unsupported, Choice, PlanRow, PlanView,
+    held_rows, master_default, needed, primary_account, rows, says, unsupported, Choice, PlanRow,
+    PlanView,
 };
 use super::add_register::learn;
 use super::model::ClusterModel;
@@ -45,6 +47,7 @@ pub struct AddFlow {
     shown: Vec<(PlanRow, Option<ShownPlan>)>,
     after: Vec<PlanRow>,
     needed: BTreeSet<StepId>,
+    held: Vec<PlanRow>,
     blocked: Option<String>,
     needs_password: bool,
     root_confirm: bool,
@@ -105,6 +108,7 @@ impl AddFlow {
             shown: Vec::new(),
             after: Vec::new(),
             needed: BTreeSet::new(),
+            held: Vec::new(),
             blocked: None,
             needs_password: false,
             root_confirm: false,
@@ -233,6 +237,7 @@ impl AddFlow {
         }
         self.rows.clear();
         self.after.clear();
+        self.held.clear();
         self.blocked = None;
         self.needs_password = false;
         self.root_confirm = false;
@@ -372,13 +377,22 @@ impl AddFlow {
             .find(|m| m.name == self.name)
             .map(|m| engine.overlaid(&m))
             .ok_or_else(|| Stop::new(t::cluster::add_no_machine(&self.name), true))?;
+        let own = engine.steps(&machine);
         let mut node_view = machine;
         node_view.jobs.clear();
-        let steps = engine.steps(&node_view);
+        let steps: Vec<_> = engine
+            .steps(&node_view)
+            .into_iter()
+            .filter(|s| {
+                own.iter()
+                    .any(|o| o.id == s.id && discriminant(&o.fix) == discriminant(&s.fix))
+            })
+            .collect();
         let results = engine.results(&self.name);
         let needed = needed(&steps);
         let listed = rows(&steps, &results);
         let (list, after) = (listed.before, listed.after);
+        let held = held_rows(&steps, &results, &needed, &list);
         if list.is_empty() {
             let joined = results
                 .get(&StepId::NODE_JOINED)
@@ -394,8 +408,12 @@ impl AddFlow {
         let (mut needs_password, mut root_confirm) = (false, false);
         for row in &list {
             if row.howto {
-                if row.id == StepId::NODE_TAILSCALE && blocked.is_none() {
-                    blocked = Some(t::cluster::add_blocked_tailscale(&self.name));
+                if blocked.is_none() {
+                    if row.id == StepId::WORKER_USER {
+                        blocked = Some(t::cluster::add_blocked_worker_user(&self.name));
+                    } else if row.id == StepId::NODE_TAILSCALE {
+                        blocked = Some(t::cluster::add_blocked_tailscale(&self.name));
+                    }
                 }
                 shown.push((row.clone(), None));
                 continue;
@@ -414,6 +432,7 @@ impl AddFlow {
         self.rows = list;
         self.after = after;
         self.needed = needed;
+        self.held = held;
         self.shown = shown;
         self.blocked = blocked;
         self.needs_password = needs_password;
@@ -529,21 +548,38 @@ impl AddFlow {
                 }
             }
         }
-        let title = items
-            .first()
-            .map(|i| match i {
-                Item::Fix { title, .. } | Item::HowTo { title, .. } => title.clone(),
+        let held = std::mem::take(&mut self.held);
+        if !held.is_empty() {
+            let at = items
+                .iter()
+                .position(|i| matches!(i, Item::Fix { id, .. } if *id == StepId::NODE_JOINED))
+                .unwrap_or(items.len());
+            let rest = items.split_off(at);
+            items.extend(held.into_iter().map(|row| Item::HowTo {
+                id: row.id,
+                title: row.title,
+                howto: row.display,
+            }));
+            items.extend(rest);
+        }
+        let job = RunJob {
+            machine: self.name.clone(),
+            items,
+        };
+        let title = job
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Fix { title, .. } => Some(title.clone()),
+                Item::HowTo { .. } => None,
             })
             .unwrap_or_default();
         self.phase = Phase::Running {
             step: 1,
-            of: items.len(),
+            of: job.fixes(),
             title,
         };
-        self.job = Some(RunJob {
-            machine: self.name.clone(),
-            items,
-        });
+        self.job = Some(job);
         Ok(())
     }
 

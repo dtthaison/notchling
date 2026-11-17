@@ -1,4 +1,4 @@
-use notchling_engine::machines::registry::{Machine, MachineAbilities};
+use notchling_engine::machines::registry::{AdminAccess, Machine, MachineAbilities, MachineOs};
 use notchling_engine::machines::shell::is_safe_machine_path;
 use notchling_engine::machines::step::Detected;
 
@@ -29,7 +29,11 @@ fn merged(old: Option<MachineAbilities>, new: Option<&MachineAbilities>) -> Mach
 
 pub(super) fn learn(machine: &mut Machine, detected: &Detected) {
     if let Some(os) = detected.os {
+        let unknown = machine.os.is_none();
         machine.os = Some(os);
+        if unknown && os == MachineOs::Linux && machine.admin() == AdminAccess::Sudo {
+            machine.set_admin(AdminAccess::RootSsh);
+        }
     }
     if let Some(file_vault) = detected.file_vault {
         machine.file_vault = file_vault;

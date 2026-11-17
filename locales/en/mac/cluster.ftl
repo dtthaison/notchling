@@ -411,6 +411,8 @@ cluster-add-registry-unreadable = machines.json can't be read, so nothing can be
 cluster-add-name-taken = A machine named { $name } is already in Machines with another address.
 # Shown by Install and Join when the plan can't run; $name is the machine.
 cluster-add-blocked-tailscale = Tailscale has to be connected on { $name } before Install and Join.
+# Shown by Install and Join when the node account is not allowed; $name is the machine.
+cluster-add-blocked-worker-user = The account on { $name } must not be an admin. Fix it first, then Check Again.
 # Shown when Install and Join is pressed without the admin password.
 cluster-add-needs-password = Type the admin password first.
 # Shown when the machine changed after the plan was shown.
