@@ -192,7 +192,9 @@ impl ChatView {
             return preview.clone();
         }
         match self.selected_session() {
-            Some(session) => self.source.outbox_bubbles(&session.agent),
+            Some(session) => self
+                .source
+                .outbox_bubbles(&session.agent, &self.conversation),
             None => Vec::new(),
         }
     }

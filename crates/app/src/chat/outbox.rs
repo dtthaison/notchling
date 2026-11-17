@@ -6,7 +6,7 @@ use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
-use super::outgoing::Outgoing;
+use super::outgoing::{dated_since, Outgoing};
 use crate::acting::Request;
 
 const SENT_KEPT: usize = 50;
@@ -145,6 +145,10 @@ pub fn head_needs_you(rows: &[OutboxRow]) -> bool {
             State::Unsure | State::Box | State::Stopped | State::Gone
         )
     })
+}
+
+fn shown_by_transcript(row: &OutboxRow, conversation: &Conversation) -> bool {
+    row.state == State::Sending && dated_since(&row.text, row.updated_ms as f64, conversation)
 }
 
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
@@ -374,6 +378,14 @@ impl OutboxFeed {
     }
 
     pub fn bubbles(&self, session: &str) -> Vec<Bubble> {
+        self.bubbles_in(session, &Conversation::default())
+    }
+
+    pub fn bubbles_for_in(&self, agent: &Agent, conversation: &Conversation) -> Vec<Bubble> {
+        self.bubbles_in(&agent.outbox_key(), conversation)
+    }
+
+    pub fn bubbles_in(&self, session: &str, conversation: &Conversation) -> Vec<Bubble> {
         let sent = self
             .sent
             .get(session)
@@ -385,7 +397,11 @@ impl OutboxFeed {
                 status: Status::Sent,
                 buttons: Vec::new(),
             });
-        let waiting = self.rows(session).iter().map(bubble);
+        let waiting = self
+            .rows(session)
+            .iter()
+            .filter(|row| !shown_by_transcript(row, conversation))
+            .map(bubble);
         sent.chain(waiting).collect()
     }
 
