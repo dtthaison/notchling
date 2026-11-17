@@ -1,4 +1,4 @@
-use super::glance::Peeked;
+use super::glance::{has, Peeked};
 use super::model::{Conversation, Timestamp};
 use super::tail::RAW_BYTES;
 use super::util::{file_times, modified_secs};
@@ -203,8 +203,10 @@ pub fn list_chain<S: AsRef<str>>(
     }
     for agent in &mut out {
         agent.status = status_of(agent, finished, now);
+        let resumed = finished.get(agent.own_id()).map(String::as_str) == Some(RESUMED);
         if agent.status != Status::Completed
             && agent.status != Status::Failed
+            && !resumed
             && handed_back_stamped(&agent.path)
         {
             agent.status = Status::Completed;
@@ -318,8 +320,17 @@ pub fn handed_back(path: &str) -> bool {
         return false;
     }
     RAW_BYTES.fetch_add(tail.len() as u64, Ordering::Relaxed);
-    let needle = b"Report delivered to your caller";
-    tail.windows(needle.len()).any(|w| w == needle)
+    let needle: &[u8] = b"Report delivered to your caller";
+    let lines: Vec<&[u8]> = tail.split(|b| *b == b'\n').collect();
+    let Some(at) = lines.iter().rposition(|line| has(line, needle)) else {
+        return false;
+    };
+    let after = &lines[at + 1..];
+    let unfinished = after.last().is_some_and(|line| !line.is_empty());
+    !unfinished
+        && after
+            .iter()
+            .all(|line| !has(line, br#""type":"user""#) && !has(line, br#""type":"assistant""#))
 }
 
 pub fn active_count(transcript_path: &str, now: Timestamp) -> usize {
@@ -354,6 +365,20 @@ pub fn result_end<'a>(
         return None;
     }
     Some(([tool, agent], if is_error { "failed" } else { "completed" }))
+}
+
+pub const RESUMED: &str = "resumed";
+
+pub fn resume_end(is_error: bool, result: Option<&Value>) -> Option<(&str, &'static str)> {
+    let result = result?;
+    if is_error || result.get("success").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let agent = result
+        .get("resumedAgentId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())?;
+    Some((agent, RESUMED))
 }
 
 pub fn notification_statuses(text: &str) -> Vec<(String, String)> {
