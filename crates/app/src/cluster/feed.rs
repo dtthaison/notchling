@@ -142,9 +142,10 @@ impl ClusterFeed {
     }
 
     pub fn fixed_adding(model: ClusterModel, add: AddSource, runs: AddRuns) -> ClusterFeed {
-        let mut feed = ClusterFeed::fixed(model);
+        let mut feed = ClusterFeed::fixed(model.clone());
         feed.add = Arc::new(add);
         if let Some(shared) = Arc::get_mut(&mut feed.shared) {
+            runs.seen(&model);
             shared.adds = runs;
         }
         feed
@@ -152,6 +153,7 @@ impl ClusterFeed {
 
     pub fn fixed(model: ClusterModel) -> ClusterFeed {
         let feed = ClusterFeed::none();
+        feed.shared.adds.seen(&model);
         *feed.shared.model() = model;
         feed
     }

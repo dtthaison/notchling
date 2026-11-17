@@ -72,6 +72,11 @@ pub struct World {
     pub done: Mutex<BTreeSet<String>>,
     pub fails: Mutex<BTreeSet<String>>,
     pub fixes: Mutex<Vec<String>>,
+    pub app: Mutex<Option<bool>>,
+    pub app_open: Mutex<bool>,
+    pub git: Mutex<bool>,
+    pub codex: Mutex<bool>,
+    pub unsure: Mutex<BTreeSet<String>>,
 }
 
 impl World {
@@ -88,6 +93,11 @@ impl World {
             done: Mutex::new(BTreeSet::new()),
             fails: Mutex::new(BTreeSet::new()),
             fixes: Mutex::new(Vec::new()),
+            app: Mutex::new(None),
+            app_open: Mutex::new(false),
+            git: Mutex::new(true),
+            codex: Mutex::new(true),
+            unsure: Mutex::new(BTreeSet::new()),
         })
     }
 
@@ -104,6 +114,9 @@ fn passing(world: &Arc<World>, name: &'static str, text: &'static str) -> Probe 
     let w = world.clone();
     Probe::local(move |_| {
         if lock(&w.done).contains(name) {
+            if lock(&w.unsure).contains(name) {
+                return CheckResult::cant_tell(format!("can't tell about {name}"));
+            }
             CheckResult::pass(text)
         } else {
             CheckResult::fail(format!("{name} isn't there"))
@@ -140,6 +153,11 @@ fn catalog(world: &Arc<World>) -> Catalog {
     let w = world.clone();
     let steps = move |m: &Machine, _all: &[Machine]| -> Vec<SetupStep> {
         let os = m.os.unwrap_or(*lock(&w.os));
+        let strict_home = m
+            .abilities
+            .as_ref()
+            .and_then(|a| a.home.clone())
+            .unwrap_or_else(|| "an unknown home".to_owned());
         let home = m
             .abilities
             .as_ref()
@@ -162,6 +180,7 @@ fn catalog(world: &Arc<World>) -> Catalog {
                     os: Some(*lock(&w.os)),
                     home: Some(home.clone()),
                     abilities: Some(abilities),
+                    notchling_app: *lock(&w.app),
                     ..Detected::default()
                 })
             })
@@ -192,11 +211,18 @@ fn catalog(world: &Arc<World>) -> Catalog {
                 ));
             }
             if node_only {
+                let w2 = w.clone();
                 out.push(step(
                     StepId::NODE_GIT,
                     "Git",
                     &[StepId::REACHABLE],
-                    Probe::local(|_| CheckResult::pass("git 2")),
+                    Probe::local(move |_| {
+                        if *lock(&w2.git) {
+                            CheckResult::pass("git 2")
+                        } else {
+                            CheckResult::fail("git isn't installed")
+                        }
+                    }),
                     StepFix::HowTo("install git".into()),
                 ));
             }
@@ -226,8 +252,29 @@ fn catalog(world: &Arc<World>) -> Catalog {
                 "Notchling service",
                 &[StepId::NODE_BINARY],
                 passing(&w, "service", "loaded"),
-                fix(&w, "service", true, "write the plist".into()),
+                fix(
+                    &w,
+                    "service",
+                    true,
+                    format!("write the plist in {strict_home}"),
+                ),
             ));
+            if m.runs_app() {
+                let w2 = w.clone();
+                out.push(step(
+                    StepId::NODE_APP_CLOSED,
+                    "Notchling app closed",
+                    &[StepId::NODE_BINARY],
+                    Probe::local(move |_| {
+                        if *lock(&w2.app_open) {
+                            CheckResult::fail("the app is open there")
+                        } else {
+                            CheckResult::pass("closed")
+                        }
+                    }),
+                    StepFix::HowTo("quit the app".into()),
+                ));
+            }
             let w2 = w.clone();
             out.push(step(
                 StepId::NODE_REACH,
@@ -243,14 +290,18 @@ fn catalog(world: &Arc<World>) -> Catalog {
                 StepFix::HowTo("open the ACL".into()),
             ));
             let w2 = w.clone();
+            let mut joined_needs = vec![
+                StepId::NODE_SERVICE,
+                StepId::NODE_TAILSCALE,
+                StepId::NODE_REACH,
+            ];
+            if m.runs_app() {
+                joined_needs.push(StepId::NODE_APP_CLOSED);
+            }
             out.push(step(
                 StepId::NODE_JOINED,
                 "Joined the cluster",
-                &[
-                    StepId::NODE_SERVICE,
-                    StepId::NODE_TAILSCALE,
-                    StepId::NODE_REACH,
-                ],
+                &joined_needs,
                 Probe::local(move |_| {
                     let seen = |r: CheckResult| {
                         r.detected(Detected {
@@ -268,6 +319,20 @@ fn catalog(world: &Arc<World>) -> Catalog {
                     }
                 }),
                 fix(&w, "joined", false, "ask to join".into()),
+            ));
+            let w2 = w.clone();
+            out.push(step(
+                StepId::NODE_CODEX_LOGIN,
+                "Codex signed in",
+                &[StepId::REACHABLE],
+                Probe::local(move |_| {
+                    if *lock(&w2.codex) {
+                        CheckResult::pass("signed in")
+                    } else {
+                        CheckResult::fail("not signed in")
+                    }
+                }),
+                StepFix::HowTo("sign Codex in".into()),
             ));
         }
         if m.sd_worker().is_some() {
@@ -391,9 +456,10 @@ impl Rig {
     }
 
     pub fn check(&self, flow: &mut AddFlow) {
-        for probe in flow.check() {
+        let mut probes = flow.check();
+        while let Some(probe) = probes.pop() {
             let reply = probe.run(&self.engine);
-            flow.reply(reply);
+            probes.extend(flow.reply(reply));
         }
     }
 

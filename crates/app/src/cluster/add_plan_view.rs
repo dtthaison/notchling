@@ -214,7 +214,7 @@ impl ClusterSheetView {
     }
 
     fn choices(&self, plan: &PlanView, a: Appearance, cx: &mut Context<Self>) -> Div {
-        div()
+        let mut block = div()
             .flex()
             .flex_col()
             .gap(px(SPACE[0]))
@@ -239,6 +239,18 @@ impl ClusterSheetView {
                 a,
                 cx,
                 Self::add_set_acting,
-            ))
+            ));
+        if !plan.after.is_empty() {
+            block = block.child(label(
+                t::cluster::add_after_note(),
+                TypeRole::Meta,
+                Ink::TextMuted,
+                a,
+            ));
+            for row in &plan.after {
+                block = block.child(self.plan_row(row, a, cx));
+            }
+        }
+        block
     }
 }

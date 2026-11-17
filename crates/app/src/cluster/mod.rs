@@ -4,6 +4,7 @@ pub mod add_parts;
 pub mod add_plan;
 #[cfg(target_os = "macos")]
 mod add_plan_view;
+mod add_register;
 pub mod add_runs;
 pub mod add_sheet;
 pub mod add_source;

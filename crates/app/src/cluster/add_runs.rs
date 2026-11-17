@@ -39,6 +39,7 @@ pub struct AddRuns {
     flows: Arc<Mutex<BTreeMap<String, AddFlow>>>,
     shown: Arc<Mutex<BTreeMap<String, Snap>>>,
     generation: Arc<AtomicU64>,
+    latest: Arc<Mutex<ClusterModel>>,
 }
 
 impl Default for AddRuns {
@@ -53,6 +54,7 @@ impl AddRuns {
             flows: Arc::new(Mutex::new(BTreeMap::new())),
             shown: Arc::new(Mutex::new(BTreeMap::new())),
             generation,
+            latest: Arc::new(Mutex::new(ClusterModel::default())),
         }
     }
 
@@ -84,8 +86,14 @@ impl AddRuns {
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
-    pub fn begin(&self, flow: AddFlow) -> bool {
+    pub fn begin(&self, mut flow: AddFlow) -> bool {
         let name = flow.name().to_owned();
+        let latest = self
+            .latest
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        flow.seen(&latest, now_secs());
         {
             let mut flows = self.flows();
             if flows.get(&name).is_some_and(|f| active(f.phase())) {
@@ -113,10 +121,11 @@ impl AddRuns {
         std::thread::Builder::new()
             .name("notchling-add-check".into())
             .spawn(move || {
-                for probe in probes {
+                let mut probes = probes;
+                while let Some(probe) = probes.pop() {
                     let reply = probe.run(&engine);
                     if let Some(flow) = runs.flows().get_mut(&name) {
-                        flow.reply(reply);
+                        probes.extend(flow.reply(reply));
                     }
                     runs.bump();
                 }
@@ -208,6 +217,7 @@ impl AddRuns {
     }
 
     pub fn seen(&self, model: &ClusterModel) {
+        *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = model.clone();
         let now = now_secs();
         let mut changed = false;
         for flow in self.flows().values_mut() {

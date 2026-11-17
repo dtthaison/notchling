@@ -34,6 +34,7 @@ pub struct PlanView {
     pub can_be_master: Choice,
     pub acting: Choice,
     pub blocked: Option<String>,
+    pub after: Vec<PlanRow>,
 }
 
 pub fn why(id: &StepId) -> &'static str {
@@ -89,16 +90,33 @@ fn is_howto(step: &SetupStep) -> bool {
     matches!(step.fix, StepFix::HowTo(_))
 }
 
-pub fn rows(
-    steps: &[SetupStep],
-    node_ids: &BTreeSet<StepId>,
-    results: &BTreeMap<StepId, CheckResult>,
-) -> Vec<PlanRow> {
-    let list: Vec<&SetupStep> = steps.iter().filter(|s| node_ids.contains(&s.id)).collect();
-    let joined_at = list.iter().position(|s| s.id == StepId::NODE_JOINED);
-    let mut out = Vec::new();
+pub struct Listed {
+    pub before: Vec<PlanRow>,
+    pub after: Vec<PlanRow>,
+}
+
+pub fn needed(steps: &[SetupStep]) -> BTreeSet<StepId> {
+    let mut out = BTreeSet::new();
+    let mut todo = vec![StepId::NODE_JOINED];
+    while let Some(id) = todo.pop() {
+        let Some(step) = steps.iter().find(|s| s.id == id) else {
+            continue;
+        };
+        for need in &step.needs {
+            if out.insert(need.clone()) {
+                todo.push(need.clone());
+            }
+        }
+    }
+    out
+}
+
+pub fn rows(steps: &[SetupStep], results: &BTreeMap<StepId, CheckResult>) -> Listed {
+    let joined_at = steps.iter().position(|s| s.id == StepId::NODE_JOINED);
+    let mut before = Vec::new();
+    let mut after = Vec::new();
     let mut last = None;
-    for (at, step) in list.iter().enumerate() {
+    for (at, step) in steps.iter().enumerate() {
         let Some(result) = results.get(&step.id) else {
             continue;
         };
@@ -106,9 +124,6 @@ pub fn rows(
         let failing = result.state.is_fail();
         let howto = is_howto(step);
         if !(failing || (waiting && !howto)) {
-            continue;
-        }
-        if howto && joined_at.is_some_and(|j| at > j) {
             continue;
         }
         let display = match &step.fix {
@@ -126,14 +141,16 @@ pub fn rows(
             howto,
             waiting,
         };
-        if step.id == StepId::NODE_JOINED {
+        if howto && joined_at.is_some_and(|j| at > j) {
+            after.push(row);
+        } else if step.id == StepId::NODE_JOINED {
             last = Some(row);
         } else {
-            out.push(row);
+            before.push(row);
         }
     }
-    out.extend(last);
-    out
+    before.extend(last);
+    Listed { before, after }
 }
 
 const MAC_MIN: u32 = 13;

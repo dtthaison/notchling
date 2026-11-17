@@ -434,3 +434,6 @@ fn wait(mut ready: impl FnMut() -> bool) {
 
 #[path = "add_run_tests.rs"]
 mod run;
+
+#[path = "add_review_tests.rs"]
+mod review;

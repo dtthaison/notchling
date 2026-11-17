@@ -45,6 +45,7 @@ fn plan(needs_password: bool, blocked: Option<&str>) -> PlanView {
         can_be_master: choice(false),
         acting: choice(true),
         blocked: blocked.map(str::to_owned),
+        after: Vec::new(),
     }
 }
 

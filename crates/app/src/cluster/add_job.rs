@@ -149,7 +149,7 @@ impl RunJob {
                     if id == StepId::NODE_JOINED {
                         continue;
                     }
-                    if let Some(r) = result(&id).filter(|r| r.state.is_fail()) {
+                    if let Some(r) = result(&id).filter(|r| !r.state.is_pass()) {
                         let why = t::cluster::add_step_not_done(&title, r.state.text());
                         return End::Stopped(Stop::new(why, true));
                     }

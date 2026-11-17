@@ -488,6 +488,8 @@ cluster-add-root-warning = Admin steps run as root over SSH on { $host }.
 cluster-add-master-label = Can Be Master
 cluster-add-acting-label = Let it run sessions and jobs
 cluster-add-choices-label = After it joins
+# Line over steps you do yourself once the machine has joined; the join doesn't wait for them.
+cluster-add-after-note = These don't stop the join. Do them yourself once it is in.
 cluster-add-running-note = You can close this. The run goes on, and the Cluster sheet shows it.
 cluster-add-log-label = What it did
 # Row on the cluster sheet while a plan waits for Install and Join; $name is the machine.

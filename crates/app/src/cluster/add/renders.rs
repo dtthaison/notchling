@@ -124,6 +124,7 @@ fn plan() -> PlanView {
             reason: None,
         },
         blocked: None,
+        after: Vec::new(),
     }
 }
 

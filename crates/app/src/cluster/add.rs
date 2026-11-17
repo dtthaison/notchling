@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -10,14 +10,14 @@ use notchling_engine::machines::forms::machine_problems;
 use notchling_engine::machines::registry::{
     write_lock, AdminAccess, Machine, MachineOs, NodeChoices, NodeSettings, RegistryState,
 };
-use notchling_engine::machines::shell::is_safe_machine_path;
 use notchling_engine::machines::step::{CheckResult, Detected, StepId};
 use notchling_locale as t;
 
 use super::add_parts::{Account, AddParts};
 use super::add_plan::{
-    master_default, primary_account, rows, says, unsupported, Choice, PlanRow, PlanView,
+    master_default, needed, primary_account, rows, says, unsupported, Choice, PlanRow, PlanView,
 };
+use super::add_register::learn;
 use super::model::ClusterModel;
 use crate::machines::model::Registry;
 
@@ -43,6 +43,8 @@ pub struct AddFlow {
     facts: Facts,
     rows: Vec<PlanRow>,
     shown: Vec<(PlanRow, Option<ShownPlan>)>,
+    after: Vec<PlanRow>,
+    needed: BTreeSet<StepId>,
     blocked: Option<String>,
     needs_password: bool,
     root_confirm: bool,
@@ -58,6 +60,11 @@ impl fmt::Debug for AddFlow {
             .field("phase", &self.phase)
             .finish()
     }
+}
+
+enum Settled {
+    Phase(Phase),
+    Again,
 }
 
 fn commit(
@@ -96,6 +103,8 @@ impl AddFlow {
             facts: Facts::default(),
             rows: Vec::new(),
             shown: Vec::new(),
+            after: Vec::new(),
+            needed: BTreeSet::new(),
             blocked: None,
             needs_password: false,
             root_confirm: false,
@@ -223,6 +232,7 @@ impl AddFlow {
             }
         }
         self.rows.clear();
+        self.after.clear();
         self.blocked = None;
         self.needs_password = false;
         self.root_confirm = false;
@@ -233,9 +243,13 @@ impl AddFlow {
             return Vec::new();
         }
         self.cancel_plans();
-        self.round += 1;
         self.checked = true;
         self.phase = Phase::Checking;
+        vec![self.draft()]
+    }
+
+    fn draft(&mut self) -> Probe {
+        self.round += 1;
         let mut machine = self
             .parts
             .registry
@@ -249,20 +263,22 @@ impl AddFlow {
             });
         }
         machine.jobs.clear();
-        vec![Probe::Draft {
+        Probe::Draft {
             machine: Box::new(machine),
             round: self.round,
-        }]
+        }
     }
 
-    pub fn reply(&mut self, reply: Reply) {
+    pub fn reply(&mut self, reply: Reply) -> Vec<Probe> {
         if self.phase != Phase::Checking || reply.round != self.round {
-            return;
+            return Vec::new();
         }
-        self.phase = match self.settle(reply.results) {
-            Ok(phase) => phase,
-            Err(stop) => Phase::Stopped(stop),
-        };
+        match self.settle(reply.results) {
+            Ok(Settled::Phase(phase)) => self.phase = phase,
+            Ok(Settled::Again) => return vec![self.draft()],
+            Err(stop) => self.phase = Phase::Stopped(stop),
+        }
+        Vec::new()
     }
 
     fn unreachable(&self, text: &str) -> Stop {
@@ -277,7 +293,7 @@ impl AddFlow {
         Stop::new(text, true).with_howto(howto)
     }
 
-    fn settle(&mut self, results: BTreeMap<StepId, CheckResult>) -> Result<Phase, Stop> {
+    fn settle(&mut self, results: BTreeMap<StepId, CheckResult>) -> Result<Settled, Stop> {
         let Some(reach) = results.get(&StepId::REACHABLE) else {
             return Err(Stop::new(t::cluster::add_no_answer(), true));
         };
@@ -302,42 +318,48 @@ impl AddFlow {
             home: detected.home.clone(),
         };
         self.node = detected.node.clone();
-        self.register(&detected)?;
+        let app_learned = self.register(&detected)?;
+        if app_learned {
+            return Ok(Settled::Again);
+        }
         for (id, result) in results {
             self.parts.engine.show(&self.name, id, result);
         }
-        self.plan_rows()
+        self.plan_rows().map(Settled::Phase)
     }
 
-    fn register(&self, detected: &Detected) -> Result<(), Stop> {
-        let mut machine = Machine::new(&self.name, &self.host, &self.user);
-        machine.os = detected.os;
-        if machine.os == Some(MachineOs::Linux) {
-            machine.set_admin(AdminAccess::RootSsh);
-        }
-        if let Some(fv) = detected.file_vault {
-            machine.file_vault = fv;
-        }
-        if let Some(mut abilities) = detected.abilities.clone() {
-            if let Some(home) = detected.home.as_ref().filter(|h| is_safe_machine_path(h)) {
-                abilities.home = Some(home.clone());
-            }
-            machine.abilities = Some(abilities);
-        }
-        machine.node = Some(NodeSettings {
-            choices: self.choices(),
-        });
+    fn register(&self, detected: &Detected) -> Result<bool, Stop> {
+        let mut app_learned = false;
         commit(&*self.parts.registry, |list| {
-            if let Some(there) = list.iter().find(|m| m.name == self.name) {
-                if self.known || (there.host == self.host && there.user == self.user) {
-                    return Ok(false);
+            if let Some(there) = list.iter_mut().find(|m| m.name == self.name) {
+                if !self.known && (there.host != self.host || there.user != self.user) {
+                    return Err(t::cluster::add_name_taken(&self.name));
                 }
-                return Err(t::cluster::add_name_taken(&self.name));
+                let before = there.clone();
+                let was_running = there.runs_app();
+                learn(there, detected);
+                if there.node.is_none() {
+                    there.node = Some(NodeSettings {
+                        choices: self.choices(),
+                    });
+                }
+                app_learned = !was_running && there.runs_app();
+                return Ok(*there != before);
             }
+            let mut machine = Machine::new(&self.name, &self.host, &self.user);
+            learn(&mut machine, detected);
+            if machine.os == Some(MachineOs::Linux) {
+                machine.set_admin(AdminAccess::RootSsh);
+            }
+            machine.node = Some(NodeSettings {
+                choices: self.choices(),
+            });
+            app_learned = machine.runs_app();
             list.push(machine);
             Ok(true)
         })
-        .map_err(|why| Stop::new(why, true))
+        .map_err(|why| Stop::new(why, true))?;
+        Ok(app_learned)
     }
 
     fn plan_rows(&mut self) -> Result<Phase, Stop> {
@@ -350,11 +372,13 @@ impl AddFlow {
             .find(|m| m.name == self.name)
             .map(|m| engine.overlaid(&m))
             .ok_or_else(|| Stop::new(t::cluster::add_no_machine(&self.name), true))?;
-        let mut node_view = machine.clone();
+        let mut node_view = machine;
         node_view.jobs.clear();
-        let ids = engine.steps(&node_view).into_iter().map(|s| s.id).collect();
+        let steps = engine.steps(&node_view);
         let results = engine.results(&self.name);
-        let list = rows(&engine.steps(&machine), &ids, &results);
+        let needed = needed(&steps);
+        let listed = rows(&steps, &results);
+        let (list, after) = (listed.before, listed.after);
         if list.is_empty() {
             let joined = results
                 .get(&StepId::NODE_JOINED)
@@ -388,6 +412,8 @@ impl AddFlow {
             shown.push((row.clone(), Some(plan)));
         }
         self.rows = list;
+        self.after = after;
+        self.needed = needed;
         self.shown = shown;
         self.blocked = blocked;
         self.needs_password = needs_password;
@@ -407,6 +433,7 @@ impl AddFlow {
                 reason: None,
             },
             blocked: self.blocked.clone(),
+            after: self.after.clone(),
         })
     }
 
@@ -469,6 +496,9 @@ impl AddFlow {
         let mut left = shown.into_iter();
         while let Some((row, plan)) = left.next() {
             let Some(plan) = plan else {
+                if !self.needed.contains(&row.id) {
+                    continue;
+                }
                 items.push(Item::HowTo {
                     id: row.id,
                     title: row.title,
