@@ -85,6 +85,9 @@ settings-install-hooks-and-skills = Install Hooks and Skills
 
 ## General page: rows
 
+# Row in the General section: look for a newer Notchling release when the app starts and once a day.
+settings-check-for-updates = Check for updates automatically
+
 # Row in the General section.
 settings-appearance = Appearance
 

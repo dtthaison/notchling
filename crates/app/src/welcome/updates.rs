@@ -7,9 +7,12 @@ use super::xml::{self, Node};
 
 pub const FEED_URL: &str =
     "https://github.com/dtthaison/notchling/releases/download/appcast/appcast.xml";
+pub const RELEASES_URL: &str = "https://github.com/dtthaison/notchling/releases";
 pub const KILL_SWITCH: &str = "NOTCHLING_RELEASES";
-pub const OFF_MESSAGE: &str =
-    "Updates are off. Notchling checks for updates only once the maintainer turns releases on.";
+pub const SETTING_KEY: &str = "checkForUpdates";
+pub const INTERVAL_SECS: u64 = 24 * 60 * 60;
+pub const RETRY_SECS: u64 = 60 * 60;
+pub const TICK_SECS: u64 = 5 * 60;
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_FEED: usize = 2 * 1024 * 1024;
@@ -82,9 +85,30 @@ pub struct Release {
     pub notes: Option<String>,
 }
 
+impl Release {
+    pub fn page(&self) -> String {
+        self.notes
+            .clone()
+            .unwrap_or_else(|| RELEASES_URL.to_owned())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Skip {
+    Environment,
+    Setting,
+    Development,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trigger {
+    Automatic,
+    Manual,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    Off,
+    Skipped(Skip),
     UpToDate(Version),
     Available(Release),
     Failed(String),
@@ -93,7 +117,13 @@ pub enum Outcome {
 impl Outcome {
     pub fn line(&self) -> String {
         match self {
-            Outcome::Off => OFF_MESSAGE.to_owned(),
+            Outcome::Skipped(Skip::Environment) => {
+                format!("Update checks are off ({KILL_SWITCH}=off).")
+            }
+            Outcome::Skipped(Skip::Setting) => "Update checks are off in Settings.".to_owned(),
+            Outcome::Skipped(Skip::Development) => {
+                "This is a development build, so it doesn't check for updates.".to_owned()
+            }
             Outcome::UpToDate(v) => format!("Notchling {v} is up to date."),
             Outcome::Available(r) if r.critical => {
                 format!("Notchling {} is available, a critical update.", r.version)
@@ -162,8 +192,57 @@ impl FeedFetcher for NoFeed {
     }
 }
 
-pub fn releases_on(value: Option<&str>) -> bool {
-    value == Some("on")
+pub fn environment_off(value: Option<&str>) -> bool {
+    value.is_some_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "off" | "0" | "false" | "no"
+        )
+    })
+}
+
+pub fn is_development(version: &str, build: Option<&str>) -> bool {
+    let Some(parsed) = Version::parse(version) else {
+        return true;
+    };
+    parsed.major == 0 || build.is_none_or(|b| b.is_empty() || b.ends_with("-dirty"))
+}
+
+pub fn skip(
+    trigger: Trigger,
+    switch: Option<&str>,
+    setting: bool,
+    version: &str,
+    build: Option<&str>,
+) -> Option<Skip> {
+    if environment_off(switch) {
+        return Some(Skip::Environment);
+    }
+    if trigger == Trigger::Manual {
+        return None;
+    }
+    if !setting {
+        return Some(Skip::Setting);
+    }
+    is_development(version, build).then_some(Skip::Development)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attempt {
+    pub at: u64,
+    pub failed: bool,
+}
+
+pub fn due(last: Option<Attempt>, now: u64) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    let wait = if last.failed {
+        RETRY_SECS
+    } else {
+        INTERVAL_SECS
+    };
+    now < last.at || now - last.at >= wait
 }
 
 fn safe_link(link: &str) -> Option<String> {
@@ -202,6 +281,53 @@ fn release_of(item: &Node) -> Option<(Release, bool)> {
     ))
 }
 
+pub struct Inputs<'a> {
+    pub version: &'a str,
+    pub build: Option<&'a str>,
+    pub switch: Option<&'a str>,
+    pub setting: bool,
+}
+
+pub fn run(trigger: Trigger, inputs: &Inputs, fetcher: &dyn FeedFetcher) -> Outcome {
+    match skip(
+        trigger,
+        inputs.switch,
+        inputs.setting,
+        inputs.version,
+        inputs.build,
+    ) {
+        Some(why) => Outcome::Skipped(why),
+        None => check(inputs.version, fetcher),
+    }
+}
+
+pub fn tick(
+    last: &mut Option<Attempt>,
+    now: u64,
+    inputs: &Inputs,
+    fetcher: &dyn FeedFetcher,
+) -> Option<Outcome> {
+    if let Some(why) = skip(
+        Trigger::Automatic,
+        inputs.switch,
+        inputs.setting,
+        inputs.version,
+        inputs.build,
+    ) {
+        *last = None;
+        return Some(Outcome::Skipped(why));
+    }
+    if !due(*last, now) {
+        return None;
+    }
+    let outcome = check(inputs.version, fetcher);
+    *last = Some(Attempt {
+        at: now,
+        failed: matches!(outcome, Outcome::Failed(_)),
+    });
+    Some(outcome)
+}
+
 pub fn newest(feed: &str, current: &Version) -> Result<Option<Release>, String> {
     if feed.len() > MAX_FEED {
         return Err("the feed is too large".into());
@@ -223,10 +349,7 @@ pub fn newest(feed: &str, current: &Version) -> Result<Option<Release>, String> 
     Ok(best.filter(|r| r.version > *current))
 }
 
-pub fn check(current: &str, switch: Option<&str>, fetcher: &dyn FeedFetcher) -> Outcome {
-    if !releases_on(switch) {
-        return Outcome::Off;
-    }
+pub fn check(current: &str, fetcher: &dyn FeedFetcher) -> Outcome {
     let Some(current) = Version::parse(current) else {
         return Outcome::Failed("this build's version isn't a release number".into());
     };
@@ -299,36 +422,211 @@ mod tests {
         assert!(v("0.10.0") > v("0.9.9"));
     }
 
-    #[test]
-    fn the_kill_switch_is_off_unless_exactly_on() {
-        for off in [
-            None,
-            Some(""),
-            Some("ON"),
-            Some("true"),
-            Some("1"),
-            Some("on "),
-        ] {
-            assert!(!releases_on(off), "{off:?}");
+    fn inputs<'a>(
+        version: &'a str,
+        build: Option<&'a str>,
+        switch: Option<&'a str>,
+        setting: bool,
+    ) -> Inputs<'a> {
+        Inputs {
+            version,
+            build,
+            switch,
+            setting,
         }
-        assert!(releases_on(Some("on")));
     }
 
     #[test]
-    fn while_off_nothing_is_requested() {
-        let feed = Feed::of(FEED);
-        for switch in [None, Some("off"), Some("")] {
-            let outcome = check("1.0.0", switch, &feed);
-            assert_eq!(outcome, Outcome::Off);
-            assert_eq!(outcome.line(), OFF_MESSAGE);
+    fn only_the_off_words_turn_the_environment_off() {
+        for off in [
+            Some("off"),
+            Some("OFF"),
+            Some(" off "),
+            Some("0"),
+            Some("false"),
+            Some("no"),
+        ] {
+            assert!(environment_off(off), "{off:?}");
         }
-        assert!(feed.asked().is_empty(), "no request while off");
+        for on in [
+            None,
+            Some(""),
+            Some("on"),
+            Some("1"),
+            Some("yes"),
+            Some("offline"),
+        ] {
+            assert!(!environment_off(on), "{on:?}");
+        }
+    }
+
+    #[test]
+    fn dev_builds_are_told_by_version_and_build_id() {
+        assert!(!is_development("2.0.0", Some("0bdc0b0abcde")));
+        assert!(!is_development("2.0.0-beta.1", Some("0bdc0b0abcde")));
+        assert!(is_development("0.1.0", Some("0bdc0b0abcde")));
+        assert!(is_development("2.0.0", Some("0bdc0b0abcde-dirty")));
+        assert!(is_development("2.0.0", None));
+        assert!(is_development("2.0.0", Some("")));
+        assert!(is_development("dev", Some("0bdc0b0abcde")));
+    }
+
+    #[test]
+    fn a_release_build_checks_by_default() {
+        let release = inputs("2.0.0", Some("0bdc0b0abcde"), None, true);
+        assert_eq!(
+            skip(
+                Trigger::Automatic,
+                None,
+                true,
+                "2.0.0",
+                Some("0bdc0b0abcde")
+            ),
+            None
+        );
+        let feed = Feed::of(FEED);
+        let outcome = run(Trigger::Automatic, &release, &feed);
+        assert_eq!(outcome, Outcome::UpToDate(v("2.0.0")));
+        assert_eq!(feed.asked(), vec![FEED_URL.to_owned()]);
+    }
+
+    #[test]
+    fn the_environment_setting_dev_builds_and_manual_checks_gate_the_request() {
+        let feed = Feed::of(FEED);
+        let cases = [
+            (
+                Trigger::Automatic,
+                inputs("1.2.0", Some("abc"), Some("off"), true),
+                Skip::Environment,
+            ),
+            (
+                Trigger::Manual,
+                inputs("1.2.0", Some("abc"), Some("off"), true),
+                Skip::Environment,
+            ),
+            (
+                Trigger::Automatic,
+                inputs("1.2.0", Some("abc"), None, false),
+                Skip::Setting,
+            ),
+            (
+                Trigger::Automatic,
+                inputs("1.2.0", Some("abc-dirty"), None, true),
+                Skip::Development,
+            ),
+            (
+                Trigger::Automatic,
+                inputs("0.1.0", Some("abc"), None, true),
+                Skip::Development,
+            ),
+        ];
+        for (trigger, input, why) in cases {
+            assert_eq!(run(trigger, &input, &feed), Outcome::Skipped(why));
+        }
+        assert!(feed.asked().is_empty(), "no request while skipped");
+        let manual = inputs("1.2.0", Some("abc-dirty"), None, false);
+        let outcome = run(Trigger::Manual, &manual, &feed);
+        assert!(matches!(outcome, Outcome::Available(_)), "{outcome:?}");
+        assert_eq!(feed.asked().len(), 1);
+    }
+
+    #[test]
+    fn skipped_outcomes_say_why() {
+        assert!(Outcome::Skipped(Skip::Environment)
+            .line()
+            .contains("NOTCHLING_RELEASES=off"));
+        assert!(Outcome::Skipped(Skip::Setting).line().contains("Settings"));
+        assert!(Outcome::Skipped(Skip::Development)
+            .line()
+            .contains("development"));
+    }
+
+    #[test]
+    fn a_check_is_due_at_launch_then_daily_and_a_failure_retries_sooner() {
+        assert!(due(None, 0));
+        let ok = Some(Attempt {
+            at: 100,
+            failed: false,
+        });
+        assert!(!due(ok, 100));
+        assert!(!due(ok, 100 + INTERVAL_SECS - 1));
+        assert!(due(ok, 100 + INTERVAL_SECS));
+        let failed = Some(Attempt {
+            at: 100,
+            failed: true,
+        });
+        assert!(!due(failed, 100 + RETRY_SECS - 1));
+        assert!(due(failed, 100 + RETRY_SECS));
+        assert!(due(ok, 50), "a clock that went back");
+    }
+
+    #[test]
+    fn ticks_check_at_launch_then_daily_and_never_while_skipped() {
+        let feed = Feed::of(FEED);
+        let on = inputs("1.2.0", Some("abc"), None, true);
+        let mut last = None;
+        let first = tick(&mut last, 10, &on, &feed);
+        assert!(matches!(first, Some(Outcome::Available(_))));
+        assert_eq!(tick(&mut last, 10 + TICK_SECS, &on, &feed), None);
+        assert_eq!(feed.asked().len(), 1, "no second request within a day");
+        assert!(tick(&mut last, 10 + INTERVAL_SECS, &on, &feed).is_some());
+        assert_eq!(feed.asked().len(), 2);
+
+        let off = inputs("1.2.0", Some("abc"), None, false);
+        assert_eq!(
+            tick(&mut last, 20 + INTERVAL_SECS, &off, &feed),
+            Some(Outcome::Skipped(Skip::Setting))
+        );
+        assert_eq!(last, None);
+        assert_eq!(feed.asked().len(), 2, "no request while off");
+        assert!(
+            matches!(
+                tick(&mut last, 30 + INTERVAL_SECS, &on, &feed),
+                Some(Outcome::Available(_))
+            ),
+            "turning it back on checks at once"
+        );
+    }
+
+    #[test]
+    fn a_failed_tick_retries_within_the_hour() {
+        let failing = Feed {
+            text: Err("no network".into()),
+            asked: Mutex::new(Vec::new()),
+        };
+        let on = inputs("1.2.0", Some("abc"), None, true);
+        let mut last = None;
+        assert!(matches!(
+            tick(&mut last, 0, &on, &failing),
+            Some(Outcome::Failed(_))
+        ));
+        assert_eq!(tick(&mut last, RETRY_SECS - 1, &on, &failing), None);
+        assert!(tick(&mut last, RETRY_SECS, &on, &failing).is_some());
+        assert_eq!(failing.asked().len(), 2);
+    }
+
+    #[test]
+    fn a_release_links_to_its_notes_or_the_releases_page() {
+        let feed = Feed::of(FEED);
+        let Outcome::Available(release) = check("1.2.0", &feed) else {
+            panic!("1.2.1 is newer");
+        };
+        assert_eq!(
+            release.page(),
+            "https://github.com/dtthaison/notchling/releases/tag/v1.2.1"
+        );
+        let bare = Release {
+            version: v("2.0.0"),
+            critical: false,
+            notes: None,
+        };
+        assert_eq!(bare.page(), RELEASES_URL);
     }
 
     #[test]
     fn a_stable_app_is_offered_only_stable_releases() {
         let feed = Feed::of(FEED);
-        let outcome = check("1.2.0", Some("on"), &feed);
+        let outcome = check("1.2.0", &feed);
         let Outcome::Available(release) = outcome else {
             panic!("1.2.1 is newer");
         };
@@ -339,20 +637,14 @@ mod tests {
             Some("https://github.com/dtthaison/notchling/releases/tag/v1.2.1")
         );
         assert_eq!(feed.asked(), vec![FEED_URL.to_owned()]);
-        assert_eq!(
-            check("1.2.1", Some("on"), &feed),
-            Outcome::UpToDate(v("1.2.1"))
-        );
+        assert_eq!(check("1.2.1", &feed), Outcome::UpToDate(v("1.2.1")));
     }
 
     #[test]
     fn a_beta_app_sees_betas_too_and_a_critical_one_is_flagged() {
         let feed = Feed::of(FEED);
-        assert_eq!(
-            check("1.2.1", Some("on"), &feed),
-            Outcome::UpToDate(v("1.2.1"))
-        );
-        let outcome = check("1.3.0-beta.1", Some("on"), &feed);
+        assert_eq!(check("1.2.1", &feed), Outcome::UpToDate(v("1.2.1")));
+        let outcome = check("1.3.0-beta.1", &feed);
         let Outcome::Available(release) = outcome else {
             panic!("beta.2 is newer");
         };
@@ -360,7 +652,7 @@ mod tests {
         assert!(release.critical);
         assert!(Outcome::Available(release).line().contains("critical"));
         assert_eq!(
-            check("1.3.0-beta.2", Some("on"), &feed),
+            check("1.3.0-beta.2", &feed),
             Outcome::UpToDate(v("1.3.0-beta.2"))
         );
     }
@@ -368,11 +660,11 @@ mod tests {
     #[test]
     fn an_empty_feed_is_up_to_date_and_a_bad_one_fails() {
         assert_eq!(
-            check("0.1.0", Some("on"), &Feed::of(EMPTY)),
+            check("0.1.0", &Feed::of(EMPTY)),
             Outcome::UpToDate(v("0.1.0"))
         );
         for bad in ["", "not xml", "<rss><channel>", "<rss/>"] {
-            let outcome = check("0.1.0", Some("on"), &Feed::of(bad));
+            let outcome = check("0.1.0", &Feed::of(bad));
             assert!(
                 matches!(outcome, Outcome::Failed(_)),
                 "{bad:?}: {outcome:?}"
@@ -383,13 +675,10 @@ mod tests {
             asked: Mutex::new(Vec::new()),
         };
         assert_eq!(
-            check("0.1.0", Some("on"), &failing),
+            check("0.1.0", &failing),
             Outcome::Failed("no network".into())
         );
-        assert!(matches!(
-            check("dev", Some("on"), &failing),
-            Outcome::Failed(_)
-        ));
+        assert!(matches!(check("dev", &failing), Outcome::Failed(_)));
     }
 
     #[test]
@@ -400,7 +689,7 @@ mod tests {
           <item><sparkle:shortVersionString>junk</sparkle:shortVersionString></item>
         </channel></rss>"#;
         assert_eq!(
-            check("1.0.0-beta.1", Some("on"), &Feed::of(feed)),
+            check("1.0.0-beta.1", &Feed::of(feed)),
             Outcome::UpToDate(v("1.0.0-beta.1"))
         );
     }

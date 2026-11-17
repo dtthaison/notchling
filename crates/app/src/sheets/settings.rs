@@ -7,6 +7,7 @@ use crate::appearance;
 use crate::chat::history;
 use crate::search::shortcut;
 use crate::switches::restart::Area;
+use crate::welcome::updates;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Field {
@@ -241,12 +242,15 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
     vec![
         Section {
             title: t::settings::section_general(),
-            rows: vec![choice(
-                read,
-                appearance::KEY,
-                t::settings::appearance(),
-                &appearance::CHOICES,
-            )],
+            rows: vec![
+                choice(
+                    read,
+                    appearance::KEY,
+                    t::settings::appearance(),
+                    &appearance::CHOICES,
+                ),
+                toggle(read, updates::SETTING_KEY, t::settings::check_for_updates()),
+            ],
             footer: None,
         },
         Section {
@@ -499,7 +503,7 @@ mod tests {
     fn the_general_section_offers_appearance_with_system_the_default() {
         let general = sections(&|_| None, &with(Acting::Off)).remove(0);
         assert_eq!(general.title, "General");
-        assert_eq!(general.rows.len(), 1);
+        assert_eq!(general.rows.len(), 2);
         let row = &general.rows[0];
         assert_eq!(row.title, "Appearance");
         let Field::Choice { selected, options } = row.field.clone() else {
@@ -510,6 +514,28 @@ mod tests {
         assert_eq!(names, ["System", "Light", "Dark"]);
         assert_eq!(change(row, "dark"), Some(("appearance", json!("dark"))));
         assert_eq!(change(row, "sepia"), None);
+    }
+
+    #[test]
+    fn checking_for_updates_is_a_general_toggle_that_starts_on() {
+        let general = sections(&|_| None, &with(Acting::Off)).remove(0);
+        let row = &general.rows[1];
+        assert_eq!(row.key, "checkForUpdates");
+        assert_eq!(row.title, "Check for updates automatically");
+        assert!(matches!(
+            row.field,
+            Field::Toggle {
+                on: true,
+                inverted: false
+            }
+        ));
+        assert_eq!(change(row, ""), Some(("checkForUpdates", json!(false))));
+        let off = sections(
+            &|k| (k == "checkForUpdates").then(|| json!(false)),
+            &with(Acting::Off),
+        )
+        .remove(0);
+        assert!(matches!(off.rows[1].field, Field::Toggle { on: false, .. }));
     }
 
     #[test]

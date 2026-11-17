@@ -1,3 +1,5 @@
+use notchling_locale as t;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AwakeMode {
     #[default]
@@ -24,6 +26,7 @@ pub struct MenuState {
     pub awake: AwakeMode,
     pub keep_display_on: bool,
     pub holding: bool,
+    pub update: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +38,7 @@ pub enum Command {
     Settings,
     About,
     Welcome,
+    OpenUpdate,
     Quit,
 }
 
@@ -87,7 +91,7 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
         None,
         state.keep_display_on,
     ));
-    vec![
+    let mut entries = vec![
         Entry::Header("Claude Code".to_owned()),
         account,
         Entry::Separator,
@@ -106,7 +110,19 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
         },
         Entry::Separator,
         action("Quit Notchling", Command::Quit, Some('q'), false),
-    ]
+    ];
+    if let Some(version) = &state.update {
+        entries.insert(
+            entries.len() - 2,
+            action(
+                &t::update::menu_available(version),
+                Command::OpenUpdate,
+                None,
+                false,
+            ),
+        );
+    }
+    entries
 }
 
 pub fn tray_symbol(state: &MenuState) -> &'static str {
@@ -148,6 +164,24 @@ mod tests {
                 "-",
                 "Quit Notchling"
             ]
+        );
+    }
+
+    #[test]
+    fn a_newer_release_adds_one_row_before_quit_and_none_otherwise() {
+        let state = MenuState {
+            update: Some("2.1.0".to_owned()),
+            ..MenuState::default()
+        };
+        let menu = tray_menu(&state);
+        assert_eq!(menu.len(), tray_menu(&MenuState::default()).len() + 1);
+        assert_eq!(
+            menu[menu.len() - 3],
+            action("Update Available: 2.1.0…", Command::OpenUpdate, None, false)
+        );
+        assert_eq!(
+            titles(&menu).last().map(String::as_str),
+            Some("Quit Notchling")
         );
     }
 

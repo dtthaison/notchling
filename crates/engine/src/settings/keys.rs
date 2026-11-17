@@ -251,6 +251,8 @@ pub const KEYS: &[KeySpec] = &[
         .free("Conversation history to load", "How much of a long conversation Chat loads: the newest 2, 4, 8 or 16 MB of its file", "a display and memory preference"),
     choice("appearance", "system", &["system", "light", "dark"], false, "How Notchling's windows look: System follows macOS, Light and Dark force it")
         .free("Appearance", "How Notchling's windows look: system follows macOS, light or dark forces it", "a display preference"),
+    key("checkForUpdates", K::Bool, D::Bool(true), false, "Look for a newer Notchling release when the app starts and once a day; NOTCHLING_RELEASES=off turns it off whatever this says")
+        .ask("Check for updates", "Look for a newer Notchling release when the app starts and once a day, and say so in the menu bar and in About", "it makes the app contact github.com on its own"),
     key("searchShortcut", K::String, D::Str("ctrl+alt+p"), false, "The global key that opens Search from any app: modifiers and a key joined by +, such as ctrl+alt+p, or off")
         .ask("Search shortcut", "The global key that opens Search from any app: modifiers and a key joined by +, such as ctrl+alt+p, or off", "it takes a key from every other app"),
     choice("clusterFailover", "off", &["off", "30m", "1h"], false, "Automatic Failover: how long the primary Mac can be unreachable before a Standby takes over its sessions (off, 30m or 1h). A mirror of the cluster's journaled value; the primary's journal wins")

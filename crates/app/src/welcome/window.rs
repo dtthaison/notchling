@@ -108,10 +108,12 @@ fn open_about(cx: &mut App) {
         Some(r) => AboutEnv {
             fetcher: Arc::new(CurlFetcher::new(RealLauncher::new(&r.home))),
             switch: std::env::var(KILL_SWITCH).ok(),
+            known: crate::mac::update_watch::latest(cx),
         },
         None => AboutEnv {
             fetcher: Arc::new(NoFeed),
             switch: None,
+            known: None,
         },
     };
     let handle = open_titled(cx, "About Notchling", (460.0, 560.0), |_, _| {
