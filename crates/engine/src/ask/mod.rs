@@ -1,11 +1,14 @@
 mod branch;
 mod find;
+mod inbox_item;
 mod model;
+mod rules;
 mod store;
 mod words;
 
 pub use branch::branch;
 pub use find::{candidates, delegate_tool, find, Asking, Candidate, Source};
+pub use inbox_item::{action_for, choice_of, item};
 pub use model::{
     new_id, AskState, Asker, By, Found, Mode, New, OpenError, Row, CHOICE_LABEL_CHARS,
     DEADLINE_MARGIN_MS, DEADLINE_VARIABLE, DETAIL_CHARS, FIND_MAX_FILES, FIND_MS, FIND_TAIL_BYTES,
@@ -13,6 +16,7 @@ pub use model::{
     MAX_OPEN, MAX_OPEN_PER_SESSION, MAX_QUESTION_CHARS, MIN_CHOICES, TITLE_CHARS, WAIT_DEFAULT_S,
     WAIT_MS_MAX,
 };
+pub use rules::{answer_text, check_new, cut, main_may_see, may_answer, AnswerError, Refused, Who};
 pub use store::AskStore;
 pub use words::{same_command, simple_commands};
 
@@ -23,8 +27,14 @@ mod branch_tests;
 #[path = "find_tests.rs"]
 mod find_tests;
 #[cfg(test)]
+#[path = "inbox_item_tests.rs"]
+mod inbox_item_tests;
+#[cfg(test)]
 #[path = "model_tests.rs"]
 mod model_tests;
+#[cfg(test)]
+#[path = "rules_tests.rs"]
+mod rules_tests;
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod store_tests;

@@ -43,6 +43,14 @@ fn decided(answer: Option<ActionId>) -> &'static str {
         Some(ActionId::Keep) => "Kept",
         Some(ActionId::ContinueHere) => "Continued Here",
         Some(ActionId::WaitFor) => "Waiting",
+        Some(
+            ActionId::Choice1
+            | ActionId::Choice2
+            | ActionId::Choice3
+            | ActionId::Choice4
+            | ActionId::Choice5
+            | ActionId::Choice6,
+        ) => "Answered",
         None => "Answered",
     }
 }
