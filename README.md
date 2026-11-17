@@ -33,20 +33,32 @@ Notchling is free and open source, and isn't affiliated with Anthropic or Google
 
 <sub>Made-up accounts, rendered from the real Accounts window by `legacy/macos/Demo/make-demo.sh accounts`.</sub>
 
-## Requirements
+## Install
 
-- macOS 13 or later; built for Apple Silicon and Intel. Designed around a notched MacBook screen. Without a notch it hangs under the menu bar.
-- Claude Code installed at `~/.local/bin/claude` (or `/usr/local/bin/claude`).
-- Xcode Command Line Tools (`swiftc`). No Xcode project is needed.
+Download `Notchling-<version>.dmg` from the [latest release](https://github.com/dtthaison/notchling/releases/latest) and drag Notchling to Applications. It needs macOS 13 or later on a Mac with Apple silicon.
 
-## Build and install
+The app is ad hoc signed, not notarized, so macOS blocks the first launch. Open System Settings > Privacy & Security and choose **Open Anyway**, or run:
 
 ```sh
-./build.sh            # builds build/Notchling.app
-./build.sh --install  # also quits the running copy, installs to /Applications and opens it
+xattr -dr com.apple.quarantine /Applications/Notchling.app
 ```
 
-`build.sh` compiles every file under `legacy/macos/Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `legacy/macos/Icon/make-icon.swift` changes, and signs the app ad hoc.
+Linux machines for the cluster need nothing downloaded by hand: **Add Machine** in the Cluster sheet installs Notchling's Linux build on them, taken from the release and checked against its SHA-256.
+
+## Requirements
+
+- macOS 13 or later on Apple silicon. Designed around a notched MacBook screen. Without a notch it hangs under the menu bar.
+- Claude Code installed at `~/.local/bin/claude` (or `/usr/local/bin/claude`).
+- To build it yourself: Rust (the version in `rust-toolchain.toml`, installed by `rustup`).
+
+## Build from source
+
+```sh
+tools/bundle-next.sh            # builds build/next/Notchling.app
+tools/bundle-next.sh --install  # also quits the running copy and installs it to /Applications
+```
+
+`tools/bundle-next.sh` builds the app, its daemon and its terminal host with `cargo` and signs the app ad hoc. `--install` refuses to replace an app that is still the Swift one. Linux node binaries for development come from `tools/build-node.sh`. The retired Swift app builds with `./build.sh`.
 
 To start at login, turn on **Launch at Login** in Settings, or run:
 

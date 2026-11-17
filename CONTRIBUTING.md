@@ -31,7 +31,7 @@ Expect a first reply within about a week.
 4. **Pull request.** One change per pull request, using the template. Sign off every commit (see [Sign-off](#sign-off-dco)).
 5. **Checks.** Every pull request runs the checks below. Each one is bound to the PR's head commit.
 6. **Merge.** Until Phase 5 the maintainer merges every pull request; agents never merge. From Phase 5, a pull request that touches only the auto-merge zone and passes every check may merge on its own. Anything else waits for the maintainer: `maintainer-gate` passes only after he approves the PR's current head commit, and a later push needs a new approval.
-7. **Beta, then Stable.** *(Phase 6: built, off until the maintainer turns it on.)* Merged work goes into a daily Beta; the maintainer promotes a Beta to Stable with one click. Until it's on, releases are cut by hand (see [Releasing](#releasing)).
+7. **Beta, then Stable.** *(Phase 6: built, off until the maintainer turns it on.)* Merged work goes into a daily Beta; the maintainer promotes a Beta to Stable with one click. Until it's on, releases are cut with `tools/release/release.py` (see [Releasing](#releasing)).
 
 ### The checks
 
@@ -167,7 +167,7 @@ The maintainer reviews a new language's first pull request and every change to `
 
 - Keep each one to a single change, and say in the description what you ran and looked at.
 - For a bug fix, add a test that fails on `main` and passes with your change. For a UI or intermittent bug, a recorded reproduction is fine.
-- Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) if users would notice the change. Once the Beta flow is on, a changelog fragment replaces it ([changes/README.md](changes/README.md)); until then the old release flow reads only `[Unreleased]`.
+- Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) if users would notice the change. A changelog fragment in `changes/` does the same job ([changes/README.md](changes/README.md)); `release.py` folds the fragments into `CHANGELOG.md` at release.
 - Screenshots or a short recording help a lot for anything visual.
 - Say whether the PR touches anything outside the auto-merge zone, and why.
 
@@ -184,21 +184,19 @@ Sign off every commit with `git commit -s`. It adds a `Signed-off-by:` line, whi
 
 ## Releasing
 
-For maintainers. Two flows exist, and only the old one is on.
+For maintainers. Two flows exist, and only the first is on: `tools/release/release.py`, used for 2.0.0. The Beta and Stable flow below is the Swift app's signed one and is not used for 2.0.0.
 
-### Today: by hand
+### Today: release.py
 
-With the changes for the release listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md):
-
-```sh
-legacy/macos/release.sh 1.2.0
-```
-
-This makes branch `release/1.2.0` from `main`, sets the version in `legacy/macos/Info.plist` (and bumps the build number), moves the `[Unreleased]` entries under `[1.2.0]`, pushes the branch and opens a pull request. Merging it tags `v1.2.0` on the merge commit and publishes the GitHub release with the disk image, a zip and the changelog entries as notes (`.github/workflows/release.yml`). Use major.minor.patch: patch for fixes, minor for new features. The builds are signed ad hoc and not notarized.
+1. The release goes out from `main`, so `main` must hold everything that ships, with a changelog fragment in `changes/` for each user-visible change ([changes/README.md](changes/README.md)).
+2. See what it would do: `tools/release/release.py <X.Y.Z> --dry-run`. It prints the version bump in `Cargo.toml`, the `Cargo.lock` entries and the `CHANGELOG.md` section the fragments fold into (the text under `[Unreleased]` before its first heading stays at the top). It writes nothing. Use major.minor.patch: patch for fixes, minor for new features.
+3. Make the release: `tools/release/release.py <X.Y.Z> --open-pr`. Without flags it only makes the branch `release/<X.Y.Z>` and one commit; then push it and open the pull request by hand (`--push` pushes).
+4. Review and merge the `release/<X.Y.Z>` pull request. Merging runs `.github/workflows/release.yml`: it tags `v<X.Y.Z>` on the merge commit and publishes the GitHub release with `Notchling-<X.Y.Z>.dmg` and `.zip`, the Linux node binaries (`notchling-linux-x86_64`, `notchling-linux-aarch64`) with `manifest.json`, `SHA256SUMS`, and the changelog section plus an Install section as notes. It then adds the version to the update feed (the `appcast` release). The builds are ad hoc signed, not notarized, and the Mac app is for Apple silicon only.
+5. If the publish job fails, use "Re-run failed jobs": it is safe. A full re-run stops at the gate once the tag exists.
 
 ### Beta and Stable (Phase 6: built, off)
 
-Every job in the new flow stops at its first step until the repository variable `NOTCHLING_RELEASES` is `on`. The maintainer turns it on in this order: a public repository (attestations need one), the Developer ID, the `release` environment and its secrets, the update signing key backed up offline, Sparkle and `NSAppleEventsUsageDescription` in the app as its own pull request, `NOTCHLING_RELEASES=on`, the first Beta, canaries, then retiring `release.sh` and `release.yml`. [docs/policies/automation.md](docs/policies/automation.md#turning-releases-on) has each step. Once it's on:
+Every job in the new flow stops at its first step until the repository variable `NOTCHLING_RELEASES` is `on`. The maintainer turns it on in this order: a public repository (attestations need one), the Developer ID, the `release` environment and its secrets, the update signing key backed up offline, Sparkle and `NSAppleEventsUsageDescription` in the app as its own pull request, `NOTCHLING_RELEASES=on`, the first Beta, canaries. This flow builds the Swift app, so it needs a port to the Rust app before it replaces `release.py`. [docs/policies/automation.md](docs/policies/automation.md#turning-releases-on) has each step. Once it's on:
 
 - **Beta.** `.github/workflows/beta.yml` runs daily at 04:17 UTC and cuts `vX.Y.Z-beta.N` when `main` has commits since the last tag, or on a click (Actions > Beta > Run workflow). The version comes from the tags and the kinds of the fragments not yet in the last Stable (`tools/release/version.py`), the notes from the fragments ([changes/README.md](changes/README.md)). It builds with no secrets, signs (hardened runtime) and notarizes in a job that runs no repository code, publishes the prerelease and adds it to the update feed on the Beta channel. A `breaking` fragment needs a maintainer's click ("Allow a breaking change") only for the first Beta of the new major line.
 - **Stable.** Run Promote with the Beta's tag (Actions > Promote > Run workflow, or `gh workflow run promote.yml --ref main -f beta_tag=vX.Y.Z-beta.N`). Only an account in `MAINTAINERS` can. It publishes `vX.Y.Z` with the Beta's own files, never rebuilt, moves the Beta's feed item to Stable (the Stable notes link, a fresh date, a one-day phased rollout) and opens a pull request that folds the fragments present at that Beta's commit into `CHANGELOG.md`. Any Beta can be promoted; don't start two Promotes at once, since GitHub keeps only one waiting run per workflow group and drops the older.
