@@ -507,7 +507,7 @@ fn binary_fix_still_kickstarts_without_rereading_the_plist() {
 }
 
 #[test]
-fn old_launch_agent_is_booted_out() {
+fn old_launch_agent_is_booted_out_after_the_install() {
     let rig = Rig::new(node_mac());
     let ctx = fix_of(&rig, None, None);
     let out = (plan(&step(&rig.machine, &StepId::NODE_SERVICE)).run)(&ctx);
@@ -516,7 +516,7 @@ fn old_launch_agent_is_booted_out() {
     let seen = texts(&calls);
     let at = seen
         .iter()
-        .position(|t| t.contains("launchctl bootout"))
+        .position(|t| t.contains("launchctl bootout \"gui/"))
         .expect("a bootout");
     assert!(!seen[at].contains("sudo"), "{}", seen[at]);
     assert!(
@@ -527,9 +527,30 @@ fn old_launch_agent_is_booted_out() {
     assert!(seen[at].contains("rm -f"), "{}", seen[at]);
     assert!(seen[at].contains(OLD_AGENT_PLIST.rsplit('/').next().unwrap()));
     let admin = seen.iter().position(|t| t.contains("sudo")).unwrap();
-    assert!(at < admin, "{seen:?}");
+    assert!(admin < at, "{seen:?}");
     let shown = plan(&step(&rig.machine, &StepId::NODE_SERVICE)).display;
     assert!(shown.contains("launchctl bootout \"gui/"), "{shown}");
+}
+
+#[test]
+fn a_failed_install_leaves_the_old_launch_agent_alone() {
+    let rig = Rig::new(node_mac());
+    rig.runner.on(
+        |a| a.last().is_some_and(|s| s.contains("sudo")),
+        result(1, "", "Sorry, try again."),
+    );
+    let ctx = fix_of(&rig, None, None);
+    let out = (plan(&step(&rig.machine, &StepId::NODE_SERVICE)).run)(&ctx);
+    assert!(!out.ok);
+    let seen = texts(&rig.calls());
+    assert!(
+        seen.iter().any(|t| t.contains("sudo")),
+        "the admin step ran: {seen:?}"
+    );
+    assert!(
+        !seen.iter().any(|t| t.contains("dev.notchling.daemon")),
+        "{seen:?}"
+    );
 }
 
 #[cfg(unix)]

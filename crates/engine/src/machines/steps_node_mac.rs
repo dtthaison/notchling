@@ -307,9 +307,12 @@ fn parse_service(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
 
 fn display(m: &Machine) -> String {
     let head = format!(
-        "{}\nMake the folder the service logs to, as the node user:\n{}\nBoot out and remove an old per-login service, as the node user:\n{}",
+        "{}\nMake the folder the service logs to, as the node user:\n{}",
         stops_work(false),
-        data_folder_script(),
+        data_folder_script()
+    );
+    let tail = format!(
+        "Then, once that worked, boot out and remove an old per-login service, as the node user:\n{}",
         old_agent_script()
     );
     let plist = home_of(m)
@@ -318,9 +321,11 @@ fn display(m: &Machine) -> String {
         .and_then(|text| install_script(&text));
     match plist {
         Ok(script) => format!(
-            "{head}\nThen, as admin, write the LaunchDaemon, check it, and load it or restart it:\n{script}"
+            "{head}\nThen, as admin, write the LaunchDaemon, check it, and load it or restart it:\n{script}\n{tail}"
         ),
-        Err(why) => format!("{head}\nThen, as admin, write the LaunchDaemon (not shown yet: {why})"),
+        Err(why) => format!(
+            "{head}\nThen, as admin, write the LaunchDaemon (not shown yet: {why})\n{tail}"
+        ),
     }
 }
 
@@ -360,7 +365,6 @@ fn service_fix(ctx: &FixContext) -> FixOutcome {
             said(ctx, &folder)
         ));
     }
-    let _ = run::script(ctx, &old_agent_script(), None, 60);
     let wrote = run::admin(ctx, &script, 180);
     if wrote.code != 0 {
         return FixOutcome::fail(format!(
@@ -369,6 +373,7 @@ fn service_fix(ctx: &FixContext) -> FixOutcome {
             said(ctx, &wrote)
         ));
     }
+    let _ = run::script(ctx, &old_agent_script(), None, 60);
     FixOutcome::ok("LaunchDaemon written and loaded")
 }
 

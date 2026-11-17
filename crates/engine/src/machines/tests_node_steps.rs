@@ -250,13 +250,13 @@ fn service_fix_installs_and_loads_macos() {
     let seen = texts(&rig.calls());
     assert_eq!(seen.len(), 3, "{seen:?}");
     assert!(seen[0].contains("mkdir -p \"$d\""));
-    assert!(seen[1].contains("launchctl bootout"));
-    assert!(seen[2].contains("sudo -S"));
-    assert!(seen[2].contains("launchctl enable system/dev.notchling.node"));
-    assert!(seen[2].contains("launchctl bootout system/dev.notchling.node"));
-    assert!(!seen[2].contains("kickstart"), "{}", seen[2]);
-    assert!(seen[2]
+    assert!(seen[1].contains("sudo -S"));
+    assert!(seen[1].contains("launchctl enable system/dev.notchling.node"));
+    assert!(seen[1].contains("launchctl bootout system/dev.notchling.node"));
+    assert!(!seen[1].contains("kickstart"), "{}", seen[1]);
+    assert!(seen[1]
         .contains("launchctl bootstrap system /Library/LaunchDaemons/dev.notchling.node.plist"));
+    assert!(seen[2].contains("launchctl bootout \"gui/"));
 }
 
 #[test]

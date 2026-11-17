@@ -123,11 +123,11 @@ fn the_log_folder_is_made_before_the_service_file_on_a_fresh_machine() {
             assert!(seen[1].contains("service install"), "{seen:?}");
         } else {
             assert!(seen[0].contains("notchlingd.log"), "{seen:?}");
-            assert!(seen[1].contains("launchctl bootout"), "{seen:?}");
             assert!(
-                seen[2].contains("install -m 644 -o root -g wheel"),
+                seen[1].contains("install -m 644 -o root -g wheel"),
                 "{seen:?}"
             );
+            assert!(seen[2].contains("launchctl bootout"), "{seen:?}");
         }
     }
 }
