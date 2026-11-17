@@ -18,6 +18,7 @@ struct Note {
     key: String,
     text: String,
     layout: TextLayout,
+    links: Vec<(Range<usize>, String)>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -61,6 +62,15 @@ impl State {
         let anchor = self.order(self.anchor.as_ref()?)?;
         let focus = self.order(self.focus.as_ref()?)?;
         Some(ordered(anchor, focus))
+    }
+
+    fn link_at(&self, position: Point<Pixels>) -> Option<String> {
+        let note = self
+            .notes
+            .iter()
+            .find(|n| n.layout.bounds().contains(&position))?;
+        let index = note.layout.index_for_position(position).ok()?;
+        crate::chat::link_target::link_at(&note.links, index).map(str::to_owned)
     }
 
     fn spot_at(&self, position: Point<Pixels>) -> Option<Spot> {
@@ -160,17 +170,21 @@ pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
                     return;
                 }
                 if event.button == MouseButton::Right {
-                    let (over, enabled) = STATE.with(|s| {
+                    let (over, enabled, link) = STATE.with(|s| {
                         let s = s.borrow();
                         let over = s
                             .notes
                             .iter()
                             .any(|n| n.layout.bounds().contains(&event.position));
-                        (over, selects(s.anchor.as_ref(), s.focus.as_ref()))
+                        (
+                            over,
+                            selects(s.anchor.as_ref(), s.focus.as_ref()),
+                            s.link_at(event.position),
+                        )
                     });
                     if over {
                         let at = event.position;
-                        chat.update(cx, |chat, cx| chat.open_copy_menu(at, enabled, cx))
+                        chat.update(cx, |chat, cx| chat.open_copy_menu(at, enabled, link, cx))
                             .ok();
                     }
                     return;
@@ -267,6 +281,7 @@ pub fn selectable(
         layout,
         child: Some(child),
         a,
+        links: Vec::new(),
     }
 }
 
@@ -276,6 +291,14 @@ pub struct Selectable {
     layout: TextLayout,
     child: Option<AnyElement>,
     a: Appearance,
+    links: Vec<(Range<usize>, String)>,
+}
+
+impl Selectable {
+    pub fn links(mut self, links: Vec<(Range<usize>, String)>) -> Selectable {
+        self.links = links;
+        self
+    }
 }
 
 impl IntoElement for Selectable {
@@ -326,6 +349,7 @@ impl Element for Selectable {
             key: self.key.clone(),
             text: std::mem::take(&mut self.text),
             layout: self.layout.clone(),
+            links: std::mem::take(&mut self.links),
         };
         STATE.with(|s| s.borrow_mut().note_drawn(note));
         window.insert_hitbox(bounds, HitboxBehavior::Normal)
@@ -407,6 +431,7 @@ mod tests {
             key: key.to_owned(),
             text: text.to_owned(),
             layout: TextLayout::default(),
+            links: Vec::new(),
         }
     }
 

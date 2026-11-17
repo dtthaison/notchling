@@ -60,9 +60,15 @@ pub struct Launch {
     pub path: String,
 }
 
+const LAUNCH_LEADS: [&str; 2] = [
+    "Command running in background with ID: ",
+    "Command was moved to the background (ID: ",
+];
+
 pub fn launch(result: &str) -> Option<Launch> {
-    let lead = "Command running in background with ID: ";
-    let after_id = result.find(lead)? + lead.len();
+    let after_id = LAUNCH_LEADS
+        .iter()
+        .find_map(|lead| result.find(lead).map(|at| at + lead.len()))?;
     let id: String = result[after_id..]
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')

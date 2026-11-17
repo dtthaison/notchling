@@ -273,6 +273,15 @@ impl ChatView {
             view.copy_menu = Some(copy_menu::CopyMenu {
                 at: gpui::point(px(520.0), px(240.0)),
                 enabled: how != "off",
+                target: match how.as_str() {
+                    "link" => Some(crate::chat::link_target::Target::Link(
+                        "https://example.com/docs/a/long/page".into(),
+                    )),
+                    "path" => Some(crate::chat::link_target::Target::Path(
+                        "/work/app/scripts/report-role-grants.ts".into(),
+                    )),
+                    _ => None,
+                },
             });
         }
         if switch(INBOX_ENV) {

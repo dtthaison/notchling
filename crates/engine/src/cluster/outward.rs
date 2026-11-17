@@ -1,12 +1,15 @@
 use serde_json::{json, Value};
 
 use crate::transcript::model::{ChatItem, Conversation, ItemKind, ToolCall, ToolKind};
+use crate::transcript::subagents::RESUMED;
 
 mod commands;
 mod shell;
 
 #[cfg(test)]
 mod commands_tests;
+#[cfg(test)]
+mod resumed_tests;
 #[cfg(test)]
 mod shell_tests;
 #[cfg(test)]
@@ -142,8 +145,8 @@ fn call_outward(call: &ToolCall) -> bool {
 fn agent_reported(conv: &Conversation, call: &ToolCall) -> bool {
     conv.finished_agents.contains_key(&call.id)
         || call.output.as_deref().is_some_and(|output| {
-            conv.finished_agents
-                .keys()
-                .any(|id| id.len() >= MIN_AGENT_ID && output.contains(id.as_str()))
+            conv.finished_agents.iter().any(|(id, word)| {
+                word != RESUMED && id.len() >= MIN_AGENT_ID && output.contains(id.as_str())
+            })
         })
 }

@@ -148,7 +148,7 @@ pub fn local_link(url: &str, folder: &str) -> Option<std::path::PathBuf> {
     })
 }
 
-fn has_scheme(url: &str) -> bool {
+pub(crate) fn has_scheme(url: &str) -> bool {
     let Some(colon) = url.find(':') else {
         return false;
     };

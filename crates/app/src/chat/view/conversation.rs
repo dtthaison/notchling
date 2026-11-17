@@ -2,8 +2,8 @@ use notchling_locale as t;
 use std::cell::Cell;
 
 use gpui::{
-    div, point, prelude::*, px, relative, AnyElement, App, BoxShadow, Context, Div, SharedString,
-    Stateful, WeakEntity,
+    div, point, prelude::*, px, relative, AnyElement, App, BoxShadow, Context, Div, MouseButton,
+    SharedString, Stateful, WeakEntity,
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPINNER_MINI;
@@ -289,6 +289,7 @@ fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoEle
     let (w, h) = super::markdown::image_shape(&text).unwrap_or((4, 3));
     let width = (SENT_PICTURE * w as f32 / h.max(1) as f32).clamp(60.0, 320.0);
     let to = text.clone();
+    let copy = text.clone();
     div()
         .id(SharedString::from(format!("sent-pic-{id}-{text}")))
         .w(px(width))
@@ -299,6 +300,9 @@ fn sent_picture(id: &str, path: &std::path::Path, a: Appearance) -> impl IntoEle
         .overflow_hidden()
         .cursor_pointer()
         .on_click(move |_, window, cx| super::page_panel::follow_link(&to, window, cx))
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            super::page_panel::right_click_path(&copy, event.position, window, cx)
+        })
         .child(
             gpui::img(path.to_path_buf())
                 .size_full()
