@@ -462,3 +462,14 @@ fn gone_exits_1() {
     );
     assert!(rig.stderr().contains("no longer waiting"));
 }
+
+#[test]
+fn a_huge_timeout_never_overflows_the_deadline() {
+    let mut rig = Rig::new();
+    rig.delegate = Some(T0 + 600_000);
+    let mut link = Fake::new(&rig.clock, vec![opened("q1")]);
+    link.idle_waits = true;
+    let args = ask_args(&["--wait", "--timeout", "9223372036854775807", "--", "q"]);
+    assert_eq!(rig.run(|env| ask(&mut link, &args, env)), 124);
+    assert_eq!(link.of("ask.open")[0]["deadlineMs"], json!(T0 + 540_000));
+}

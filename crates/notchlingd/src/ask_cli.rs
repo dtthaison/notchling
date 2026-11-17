@@ -125,9 +125,12 @@ fn deadline_for(args: &AskArgs, env: &Env) -> Option<i64> {
         return None;
     }
     let seconds = args.timeout_s.unwrap_or(WAIT_DEFAULT_S);
-    let own = (env.now)().saturating_add(i64::try_from(seconds).unwrap_or(i64::MAX / 1000) * 1000);
+    let span = i64::try_from(seconds)
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1000);
+    let own = (env.now)().saturating_add(span);
     Some(match env.delegate_deadline {
-        Some(delegate) => own.min(delegate - DEADLINE_MARGIN_MS),
+        Some(delegate) => own.min(delegate.saturating_sub(DEADLINE_MARGIN_MS)),
         None => own,
     })
 }
