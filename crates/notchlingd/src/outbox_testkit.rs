@@ -43,6 +43,8 @@ pub(crate) struct FakeFiles {
     pub restarted: AtomicBool,
     pub queue: Mutex<Option<QueueState>>,
     pub processes: Mutex<HashMap<String, (u32, Option<i64>)>>,
+    pub born: Mutex<HashMap<String, i64>>,
+    pub shared_name: AtomicBool,
 }
 
 impl JobFiles for FakeFiles {
@@ -66,9 +68,22 @@ impl JobFiles for FakeFiles {
     fn process(&self, job: &str) -> Option<(u32, Option<i64>)> {
         self.processes.lock().unwrap().get(job).copied()
     }
+    fn born_ms(&self, path: &str) -> Option<i64> {
+        let set = self.born.lock().unwrap().get(path).copied();
+        set.or_else(|| crate::outbox_courier::made_ms(path))
+    }
+    fn shares_name(&self, _agent: &Agent) -> bool {
+        self.shared_name.load(Ordering::SeqCst)
+    }
 }
 
 impl FakeFiles {
+    pub(crate) fn born_at(&self, path: &std::path::Path, ms: i64) {
+        self.born
+            .lock()
+            .unwrap()
+            .insert(path.to_string_lossy().into_owned(), ms);
+    }
     pub(crate) fn set_status(&self, job: &str, status: &str) {
         self.statuses
             .lock()

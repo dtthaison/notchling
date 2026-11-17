@@ -13,8 +13,7 @@ pub fn project_folder(cwd: &str) -> String {
         .collect()
 }
 
-pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Option<String> {
-    let file = format!("{session_id}.jsonl");
+fn folders_of(cwd: &str) -> Vec<String> {
     let mut cwds = vec![cwd.to_string()];
     if let Some(rest) = cwd.strip_prefix("/private") {
         cwds.push(rest.to_string());
@@ -24,8 +23,13 @@ pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Optio
     {
         cwds.push(format!("/private{cwd}"));
     }
-    for c in cwds {
-        let guess = Path::new(projects_dir).join(project_folder(&c)).join(&file);
+    cwds.iter().map(|c| project_folder(c)).collect()
+}
+
+pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Option<String> {
+    let file = format!("{session_id}.jsonl");
+    for folder in folders_of(cwd) {
+        let guess = Path::new(projects_dir).join(folder).join(&file);
         if guess.is_file() {
             return Some(guess.to_string_lossy().into_owned());
         }
@@ -42,15 +46,72 @@ pub fn find_transcript(projects_dir: &str, session_id: &str, cwd: &str) -> Optio
         .map(|p| p.to_string_lossy().into_owned())
 }
 
+pub fn find_in_folders(projects_dir: &str, ids: &[String], cwds: &[&str]) -> Option<String> {
+    let folders: Vec<String> = cwds
+        .iter()
+        .filter(|c| !c.is_empty())
+        .flat_map(|c| folders_of(c))
+        .collect();
+    ids.iter().filter(|id| !id.is_empty()).find_map(|id| {
+        folders.iter().find_map(|folder| {
+            let guess = Path::new(projects_dir)
+                .join(folder)
+                .join(format!("{id}.jsonl"));
+            guess
+                .is_file()
+                .then(|| guess.to_string_lossy().into_owned())
+        })
+    })
+}
+
 pub fn job_transcript(
     link_scan_path: Option<&str>,
     session_id: Option<&str>,
     worktree_path: Option<&str>,
     modified: impl Fn(&str) -> Option<Timestamp>,
 ) -> Option<String> {
-    let link = link_scan_path?;
+    let folders: Vec<&str> = worktree_path
+        .filter(|w| !w.is_empty())
+        .into_iter()
+        .collect();
+    newest_of(link_scan_path?, &[session_id], &folders, false, modified)
+}
+
+pub struct JobPaths<'a> {
+    pub link_scan_path: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+    pub resume_session_id: Option<&'a str>,
+    pub worktree_path: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+}
+
+pub fn job_transcript_live(
+    job: &JobPaths,
+    modified: impl Fn(&str) -> Option<Timestamp>,
+) -> Option<String> {
+    let folders: Vec<&str> = [job.worktree_path, job.cwd]
+        .into_iter()
+        .flatten()
+        .filter(|f| !f.is_empty())
+        .collect();
+    newest_of(
+        job.link_scan_path?,
+        &[job.resume_session_id, job.session_id],
+        &folders,
+        true,
+        modified,
+    )
+}
+
+fn newest_of(
+    link: &str,
+    ids: &[Option<&str>],
+    cwds: &[&str],
+    own_folder: bool,
+    modified: impl Fn(&str) -> Option<Timestamp>,
+) -> Option<String> {
     let mut candidates = vec![link.to_string()];
-    if let Some(worktree) = worktree_path.filter(|w| !w.is_empty()) {
+    if !cwds.is_empty() || own_folder {
         let projects = Path::new(link)
             .parent()
             .and_then(Path::parent)
@@ -59,16 +120,30 @@ pub fn job_transcript(
         let stem = Path::new(link)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned());
-        let mut ids: Vec<String> = Vec::new();
-        for id in session_id.map(String::from).into_iter().chain(stem) {
-            if !id.is_empty() && !ids.contains(&id) {
-                ids.push(id);
+        let mut named: Vec<String> = Vec::new();
+        for id in ids.iter().flatten().map(|id| id.to_string()).chain(stem) {
+            if !id.is_empty() && !named.contains(&id) {
+                named.push(id);
             }
         }
-        for id in ids {
-            let guess = format!("{projects}/{}/{id}.jsonl", project_folder(worktree));
-            if !candidates.contains(&guess) {
-                candidates.push(guess);
+        let mut folders: Vec<String> = Vec::new();
+        if own_folder {
+            if let Some(own) = Path::new(link).parent().and_then(Path::file_name) {
+                folders.push(own.to_string_lossy().into_owned());
+            }
+        }
+        for cwd in cwds {
+            let folder = project_folder(cwd);
+            if !folders.contains(&folder) {
+                folders.push(folder);
+            }
+        }
+        for folder in &folders {
+            for id in &named {
+                let guess = format!("{projects}/{folder}/{id}.jsonl");
+                if !candidates.contains(&guess) {
+                    candidates.push(guess);
+                }
             }
         }
     }
@@ -101,6 +176,7 @@ fn successor_cache() -> &'static Mutex<SuccessorCache> {
 
 const HEAD_WINDOW: usize = 16_384;
 const HEAD_PENDING_FOR: f64 = 60.0;
+const MAX_HOPS: usize = 32;
 
 struct Search {
     found: Option<String>,
@@ -201,6 +277,14 @@ fn head_of(path: &Path) -> Option<(String, bool)> {
     Some((String::from_utf8_lossy(&head).into_owned(), full))
 }
 
+pub fn begins_with_clear(path: &str) -> bool {
+    head_of(Path::new(path)).is_some_and(|(head, _)| {
+        head.contains("<command-name>/clear</command-name>")
+            || head.contains(r#""commandRun":{"command":"clear""#)
+            || head.contains("SessionStart:clear")
+    })
+}
+
 fn head_contains(path: &Path, marker: &str) -> bool {
     head_of(path).is_some_and(|(head, _)| head.contains(marker))
 }
@@ -240,13 +324,17 @@ fn search_successor(path: &str, name: &str) -> Search {
     };
 
     let mut current = path.to_string();
+    let mut visited = vec![path.to_string()];
     let mut found = None;
     let mut settled = true;
-    for _ in 0..4 {
+    let mut ended = false;
+    for _ in 0..MAX_HOPS {
         let Some(since) = modified_secs(&current).map(|m| m - 10.0) else {
+            ended = true;
             break;
         };
         let Ok(entries) = std::fs::read_dir(&dir) else {
+            ended = true;
             break;
         };
         let mut candidates: Vec<(Timestamp, String)> = entries
@@ -254,7 +342,7 @@ fn search_successor(path: &str, name: &str) -> Search {
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
             .map(|p| p.to_string_lossy().into_owned())
-            .filter(|p| *p != current && p != path)
+            .filter(|p| !visited.contains(p))
             .filter_map(|p| file_times(&p).map(|(_, created)| (created, p)))
             .filter(|(created, _)| *created > since)
             .collect();
@@ -270,9 +358,16 @@ fn search_successor(path: &str, name: &str) -> Search {
                 Head::Not => {}
             }
         }
-        let Some(next) = next else { break };
+        let Some(next) = next else {
+            ended = true;
+            break;
+        };
+        visited.push(next.clone());
         found = Some(next.clone());
         current = next;
     }
-    Search { found, settled }
+    Search {
+        found: found.filter(|_| ended),
+        settled,
+    }
 }

@@ -276,3 +276,122 @@ fn a_big_typed_line_after_a_take_counts_once_with_its_pictures() {
     two.pictures = 2;
     assert_eq!(count_since(&path, &two, since(18)), seen(0, 0));
 }
+
+fn raw_user(text: &str, second: u32) -> String {
+    let body = serde_json::to_string(text).unwrap();
+    format!(
+        r#"{{"parentUuid":"p","isSidechain":false,"type":"user","message":{{"role":"user","content":{body}}},"uuid":"u","timestamp":"{}","origin":{{"kind":"human"}}}}"#,
+        stamp(second, 0)
+    )
+}
+
+fn raw_enqueue(content: &str, second: u32, ms: u32) -> String {
+    let body = serde_json::to_string(content).unwrap();
+    format!(
+        r#"{{"type":"queue-operation","operation":"enqueue","timestamp":"{}","sessionId":"s","content":{body}}}"#,
+        stamp(second, ms)
+    )
+}
+
+fn log_of(bytes: usize) -> String {
+    let mut text = String::from("tool_use_id toolUseResult pasted by the person\n");
+    let mut n = 0;
+    while text.len() < bytes {
+        text.push_str(&format!("log line {n} of the pasted output\n"));
+        n += 1;
+    }
+    text
+}
+
+#[test]
+fn a_pasted_log_over_the_line_limit_is_kept_even_when_it_names_tool_results() {
+    let text = log_of(140_000);
+    let lines = [old(0), raw_user(&text, 20), old(25)];
+    let (_dir, path) = write(&lines);
+    assert_eq!(count_since(&path, &message(&text), since(18)), seen(0, 1));
+}
+
+#[test]
+fn a_real_tool_result_over_the_line_limit_is_still_skipped() {
+    let result = format!(
+        r#"{{"parentUuid":"p","isSidechain":false,"type":"user","message":{{"role":"user","content":[{{"tool_use_id":"t","type":"tool_result","content":"{}"}}]}},"timestamp":"{}","toolUseResult":{{"stdout":"x"}}}}"#,
+        "x".repeat(200_000),
+        stamp(20, 0)
+    );
+    let text = "ship the fix";
+    let lines = [old(0), result, raw_user(text, 21)];
+    let (_dir, path) = write(&lines);
+    assert_eq!(count_since(&path, &message(text), since(18)), seen(0, 1));
+}
+
+#[test]
+fn an_oversized_enqueue_stays_in_the_replay_so_a_dequeue_pops_the_right_entry() {
+    let big = log_of(150_000);
+    let lines = [
+        old(0),
+        raw_enqueue(&big, 20, 0),
+        raw_enqueue("second entry", 20, 100),
+        operation_line("dequeue", 21),
+    ];
+    let (_dir, path) = write(&lines);
+    let state = queue_state(&path).unwrap();
+    assert_eq!(
+        state.waiting,
+        vec!["second entry".to_string()],
+        "the dequeue takes the oversized first entry, not the short one"
+    );
+    assert_eq!(
+        count_since(&path, &message(&big), since(18)),
+        seen(1, 0),
+        "the oversized enqueue counts as an enqueue"
+    );
+}
+
+fn operation_line(op: &str, second: u32) -> String {
+    json!({"type": "queue-operation", "operation": op,
+        "timestamp": stamp(second, 0), "sessionId": "s"})
+    .to_string()
+}
+
+#[test]
+fn big_prompt_lines_past_the_budget_leave_the_answer_unsure_not_wrong() {
+    let picture = |second: u32| {
+        let pictured = json!([{"type": "text", "text": "look"}, image(7_900_000)]);
+        format!(
+            r#"{{"parentUuid":"p","isSidechain":false,"type":"user","message":{{"role":"user","content":{pictured}}},"timestamp":"{}","origin":{{"kind":"human"}}}}"#,
+            stamp(second, 0)
+        )
+    };
+    let lines = [old(0), picture(21), picture(22), picture(23), picture(24)];
+    let (_dir, path) = write(&lines);
+    assert_eq!(
+        count_since(&path, &message("other words"), since(18)),
+        None,
+        "four 7.9 MB lines do not fit the budget, so the window cannot say it saw everything since the moment"
+    );
+}
+
+#[test]
+fn an_unchanged_file_is_read_once_and_a_changed_one_again() {
+    let text = "keep the sidebar narrow";
+    let lines = [old(0), enqueue(text, 20, 0)];
+    let (_dir, path) = write(&lines);
+    let reads = || crate::transcript::window::reads_of(&path);
+    assert_eq!(count_since(&path, &message(text), since(18)), seen(1, 0));
+    assert_eq!(count_since(&path, &message(text), since(18)), seen(1, 0));
+    assert_eq!(queue_lists(&path, &message(text)), Some(true));
+    assert_eq!(
+        reads(),
+        1,
+        "the 1 s facts poll and the watcher reuse one read"
+    );
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    writeln!(file, "{}", taken(json!(text), "human", 21, 0)).unwrap();
+    drop(file);
+    assert_eq!(count_since(&path, &message(text), since(18)), seen(1, 1));
+    assert_eq!(reads(), 2);
+}

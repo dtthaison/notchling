@@ -4,6 +4,7 @@ use crate::acting_ops::{bad, forbidden, now_ms, Room};
 use crate::agy_ops::valid_session;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
+use crate::outbox_courier::live_files;
 use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
 use crate::outbox_settle::Settle;
 use crate::outbox_verify::count_row;
@@ -211,8 +212,13 @@ impl OutboxOps {
 
     pub(crate) fn settle_sending(&self, row: &Row, now_ms: i64) -> bool {
         let seen = match row.tool {
-            Tool::Claude => fresh::job_row(&self.roots, &Probes::from_proc(), &row.session)
-                .and_then(|agent| count_row(agent.transcript_path.as_deref()?, &agent.name, row)),
+            Tool::Claude => {
+                let files = live_files(self.roots.clone());
+                files.row(&row.session).and_then(|agent| {
+                    let path = files.transcript(&agent)?;
+                    count_row(files.as_ref(), &agent, &path, row)
+                })
+            }
             Tool::Codex | Tool::Antigravity => None,
         };
         let before = match (row.seen_before, row.queued_before) {
