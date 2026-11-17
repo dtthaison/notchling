@@ -335,7 +335,7 @@ mod log_retention_tests;
 mod outbox_testkit;
 #[cfg(test)]
 mod pages_ops_tests;
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod process_facts_tests;
 #[cfg(test)]
 mod providers_add_tests;
