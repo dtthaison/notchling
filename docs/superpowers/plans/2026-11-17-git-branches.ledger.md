@@ -42,3 +42,11 @@ Append-only: add new rulings and log lines at the end of their section; never ed
 - git: Task 13 fix round (R4): dispatched (sonnet high).
 - git: Task 8 review (agy hydrogen high): Approved.
 - git: Task 13 fix round: f168556b (R4; new word chat-git-more-worktrees-only; worktrees 32 pass). Approved by the coordinator (one-function change, test red then green).
+- git: Task 14: dispatched (sonnet high).
+- git: Task 14: complete cff5cca4 (changes_target 17, branch 4 new; app lib 1629 pass; the three Changes renders byte-identical before and after). Accepted: `TargetState.refused` holds the daemon's reason ("Nothing to compare." plus it) and stops asking until Changes closes; a stat error on an explicit base clears that base and asks once more; `chat-changes-committed-only` reads "{ $files } · Committed work only" to keep the counts line's shape.
+- git: environment: `chat::reload::tests::steady_writes_still_make_the_watcher_report` and platform `watch::tests` fail in this lane's runs even alone and outside the sandbox (FSEvents gives no batch here); platform and reload.rs have no diff on this branch, so it is not this lane's. To recheck on the maintainer's Mac.
+- git: Task 17: dispatched (sonnet high).
+- git: Task 14 review (agy hydrogen high): Needs fixes, 1 finding, verified in view/repo.rs git_status_in: opening Changes for another target while a round is in flight leaves Changes on "Nothing to compare." until the next tick, because an answer without the current other target (applied None or Ignored) asks nothing again. Fix round after Task 17.
+- git: Task 17: complete 4adb9f69 (branch_list 34, red seen; app lib 1663, only the environmental reload watcher test fails). Accepted: B8 calls the engine's pure `git::guard::clean_ref`; the filter matches each word anywhere in the joined name, path, session name and subject (B6: "every word anywhere in"); `tab_label` added for Task 18; "not merged"/"merged into" are `Faint` parts; tab counts ignore the filter. branch_list.rs is 658 lines (over the 600 warning, under 1,000).
+- git: Task 14 fix round: dispatched (sonnet high).
+- git: Task 14 fix round: 8ad7f9c2 (pure `needs_ask_again`, 3 tests red then green; chat:: 806). Approved by the coordinator after reading the condition (no loop: refused, not a repository, or hidden Changes ask nothing).
