@@ -205,7 +205,7 @@ fn a_join_goes_to_the_daemon_and_an_error_never_carries_the_token() {
 }
 
 #[test]
-fn the_feed_remembers_when_each_tool_or_login_of_a_node_last_changed() {
+fn the_feed_stamps_a_tool_or_login_only_when_it_changes_after_first_sight() {
     let with = |codex: &str, claude: &str, clock: &str| {
         let mut next = status();
         let member = next["members"]
@@ -218,19 +218,17 @@ fn the_feed_remembers_when_each_tool_or_login_of_a_node_last_changed() {
     };
     let feed = ClusterFeed::none();
     assert_eq!(feed.reported_at(STANDBY, Tool::Codex), None);
-    let before = now_ms();
     feed.take_status(&with("0.118.0", "2.1.0", "1"));
-    let first = feed.reported_at(STANDBY, Tool::Codex).expect("seen");
-    assert!(first >= before, "the first sight is stamped now, not 0");
-    let claude = feed.reported_at(STANDBY, Tool::Claude).expect("seen");
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Codex), Some(0));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Claude), Some(0));
     feed.take_status(&with("0.118.0", "2.1.0", "2"));
-    assert_eq!(feed.reported_at(STANDBY, Tool::Codex), Some(first));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Codex), Some(0));
+    let before = now_ms();
     feed.take_status(&with("0.166.0", "2.1.0", "2"));
     assert!(feed
         .reported_at(STANDBY, Tool::Codex)
-        .is_some_and(|at| at > first));
-    assert_eq!(feed.reported_at(STANDBY, Tool::Claude), Some(claude));
+        .is_some_and(|at| at >= before));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Claude), Some(0));
     assert_eq!(feed.reported_at("nobody", Tool::Codex), None);
 }
 

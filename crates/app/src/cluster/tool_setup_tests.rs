@@ -788,7 +788,7 @@ fn a_cancelled_sign_in_ends_as_cancelled_and_rechecks_the_status_before_marking(
         id,
         &cancel,
         &outcome,
-        NOW,
+        &|| NOW,
     );
     assert!(!runs.running("m1"));
     match runs.get("m1") {
@@ -818,7 +818,7 @@ fn a_finished_sign_in_marks_and_closes_the_sheet() {
         id,
         &cancel,
         &outcome,
-        NOW,
+        &|| NOW,
     );
     assert_eq!(runs.login_mark("m1", Tool::Codex), Some((NOW, true)));
     assert!(runs.sheet().is_none());
@@ -923,4 +923,46 @@ fn nothing_changes_when_the_cluster_cannot_be_read_first() {
     assert!(!refused.ok);
     assert!(refused.message.contains("m1"), "{}", refused.message);
     assert!(idle_now(&feed, M1, "m1", Kind::SignIn).is_some());
+}
+
+#[test]
+fn a_cancelled_sign_in_stays_running_through_the_recheck_and_stamps_after_it() {
+    let w = worker();
+    let rig = rig(&w, true);
+    let runs = Arc::new(ToolRuns::default());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let probed = Arc::new(AtomicBool::new(false));
+    let (during, flag, watch) = (runs.clone(), probed.clone(), seen.clone());
+    rig.runner.on_call(
+        |argv| argv.last().is_some_and(|s| s.contains("login status")),
+        move |_| {
+            watch.lock().unwrap().push(during.running("m1"));
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            CommandResult::ok("@@signed_in\n")
+        },
+    );
+    let cancel = runs.open_session("m1", Tool::Codex).unwrap();
+    let id = runs.begin_run("m1", "signing in").unwrap();
+    runs.cancel("m1", "stopping");
+    let after = probed.clone();
+    let stamped = Arc::new(Mutex::new(None));
+    let record = stamped.clone();
+    let now = move || {
+        *record.lock().unwrap() = Some(after.load(std::sync::atomic::Ordering::SeqCst));
+        NOW
+    };
+    let outcome = FixOutcome::fail("cancelled");
+    settle_sign_in(
+        &rig.engine,
+        &runs,
+        &sign_in_go(),
+        id,
+        &cancel,
+        &outcome,
+        &now,
+    );
+    assert_eq!(*seen.lock().unwrap(), vec![true]);
+    assert_eq!(*stamped.lock().unwrap(), Some(true));
+    assert!(!runs.running("m1"));
+    assert_eq!(runs.login_mark("m1", Tool::Codex), Some((NOW, true)));
 }

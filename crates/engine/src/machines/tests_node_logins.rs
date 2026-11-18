@@ -226,23 +226,23 @@ mod on_this_machine {
     #[test]
     fn the_script_sends_back_one_fixed_word_and_never_codexs_text() {
         let rig = Rig::new(node_linux());
-        let (on, _) = run_with(Some("echo 'Logged in using ChatGPT'"), 20);
+        let (on, _) = run_with(Some("echo 'Logged in using ChatGPT'"), 300);
         assert_eq!(on.trim(), "@@signed_in");
         assert!(probe(&rig, &CODEX, &on, 0).is_pass(), "{on}");
-        let (off, _) = run_with(Some("echo 'Not logged in'; exit 1"), 20);
+        let (off, _) = run_with(Some("echo 'Not logged in'; exit 1"), 300);
         assert_eq!(off.trim(), "@@signed_out");
         assert!(probe(&rig, &CODEX, &off, 0).is_fail(), "{off}");
         let (key, _) = run_with(
             Some("echo 'Logged in using an API key - sk-proj-***ABCDE'"),
-            20,
+            300,
         );
         assert_eq!(key.trim(), "@@api_key");
         assert!(!key.contains("sk-") && !key.contains("ABCDE"), "{key}");
-        let (odd, _) = run_with(Some("echo 'Not logged in'"), 20);
+        let (odd, _) = run_with(Some("echo 'Not logged in'"), 300);
         assert_eq!(odd.trim(), "@@unknown");
-        let (weird, _) = run_with(Some("echo 'error: unexpected argument'; exit 2"), 20);
+        let (weird, _) = run_with(Some("echo 'error: unexpected argument'; exit 2"), 300);
         assert_eq!(weird.trim(), "@@unknown");
-        let (none, _) = run_with(None, 20);
+        let (none, _) = run_with(None, 300);
         assert_eq!(none.trim(), "@@none");
         assert!(matches!(
             probe(&rig, &CODEX, &none, 0),

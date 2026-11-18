@@ -114,7 +114,7 @@ impl Shared {
                         }
                     }
                     None => {
-                        reported.insert((id.to_owned(), key), (print, now));
+                        reported.insert((id.to_owned(), key), (print, 0));
                     }
                 }
             }

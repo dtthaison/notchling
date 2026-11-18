@@ -523,21 +523,21 @@ pub fn settle_sign_in(
     id: u64,
     cancel: &Arc<AtomicBool>,
     outcome: &FixOutcome,
-    now: i64,
+    now: &dyn Fn() -> i64,
 ) {
     let cancelled = cancel.load(Ordering::SeqCst);
     runs.close_session(&go.machine, cancel);
     if cancelled {
-        let said = t::cluster::tool_sign_in_cancelled(go.tool.title(), &go.machine);
-        runs.finish_run(&go.machine, id, &FixOutcome::fail(said));
         let check = engine.check_login(&go.machine, go.tool, &go.node);
         if let Some(signed) = check.signed {
-            runs.mark_login_run(&go.machine, id, go.tool, signed, now);
+            runs.mark_login_run(&go.machine, id, go.tool, signed, now());
         }
+        let said = t::cluster::tool_sign_in_cancelled(go.tool.title(), &go.machine);
+        runs.finish_run(&go.machine, id, &FixOutcome::fail(said));
         return;
     }
     if outcome.ok {
-        runs.mark_login_run(&go.machine, id, go.tool, true, now);
+        runs.mark_login_run(&go.machine, id, go.tool, true, now());
     }
     runs.finish_run(&go.machine, id, outcome);
     if runs.is_current(&go.machine, id) {

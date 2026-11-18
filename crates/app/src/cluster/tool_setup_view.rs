@@ -123,7 +123,7 @@ impl ClusterSheetView {
                         Some(busy) => busy,
                         None => run_sign_in(&engine, &runs, &go, sink, cancel.clone()),
                     };
-                    settle_sign_in(&engine, &runs, &go, id, &cancel, &outcome, now_ms());
+                    settle_sign_in(&engine, &runs, &go, id, &cancel, &outcome, &now_ms);
                     feed.refresh();
                 })
                 .await;
@@ -371,7 +371,7 @@ impl ClusterSheetView {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.tools
                         .runs
-                        .cancel(&to, &t::cluster::tool_sign_in_cancelled(tool.title(), &to));
+                        .cancel(&to, &t::cluster::tool_sign_in_stopping(&to));
                     this.tools.seen = None;
                     cx.notify();
                 })),
