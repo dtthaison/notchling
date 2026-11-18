@@ -14,6 +14,7 @@ pub fn policy_for(titled_windows: usize) -> Policy {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainItem {
+    About,
     Settings,
     Quit,
     Undo,
@@ -30,6 +31,7 @@ pub enum MainItem {
 impl MainItem {
     pub fn title(self) -> &'static str {
         match self {
+            MainItem::About => "About Notchling",
             MainItem::Settings => "Settings…",
             MainItem::Quit => "Quit Notchling",
             MainItem::Undo => "Undo",
@@ -46,6 +48,7 @@ impl MainItem {
 
     pub fn key(self) -> Option<&'static str> {
         match self {
+            MainItem::About => None,
             MainItem::Settings => Some("cmd-,"),
             MainItem::Quit => Some("cmd-q"),
             MainItem::Undo => Some("cmd-z"),
@@ -68,10 +71,25 @@ pub struct MainMenu {
 }
 
 pub fn main_menu() -> Vec<MainMenu> {
+    main_menu_for(true)
+}
+
+pub fn main_menu_for(app_shell: bool) -> Vec<MainMenu> {
+    let app_items = if app_shell {
+        vec![
+            MainItem::About,
+            MainItem::Separator,
+            MainItem::Settings,
+            MainItem::Separator,
+            MainItem::Quit,
+        ]
+    } else {
+        vec![MainItem::Quit]
+    };
     vec![
         MainMenu {
             name: "Notchling",
-            items: vec![MainItem::Settings, MainItem::Separator, MainItem::Quit],
+            items: app_items,
         },
         MainMenu {
             name: "Edit",
@@ -114,10 +132,34 @@ mod tests {
             assert!(!item.title().contains("Hide"));
             assert_eq!(
                 item.key().is_some(),
-                *item != MainItem::Separator,
+                !matches!(item, MainItem::Separator | MainItem::About),
                 "{:?}",
                 item
             );
         }
+    }
+
+    #[test]
+    fn app_menu_starts_with_about_then_a_separator() {
+        let app = &main_menu()[0];
+        assert_eq!(app.name, "Notchling");
+        assert_eq!(
+            app.items,
+            [
+                MainItem::About,
+                MainItem::Separator,
+                MainItem::Settings,
+                MainItem::Separator,
+                MainItem::Quit
+            ]
+        );
+        assert_eq!(MainItem::About.title(), "About Notchling");
+    }
+
+    #[test]
+    fn without_the_app_shell_the_app_menu_has_only_quit() {
+        let menus = main_menu_for(false);
+        assert_eq!(menus[0].items, [MainItem::Quit]);
+        assert_eq!(menus[1..], main_menu()[1..]);
     }
 }

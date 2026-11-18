@@ -2,11 +2,12 @@ use gpui::{actions, App, KeyBinding, Menu, MenuItem, OsAction};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
-use crate::dock::{main_menu, MainItem, Policy};
+use crate::dock::{main_menu, main_menu_for, MainItem, Policy};
 
 actions!(
     notchling,
     [
+        OpenAbout,
         OpenSettings,
         OpenSearch,
         Quit,
@@ -37,7 +38,7 @@ pub fn apply(policy: Policy) {
 
 pub fn set_main_menu(cx: &mut App, policy: Policy) {
     let menus = match policy {
-        Policy::Regular => main_menu()
+        Policy::Regular => main_menu_for(super::shell::has_shell(cx))
             .into_iter()
             .map(|menu| Menu {
                 name: menu.name.into(),
@@ -52,6 +53,7 @@ pub fn set_main_menu(cx: &mut App, policy: Policy) {
 fn menu_item(item: MainItem) -> MenuItem {
     let title = item.title();
     match item {
+        MainItem::About => MenuItem::action(title, OpenAbout),
         MainItem::Settings => MenuItem::action(title, OpenSettings),
         MainItem::Quit => MenuItem::action(title, Quit),
         MainItem::Undo => MenuItem::os_action(title, Undo, OsAction::Undo),
@@ -68,7 +70,16 @@ fn menu_item(item: MainItem) -> MenuItem {
 
 pub fn register(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.on_action(|_: &OpenSettings, cx| super::shell::open_chat_settings(cx));
+    cx.on_action(|_: &OpenAbout, cx| {
+        if super::shell::has_shell(cx) {
+            crate::welcome::window::open(cx, crate::welcome::window::Which::About)
+        }
+    });
+    cx.on_action(|_: &OpenSettings, cx| {
+        if super::shell::has_shell(cx) {
+            super::shell::open_chat_settings(cx)
+        }
+    });
     cx.on_action(|_: &OpenSearch, cx| crate::search::panel::toggle(cx));
     cx.on_action(|_: &Minimize, cx| {
         if let Some(window) = cx.active_window() {
@@ -103,6 +114,7 @@ pub fn bind_keys(cx: &mut App) {
 
 fn binding(key: &str, item: MainItem) -> KeyBinding {
     match item {
+        MainItem::About => KeyBinding::new(key, OpenAbout, None),
         MainItem::Settings => KeyBinding::new(key, OpenSettings, None),
         MainItem::Quit | MainItem::Separator => KeyBinding::new(key, Quit, None),
         MainItem::Undo => KeyBinding::new(key, Undo, None),

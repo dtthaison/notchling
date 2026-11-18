@@ -479,6 +479,10 @@ pub fn open_chat_secret(cx: &mut App, name: &str) {
     }
 }
 
+pub fn has_shell(cx: &App) -> bool {
+    cx.has_global::<Shell>()
+}
+
 pub fn note_titled(cx: &mut App, id: WindowId) {
     cx.global_mut::<Shell>().titled.insert(id);
     update_dock(cx);
