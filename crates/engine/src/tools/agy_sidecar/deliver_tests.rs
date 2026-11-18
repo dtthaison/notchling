@@ -1,5 +1,8 @@
 use super::agentapi::{AgentApi, ApiError};
-use super::deliver::{send, start, Fail, Pause, Sent, Started, Timing};
+use super::deliver::{
+    send, start, Fail, Pause, Sent, Started, Timing, PICKUP_BUDGET, RUN_BUDGET, START_CALL_WITHIN,
+    WORST_CASE,
+};
 use super::steps::Steps;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -140,18 +143,86 @@ fn a_message_agentapi_took_but_no_step_shows_for_is_unconfirmed_not_lost() {
 }
 
 #[test]
-fn a_failing_agentapi_is_a_visible_failure() {
-    let api = FakeApi::answering(Err(ApiError::Failed("agentapi: boom".into())));
+fn a_program_that_never_started_is_a_failure_because_nothing_was_sent() {
+    for error in [
+        ApiError::Missing,
+        ApiError::NotStarted("agentapi could not start".into()),
+    ] {
+        let api = FakeApi::answering(Err(error.clone()));
+        let steps = Counts::of(&[Some(1)]);
+        assert_eq!(
+            send(&api, &steps, &NoPause, ID, "hello", FAST),
+            Err(Fail::Api(error.to_string()))
+        );
+        assert!(matches!(
+            start(&api, &steps, &NoPause, "x", None, None, FAST),
+            Err(Fail::Api(_))
+        ));
+    }
+}
+
+#[test]
+fn a_timeout_or_a_bad_exit_after_it_started_may_have_sent_so_it_is_unconfirmed() {
+    for error in [
+        ApiError::TimedOut,
+        ApiError::Failed("agentapi: boom".into()),
+    ] {
+        let api = FakeApi::answering(Err(error));
+        let steps = Counts::of(&[Some(3)]);
+        assert_eq!(
+            send(&api, &steps, &NoPause, ID, "hello", FAST),
+            Ok(Sent::Unconfirmed { before: 3 })
+        );
+        let steps = Counts::of(&[Some(3), Some(3), Some(4)]);
+        assert_eq!(
+            send(&api, &steps, &NoPause, ID, "hello", FAST),
+            Ok(Sent::Confirmed {
+                before: 3,
+                after: 4
+            })
+        );
+        assert_eq!(
+            start(&api, &steps, &NoPause, "x", None, None, FAST),
+            Ok(Started::Unknown)
+        );
+    }
+}
+
+#[test]
+fn an_answer_that_says_neither_sent_nor_error_is_unconfirmed_and_an_error_answer_is_a_failure() {
+    let api = FakeApi::answering(Ok("{}".into()));
     let steps = Counts::of(&[Some(1)]);
     assert_eq!(
         send(&api, &steps, &NoPause, ID, "hello", FAST),
-        Err(Fail::Api("agentapi: boom".into()))
+        Ok(Sent::Unconfirmed { before: 1 })
     );
-    let api = FakeApi::answering(Ok("{}".into()));
-    assert!(matches!(
+    let api = FakeApi::answering(Ok(r#"{"response":{},"error":"usage: no"}"#.into()));
+    let steps = Counts::of(&[Some(1)]);
+    assert_eq!(
         send(&api, &steps, &NoPause, ID, "hello", FAST),
+        Err(Fail::Api("agentapi: usage: no".into()))
+    );
+    let steps = Counts::of(&[Some(1), Some(2)]);
+    assert_eq!(
+        send(&api, &steps, &NoPause, ID, "hello", FAST),
+        Ok(Sent::Confirmed {
+            before: 1,
+            after: 2
+        })
+    );
+    assert!(matches!(
+        start(&api, &steps, &NoPause, "x", None, None, FAST),
         Err(Fail::Api(_))
     ));
+}
+
+#[test]
+fn the_worst_case_of_one_job_is_the_run_limit_plus_the_polls_and_the_budget_is_above_it() {
+    let worst = super::agentapi::RUN_TIMEOUT + Timing::REAL.poll * Timing::REAL.polls;
+    assert_eq!(WORST_CASE, worst);
+    assert!(RUN_BUDGET >= WORST_CASE + Duration::from_secs(10));
+    assert!(PICKUP_BUDGET >= WORST_CASE + Duration::from_secs(10));
+    assert!(START_CALL_WITHIN >= PICKUP_BUDGET + RUN_BUDGET + Duration::from_secs(10));
 }
 
 #[test]
@@ -159,7 +230,7 @@ fn text_that_looks_like_a_flag_is_passed_as_text() {
     let api = FakeApi::answering(sent_ok());
     let steps = Counts::of(&[Some(1), Some(2)]);
     send(&api, &steps, &NoPause, ID, "--help; rm -rf /", FAST).unwrap();
-    assert_eq!(api.calls()[0][2], "--help; rm -rf /");
+    assert_eq!(api.calls()[0], vec!["send-message", ID, "--help; rm -rf /"]);
     let api = FakeApi::answering(Ok(format!(
         r#"{{"response":{{"newConversation":{{"conversationId":"{NEW}"}}}}}}"#
     )));
@@ -228,8 +299,8 @@ fn a_model_that_is_not_a_plain_name_is_refused_and_a_bad_id_back_is_refused() {
     let api = FakeApi::answering(Ok(
         r#"{"response":{"newConversation":{"conversationId":"../../x"}}}"#.into(),
     ));
-    assert!(matches!(
+    assert_eq!(
         start(&api, &steps, &NoPause, "x", None, None, FAST),
-        Err(Fail::Api(_))
-    ));
+        Ok(Started::Unknown)
+    );
 }

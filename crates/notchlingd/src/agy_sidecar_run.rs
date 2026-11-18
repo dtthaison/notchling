@@ -54,34 +54,10 @@ pub fn execute(job: &Job, work: &Work) -> Outcome {
         ) {
             Ok(Started::Confirmed(id)) => Outcome::Delivered { session: Some(id) },
             Ok(Started::Unconfirmed(id)) => Outcome::Unconfirmed { session: Some(id) },
+            Ok(Started::Unknown) => Outcome::Unconfirmed { session: None },
             Err(fail) => Outcome::Failed(fail.to_string()),
         },
     }
-}
-
-fn report(link: &mut dyn Link, id: &str, outcome: &Outcome) -> Result<(), LinkError> {
-    let mut args = outcome.to_json();
-    args["id"] = json!(id);
-    link.call(ops::AGY_SIDECAR_REPORT, args, REPORT_WITHIN)
-        .map(|_| ())
-}
-
-pub fn serve_once(link: &mut dyn Link, work: &Work) -> Result<usize, LinkError> {
-    let reply = link.call(
-        ops::AGY_SIDECAR_TAKE,
-        json!({"waitMs": TAKE_WAIT_MS}),
-        TAKE_WITHIN,
-    )?;
-    let jobs: Vec<Job> = reply
-        .get("jobs")
-        .and_then(Value::as_array)
-        .map(|list| list.iter().filter_map(Job::from_json).collect())
-        .unwrap_or_default();
-    for job in &jobs {
-        let outcome = execute(job, work);
-        report(link, &job.id, &outcome)?;
-    }
-    Ok(jobs.len())
 }
 
 pub trait Connect {
@@ -92,25 +68,65 @@ pub trait Rest {
     fn rest(&mut self, attempt: u32);
 }
 
+fn report(connect: &mut dyn Connect, rest: &mut dyn Rest, id: &str, outcome: &Outcome) -> bool {
+    let mut args = outcome.to_json();
+    args["id"] = json!(id);
+    for attempt in 0..=RETRIES {
+        if attempt > 0 {
+            rest.rest(attempt);
+        }
+        let sent = connect
+            .connect()
+            .and_then(|mut link| link.call(ops::AGY_SIDECAR_REPORT, args.clone(), REPORT_WITHIN));
+        match sent {
+            Ok(_) => return true,
+            Err(LinkError::Refused(_)) => return false,
+            Err(LinkError::Gone) => {}
+        }
+    }
+    false
+}
+
+pub fn serve_once(
+    connect: &mut dyn Connect,
+    rest: &mut dyn Rest,
+    work: &Work,
+) -> Result<usize, LinkError> {
+    let mut link = connect.connect()?;
+    let reply = link.call(
+        ops::AGY_SIDECAR_TAKE,
+        json!({"waitMs": TAKE_WAIT_MS, "max": 1}),
+        TAKE_WITHIN,
+    )?;
+    drop(link);
+    let jobs: Vec<Job> = reply
+        .get("jobs")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Job::from_json).collect())
+        .unwrap_or_default();
+    for job in &jobs {
+        let outcome = execute(job, work);
+        report(connect, rest, &job.id, &outcome);
+    }
+    Ok(jobs.len())
+}
+
 pub fn serve(connect: &mut dyn Connect, rest: &mut dyn Rest, work: &Work, stop: &dyn Fn() -> bool) {
     let mut attempt = 0;
     while !stop() {
-        if let Ok(mut link) = connect.connect() {
-            attempt = 0;
-            while !stop() {
-                if serve_once(&mut *link, work).is_err() {
-                    break;
+        match serve_once(connect, rest, work) {
+            Ok(_) => attempt = 0,
+            Err(_) => {
+                if stop() {
+                    return;
                 }
+                attempt += 1;
+                if attempt > RETRIES {
+                    return;
+                }
+                rest.rest(attempt);
             }
         }
-        if stop() {
-            return;
-        }
-        attempt += 1;
-        if attempt > RETRIES {
-            return;
-        }
-        rest.rest(attempt);
     }
 }
 

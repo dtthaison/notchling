@@ -86,7 +86,8 @@ The app:
   hooks and keys kept); on a worker set up in Machines, only the one key per tool that turns its
   self-update off (with a backup, everything else kept); in Antigravity's `~/.gemini/config` only
   Notchling's own entries in `hooks.json` and, after you confirm Turn On in Settings, the one key
-  `sidecars."notchling/sidecar".enabled` in `config.json` (with a backup, everything else kept);
+  `sidecars."notchling/sidecar".enabled` in `config.json`, which Turn Off removes again (with a
+  backup each time, everything else kept);
   only `claudeAiOauth` in the `Claude Code-credentials` Keychain item; only `oauthAccount` in
   `~/.claude.json`.
 - Write anything into an agent tool's folders but its own instructions: the `notchling-*` files and

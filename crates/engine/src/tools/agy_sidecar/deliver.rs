@@ -1,9 +1,15 @@
 use super::agentapi::{
-    message_was_sent, new_conversation_args, new_conversation_id, send_message_args, AgentApi,
+    message_was_sent, new_conversation_args, new_conversation_id, reported_error,
+    send_message_args, AgentApi, ApiError,
 };
 use super::ids::is_uuid;
 use super::steps::Steps;
 use std::time::Duration;
+
+pub const WORST_CASE: Duration = Duration::from_secs(80);
+pub const RUN_BUDGET: Duration = Duration::from_secs(100);
+pub const PICKUP_BUDGET: Duration = Duration::from_secs(100);
+pub const START_CALL_WITHIN: Duration = Duration::from_secs(220);
 
 #[derive(Clone, Copy, Debug)]
 pub struct Timing {
@@ -40,6 +46,7 @@ pub enum Sent {
 pub enum Started {
     Confirmed(String),
     Unconfirmed(String),
+    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +70,10 @@ impl std::fmt::Display for Fail {
     }
 }
 
+fn surely_not_sent(error: &ApiError) -> bool {
+    matches!(error, ApiError::Missing | ApiError::NotStarted(_))
+}
+
 pub fn send(
     api: &dyn AgentApi,
     steps: &dyn Steps,
@@ -78,11 +89,18 @@ pub fn send(
         return Err(Fail::NoConversation);
     };
     let args = send_message_args(conversation, text).map_err(Fail::Refused)?;
-    let output = api.run(&args).map_err(|e| Fail::Api(e.to_string()))?;
-    if !message_was_sent(&output) {
-        return Err(Fail::Api(
-            "agentapi did not say the message was sent".into(),
-        ));
+    match api.run(&args) {
+        Err(e) if surely_not_sent(&e) => return Err(Fail::Api(e.to_string())),
+        Ok(output) if message_was_sent(&output) => {}
+        Ok(output) => {
+            if let Some(why) = reported_error(&output) {
+                return match steps.count(conversation).filter(|n| *n > before) {
+                    Some(after) => Ok(Sent::Confirmed { before, after }),
+                    None => Err(Fail::Api(why)),
+                };
+            }
+        }
+        Err(_) => {}
     }
     for _ in 0..timing.polls {
         if let Some(after) = steps.count(conversation).filter(|n| *n > before) {
@@ -103,8 +121,20 @@ pub fn start(
     timing: Timing,
 ) -> Result<Started, Fail> {
     let args = new_conversation_args(text, model, title).map_err(Fail::Refused)?;
-    let output = api.run(&args).map_err(|e| Fail::Api(e.to_string()))?;
-    let id = new_conversation_id(&output).map_err(Fail::Api)?;
+    let output = match api.run(&args) {
+        Err(e) if surely_not_sent(&e) => return Err(Fail::Api(e.to_string())),
+        Err(_) => return Ok(Started::Unknown),
+        Ok(output) => output,
+    };
+    let id = match new_conversation_id(&output) {
+        Ok(id) => id,
+        Err(_) => {
+            return match reported_error(&output) {
+                Some(reported) => Err(Fail::Api(reported)),
+                None => Ok(Started::Unknown),
+            }
+        }
+    };
     for _ in 0..timing.polls {
         if steps.count(&id).is_some_and(|n| n > 0) {
             return Ok(Started::Confirmed(id));

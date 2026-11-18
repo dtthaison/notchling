@@ -189,8 +189,8 @@ fn an_id_that_is_not_a_uuid_never_reaches_agentapi() {
 }
 
 #[test]
-fn a_failing_agentapi_is_a_visible_failure() {
-    let api = FakeApi::answering(vec![Err(ApiError::Failed("boom".into()))]);
+fn an_agentapi_that_never_started_is_a_visible_failure_with_its_words() {
+    let api = FakeApi::answering(vec![Err(ApiError::Missing)]);
     let steps = Counts::of(&[Some(1)]);
     let work = Work {
         api: &api,
@@ -200,7 +200,7 @@ fn a_failing_agentapi_is_a_visible_failure() {
     };
     assert_eq!(
         execute(&reply("r1", ID), &work),
-        Outcome::Failed("boom".into())
+        Outcome::Failed("agentapi was not found".into())
     );
 }
 
@@ -242,88 +242,69 @@ fn a_new_conversation_reports_its_id_and_passes_only_a_plain_model_name() {
     assert!(api.calls().is_empty());
 }
 
-struct Script {
+#[derive(Default)]
+struct Hub {
     takes: VecDeque<Result<Value, LinkError>>,
-    reports: Vec<Value>,
-    report_fails: bool,
+    take_args: Vec<Value>,
+    reports: Vec<(u32, Value)>,
+    report_failures: u32,
+    report_refused: bool,
+    connects: u32,
+    connect_fails: VecDeque<bool>,
+    take_on: Vec<u32>,
 }
 
-impl Link for Script {
+type Shared = Arc<Mutex<Hub>>;
+
+struct HubLink {
+    hub: Shared,
+    n: u32,
+}
+
+impl Link for HubLink {
     fn call(&mut self, op: &str, args: Value, _: Duration) -> Result<Value, LinkError> {
+        let mut hub = self.hub.lock().unwrap();
         if op == ops::AGY_SIDECAR_REPORT {
-            if self.report_fails {
+            if hub.report_refused {
+                return Err(LinkError::Refused("no".into()));
+            }
+            if hub.report_failures > 0 {
+                hub.report_failures -= 1;
                 return Err(LinkError::Gone);
             }
-            self.reports.push(args);
+            hub.reports.push((self.n, args));
             return Ok(json!({"accepted": true}));
         }
         assert_eq!(op, ops::AGY_SIDECAR_TAKE);
-        self.takes.pop_front().unwrap_or(Err(LinkError::Gone))
+        hub.take_args.push(args);
+        hub.take_on.push(self.n);
+        hub.takes.pop_front().unwrap_or(Err(LinkError::Gone))
     }
 }
 
-fn script(takes: Vec<Result<Value, LinkError>>) -> Script {
-    Script {
-        takes: takes.into(),
-        reports: Vec::new(),
-        report_fails: false,
-    }
-}
+struct HubConnect(Shared);
 
-#[test]
-fn every_taken_job_is_reported_with_its_own_id() {
-    let api = FakeApi::answering(vec![sent(), sent()]);
-    let steps = Counts::of(&[Some(1), Some(2), Some(2), Some(3)]);
-    let work = Work {
-        api: &api,
-        steps: &steps,
-        pause: &NoPause,
-        timing: FAST,
-    };
-    let mut link = script(vec![Ok(json!({"jobs": [
-        reply("a", ID).to_json(),
-        reply("b", ID).to_json(),
-        {"kind": "nope"},
-    ]}))]);
-    assert_eq!(serve_once(&mut link, &work), Ok(2));
-    let ids: Vec<&str> = link
-        .reports
-        .iter()
-        .map(|r| r["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(ids, ["a", "b"]);
-    assert_eq!(link.reports[0]["result"], "delivered");
-}
-
-#[test]
-fn a_report_that_cannot_be_sent_ends_the_connection_so_it_is_retried() {
-    let api = FakeApi::answering(vec![sent()]);
-    let steps = Counts::of(&[Some(1), Some(2)]);
-    let work = Work {
-        api: &api,
-        steps: &steps,
-        pause: &NoPause,
-        timing: FAST,
-    };
-    let mut link = script(vec![Ok(json!({"jobs": [reply("a", ID).to_json()]}))]);
-    link.report_fails = true;
-    assert_eq!(serve_once(&mut link, &work), Err(LinkError::Gone));
-}
-
-struct Connects {
-    results: VecDeque<Result<Script, LinkError>>,
-    tried: u32,
-}
-
-impl Connect for Connects {
+impl Connect for HubConnect {
     fn connect(&mut self) -> Result<Box<dyn Link>, LinkError> {
-        self.tried += 1;
-        match self.results.pop_front() {
-            Some(Ok(link)) => Ok(Box::new(link)),
-            Some(Err(e)) => Err(e),
-            None => Err(LinkError::Gone),
+        let mut hub = self.0.lock().unwrap();
+        hub.connects += 1;
+        let n = hub.connects;
+        if hub.connect_fails.pop_front().unwrap_or(false) {
+            return Err(LinkError::Gone);
         }
+        Ok(Box::new(HubLink {
+            hub: self.0.clone(),
+            n,
+        }))
     }
+}
+
+fn hub(takes: Vec<Result<Value, LinkError>>) -> (Shared, HubConnect) {
+    let shared: Shared = Arc::new(Mutex::new(Hub {
+        takes: takes.into(),
+        ..Hub::default()
+    }));
+    (shared.clone(), HubConnect(shared))
 }
 
 #[derive(Default)]
@@ -335,49 +316,139 @@ impl Rest for Rests {
     }
 }
 
+fn working<'a>(api: &'a FakeApi, steps: &'a Counts) -> Work<'a> {
+    Work {
+        api,
+        steps,
+        pause: &NoPause,
+        timing: FAST,
+    }
+}
+
+#[test]
+fn every_taken_job_is_reported_with_its_own_id_and_each_take_asks_for_one_job() {
+    let api = FakeApi::answering(vec![sent(), sent()]);
+    let steps = Counts::of(&[Some(1), Some(2), Some(2), Some(3)]);
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(vec![Ok(json!({"jobs": [
+        reply("a", ID).to_json(),
+        reply("b", ID).to_json(),
+        {"kind": "nope"},
+    ]}))]);
+    let mut rests = Rests::default();
+    assert_eq!(serve_once(&mut connect, &mut rests, &work), Ok(2));
+    let hub = shared.lock().unwrap();
+    let ids: Vec<&str> = hub
+        .reports
+        .iter()
+        .map(|(_, r)| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["a", "b"]);
+    assert_eq!(hub.reports[0].1["result"], "delivered");
+    assert_eq!(hub.take_args[0]["max"], 1);
+}
+
+#[test]
+fn a_result_goes_back_on_a_fresh_connection_because_the_one_that_took_the_job_sat_idle() {
+    let api = FakeApi::answering(vec![sent()]);
+    let steps = Counts::of(&[Some(1), Some(2)]);
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(vec![Ok(json!({"jobs": [reply("a", ID).to_json()]}))]);
+    let mut rests = Rests::default();
+    serve_once(&mut connect, &mut rests, &work).unwrap();
+    let hub = shared.lock().unwrap();
+    assert_eq!(hub.take_on, vec![1]);
+    assert_eq!(hub.reports.len(), 1);
+    assert_ne!(hub.reports[0].0, 1);
+}
+
+#[test]
+fn a_report_that_fails_is_retried_until_it_lands_and_the_outcome_is_not_lost() {
+    let api = FakeApi::answering(vec![sent()]);
+    let steps = Counts::of(&[Some(1), Some(2)]);
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(vec![Ok(json!({"jobs": [reply("a", ID).to_json()]}))]);
+    {
+        let mut hub = shared.lock().unwrap();
+        hub.report_failures = 3;
+        hub.connect_fails = VecDeque::from([false, true]);
+    }
+    let mut rests = Rests::default();
+    assert_eq!(serve_once(&mut connect, &mut rests, &work), Ok(1));
+    let hub = shared.lock().unwrap();
+    assert_eq!(hub.reports.len(), 1);
+    assert_eq!(hub.reports[0].1["id"], "a");
+    assert_eq!(rests.0, vec![1, 2, 3, 4]);
+}
+
+#[test]
+fn a_report_the_daemon_refuses_is_not_retried_and_one_for_a_gone_daemon_gives_up() {
+    let api = FakeApi::answering(vec![sent(), sent()]);
+    let steps = Counts::of(&[Some(1), Some(2), Some(2), Some(3)]);
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(vec![Ok(json!({"jobs": [reply("a", ID).to_json()]}))]);
+    shared.lock().unwrap().report_refused = true;
+    let mut rests = Rests::default();
+    assert_eq!(serve_once(&mut connect, &mut rests, &work), Ok(1));
+    assert!(rests.0.is_empty());
+    assert_eq!(shared.lock().unwrap().connects, 2);
+
+    let (shared, mut connect) = hub(vec![Ok(json!({"jobs": [reply("b", ID).to_json()]}))]);
+    shared.lock().unwrap().report_failures = 1000;
+    let mut rests = Rests::default();
+    assert_eq!(serve_once(&mut connect, &mut rests, &work), Ok(1));
+    assert_eq!(rests.0, (1..=RETRIES).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_batch_is_never_dropped_when_one_report_cannot_be_delivered() {
+    let api = FakeApi::answering(vec![sent(), sent()]);
+    let steps = Counts::of(&[Some(1), Some(2), Some(2), Some(3)]);
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(vec![Ok(json!({"jobs": [
+        reply("a", ID).to_json(),
+        reply("b", ID).to_json(),
+    ]}))]);
+    shared.lock().unwrap().report_failures = 1;
+    let mut rests = Rests::default();
+    assert_eq!(serve_once(&mut connect, &mut rests, &work), Ok(2));
+    let hub = shared.lock().unwrap();
+    let ids: Vec<&str> = hub
+        .reports
+        .iter()
+        .map(|(_, r)| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["a", "b"]);
+    assert_eq!(api.calls().len(), 2);
+}
+
 #[test]
 fn it_reconnects_when_the_daemon_comes_back() {
     let api = FakeApi::default();
     let steps = Counts::of(&[]);
-    let work = Work {
-        api: &api,
-        steps: &steps,
-        pause: &NoPause,
-        timing: FAST,
-    };
-    let mut connects = Connects {
-        results: vec![
-            Err(LinkError::Gone),
-            Ok(script(vec![Ok(json!({"jobs": []})), Err(LinkError::Gone)])),
-            Err(LinkError::Gone),
-            Ok(script(vec![Ok(json!({"jobs": []}))])),
-        ]
-        .into(),
-        tried: 0,
-    };
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(vec![
+        Ok(json!({"jobs": []})),
+        Err(LinkError::Gone),
+        Ok(json!({"jobs": []})),
+    ]);
+    shared.lock().unwrap().connect_fails = VecDeque::from([true, false, false, true, false]);
     let mut rests = Rests::default();
-    serve(&mut connects, &mut rests, &work, &|| false);
-    assert!(connects.tried >= 4);
-    assert!(connects.results.is_empty());
+    serve(&mut connect, &mut rests, &work, &|| false);
+    assert!(shared.lock().unwrap().connects >= 5);
+    assert!(shared.lock().unwrap().takes.is_empty());
 }
 
 #[test]
 fn it_exits_cleanly_when_the_daemon_stays_gone() {
     let api = FakeApi::default();
     let steps = Counts::of(&[]);
-    let work = Work {
-        api: &api,
-        steps: &steps,
-        pause: &NoPause,
-        timing: FAST,
-    };
-    let mut connects = Connects {
-        results: VecDeque::new(),
-        tried: 0,
-    };
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(Vec::new());
+    shared.lock().unwrap().connect_fails = VecDeque::from(vec![true; 100]);
     let mut rests = Rests::default();
-    serve(&mut connects, &mut rests, &work, &|| false);
-    assert_eq!(connects.tried, RETRIES + 1);
+    serve(&mut connect, &mut rests, &work, &|| false);
+    assert_eq!(shared.lock().unwrap().connects, RETRIES + 1);
     assert_eq!(rests.0, (1..=RETRIES).collect::<Vec<_>>());
 }
 
@@ -385,21 +456,40 @@ fn it_exits_cleanly_when_the_daemon_stays_gone() {
 fn it_stops_at_once_when_asked() {
     let api = FakeApi::default();
     let steps = Counts::of(&[]);
-    let work = Work {
-        api: &api,
-        steps: &steps,
-        pause: &NoPause,
-        timing: FAST,
-    };
-    let mut connects = Connects {
-        results: VecDeque::new(),
-        tried: 0,
-    };
+    let work = working(&api, &steps);
+    let (shared, mut connect) = hub(Vec::new());
     let mut rests = Rests::default();
-    let stopped = Arc::new(Mutex::new(true));
-    let flag = stopped.clone();
-    serve(&mut connects, &mut rests, &work, &move || {
-        *flag.lock().unwrap()
-    });
-    assert_eq!(connects.tried, 0);
+    serve(&mut connect, &mut rests, &work, &|| true);
+    assert_eq!(shared.lock().unwrap().connects, 0);
+}
+
+#[test]
+fn a_timeout_or_a_bad_exit_after_agentapi_started_is_reported_unconfirmed_not_failed() {
+    for error in [
+        ApiError::TimedOut,
+        ApiError::Failed("agentapi: boom".into()),
+    ] {
+        let api = FakeApi::answering(vec![Err(error)]);
+        let steps = Counts::of(&[Some(1)]);
+        assert_eq!(
+            execute(&reply("r1", ID), &working(&api, &steps)),
+            Outcome::Unconfirmed {
+                session: Some(ID.into())
+            }
+        );
+    }
+    let api = FakeApi::answering(vec![Err(ApiError::TimedOut)]);
+    let steps = Counts::of(&[]);
+    assert_eq!(
+        execute(&start("s1", None), &working(&api, &steps)),
+        Outcome::Unconfirmed { session: None }
+    );
+    let api = FakeApi::answering(vec![Err(ApiError::NotStarted(
+        "agentapi could not start".into(),
+    ))]);
+    let steps = Counts::of(&[Some(1)]);
+    assert!(matches!(
+        execute(&reply("r1", ID), &working(&api, &steps)),
+        Outcome::Failed(_)
+    ));
 }

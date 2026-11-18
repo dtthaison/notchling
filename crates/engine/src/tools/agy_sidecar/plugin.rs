@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub const MARK: &str = ".notchling-plugin";
 pub const MARK_TEXT: &str =
-    "Written by Notchling. Turn it off in Notchling > Settings > Agents. If you edit these files, Notchling stops changing them.\n";
+    "Notchling manages these files and rewrites them when it updates; an edited file is copied to a notchling-backup file next to Antigravity's config first. Turn it off in Notchling > Settings.\n";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Plugin {
@@ -65,52 +65,99 @@ pub fn installed_for(roots: &Roots, binary: &Path) -> bool {
             == Some(want)
 }
 
-fn put(path: &Path, value: &Value) -> Result<bool, String> {
+fn put(roots: &Roots, path: &Path, value: &Value, stamp: u64) -> Result<bool, String> {
     let text = format!(
         "{}\n",
         serde_json::to_string_pretty(value).map_err(|e| e.to_string())?
     );
-    put_text(path, &text)
+    put_text(roots, path, &text, stamp)
 }
 
-fn put_text(path: &Path, text: &str) -> Result<bool, String> {
+fn back_up(roots: &Roots, path: &Path, old: &str, stamp: u64) -> Result<(), String> {
+    let name = path
+        .strip_prefix(roots.plugin_dir())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('/', "-");
+    let base = format!("notchling-plugin-{name}.notchling-backup-{stamp}");
+    for n in 0..100 {
+        let leaf = if n == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{n}")
+        };
+        let target = roots.config.join(leaf);
+        if std::fs::symlink_metadata(&target).is_ok() {
+            continue;
+        }
+        return notchling_platform::files::write_private_no_follow(&target, old.as_bytes())
+            .map_err(|e| format!("could not back up {}: {e}", path.display()));
+    }
+    Err(format!("no free name to back up {}", path.display()))
+}
+
+fn put_text(roots: &Roots, path: &Path, text: &str, stamp: u64) -> Result<bool, String> {
     if is_link(path) {
         return Err(format!("{} is a link; it was left alone", path.display()));
     }
-    if std::fs::read_to_string(path).is_ok_and(|now| now == text) {
+    let old = std::fs::read_to_string(path).ok();
+    if old.as_deref() == Some(text) {
         return Ok(false);
+    }
+    if let Some(old) = old.filter(|old| !old.is_empty()) {
+        back_up(roots, path, &old, stamp)?;
     }
     notchling_platform::files::write_private_no_follow(path, text.as_bytes())
         .map_err(|e| format!("could not write {}: {e}", path.display()))?;
     Ok(true)
 }
 
-pub fn install(roots: &Roots, binary: &Path) -> Result<bool, String> {
-    let sidecar = sidecar_json(binary)?;
-    match state(roots) {
-        Plugin::Foreign => {
-            return Err(
-                "a plugin named notchling is already in Antigravity's plugins folder and isn't Notchling's; it was left alone"
-                    .into(),
-            )
-        }
-        Plugin::Absent | Plugin::Ours => {}
+pub fn preflight(roots: &Roots, binary: &Path) -> Result<(), String> {
+    sidecar_json(binary)?;
+    if state(roots) == Plugin::Foreign {
+        return Err(
+            "a plugin named notchling is already in Antigravity's plugins folder and isn't Notchling's; it was left alone"
+                .into(),
+        );
     }
     if !roots.config.is_dir() {
         return Err("Antigravity's config folder is not there yet".into());
     }
     let dir = roots.plugin_dir();
     let leaf = sidecar_dir(roots);
-    for folder in [&dir, &leaf] {
-        if is_link(folder) {
-            return Err(format!("{} is a link; it was left alone", folder.display()));
+    let files = [
+        dir.join(MARK),
+        dir.join("plugin.json"),
+        leaf.join("sidecar.json"),
+    ];
+    for path in [&dir, &dir.join("sidecars"), &leaf]
+        .into_iter()
+        .chain(&files)
+    {
+        if is_link(path) {
+            return Err(format!("{} is a link; it was left alone", path.display()));
         }
+    }
+    for path in &files {
+        if path.is_dir() {
+            return Err(format!("{} is a folder; it was left alone", path.display()));
+        }
+    }
+    Ok(())
+}
+
+pub fn install(roots: &Roots, binary: &Path, stamp: u64) -> Result<bool, String> {
+    preflight(roots, binary)?;
+    let sidecar = sidecar_json(binary)?;
+    let dir = roots.plugin_dir();
+    let leaf = sidecar_dir(roots);
+    for folder in [&dir, &leaf] {
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("could not make {}: {e}", folder.display()))?;
     }
-    let mut changed = put_text(&dir.join(MARK), MARK_TEXT)?;
-    changed |= put(&dir.join("plugin.json"), &manifest())?;
-    changed |= put(&leaf.join("sidecar.json"), &sidecar)?;
+    let mut changed = put_text(roots, &dir.join(MARK), MARK_TEXT, stamp)?;
+    changed |= put(roots, &dir.join("plugin.json"), &manifest(), stamp)?;
+    changed |= put(roots, &leaf.join("sidecar.json"), &sidecar, stamp)?;
     Ok(changed)
 }
 

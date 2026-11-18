@@ -4,6 +4,8 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 pub const KEEP_DONE: Duration = Duration::from_secs(3600);
+pub const KEEP_TAKEN: Duration = Duration::from_secs(600);
+pub const SLICE: Duration = Duration::from_millis(250);
 pub const STOP_KEEP: Duration = Duration::from_secs(120);
 pub const MAX_PENDING: usize = 64;
 
@@ -102,10 +104,16 @@ pub enum Cancelled {
     Gone,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Patience {
+    pub pickup: Duration,
+    pub run: Duration,
+}
+
 #[derive(Debug)]
 enum State {
     Pending,
-    Taken,
+    Taken(Instant),
     Done(Outcome, Instant),
 }
 
@@ -113,19 +121,45 @@ enum State {
 struct Inner {
     jobs: BTreeMap<u64, (Job, State)>,
     next: u64,
-    seen_ms: Option<i64>,
+    seen: Option<(i64, Option<u32>)>,
     closed: bool,
+    waiters: usize,
+    epoch: u64,
 }
 
-#[derive(Default)]
+impl Inner {
+    fn prune(&mut self, keep_taken: Duration) {
+        self.jobs.retain(|_, (_, s)| match s {
+            State::Done(_, at) => at.elapsed() <= KEEP_DONE,
+            State::Taken(at) => at.elapsed() <= keep_taken,
+            State::Pending => true,
+        });
+    }
+}
+
 pub struct Queue {
     inner: Mutex<Inner>,
     changed: Condvar,
+    keep_taken: Duration,
+}
+
+impl Default for Queue {
+    fn default() -> Queue {
+        Queue::keeping_taken(KEEP_TAKEN)
+    }
 }
 
 impl Queue {
     pub fn new() -> Queue {
         Queue::default()
+    }
+
+    pub fn keeping_taken(keep_taken: Duration) -> Queue {
+        Queue {
+            inner: Mutex::new(Inner::default()),
+            changed: Condvar::new(),
+            keep_taken,
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -150,9 +184,7 @@ impl Queue {
         if inner.jobs.values().any(|(known, _)| known.id == job.id) {
             return Ok(());
         }
-        inner
-            .jobs
-            .retain(|_, (_, s)| !matches!(s, State::Done(_, at) if at.elapsed() > KEEP_DONE));
+        inner.prune(self.keep_taken);
         let pending = inner
             .jobs
             .values()
@@ -169,39 +201,66 @@ impl Queue {
     }
 
     pub fn seen(&self, now_ms: i64) {
-        self.lock().seen_ms = Some(now_ms);
+        self.lock().seen = Some((now_ms, None));
+    }
+
+    pub fn seen_by(&self, now_ms: i64, pid: u32) {
+        self.lock().seen = Some((now_ms, Some(pid)));
+    }
+
+    pub fn last_pid(&self) -> Option<u32> {
+        self.lock().seen.and_then(|(_, pid)| pid)
     }
 
     pub fn alive(&self, now_ms: i64, within_ms: i64) -> bool {
-        self.lock()
-            .seen_ms
-            .is_some_and(|at| now_ms - at <= within_ms)
+        let mut inner = self.lock();
+        inner.prune(self.keep_taken);
+        let busy = inner.jobs.values().any(
+            |(_, s)| matches!(s, State::Taken(at) if at.elapsed() < super::deliver::RUN_BUDGET),
+        );
+        inner.waiters > 0 || busy || inner.seen.is_some_and(|(at, _)| now_ms - at <= within_ms)
     }
 
     pub fn take(&self, wait: Duration) -> Vec<Job> {
+        self.take_for(wait, usize::MAX, &|| true)
+    }
+
+    pub fn take_for(&self, wait: Duration, max: usize, alive: &dyn Fn() -> bool) -> Vec<Job> {
         let deadline = Instant::now() + wait;
         let mut inner = self.lock();
-        loop {
+        inner.epoch += 1;
+        let mine = inner.epoch;
+        inner.waiters += 1;
+        self.changed.notify_all();
+        let got = loop {
+            if inner.closed || inner.epoch != mine || !alive() {
+                break Vec::new();
+            }
             let mut got = Vec::new();
             for (job, state) in inner.jobs.values_mut() {
+                if got.len() >= max {
+                    break;
+                }
                 if matches!(state, State::Pending) {
-                    *state = State::Taken;
+                    *state = State::Taken(Instant::now());
                     got.push(job.clone());
                 }
             }
-            if !got.is_empty() || inner.closed {
-                return got;
+            if !got.is_empty() {
+                break got;
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return got;
+                break got;
             }
             inner = self
                 .changed
-                .wait_timeout(inner, left)
+                .wait_timeout(inner, left.min(SLICE))
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
-        }
+        };
+        inner.waiters -= 1;
+        got
     }
 
     pub fn report(&self, id: &str, outcome: Outcome) -> bool {
@@ -209,7 +268,7 @@ impl Queue {
         let Some((_, state)) = inner
             .jobs
             .values_mut()
-            .find(|(job, state)| job.id == id && matches!(state, State::Taken))
+            .find(|(job, state)| job.id == id && matches!(state, State::Taken(_)))
         else {
             return false;
         };
@@ -219,15 +278,42 @@ impl Queue {
     }
 
     pub fn wait(&self, id: &str, timeout: Duration) -> Option<Outcome> {
-        let deadline = Instant::now() + timeout;
+        self.wait_patient(
+            id,
+            Patience {
+                pickup: timeout,
+                run: timeout,
+            },
+            &|| true,
+        )
+    }
+
+    pub fn wait_patient(
+        &self,
+        id: &str,
+        patience: Patience,
+        still_up: &dyn Fn() -> bool,
+    ) -> Option<Outcome> {
+        let started = Instant::now();
         let mut inner = self.lock();
+        let mut check_due = true;
         loop {
-            let found = inner.jobs.values().find(|(job, _)| job.id == id);
-            match found {
+            let (deadline, check) = match inner.jobs.values().find(|(job, _)| job.id == id) {
                 None => return None,
                 Some((_, State::Done(outcome, _))) => return Some(outcome.clone()),
                 Some(_) if inner.closed => return None,
-                Some(_) => {}
+                Some((_, State::Pending)) => (started + patience.pickup, true),
+                Some((_, State::Taken(at))) => (*at + patience.run, false),
+            };
+            if check && check_due {
+                drop(inner);
+                let up = still_up();
+                inner = self.lock();
+                check_due = false;
+                if !up {
+                    return None;
+                }
+                continue;
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -235,9 +321,10 @@ impl Queue {
             }
             inner = self
                 .changed
-                .wait_timeout(inner, left)
+                .wait_timeout(inner, left.min(SLICE))
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
+            check_due = true;
         }
     }
 
@@ -247,7 +334,13 @@ impl Queue {
             .jobs
             .iter()
             .find(|(_, (job, _))| job.id == id)
-            .map(|(k, (_, s))| (*k, matches!(s, State::Pending), matches!(s, State::Taken)));
+            .map(|(k, (_, s))| {
+                (
+                    *k,
+                    matches!(s, State::Pending),
+                    matches!(s, State::Taken(_)),
+                )
+            });
         match key {
             Some((k, true, _)) => {
                 inner.jobs.remove(&k);

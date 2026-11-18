@@ -12,6 +12,7 @@ const MAX_TITLE: usize = 120;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiError {
     Missing,
+    NotStarted(String),
     Failed(String),
     TimedOut,
 }
@@ -20,7 +21,7 @@ impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ApiError::Missing => write!(f, "agentapi was not found"),
-            ApiError::Failed(why) => write!(f, "{why}"),
+            ApiError::NotStarted(why) | ApiError::Failed(why) => write!(f, "{why}"),
             ApiError::TimedOut => write!(f, "agentapi took too long"),
         }
     }
@@ -86,6 +87,15 @@ pub fn new_conversation_id(output: &str) -> Result<String, String> {
     }
 }
 
+pub fn reported_error(output: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(output.trim()).ok()?;
+    let why = value.get("error")?.as_str()?;
+    Some(format!(
+        "agentapi: {}",
+        why.chars().take(200).collect::<String>()
+    ))
+}
+
 pub fn message_was_sent(output: &str) -> bool {
     serde_json::from_str::<Value>(output.trim())
         .ok()
@@ -138,7 +148,7 @@ impl AgentApi for RealAgentApi {
             .spawn()
             .map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => ApiError::Missing,
-                _ => ApiError::Failed(format!("agentapi could not start: {}", e.kind())),
+                _ => ApiError::NotStarted(format!("agentapi could not start: {}", e.kind())),
             })?;
         let out = child.stdout.take().map(drain);
         let err = child.stderr.take().map(drain);

@@ -1,4 +1,5 @@
 pub mod agentapi;
+pub mod bundle;
 pub mod config_file;
 pub mod deliver;
 pub mod hook_io;
@@ -64,6 +65,8 @@ impl Roots {
 
 #[cfg(test)]
 mod agentapi_tests;
+#[cfg(test)]
+mod bundle_tests;
 #[cfg(test)]
 mod config_file_tests;
 #[cfg(test)]

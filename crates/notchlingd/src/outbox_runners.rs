@@ -87,7 +87,8 @@ impl Courier for AgyCourier {
     }
 
     fn deliver(&self, row: &Row, _guarded: bool) -> (TryEnd, Tried, Option<String>) {
-        ended(self.ops.deliver(&row.id, bare(row, "agy:"), &row.text))
+        let attempt = format!("{}-{}", row.id, row.tries);
+        ended(self.ops.deliver(&attempt, bare(row, "agy:"), &row.text))
     }
 
     fn close(&self, _session: &str) {}

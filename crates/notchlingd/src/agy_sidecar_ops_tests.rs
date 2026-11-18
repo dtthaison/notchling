@@ -2,17 +2,20 @@ use super::*;
 use crate::acting_ops_tests::{app, code, setup, FakeRoom, Setup};
 use crate::agy_ops::tests::{self as agy_t};
 use notchling_engine::settings::Settings;
+use notchling_engine::tools::agy_sidecar::bundle::BUNDLE_ID;
+use notchling_engine::tools::agy_sidecar::jobs::Patience;
 use notchling_engine::tools::agy_sidecar::{PLUGIN, SIDECAR_FOLDER};
 use notchling_local_api::Tier;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Instant;
 
 const ID: &str = "457369a9-35a1-40f8-92b9-26b6398b78a1";
 const BINARY: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
 const SIDECAR_PID: u32 = 500;
 const OTHER_PID: u32 = 600;
+const GONE_PID: u32 = 501;
 const CONFIG: &str = "{\n  \"plugins\": {},\n  \"sidecars\": {\"swarm/board\": {\"projectId\": \"p\", \"schemaVersion\": 1}},\n  \"userSettings\": {\"big\": 12345678901234567890}\n}\n";
 
 struct FakeProcs {
@@ -20,15 +23,36 @@ struct FakeProcs {
     exes: HashMap<u32, PathBuf>,
 }
 
+fn fake_app(folder: &str, id: &str) -> PathBuf {
+    let app = scratch("bundle").join(folder);
+    std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+    std::fs::write(
+        app.join("Contents/Info.plist"),
+        format!(
+            "<plist><dict><key>CFBundleExecutable</key><string>Antigravity</string><key>CFBundleIdentifier</key><string>{id}</string></dict></plist>"
+        ),
+    )
+    .unwrap();
+    app.join("Contents/MacOS/Antigravity")
+}
+
 impl FakeProcs {
     fn standard() -> FakeProcs {
+        FakeProcs::under(fake_app("Antigravity.app", BUNDLE_ID))
+    }
+
+    fn under(antigravity: PathBuf) -> FakeProcs {
         FakeProcs {
-            parents: HashMap::from([(SIDECAR_PID, 400), (400, 1), (OTHER_PID, 300), (300, 1)]),
+            parents: HashMap::from([
+                (SIDECAR_PID, 400),
+                (GONE_PID, 400),
+                (400, 1),
+                (OTHER_PID, 300),
+                (300, 1),
+            ]),
             exes: HashMap::from([
-                (
-                    400,
-                    PathBuf::from("/Applications/Antigravity.app/Contents/MacOS/Antigravity"),
-                ),
+                (SIDECAR_PID, PathBuf::from(BINARY)),
+                (400, antigravity),
                 (300, PathBuf::from("/bin/zsh")),
             ]),
         }
@@ -114,7 +138,15 @@ fn rigged(channel: Option<&str>, install_on: bool, app_present: bool) -> Rigged 
             Vec::new()
         },
     };
-    let link = SidecarLink::with(Box::new(now_ms), Duration::from_millis(400));
+    let wait = Duration::from_millis(400);
+    let link = SidecarLink::with(
+        Box::new(now_ms),
+        Patience {
+            pickup: wait,
+            run: wait,
+        },
+        Box::new(|_| true),
+    );
     agy.ops.attach_sidecar(link.clone());
     let install = SwitchFlag::in_memory("install", "install is off", install_on);
     let ops = Arc::new(AgySidecarOps::new(
@@ -154,6 +186,21 @@ fn the_lineage_check_wants_antigravity_above_the_caller() {
 }
 
 #[test]
+fn a_path_that_only_says_antigravity_is_not_the_app() {
+    let other_id = FakeProcs::under(fake_app("Antigravity.app", "com.example.fake"));
+    assert!(!from_antigravity(&other_id, SIDECAR_PID));
+    let ide = FakeProcs::under(fake_app(
+        "Antigravity IDE.app",
+        "com.google.antigravity-ide",
+    ));
+    assert!(!from_antigravity(&ide, SIDECAR_PID));
+    let no_bundle = FakeProcs::under(PathBuf::from("/tmp/antigravity/Antigravity"));
+    assert!(!from_antigravity(&no_bundle, SIDECAR_PID));
+    let moved = FakeProcs::under(fake_app("Somewhere/Renamed.app", BUNDLE_ID));
+    assert!(from_antigravity(&moved, SIDECAR_PID));
+}
+
+#[test]
 fn only_a_hook_client_that_antigravity_started_may_use_the_sidecar_ops() {
     let r = rigged(Some("sidecar"), true, true);
     let calls = [
@@ -179,6 +226,22 @@ fn only_a_hook_client_that_antigravity_started_may_use_the_sidecar_ops() {
             assert_eq!(kind, ErrorCode::Forbidden, "{op} {stranger:?}");
         }
         assert!(r.ops.call(&sidecar(), op, args).is_ok(), "{op}");
+    }
+    let imposter = AgySidecarOps::new(
+        r.link.clone(),
+        r._agy.ops.clone(),
+        r.acting.clone(),
+        SwitchFlag::in_memory("install", "install is off", true),
+        r.roots.clone(),
+        Some(PathBuf::from(BINARY)),
+        Arc::new(FakeProcs::under(fake_app(
+            "Antigravity.app",
+            "com.example.fake",
+        ))),
+    );
+    for (op, args) in &calls {
+        let (kind, _) = code(imposter.call(&sidecar(), op, args));
+        assert_eq!(kind, ErrorCode::Forbidden, "{op}");
     }
     assert_eq!(r.ops.spec(ops::AGY_SIDECAR_TAKE), Some(OpSpec::AGENT));
     assert_eq!(r.ops.spec(ops::AGY_SIDECAR_SETUP), Some(OpSpec::APP));
@@ -234,6 +297,172 @@ fn a_report_is_accepted_for_a_taken_job_and_only_once() {
         &json!({"id": "a", "result": "maybe"}),
     ));
     assert_eq!(kind, ErrorCode::BadRequest);
+}
+
+#[test]
+fn a_taken_job_is_not_lost_when_the_sidecar_is_gone_and_the_next_take_gets_it() {
+    let r = rigged(Some("sidecar"), true, true);
+    r.link.queue().submit(reply_job("a")).unwrap();
+    let ghost = from(Some(GONE_PID), ClientKind::Hook);
+    let none = r
+        .ops
+        .call(&ghost, ops::AGY_SIDECAR_TAKE, &json!({"waitMs": 400}))
+        .unwrap();
+    assert!(none["jobs"].as_array().unwrap().is_empty());
+    assert_eq!(r.link.queue().waiting(), 1);
+    let out = r
+        .ops
+        .call(&sidecar(), ops::AGY_SIDECAR_TAKE, &json!({"waitMs": 10}))
+        .unwrap();
+    assert_eq!(out["jobs"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn a_report_counts_as_the_sidecar_being_there_so_the_gap_before_its_next_take_is_not_down() {
+    let r = rigged(Some("sidecar"), true, true);
+    assert!(!r.link.running());
+    r.ops
+        .call(
+            &sidecar(),
+            ops::AGY_SIDECAR_REPORT,
+            &json!({"id": "nothing", "result": "failed", "error": "x"}),
+        )
+        .unwrap();
+    assert!(r.link.running());
+}
+
+#[test]
+fn one_take_can_ask_for_just_one_job() {
+    let r = rigged(Some("sidecar"), true, true);
+    for id in ["a", "b"] {
+        r.link.queue().submit(reply_job(id)).unwrap();
+    }
+    let out = r
+        .ops
+        .call(
+            &sidecar(),
+            ops::AGY_SIDECAR_TAKE,
+            &json!({"waitMs": 10, "max": 1}),
+        )
+        .unwrap();
+    assert_eq!(out["jobs"].as_array().unwrap().len(), 1);
+    assert_eq!(r.link.queue().waiting(), 1);
+}
+
+#[test]
+fn a_report_must_name_a_real_conversation_id() {
+    let r = rigged(Some("sidecar"), true, true);
+    r.link.queue().submit(reply_job("a")).unwrap();
+    r.ops
+        .call(&sidecar(), ops::AGY_SIDECAR_TAKE, &json!({"waitMs": 10}))
+        .unwrap();
+    for bad in ["../x", "agy:abc", "--help", ""] {
+        for result in ["delivered", "unconfirmed"] {
+            let (kind, _) = code(r.ops.call(
+                &sidecar(),
+                ops::AGY_SIDECAR_REPORT,
+                &json!({"id": "a", "result": result, "session": bad}),
+            ));
+            assert_eq!(kind, ErrorCode::BadRequest, "{result} {bad:?}");
+        }
+    }
+    let ok = r
+        .ops
+        .call(
+            &sidecar(),
+            ops::AGY_SIDECAR_REPORT,
+            &json!({"id": "a", "result": "delivered", "session": ID}),
+        )
+        .unwrap();
+    assert_eq!(ok["accepted"], true);
+}
+
+#[test]
+fn a_sidecar_that_died_is_not_running_even_inside_the_grace_and_sends_fail_at_once() {
+    let alive = Arc::new(AtomicBool::new(true));
+    let flag = alive.clone();
+    let link = SidecarLink::with(
+        Box::new(now_ms),
+        Patience {
+            pickup: Duration::from_secs(5),
+            run: Duration::from_secs(5),
+        },
+        Box::new(move |_| flag.load(Ordering::SeqCst)),
+    );
+    link.saw(SIDECAR_PID);
+    assert!(link.running());
+    alive.store(false, Ordering::SeqCst);
+    assert!(!link.running());
+    let began = Instant::now();
+    assert_eq!(
+        link.reply("row-1", ID, "hello"),
+        Err(Delivery::Failed(NOT_RUNNING.into()))
+    );
+    assert!(began.elapsed() < Duration::from_secs(1));
+    assert_eq!(link.queue().waiting(), 0);
+}
+
+#[test]
+fn a_message_waiting_for_a_sidecar_that_dies_is_withdrawn_at_once_with_the_plain_words() {
+    let alive = Arc::new(AtomicBool::new(true));
+    let flag = alive.clone();
+    let link = SidecarLink::with(
+        Box::new(now_ms),
+        Patience {
+            pickup: Duration::from_secs(30),
+            run: Duration::from_secs(30),
+        },
+        Box::new(move |_| flag.load(Ordering::SeqCst)),
+    );
+    link.saw(SIDECAR_PID);
+    let killer = {
+        let alive = alive.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            alive.store(false, Ordering::SeqCst);
+        })
+    };
+    let began = Instant::now();
+    assert_eq!(
+        link.reply("row-1", ID, "hello"),
+        Err(Delivery::Failed(NOT_RUNNING.into()))
+    );
+    assert!(began.elapsed() < Duration::from_secs(5));
+    assert_eq!(link.queue().waiting(), 0);
+    killer.join().unwrap();
+}
+
+#[test]
+fn the_same_attempt_reported_unsure_is_never_sent_twice() {
+    let r = rigged(Some("sidecar"), true, true);
+    r.link.queue().seen(now_ms());
+    let first = answer_with(&r, Outcome::Unconfirmed { session: None });
+    assert_eq!(r.link.reply("row-1-1", ID, "hello"), Err(Delivery::Cut));
+    first.join().unwrap();
+    assert_eq!(r.link.reply("row-1-1", ID, "hello"), Err(Delivery::Cut));
+    assert_eq!(r.link.queue().waiting(), 0);
+    let second = answer_with(&r, Outcome::Delivered { session: None });
+    assert_eq!(r.link.reply("row-1-2", ID, "hello"), Ok(()));
+    second.join().unwrap();
+}
+
+#[test]
+fn a_new_message_for_a_conversation_drops_the_stop_asked_before_it() {
+    let r = rigged(Some("sidecar"), true, true);
+    r.link.queue().seen(now_ms());
+    r.link.stop(ID).unwrap();
+    let taker = answer_with(&r, Outcome::Delivered { session: None });
+    assert_eq!(r.link.reply("row-1-1", ID, "again"), Ok(()));
+    taker.join().unwrap();
+    let out = r
+        .ops
+        .call(
+            &sidecar(),
+            ops::AGY_HOOK,
+            &json!({"event": "pre-invocation", "input": json!({"conversationId": ID}).to_string()}),
+        )
+        .unwrap();
+    assert_eq!(out, json!({"output": null}));
 }
 
 fn answer_with(r: &Rigged, outcome: Outcome) -> std::thread::JoinHandle<()> {
@@ -568,7 +797,7 @@ fn turning_on_sets_only_the_one_config_key_backs_it_up_and_ships_the_plugin_and_
 }
 
 #[test]
-fn turning_off_takes_only_notchlings_own_files_and_leaves_the_config_alone() {
+fn turning_off_takes_notchlings_own_files_and_its_one_config_key_and_the_state_reads_off() {
     let r = rigged(Some("sidecar"), true, true);
     let config = seed_config(&r);
     std::fs::write(
@@ -579,7 +808,7 @@ fn turning_off_takes_only_notchlings_own_files_and_leaves_the_config_alone() {
     r.ops
         .call(&app(), ops::AGY_SIDECAR_SETUP, &setup_args("turn_on", true))
         .unwrap();
-    let on = std::fs::read_to_string(&config).unwrap();
+    assert_eq!(r.ops.status()["state"], "on");
     let out = r
         .ops
         .call(
@@ -590,11 +819,76 @@ fn turning_off_takes_only_notchlings_own_files_and_leaves_the_config_alone() {
         .unwrap();
     assert_eq!(out["plugin"], "absent");
     assert_eq!(out["hooks"], "absent");
+    assert_eq!(out["enabled"], "unset");
+    assert_eq!(out["state"], "off");
+    assert_eq!(out["backups"].as_array().unwrap().len(), 2);
     assert!(!plugin_dir(&r).exists());
     let hooks = std::fs::read_to_string(r.roots.hooks_json()).unwrap();
     assert!(hooks.contains("echo hi"));
     assert!(!hooks.contains("agy-hook"));
-    assert_eq!(std::fs::read_to_string(&config).unwrap(), on);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("12345678901234567890"));
+    assert_eq!(
+        serde_json::from_str::<Value>(&text).unwrap(),
+        serde_json::from_str::<Value>(CONFIG).unwrap()
+    );
+    assert_eq!(r.ops.status()["state"], "off");
+}
+
+#[test]
+fn turning_on_and_off_a_config_with_no_sidecars_gives_the_file_back_byte_for_byte() {
+    let r = rigged(Some("sidecar"), true, true);
+    std::fs::create_dir_all(&r.roots.config).unwrap();
+    let plain = "{\n  \"plugins\": {},\n  \"big\": 12345678901234567890\n}\n";
+    std::fs::write(r.roots.config_json(), plain).unwrap();
+    r.ops
+        .call(&app(), ops::AGY_SIDECAR_SETUP, &setup_args("turn_on", true))
+        .unwrap();
+    assert_ne!(
+        std::fs::read_to_string(r.roots.config_json()).unwrap(),
+        plain
+    );
+    r.ops
+        .call(
+            &app(),
+            ops::AGY_SIDECAR_SETUP,
+            &setup_args("turn_off", false),
+        )
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(r.roots.config_json()).unwrap(),
+        plain
+    );
+    assert_eq!(r.ops.status()["state"], "off");
+}
+
+#[test]
+fn a_config_turning_on_would_refuse_stops_it_before_the_plugin_or_the_hooks_are_written() {
+    for bad in ["{ nope", "[]", "", "{\"sidecars\": 3}"] {
+        let r = rigged(Some("sidecar"), true, true);
+        std::fs::create_dir_all(&r.roots.config).unwrap();
+        std::fs::write(r.roots.config_json(), bad).unwrap();
+        let (kind, _) = code(r.ops.call(
+            &app(),
+            ops::AGY_SIDECAR_SETUP,
+            &setup_args("turn_on", true),
+        ));
+        assert_eq!(kind, ErrorCode::Failed, "{bad}");
+        assert!(!plugin_dir(&r).exists(), "{bad}");
+        assert!(!r.roots.hooks_json().exists(), "{bad}");
+        assert_eq!(std::fs::read_to_string(r.roots.config_json()).unwrap(), bad);
+    }
+    let r = rigged(Some("sidecar"), true, true);
+    std::fs::create_dir_all(&r.roots.config).unwrap();
+    let (kind, message) = code(r.ops.call(
+        &app(),
+        ops::AGY_SIDECAR_SETUP,
+        &setup_args("turn_on", true),
+    ));
+    assert_eq!(kind, ErrorCode::Failed);
+    assert!(message.contains("config.json"), "{message}");
+    assert!(!plugin_dir(&r).exists());
+    assert!(!r.roots.hooks_json().exists());
 }
 
 #[test]

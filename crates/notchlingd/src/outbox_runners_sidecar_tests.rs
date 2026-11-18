@@ -2,8 +2,9 @@ use super::*;
 use crate::acting_ops::now_ms;
 use crate::agy_ops::tests::SESSION;
 use crate::agy_sidecar_ops::{SidecarLink, NOT_RUNNING};
+use notchling_engine::outbox::State;
 use notchling_engine::settings::Settings;
-use notchling_engine::tools::agy_sidecar::jobs::{Job as SidecarJob, Kind, Outcome};
+use notchling_engine::tools::agy_sidecar::jobs::{Job as SidecarJob, Kind, Outcome, Patience};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -25,7 +26,15 @@ fn choose(a: &AgyBench, channel: &str) {
 }
 
 fn link(a: &AgyBench) -> Arc<SidecarLink> {
-    let link = SidecarLink::with(Box::new(now_ms), Duration::from_millis(600));
+    let wait = Duration::from_millis(600);
+    let link = SidecarLink::with(
+        Box::new(now_ms),
+        Patience {
+            pickup: wait,
+            run: wait,
+        },
+        Box::new(|_| true),
+    );
     a.rig.ops.attach_sidecar(link.clone());
     link
 }
@@ -82,7 +91,7 @@ fn a_reply_goes_through_the_sidecar_queue_under_the_outbox_row_id_and_agy_is_nev
     assert_eq!(end, TryEnd::Ok, "{note:?}");
     let jobs = taker.join().unwrap();
     assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].id, id);
+    assert_eq!(jobs[0].id, format!("{id}-1"));
     assert_eq!(jobs[0].text, "hello there");
     assert_eq!(
         jobs[0].kind,
@@ -246,4 +255,69 @@ fn the_draft_channels_have_no_stop_at_all() {
         let _ = a.rig.call(ops::AGY_CANCEL, json!({"id": ROW}));
         assert!(!link.stops().take(SESSION), "{channel}");
     }
+}
+
+#[test]
+fn send_again_on_an_unsure_row_really_sends_a_new_job_while_the_same_attempt_never_does() {
+    let a = agy();
+    choose(&a, "sidecar");
+    let link = link(&a);
+    let taker = sidecar(&link, Outcome::Unconfirmed { session: None });
+    let (end, _, id) = deliver(&a, "hello");
+    assert_eq!(end, TryEnd::Cut);
+    assert_eq!(taker.join().unwrap()[0].id, format!("{id}-1"));
+
+    let taken = a.b.outbox.store().get(&id).unwrap().unwrap();
+    let (again, _, _) = a.courier.deliver(&taken, false);
+    assert_eq!(again, TryEnd::Cut);
+    assert_eq!(link.queue().waiting(), 0);
+
+    a.b.outbox
+        .store()
+        .requeue(&id, &[State::Sending], false, T0)
+        .unwrap();
+    let taker = sidecar(&link, Outcome::Delivered { session: None });
+    let retaken = a.b.outbox.store().take(&id, T0).unwrap().unwrap();
+    assert_eq!(retaken.tries, 2);
+    let (end, note, _) = a.courier.deliver(&retaken, false);
+    assert_eq!(end, TryEnd::Ok, "{note:?}");
+    let jobs = taker.join().unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].id, format!("{id}-2"));
+}
+
+#[test]
+fn a_stop_asked_before_a_new_message_goes_in_does_not_end_the_next_turn() {
+    let a = agy();
+    choose(&a, "sidecar");
+    let link = link(&a);
+    a.rig.call(ops::AGY_CANCEL, json!({"id": ROW})).unwrap();
+    let taker = sidecar(&link, Outcome::Delivered { session: None });
+    let (end, note, _) = deliver(&a, "next question");
+    assert_eq!(end, TryEnd::Ok, "{note:?}");
+    taker.join().unwrap();
+    assert!(!link.stops().take(SESSION));
+}
+
+#[test]
+fn a_stop_asked_before_a_new_conversation_starts_is_forgotten_for_its_id() {
+    let a = agy();
+    choose(&a, "sidecar");
+    let link = link(&a);
+    link.stops().ask(NEW);
+    let taker = sidecar(
+        &link,
+        Outcome::Delivered {
+            session: Some(NEW.into()),
+        },
+    );
+    let folder = a.rig.folder.to_string_lossy().into_owned();
+    a.rig
+        .call(
+            ops::AGY_SEND,
+            json!({"draft_folder": folder, "text": "Build"}),
+        )
+        .unwrap();
+    taker.join().unwrap();
+    assert!(!link.stops().take(NEW));
 }

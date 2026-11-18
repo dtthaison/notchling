@@ -1,4 +1,4 @@
-use super::config_file::{enable, switch, EnableError, Switch};
+use super::config_file::{check_enable, disable, enable, switch, EnableError, Switch};
 use super::SIDECAR_ID;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -146,4 +146,92 @@ fn the_switch_reads_unset_when_there_is_nothing_and_errors_on_junk() {
     assert_eq!(switch(&path, SIDECAR_ID), Ok(Switch::Unset));
     put(&dir, "{ junk");
     assert!(switch(&path, SIDECAR_ID).is_err());
+}
+
+#[test]
+fn on_then_off_gives_back_the_file_it_was_given_and_the_switch_reads_unset() {
+    for original in [
+        CONFIG.to_string(),
+        "{\n  \"plugins\": {}\n}\n".to_string(),
+        "{\"a\":1,\"big\":12345678901234567890}".to_string(),
+    ] {
+        let dir = folder("roundtrip");
+        let path = put(&dir, &original);
+        enable(&path, SIDECAR_ID, true, 1).unwrap();
+        assert_eq!(switch(&path, SIDECAR_ID), Ok(Switch::On));
+        let off = disable(&path, SIDECAR_ID, 2).unwrap();
+        assert!(off.wrote);
+        assert!(off.backup.is_some());
+        assert_eq!(switch(&path, SIDECAR_ID), Ok(Switch::Unset));
+        let after = std::fs::read_to_string(&path).unwrap();
+        let a: Value = serde_json::from_str(&after).unwrap();
+        let b: Value = serde_json::from_str(&original).unwrap();
+        assert_eq!(a, b);
+        if !original.contains("swarm") {
+            assert_eq!(after, original);
+        }
+    }
+}
+
+#[test]
+fn turning_off_removes_only_our_key_and_keeps_the_entry_fields_and_other_sidecars() {
+    let dir = folder("offkeeps");
+    let text = format!(
+        "{{\"before\": 1, \"sidecars\": {{\"swarm/swarm_board\": {{\"projectId\": \"x\"}}, \"{SIDECAR_ID}\": {{\"enabled\": true, \"projectId\": \"p1\"}}}}, \"after\": 2.50}}"
+    );
+    let path = put(&dir, &text);
+    disable(&path, SIDECAR_ID, 3).unwrap();
+    let now = std::fs::read_to_string(&path).unwrap();
+    assert!(now.starts_with("{\"before\": 1, \"sidecars\": "));
+    assert!(now.ends_with(", \"after\": 2.50}"));
+    let after: Value = serde_json::from_str(&now).unwrap();
+    assert_eq!(after["sidecars"][SIDECAR_ID], json!({"projectId": "p1"}));
+    assert_eq!(
+        after["sidecars"]["swarm/swarm_board"],
+        json!({"projectId": "x"})
+    );
+    assert_eq!(switch(&path, SIDECAR_ID), Ok(Switch::Unset));
+}
+
+#[test]
+fn turning_off_changes_nothing_when_we_never_turned_it_on_or_the_file_is_not_there() {
+    let dir = folder("offnothing");
+    let path = dir.join("config.json");
+    assert!(!disable(&path, SIDECAR_ID, 1).unwrap().wrote);
+    put(&dir, CONFIG);
+    assert!(!disable(&path, SIDECAR_ID, 1).unwrap().wrote);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), CONFIG);
+    let own_false = format!("{{\"sidecars\": {{\"{SIDECAR_ID}\": {{\"enabled\": false}}}}}}");
+    put(&dir, &own_false);
+    assert!(!disable(&path, SIDECAR_ID, 1).unwrap().wrote);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), own_false);
+    assert!(backups(&dir).is_empty());
+}
+
+#[test]
+fn the_check_before_turning_on_refuses_what_turning_on_would_refuse_and_writes_nothing() {
+    let dir = folder("check");
+    let path = dir.join("config.json");
+    assert!(matches!(
+        check_enable(&path, SIDECAR_ID),
+        Err(EnableError::NoConfig)
+    ));
+    for bad in [
+        "",
+        "{ nope",
+        "[]",
+        "{\"sidecars\": []}",
+        "{\"sidecars\": {\"notchling/sidecar\": 3}}",
+    ] {
+        put(&dir, bad);
+        assert!(
+            matches!(check_enable(&path, SIDECAR_ID), Err(EnableError::File(_))),
+            "{bad}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), bad);
+    }
+    put(&dir, CONFIG);
+    assert!(check_enable(&path, SIDECAR_ID).is_ok());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), CONFIG);
+    assert!(backups(&dir).is_empty());
 }

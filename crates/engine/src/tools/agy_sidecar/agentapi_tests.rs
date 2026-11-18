@@ -1,6 +1,6 @@
 use super::agentapi::{
-    message_was_sent, new_conversation_args, new_conversation_id, send_message_args, AgentApi,
-    ApiError, RealAgentApi,
+    message_was_sent, new_conversation_args, new_conversation_id, reported_error,
+    send_message_args, AgentApi, ApiError, RealAgentApi,
 };
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,6 +28,22 @@ fn a_send_answer_must_say_send_message() {
     assert!(message_was_sent(r#"{"response":{"sendMessage":{}}}"#));
     assert!(!message_was_sent(r#"{"response":{}}"#));
     assert!(!message_was_sent("oops"));
+}
+
+#[test]
+fn an_error_answer_is_read_for_its_words() {
+    assert_eq!(
+        reported_error(r#"{"response":{},"error":"usage: x"}"#),
+        Some("agentapi: usage: x".to_string())
+    );
+    assert_eq!(reported_error(r#"{"response":{"sendMessage":{}}}"#), None);
+    assert_eq!(reported_error("oops"), None);
+}
+
+#[test]
+fn the_id_comes_before_the_text_so_the_text_is_never_read_as_a_flag() {
+    let args = send_message_args(ID, "--title=x -h").unwrap();
+    assert_eq!(args, vec!["send-message", ID, "--title=x -h"]);
 }
 
 #[test]
@@ -87,6 +103,14 @@ mod real {
         );
         let api = RealAgentApi::new(PathBuf::from("/nonexistent/agentapi"));
         assert_eq!(api.run(&[]), Err(ApiError::Missing));
+    }
+
+    #[test]
+    fn a_file_that_cannot_run_never_started_so_it_is_not_started_and_not_a_failure() {
+        let path = script("noexec", "exit 0");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let api = RealAgentApi::new(path);
+        assert!(matches!(api.run(&[]), Err(ApiError::NotStarted(_))));
     }
 
     #[test]

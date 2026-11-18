@@ -7,13 +7,17 @@ use crate::outbox_runners::Delivery;
 use crate::switches::SwitchFlag;
 use crate::vault_caller::{Processes, SystemProcesses};
 use notchling_engine::contract::channels::SIDECAR;
+use notchling_engine::tools::agy_sidecar::bundle::is_antigravity_app_executable;
 use notchling_engine::tools::agy_sidecar::config_file::{self, EnableError, Switch};
+use notchling_engine::tools::agy_sidecar::deliver::{PICKUP_BUDGET, RUN_BUDGET};
 use notchling_engine::tools::agy_sidecar::hook_io::{
     parse_conversation, parse_tool, prompt_event, stop_output, tool_output,
 };
 use notchling_engine::tools::agy_sidecar::hooks_file::{self, Found, Want};
 use notchling_engine::tools::agy_sidecar::ids::is_uuid;
-use notchling_engine::tools::agy_sidecar::jobs::{Cancelled, Job, Kind, Outcome, Queue, Stops};
+use notchling_engine::tools::agy_sidecar::jobs::{
+    Cancelled, Job, Kind, Outcome, Patience, Queue, Stops,
+};
 use notchling_engine::tools::agy_sidecar::plugin::{self, Plugin};
 use notchling_engine::tools::agy_sidecar::{
     Roots, ASK_WAIT_SECS, PRE_INVOCATION, PRE_TOOL, SIDECAR_ID,
@@ -37,9 +41,12 @@ pub const OPS: [&str; 5] = [
     ops::AGY_HOOK,
 ];
 
-pub const ALIVE_MS: i64 = 90_000;
+pub const ALIVE_MS: i64 = 10_000;
 pub const TAKE_WAIT: Duration = Duration::from_secs(25);
-pub const JOB_WAIT: Duration = Duration::from_secs(75);
+pub const PATIENCE: Patience = Patience {
+    pickup: PICKUP_BUDGET,
+    run: RUN_BUDGET,
+};
 pub const LINEAGE_DEPTH: usize = 10;
 
 pub const NOT_RUNNING: &str =
@@ -48,26 +55,42 @@ pub const NOT_PICKED_UP: &str =
     "The Notchling sidecar didn't pick the message up in time, so it was kept here. Send it again.";
 pub const STILL_STARTING: &str =
     "The sidecar took the message but hasn't said it was delivered. Look in Antigravity before you send it again.";
+pub const MAYBE_STARTED: &str =
+    "The sidecar couldn't tell whether Antigravity started the conversation. Look in Antigravity before you send it again.";
 
 pub struct SidecarLink {
     queue: Queue,
     stops: Stops,
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
-    wait: Duration,
+    patience: Patience,
+    pid_alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
 }
 
 impl SidecarLink {
     pub fn new() -> Arc<SidecarLink> {
-        SidecarLink::with(Box::new(now_ms), JOB_WAIT)
+        SidecarLink::with(
+            Box::new(now_ms),
+            PATIENCE,
+            Box::new(|pid| SystemProcesses.exe(pid).is_some()),
+        )
     }
 
-    pub fn with(clock: Box<dyn Fn() -> i64 + Send + Sync>, wait: Duration) -> Arc<SidecarLink> {
+    pub fn with(
+        clock: Box<dyn Fn() -> i64 + Send + Sync>,
+        patience: Patience,
+        pid_alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
+    ) -> Arc<SidecarLink> {
         Arc::new(SidecarLink {
             queue: Queue::new(),
             stops: Stops::new(),
             clock,
-            wait,
+            patience,
+            pid_alive,
         })
+    }
+
+    pub fn saw(&self, pid: u32) {
+        self.queue.seen_by((self.clock)(), pid);
     }
 
     pub fn queue(&self) -> &Queue {
@@ -80,6 +103,22 @@ impl SidecarLink {
 
     pub fn running(&self) -> bool {
         self.queue.alive((self.clock)(), ALIVE_MS)
+            && self
+                .queue
+                .last_pid()
+                .is_none_or(|pid| (self.pid_alive)(pid))
+    }
+
+    fn still_up(&self) -> bool {
+        self.running()
+    }
+
+    fn unpicked(&self) -> String {
+        if self.running() {
+            NOT_PICKED_UP.into()
+        } else {
+            NOT_RUNNING.into()
+        }
     }
 
     pub fn close(&self) {
@@ -104,13 +143,17 @@ impl SidecarLink {
             text: text.to_string(),
         };
         let id = job.id.clone();
+        self.stops.forget(session);
         self.queue.submit(job).map_err(Delivery::Failed)?;
-        match self.queue.wait(&id, self.wait) {
+        match self
+            .queue
+            .wait_patient(&id, self.patience, &|| self.still_up())
+        {
             Some(Outcome::Delivered { .. }) => Ok(()),
             Some(Outcome::Unconfirmed { .. }) => Err(Delivery::Cut),
             Some(Outcome::Failed(why)) => Err(Delivery::Failed(why)),
             None => match self.queue.cancel(&id) {
-                Cancelled::Withdrawn => Err(Delivery::Failed(NOT_PICKED_UP.into())),
+                Cancelled::Withdrawn => Err(Delivery::Failed(self.unpicked())),
                 Cancelled::Taken | Cancelled::Gone => Err(Delivery::Cut),
             },
         }
@@ -137,20 +180,24 @@ impl SidecarLink {
         };
         let id = job.id.clone();
         self.queue.submit(job).map_err(|why| failed(&why))?;
-        match self.queue.wait(&id, self.wait) {
+        match self
+            .queue
+            .wait_patient(&id, self.patience, &|| self.still_up())
+        {
             Some(Outcome::Delivered {
                 session: Some(session),
             })
             | Some(Outcome::Unconfirmed {
                 session: Some(session),
-            }) => Ok(session),
+            }) => {
+                self.stops.forget(&session);
+                Ok(session)
+            }
             Some(Outcome::Delivered { session: None })
-            | Some(Outcome::Unconfirmed { session: None }) => Err(failed(
-                "The sidecar did not say which conversation it made.",
-            )),
+            | Some(Outcome::Unconfirmed { session: None }) => Err(failed(MAYBE_STARTED)),
             Some(Outcome::Failed(why)) => Err(failed(&why)),
             None => match self.queue.cancel(&id) {
-                Cancelled::Withdrawn => Err(failed(NOT_PICKED_UP)),
+                Cancelled::Withdrawn => Err(failed(&self.unpicked())),
                 Cancelled::Taken | Cancelled::Gone => Err(failed(STILL_STARTING)),
             },
         }
@@ -195,11 +242,10 @@ pub fn from_antigravity(processes: &dyn Processes, pid: u32) -> bool {
         let Some(p) = next.filter(|p| *p > 1) else {
             return false;
         };
-        let named = processes
+        if processes
             .exe(p)
-            .map(|path| path.to_string_lossy().to_lowercase())
-            .or_else(|| processes.name(p).map(|n| n.to_lowercase()));
-        if named.is_some_and(|n| n.contains("antigravity")) {
+            .is_some_and(|path| is_antigravity_app_executable(&path))
+        {
             return true;
         }
         next = processes.parent(p);
@@ -302,29 +348,51 @@ impl AgySidecarOps {
     }
 
     fn take(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        self.sidecar_caller(caller, "agy.sidecar.take")?;
-        self.link.queue().seen(now_ms());
+        let pid = self.sidecar_caller(caller, "agy.sidecar.take")?;
+        self.link.saw(pid);
         let wait = args
             .get("waitMs")
             .and_then(Value::as_u64)
             .map(Duration::from_millis)
             .map_or(TAKE_WAIT, |w| w.min(TAKE_WAIT));
+        let max = args
+            .get("max")
+            .and_then(Value::as_u64)
+            .map_or(usize::MAX, |m| {
+                usize::try_from(m).unwrap_or(usize::MAX).max(1)
+            });
+        let processes = self.processes.clone();
+        let up = move || processes.exe(pid).is_some();
         let jobs: Vec<Value> = self
             .link
             .queue()
-            .take(wait)
+            .take_for(wait, max, &up)
             .iter()
             .map(Job::to_json)
             .collect();
-        self.link.queue().seen(now_ms());
+        if up() {
+            self.link.saw(pid);
+        }
         Ok(json!({"jobs": jobs}))
     }
 
     fn report(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        self.sidecar_caller(caller, "agy.sidecar.report")?;
+        let pid = self.sidecar_caller(caller, "agy.sidecar.report")?;
+        self.link.saw(pid);
         let id = text_arg(args, "id")?;
         let outcome = Outcome::from_json(args)
             .ok_or_else(|| bad("result is delivered, unconfirmed or failed"))?;
+        if let Outcome::Delivered {
+            session: Some(session),
+        }
+        | Outcome::Unconfirmed {
+            session: Some(session),
+        } = &outcome
+        {
+            if !is_uuid(session) {
+                return Err(bad("session is an Antigravity conversation id"));
+            }
+        }
         Ok(json!({"accepted": self.link.queue().report(id, outcome)}))
     }
 
@@ -443,13 +511,9 @@ impl AgySidecarOps {
     }
 
     fn preflight(&self, binary: &std::path::Path) -> Result<(), String> {
-        if plugin::state(&self.roots) == Plugin::Foreign {
-            return Err("a plugin named notchling is already in Antigravity's plugins folder and isn't Notchling's; it was left alone".into());
-        }
-        if !self.roots.config.is_dir() {
-            return Err("Antigravity's config folder is not there yet. Open the Antigravity app once, then try again.".into());
-        }
-        config_file::switch(&self.roots.config_json(), SIDECAR_ID)?;
+        plugin::preflight(&self.roots, binary)?;
+        config_file::check_enable(&self.roots.config_json(), SIDECAR_ID)
+            .map_err(|e| e.to_string())?;
         let text = std::fs::read_to_string(self.roots.hooks_json()).unwrap_or_default();
         hooks_file::change(&text, binary, Os::current(), Want::Install)?;
         Ok(())
@@ -491,7 +555,7 @@ impl AgySidecarOps {
                 self.note(InstallAction::Installed, DoneOrFailed::Failed);
                 failed(e)
             };
-            plugin::install(&self.roots, binary).map_err(blocked)?;
+            plugin::install(&self.roots, binary, stamp).map_err(blocked)?;
             let hooks = hooks_file::apply(
                 &self.roots.hooks_json(),
                 binary,
@@ -521,6 +585,12 @@ impl AgySidecarOps {
                 failed(e.to_string())
             })?;
             keep(hooks.backup);
+            let config = config_file::disable(&self.roots.config_json(), SIDECAR_ID, stamp)
+                .map_err(|e| {
+                    self.note(InstallAction::Removed, DoneOrFailed::Failed);
+                    failed(e.to_string())
+                })?;
+            keep(config.backup);
             plugin::remove(&self.roots).map_err(|e| {
                 self.note(InstallAction::Removed, DoneOrFailed::Failed);
                 failed(e)

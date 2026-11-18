@@ -1,5 +1,6 @@
-use super::jobs::{Cancelled, Job, Kind, Outcome, Queue, Stops};
+use super::jobs::{Cancelled, Job, Kind, Outcome, Patience, Queue, Stops};
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -163,4 +164,149 @@ fn a_retry_of_a_failed_job_runs_again_but_a_delivered_one_never_twice() {
         q.wait("a", SHORT),
         Some(Outcome::Delivered { session: None })
     );
+}
+
+#[test]
+fn one_take_can_be_limited_to_one_job_and_the_rest_wait() {
+    let q = Queue::new();
+    for id in ["a", "b", "c"] {
+        q.submit(reply(id, "x")).unwrap();
+    }
+    assert_eq!(q.take_for(SHORT, 1, &|| true), vec![reply("a", "x")]);
+    assert_eq!(q.waiting(), 2);
+    assert_eq!(q.take_for(SHORT, 1, &|| true), vec![reply("b", "x")]);
+}
+
+#[test]
+fn a_taker_whose_process_is_gone_takes_nothing_and_the_job_stays_for_the_next() {
+    let q = Queue::new();
+    q.submit(reply("a", "x")).unwrap();
+    assert!(q.take_for(SHORT, 5, &|| false).is_empty());
+    assert_eq!(q.waiting(), 1);
+    assert_eq!(q.take(SHORT).len(), 1);
+}
+
+#[test]
+fn a_taker_waiting_when_its_process_dies_lets_go_and_the_next_taker_gets_the_job() {
+    let q = Arc::new(Queue::new());
+    let up = Arc::new(AtomicBool::new(true));
+    let old = {
+        let (q, up) = (q.clone(), up.clone());
+        std::thread::spawn(move || {
+            q.take_for(Duration::from_secs(10), 5, &|| up.load(Ordering::SeqCst))
+        })
+    };
+    std::thread::sleep(Duration::from_millis(60));
+    up.store(false, Ordering::SeqCst);
+    assert!(old.join().unwrap().is_empty());
+    q.submit(reply("a", "x")).unwrap();
+    assert_eq!(q.take(SHORT).len(), 1);
+}
+
+#[test]
+fn a_newer_take_replaces_an_older_one_that_is_still_waiting() {
+    let q = Arc::new(Queue::new());
+    let old = {
+        let q = q.clone();
+        std::thread::spawn(move || q.take(Duration::from_secs(10)))
+    };
+    std::thread::sleep(Duration::from_millis(60));
+    let new = {
+        let q = q.clone();
+        std::thread::spawn(move || q.take(Duration::from_secs(10)))
+    };
+    assert!(old.join().unwrap().is_empty());
+    q.submit(reply("a", "x")).unwrap();
+    assert_eq!(new.join().unwrap(), vec![reply("a", "x")]);
+}
+
+#[test]
+fn the_sidecar_is_running_while_it_waits_or_works_and_for_a_moment_after() {
+    let q = Arc::new(Queue::new());
+    assert!(!q.alive(0, 1_000));
+    let waiter = {
+        let q = q.clone();
+        std::thread::spawn(move || q.take(Duration::from_millis(400)))
+    };
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(q.alive(10_000_000, 1_000));
+    waiter.join().unwrap();
+    assert!(!q.alive(10_000_000, 1_000));
+    q.submit(reply("a", "x")).unwrap();
+    q.take(SHORT);
+    assert!(q.alive(10_000_000, 1_000));
+    q.report("a", Outcome::Delivered { session: None });
+    q.seen_by(5_000, 77);
+    assert_eq!(q.last_pid(), Some(77));
+    assert!(q.alive(5_500, 1_000));
+    assert!(!q.alive(7_000, 1_000));
+}
+
+#[test]
+fn a_taken_job_that_never_reports_is_dropped_after_its_bound() {
+    let q = Queue::keeping_taken(Duration::from_millis(40));
+    q.submit(reply("a", "x")).unwrap();
+    q.take(SHORT);
+    assert_eq!(q.cancel("a"), Cancelled::Taken);
+    std::thread::sleep(Duration::from_millis(80));
+    q.submit(reply("b", "x")).unwrap();
+    assert_eq!(q.cancel("a"), Cancelled::Gone);
+    assert!(!q.report("a", Outcome::Delivered { session: None }));
+    q.submit(reply("a", "x")).unwrap();
+    assert_eq!(q.waiting(), 2);
+}
+
+#[test]
+fn a_job_waits_for_a_taker_by_one_limit_and_for_a_report_by_another() {
+    let q = Arc::new(Queue::new());
+    q.submit(reply("a", "x")).unwrap();
+    let patience = Patience {
+        pickup: Duration::from_millis(60),
+        run: Duration::from_secs(5),
+    };
+    assert_eq!(q.wait_patient("a", patience, &|| true), None);
+    assert_eq!(q.cancel("a"), Cancelled::Withdrawn);
+    q.submit(reply("b", "x")).unwrap();
+    q.take(SHORT);
+    let waiter = {
+        let q = q.clone();
+        std::thread::spawn(move || {
+            q.wait_patient(
+                "b",
+                Patience {
+                    pickup: Duration::from_millis(1),
+                    run: Duration::from_secs(5),
+                },
+                &|| true,
+            )
+        })
+    };
+    std::thread::sleep(Duration::from_millis(120));
+    q.report("b", Outcome::Delivered { session: None });
+    assert_eq!(
+        waiter.join().unwrap(),
+        Some(Outcome::Delivered { session: None })
+    );
+    q.submit(reply("c", "x")).unwrap();
+    q.take(SHORT);
+    let short_run = Patience {
+        pickup: Duration::from_secs(5),
+        run: Duration::from_millis(60),
+    };
+    assert_eq!(q.wait_patient("c", short_run, &|| true), None);
+    assert_eq!(q.cancel("c"), Cancelled::Taken);
+}
+
+#[test]
+fn a_waiting_job_is_given_up_at_once_when_the_sidecar_is_no_longer_there() {
+    let q = Queue::new();
+    q.submit(reply("a", "x")).unwrap();
+    let patience = Patience {
+        pickup: Duration::from_secs(30),
+        run: Duration::from_secs(30),
+    };
+    let began = std::time::Instant::now();
+    assert_eq!(q.wait_patient("a", patience, &|| false), None);
+    assert!(began.elapsed() < Duration::from_secs(2));
+    assert_eq!(q.cancel("a"), Cancelled::Withdrawn);
 }
