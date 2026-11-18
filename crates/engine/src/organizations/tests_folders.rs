@@ -172,3 +172,32 @@ fn a_document_places_a_folder_through_its_view() {
         PERSONAL_ID
     );
 }
+
+#[test]
+fn the_deeper_real_folder_wins_over_a_link_that_looks_deeper_and_a_tie_is_settled_by_id() {
+    let orgs = [
+        org(PERSONAL_ID, &[]),
+        org("outer", &["~/link"]),
+        org("inner", &["/data/proj/sub"]),
+    ];
+    let resolve = links(&[
+        ("/Users/me/link", "/data/proj"),
+        ("/Users/me/link/sub", "/data/proj/sub"),
+        ("/data/proj/sub", "/data/proj/sub"),
+    ]);
+    assert_eq!(id(&orgs, "/Users/me/link/sub", &resolve), "inner");
+
+    let tied = [
+        org(PERSONAL_ID, &[]),
+        org("zeta", &["/srv/x"]),
+        org("alpha", &["/srv/x"]),
+    ];
+    let none = links(&[]);
+    assert_eq!(id(&tied, "/srv/x/app", &none), "alpha");
+    let flipped = [
+        org(PERSONAL_ID, &[]),
+        org("alpha", &["/srv/x"]),
+        org("zeta", &["/srv/x"]),
+    ];
+    assert_eq!(id(&flipped, "/srv/x/app", &none), "alpha");
+}

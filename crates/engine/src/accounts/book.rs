@@ -17,6 +17,10 @@ pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
     let Some(root) = read_json(file) else {
         return vec![];
     };
+    accounts_in(&root)
+}
+
+fn accounts_in(root: &Value) -> Vec<Saved> {
     root.get("accounts")
         .and_then(Value::as_array)
         .map(|list| {
@@ -38,17 +42,34 @@ pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
 }
 
 pub fn write_accounts(file: &DocFile, accounts: &[Saved]) -> bool {
-    let list: Vec<Value> = accounts
-        .iter()
-        .map(|a| {
-            let mut entry = json!({"id": a.id, "email": a.email, "plan": a.plan});
-            if let Some(organization) = &a.organization {
-                entry["organization"] = json!(organization);
-            }
-            entry
-        })
-        .collect();
-    write_json(file, "accounts", &json!({"version": 1, "accounts": list}))
+    let result = file.update(
+        |old| ours(old, "accounts"),
+        |stored| {
+            let current: Vec<Saved> = stored
+                .as_deref()
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                .map(|root| accounts_in(&root))
+                .unwrap_or_default();
+            let list: Vec<Value> = accounts
+                .iter()
+                .map(|a| {
+                    let organization = match current.iter().find(|c| c.id == a.id) {
+                        Some(c) => c.organization.as_ref(),
+                        None => a.organization.as_ref(),
+                    };
+                    let mut entry = json!({"id": a.id, "email": a.email, "plan": a.plan});
+                    if let Some(organization) = organization {
+                        entry["organization"] = json!(organization);
+                    }
+                    entry
+                })
+                .collect();
+            serde_json::to_string_pretty(&json!({"version": 1, "accounts": list}))
+                .map(Some)
+                .map_err(|e| e.to_string())
+        },
+    );
+    result.is_ok()
 }
 
 pub fn read_ids(file: &DocFile) -> Vec<String> {

@@ -95,6 +95,7 @@ pub enum Problem {
     OwnerInvalid(String),
     FolderInvalid(String),
     FolderTaken { folder: String, by: String },
+    ShadowInvalid(String),
     NotEmpty(Counts),
 }
 
@@ -194,6 +195,11 @@ impl Document {
                 }
             }
         }
+        for (key, value) in self.shadow.accounts.iter().chain(&self.shadow.vault) {
+            if !valid_id(value) {
+                out.push(Problem::ShadowInvalid(key.clone()));
+            }
+        }
         out
     }
 
@@ -210,7 +216,7 @@ impl Document {
         } else if self.name_taken(&name, None) {
             problems.push(Problem::NameTaken(name.clone()));
         }
-        let color = color.unwrap_or(DEFAULT_COLOR).to_owned();
+        let color = color.unwrap_or(DEFAULT_COLOR).trim().to_owned();
         if !valid_color(&color) {
             problems.push(Problem::ColorInvalid(color.clone()));
         }
@@ -255,6 +261,7 @@ impl Document {
     }
 
     pub fn set_color(&mut self, id: &str, color: &str) -> Result<(), Problem> {
+        let color = color.trim();
         if !valid_color(color) {
             return Err(Problem::ColorInvalid(color.into()));
         }

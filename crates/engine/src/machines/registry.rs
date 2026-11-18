@@ -504,6 +504,17 @@ impl RegistryFiles {
             return Ok(0);
         }
         self.import_old();
+        if let Ok(Some(text)) = store::doc(&self.data_dir, REGISTRY_DOC) {
+            if let Raw::V3(machines) = parse(text.as_bytes()) {
+                if machines.iter().all(|m| {
+                    m.organization
+                        .as_deref()
+                        .is_some_and(|o| !o.trim().is_empty())
+                }) {
+                    return Ok(0);
+                }
+            }
+        }
         let mut stamped = 0;
         store::update_doc(&self.data_dir, REGISTRY_DOC, |row| {
             let Some(old) = row else {
@@ -515,7 +526,11 @@ impl RegistryFiles {
                 Raw::V1(..) | Raw::Missing => return Ok(Some(old)),
                 Raw::Unreadable(why) => return Err(why),
             };
-            for machine in machines.iter_mut().filter(|m| m.organization.is_none()) {
+            for machine in machines.iter_mut().filter(|m| {
+                !m.organization
+                    .as_deref()
+                    .is_some_and(|o| !o.trim().is_empty())
+            }) {
                 machine.organization = Some(crate::organizations::PERSONAL_ID.into());
                 stamped += 1;
             }
@@ -653,7 +668,6 @@ fn serialize(machines: &[Machine]) -> Option<String> {
 }
 
 fn write_backup(original: &[u8], file: &Path, suffix: &str) -> Option<PathBuf> {
-    use std::io::Write;
     let base = backup_path_with(file, suffix);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -664,17 +678,14 @@ fn write_backup(original: &[u8], file: &Path, suffix: &str) -> Option<PathBuf> {
         PathBuf::from(format!("{}-{stamp}", base.display())),
     ];
     candidates.extend((2..=50).map(|n| PathBuf::from(format!("{}-{stamp}-{n}", base.display()))));
-    std::fs::create_dir_all(file.parent()?).ok()?;
+    notchling_platform::files::ensure_private_dir(file.parent()?).ok()?;
     for candidate in candidates {
-        if candidate.exists() {
+        if std::fs::symlink_metadata(&candidate).is_ok() {
             continue;
         }
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-            .ok()?;
-        if f.write_all(original).is_err() || std::fs::read(&candidate).ok()? != original {
+        if notchling_platform::files::write_private_no_follow(&candidate, original).is_err()
+            || std::fs::read(&candidate).ok()? != original
+        {
             let _ = std::fs::remove_file(&candidate);
             return None;
         }

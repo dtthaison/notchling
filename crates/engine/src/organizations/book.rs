@@ -1,8 +1,9 @@
 use super::backup;
 use super::kinds::{self, Kind, FIELD, KINDS};
+use super::migrate::MigrateError;
 use super::record::{Counts, Document, MachineSettings, Problem, DOC};
 use super::view::{Resolved, State, View};
-use crate::machines::registry::RegistryFiles;
+use crate::machines::registry::{RegistryFiles, RegistryState};
 use crate::store::{self, DocChange};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -148,7 +149,10 @@ impl Organizations {
         color: Option<&str>,
     ) -> Result<String, EditError> {
         if self.view().only_personal() {
-            let _ = self.migrate(None);
+            self.migrate(None).map_err(|e| match e {
+                MigrateError::Unreadable(why) => EditError::Unreadable(why),
+                MigrateError::Store(why) => EditError::Store(why),
+            })?;
         }
         self.edit(|doc| doc.create(name, github_owner, color))
     }
@@ -178,8 +182,88 @@ impl Organizations {
     }
 
     pub fn delete(&self, id: &str, registry: Option<&RegistryFiles>) -> Result<(), EditError> {
-        let counts = self.counts(registry).get(id).copied().unwrap_or_default();
-        self.edit(|doc| doc.delete(id, counts).map_err(|p| vec![p]))
+        let machines: Vec<Option<String>> = match registry.map(RegistryFiles::load) {
+            Some(RegistryState::Unreadable(why)) => return Err(EditError::Unreadable(why)),
+            Some(state) => state
+                .machines()
+                .into_iter()
+                .map(|m| m.organization)
+                .collect(),
+            None => Vec::new(),
+        };
+        self.import_legacy();
+        let names = [
+            DOC,
+            KINDS[0].doc(),
+            KINDS[1].doc(),
+            KINDS[2].doc(),
+            KINDS[3].doc(),
+        ];
+        let mut failure: Option<EditError> = None;
+        let stored = store::update_docs(&self.data_dir, &names, |old| {
+            let mut doc = match parse_doc(old[0].as_deref()) {
+                Ok(doc) => doc,
+                Err(why) => {
+                    failure = Some(EditError::Unreadable(why.clone()));
+                    return Err(why);
+                }
+            };
+            let view = View::new(State::Loaded(doc.clone()));
+            let mut counts = Counts {
+                machines: machines
+                    .iter()
+                    .filter(|m| view.machine(m.as_deref()).id == id)
+                    .count(),
+                ..Counts::default()
+            };
+            for (i, kind) in KINDS.iter().enumerate() {
+                let Some(text) = old[i + 1].as_deref() else {
+                    continue;
+                };
+                let Some(list) = kinds::listing(*kind, text) else {
+                    let why = format!("{} can't be read", kind.doc());
+                    failure = Some(EditError::Unreadable(why.clone()));
+                    return Err(why);
+                };
+                for (key, field) in list {
+                    if view.resolve(*kind, &key, field.as_deref()).id == id {
+                        if kind.is_account() {
+                            counts.accounts += 1;
+                        } else {
+                            counts.secrets += 1;
+                        }
+                    }
+                }
+            }
+            if let Err(problem) = doc.delete(id, counts) {
+                failure = Some(EditError::Problems(vec![problem]));
+                return Err("the change is refused".into());
+            }
+            let problems = doc.problems();
+            if !problems.is_empty() {
+                failure = Some(EditError::Problems(problems));
+                return Err("the change is not valid".into());
+            }
+            let mut changes = vec![DocChange::Keep; names.len()];
+            changes[0] = DocChange::Set(doc.text()?);
+            Ok(changes)
+        });
+        match (failure, stored) {
+            (Some(e), _) => Err(e),
+            (None, Ok(())) => Ok(()),
+            (None, Err(why)) => Err(EditError::Store(why)),
+        }
+    }
+
+    pub(super) fn import_legacy(&self) {
+        for kind in KINDS {
+            let _ = store::import_file(
+                &self.data_dir,
+                kind.doc(),
+                &kind.legacy_file(&self.data_dir),
+                |text| kinds::listing(kind, text).is_some(),
+            );
+        }
     }
 
     pub fn set_organization(
@@ -231,6 +315,24 @@ impl Organizations {
             (None, Ok(())) => Ok(()),
             (None, Err(why)) => Err(EditError::Store(why)),
         }
+    }
+
+    pub fn move_shadow(&self, kind: Kind, from: &str, to: &str) -> Result<(), EditError> {
+        let from = kind.shadow_key(&kind.normal(from));
+        let to = kind.shadow_key(&kind.normal(to));
+        let State::Loaded(mut doc) = self.state() else {
+            return Ok(());
+        };
+        if !shadow_of(&mut doc, kind).contains_key(&from) {
+            return Ok(());
+        }
+        self.edit(|doc| {
+            let shadow = shadow_of(doc, kind);
+            if let Some(value) = shadow.remove(&from) {
+                shadow.insert(to, value);
+            }
+            Ok(())
+        })
     }
 
     pub fn forget(&self, kind: Kind, key: &str) -> Result<(), EditError> {

@@ -16,9 +16,10 @@ use notchling_engine::machines::roots::MachineRoots;
 use notchling_engine::organizations::Organizations;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_events::kinds::choices::SwitchName;
+use notchling_events::kinds::diagnostics::OrganizationsChecked;
 use notchling_events::kinds::security::{DaemonStopped, StopCause, SwitchCause, SwitchChanged};
 use notchling_events::spec::Outcome;
-use notchling_events::{Emit, Event, Millis};
+use notchling_events::{Count, Emit, Event, Millis};
 use notchling_local_api::lock::InstanceLock;
 use notchling_local_api::tier::installed_app_paths;
 use notchling_local_api::{
@@ -224,11 +225,47 @@ impl Default for DaemonOptions {
     }
 }
 
-pub(crate) fn migrate_organizations(layout: &Layout) -> bool {
+pub(crate) fn migrate_organizations(
+    layout: &Layout,
+) -> Result<notchling_engine::organizations::Report, notchling_engine::organizations::MigrateError>
+{
     let registry = MachineRoots::in_data(&layout.data_dir).registry();
-    Organizations::new(&layout.data_dir)
-        .migrate(Some(&registry))
-        .is_ok()
+    Organizations::new(&layout.data_dir).migrate(Some(&registry))
+}
+
+fn organizations_event(
+    result: &Result<
+        notchling_engine::organizations::Report,
+        notchling_engine::organizations::MigrateError,
+    >,
+) -> Event {
+    let count = |n: usize| Count(u64::try_from(n).unwrap_or(u64::MAX));
+    match result {
+        Ok(report) => Event::new(
+            &OrganizationsChecked {
+                marked: count(report.stamped + report.machines),
+                restored: count(report.restored),
+                skipped: count(report.skipped.len()),
+                backups: count(report.backups.len()),
+            },
+            if report.skipped.is_empty() {
+                Outcome::Ok
+            } else {
+                Outcome::Info
+            },
+            wall_ms(),
+        ),
+        Err(_) => Event::new(
+            &OrganizationsChecked {
+                marked: count(0),
+                restored: count(0),
+                skipped: count(0),
+                backups: count(0),
+            },
+            Outcome::Failed,
+            wall_ms(),
+        ),
+    }
 }
 
 pub fn run(
@@ -251,7 +288,6 @@ pub fn run(
         }
         None => None,
     };
-    let _ = migrate_organizations(&layout);
     let allowlist = Allowlist::for_daemon(
         &installed_app_paths(),
         std::env::var_os(APP_TIER_PATHS_ENV).as_deref(),
@@ -268,6 +304,8 @@ pub fn run(
     let keys = options.keys.clone().unwrap_or_else(|| layout.key_store());
     let logs = log_start::start_with(&layout, env!("CARGO_PKG_VERSION"), publish.clone(), keys);
     let began = Instant::now();
+    logs.bus
+        .push(organizations_event(&migrate_organizations(&layout)));
     let wired = Wired::build(
         &layout,
         sessions.clone(),

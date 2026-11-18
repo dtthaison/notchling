@@ -625,3 +625,35 @@ fn the_vault_entry_for_the_admin_password_round_trips_and_an_old_file_loads_with
     assert!(empty.save(std::slice::from_ref(&m4)));
     assert!(!doc(&empty).unwrap().contains("adminSecret"));
 }
+
+#[cfg(unix)]
+#[test]
+fn the_version_2_backup_and_its_folder_are_private_and_a_second_adoption_writes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("reg");
+    let reg = with_old_file(&dir, "data", OLD_V2);
+    std::fs::set_permissions(dir.join("data"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(reg.adopt_organizations(), Ok(1));
+    let backup = backup_path_v2(&reg.old_own);
+    assert_eq!(std::fs::read(&backup).unwrap(), OLD_V2.as_bytes());
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&backup), 0o600);
+    assert_eq!(mode(&dir.join("data")), 0o700);
+    let after = doc(&reg);
+    assert_eq!(reg.adopt_organizations(), Ok(0));
+    assert_eq!(doc(&reg), after);
+}
+
+#[test]
+fn a_blank_organization_counts_as_none_when_the_registry_adopts() {
+    let dir = TempDir::new("reg");
+    let reg = registry(&dir, "data");
+    let mut m = machine("m1", "sondoan", "python3", "/opt/sd/sd.py", false);
+    m.organization = Some("  ".into());
+    assert!(reg.save(&[m]));
+    assert_eq!(reg.adopt_organizations(), Ok(1));
+    assert_eq!(
+        reg.all()[0].organization.as_deref(),
+        Some(crate::organizations::PERSONAL_ID)
+    );
+}

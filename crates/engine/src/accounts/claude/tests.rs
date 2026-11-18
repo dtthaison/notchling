@@ -370,9 +370,10 @@ fn a_sync_that_saves_the_account_again_keeps_its_organization() {
     w.signed_in(1, 1);
     w.answers_profile(1);
     w.store.sync().unwrap();
-    let mut list = w.store.saved_list();
-    list[0].organization = Some("aptusfit".into());
-    w.store.save_list(&list).unwrap();
+    let orgs = crate::organizations::Organizations::new(&w.tmp.path("data"));
+    orgs.create("AptusFIT", None, None).unwrap();
+    orgs.set_organization(crate::organizations::Kind::Claude, &id(1), "aptusfit")
+        .unwrap();
 
     w.signed_in(1, 2);
     w.answers_profile(1);
@@ -382,5 +383,29 @@ fn a_sync_that_saves_the_account_again_keeps_its_organization() {
     assert_eq!(
         w.store.saved_list()[0].organization.as_deref(),
         Some("aptusfit")
+    );
+}
+
+#[test]
+fn a_list_read_before_an_organization_was_set_does_not_undo_it() {
+    use crate::organizations::{Kind as OrgKind, Organizations};
+    let w = World::new("acc-organization");
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    let stale = w.store.sync().unwrap().accounts;
+    let data = w.tmp.path("data");
+    let orgs = Organizations::new(&data);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Claude, &id(1), "acme")
+        .unwrap();
+    w.store.save_list(&stale).unwrap();
+    assert_eq!(
+        w.store.saved_list()[0].organization.as_deref(),
+        Some("acme")
+    );
+    w.store.sync().unwrap();
+    assert_eq!(
+        w.store.saved_list()[0].organization.as_deref(),
+        Some("acme")
     );
 }

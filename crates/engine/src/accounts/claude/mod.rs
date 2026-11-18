@@ -178,12 +178,26 @@ impl ClaudeAccounts {
     }
 
     fn save_list(&self, list: &[ClaudeAccount]) -> Result<(), AccountError> {
-        let text = serde_json::to_string(list).map_err(|e| err(e.to_string()))?;
         self.list_doc()
-            .put(
+            .update(
                 |old| serde_json::from_str::<Vec<ClaudeAccount>>(old).is_ok(),
-                &text,
+                |stored| {
+                    let current: Vec<ClaudeAccount> = stored
+                        .as_deref()
+                        .and_then(|text| serde_json::from_str(text).ok())
+                        .unwrap_or_default();
+                    let mut next = list.to_vec();
+                    for account in &mut next {
+                        if let Some(old) = current.iter().find(|a| a.id == account.id) {
+                            account.organization = old.organization.clone();
+                        }
+                    }
+                    serde_json::to_string(&next)
+                        .map(Some)
+                        .map_err(|e| e.to_string())
+                },
             )
+            .map(|_| ())
             .map_err(|e| err(format!("Couldn't save the accounts list: {e}")))
     }
 

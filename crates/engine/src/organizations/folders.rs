@@ -60,34 +60,38 @@ pub fn find(
         return personal;
     };
     let session_real = resolve(&session);
-    let mut best: Option<(usize, FolderMatch)> = None;
+    let mut best: Option<(usize, &str, String)> = None;
     for org in organizations {
         for claimed in &org.folders {
             let Some(path) = expand(claimed, home) else {
                 continue;
             };
-            let mut length = None;
-            if session.starts_with(&path) {
-                length = Some(depth(&path));
+            let real = resolve(&path);
+            let textual = session.starts_with(&path);
+            let canonical = match (&real, &session_real) {
+                (Some(a), Some(b)) => b.starts_with(a),
+                _ => false,
+            };
+            if !textual && !canonical {
+                continue;
             }
-            if let (Some(a), Some(b)) = (resolve(&path), session_real.as_deref()) {
-                if b.starts_with(&a) {
-                    length = length.max(Some(depth(&a)));
-                }
-            }
-            let Some(length) = length else {
+            let length = depth(real.as_deref().unwrap_or(&path));
+            let Some(norm) = normalize_folder(claimed) else {
                 continue;
             };
-            if best.as_ref().is_none_or(|(n, _)| length > *n) {
-                best = Some((
-                    length,
-                    FolderMatch {
-                        organization: org.id.clone(),
-                        folder: normalize_folder(claimed),
-                    },
-                ));
+            let better = match &best {
+                None => true,
+                Some((n, id, folder)) => {
+                    length > *n || (length == *n && (org.id.as_str(), &norm) < (*id, folder))
+                }
+            };
+            if better {
+                best = Some((length, org.id.as_str(), norm));
             }
         }
     }
-    best.map_or(personal, |(_, m)| m)
+    best.map_or(personal, |(_, id, folder)| FolderMatch {
+        organization: id.to_owned(),
+        folder: Some(folder),
+    })
 }

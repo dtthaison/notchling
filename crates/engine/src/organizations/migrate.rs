@@ -34,6 +34,7 @@ impl Organizations {
             KINDS[3].doc(),
         ];
         let mut report = Report::default();
+        self.import_legacy();
         let mut failure: Option<MigrateError> = None;
         let stored = store::update_docs(&self.data_dir, &names, |old| {
             let mut doc = match old[0].as_deref() {

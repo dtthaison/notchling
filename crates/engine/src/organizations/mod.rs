@@ -27,6 +27,8 @@ mod tests_personal;
 #[cfg(test)]
 mod tests_record;
 #[cfg(test)]
+mod tests_review;
+#[cfg(test)]
 mod tests_shadow;
 #[cfg(test)]
 mod tests_support;

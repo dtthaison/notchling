@@ -46,6 +46,10 @@ impl VaultIndex {
         VaultIndex(DocFile::new(data_dir, INDEX_DOC, old_file).strict())
     }
 
+    pub fn data_dir(&self) -> &Path {
+        &self.0.data_dir
+    }
+
     pub fn in_data(data_dir: &Path) -> VaultIndex {
         VaultIndex::new(data_dir, data_dir.join("daemon").join("vault.json"))
     }

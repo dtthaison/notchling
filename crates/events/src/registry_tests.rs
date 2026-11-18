@@ -250,9 +250,9 @@ fn session_outbox_has_no_text_fields() {
 }
 
 #[test]
-fn fifty_eight_kinds() {
+fn fifty_nine_kinds() {
     let kinds = all();
-    assert_eq!(kinds.len(), 58);
+    assert_eq!(kinds.len(), 59);
     let off: Vec<&str> = kinds
         .iter()
         .filter(|k| k.default == DefaultState::Off)

@@ -139,6 +139,25 @@ kinds! {
             count: Count,
         }
     }
+    OrganizationsChecked = "organizations.checked", kv 1 {
+        title: "Organizations Checked",
+        records: "The start-up check of organizations: how many records it marked, restored or left alone, how many copies it saved, and whether it finished. Counts only.",
+        why: "Shows that the move to Personal ran, and that a list it could not read was left as it was.",
+        default: On,
+        lock: Lock::Toggle,
+        sinks: DIAG,
+        durability: Durability::Push,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::No,
+        keep_days: 30,
+        fields {
+            marked: Count,
+            restored: Count,
+            skipped: Count,
+            backups: Count,
+        }
+    }
     HostIdentity = "host.identity", kv 1 {
         title: "Machine Id",
         records: "This Mac's id changed, which happens when the bridge certificate is first made.",

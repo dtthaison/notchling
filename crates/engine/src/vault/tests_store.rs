@@ -347,3 +347,36 @@ fn remove_never_touches_a_value_the_daemons_list_doesnt_name() {
     assert!(store.remove("gh").unwrap());
     assert_eq!(item.values(), theirs);
 }
+
+#[test]
+fn a_save_or_rename_made_from_a_stale_entry_keeps_the_organization_set_since() {
+    use crate::organizations::{Kind as OrgKind, Organizations};
+    let (temp, _item, store) = store("organization");
+    let entry = VaultEntry::new("npm", Kind::Token);
+    store
+        .save(&entry, Some(value("fake-npm-0001")), None, "t")
+        .unwrap();
+    let orgs = Organizations::new(&temp.0);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Vault, "npm", "acme")
+        .unwrap();
+    let stale = store.entry("npm").unwrap().unwrap();
+    assert_eq!(stale.organization.as_deref(), Some("acme"));
+    orgs.create("Other", None, None).unwrap();
+    orgs.set_organization(OrgKind::Vault, "npm", "other")
+        .unwrap();
+    let saved = store.save(&stale, None, Some(&stale), "t2").unwrap();
+    assert_eq!(saved.entry.organization.as_deref(), Some("other"));
+    assert_eq!(
+        store.entry("npm").unwrap().unwrap().organization.as_deref(),
+        Some("other")
+    );
+    let renamed = store.rename(&stale, "npm-two", "t3").unwrap();
+    assert_eq!(renamed.entry.organization.as_deref(), Some("other"));
+    let shadow = match orgs.state() {
+        crate::organizations::State::Loaded(doc) => doc.shadow.vault,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(shadow.get("npm-two").map(String::as_str), Some("other"));
+    assert!(!shadow.contains_key("npm"));
+}

@@ -92,8 +92,12 @@ impl View {
         };
         let (id, source) = match field {
             Some(id) => (id.to_owned(), Source::Field),
-            None => match shadow.get(&kind.shadow_key(key)) {
-                Some(id) => (id.clone(), Source::Shadow),
+            None => match shadow
+                .get(&kind.shadow_key(key))
+                .map(|id| id.trim())
+                .filter(|id| !id.is_empty())
+            {
+                Some(id) => (id.to_owned(), Source::Shadow),
                 None => (PERSONAL_ID.to_owned(), Source::Default),
             },
         };

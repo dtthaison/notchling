@@ -1,5 +1,6 @@
 use super::entry::{Kind, VaultEntry, VaultValue};
 use super::list::{self, IndexError, VaultIndex};
+use crate::organizations::{Kind as OrgKind, Organizations};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 
@@ -231,10 +232,22 @@ impl VaultStore {
         let mut saved = entry.clone();
         saved.updated = now.to_string();
         self.index.update(|mut list| {
+            let current = list
+                .iter()
+                .find(|e| Some(e.id()) == old_id)
+                .or_else(|| list.iter().find(|e| e.id() == id))
+                .map(|e| e.organization.clone());
+            if let Some(organization) = current {
+                saved.organization = organization;
+            }
             list.retain(|e| e.id() != id && Some(e.id()) != old_id);
             list.push(saved.clone());
             Ok(list)
         })?;
+        if let Some(old_id) = old_id.filter(|o| *o != id) {
+            let _ =
+                Organizations::new(self.index.data_dir()).move_shadow(OrgKind::Vault, &old_id, &id);
+        }
         Ok(Saved {
             entry: saved,
             value_changed: changed(before.as_ref(), &stored),

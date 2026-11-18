@@ -2,6 +2,7 @@ use crate::accounts::book::{ANTIGRAVITY_DOC, CODEX_DOC};
 use crate::accounts::claude::LIST_DOC;
 use crate::vault::list::INDEX_DOC;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 pub const FIELD: &str = "organization";
 
@@ -22,6 +23,16 @@ impl Kind {
             Kind::Codex => CODEX_DOC,
             Kind::Antigravity => ANTIGRAVITY_DOC,
             Kind::Vault => INDEX_DOC,
+        }
+    }
+
+    pub fn legacy_file(self, data_dir: &Path) -> PathBuf {
+        let daemon = data_dir.join("daemon");
+        match self {
+            Kind::Claude => daemon.join("accounts.json"),
+            Kind::Codex => daemon.join("accounts").join("codex.json"),
+            Kind::Antigravity => daemon.join("accounts").join("antigravity.json"),
+            Kind::Vault => daemon.join("vault.json"),
         }
     }
 

@@ -252,7 +252,7 @@ fn the_first_start_makes_the_personal_organization_and_a_second_start_changes_no
     assert_eq!(doc.organizations.len(), 1);
     assert_eq!(doc.organizations[0].id, PERSONAL_ID);
     let text = notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap();
-    assert!(super::daemon::migrate_organizations(&daemon.layout));
+    assert!(super::daemon::migrate_organizations(&daemon.layout).is_ok());
     assert_eq!(
         notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap(),
         text

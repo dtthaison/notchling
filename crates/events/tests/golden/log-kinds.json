@@ -342,6 +342,12 @@
     {"name":"why","type":"choice","optional":false,"list":false,"choices":["no_socket","refused","timeout","untrusted_server","version","other"]},
     {"name":"count","type":"count","optional":false,"list":false,"choices":[]}
   ]},
+  {"name":"organizations.checked","kv":1,"group":"diagnostics","lock":"toggle","sinks":["diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"marked","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"restored","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"skipped","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"backups","type":"count","optional":false,"list":false,"choices":[]}
+  ]},
   {"name":"host.identity","kv":1,"group":"diagnostics","lock":"always","sinks":["audit","activity"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"old","type":"hex","optional":false,"list":false,"choices":[]},
     {"name":"new","type":"hex","optional":false,"list":false,"choices":[]}
