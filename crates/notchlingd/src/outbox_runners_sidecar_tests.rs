@@ -60,6 +60,10 @@ fn sidecar(link: &Arc<SidecarLink>, outcome: Outcome) -> JoinHandle<Vec<SidecarJ
     })
 }
 
+fn attempt_id(row: &Row) -> String {
+    format!("{}-{}-{}", row.id, row.tries, row.attempt_ms.unwrap())
+}
+
 fn deliver(a: &AgyBench, text: &str) -> (TryEnd, Option<String>, String) {
     let row = a.b.send(ROW, text);
     let taken = a.b.outbox.store().take(&row.id, T0).unwrap().unwrap();
@@ -91,7 +95,8 @@ fn a_reply_goes_through_the_sidecar_queue_under_the_outbox_row_id_and_agy_is_nev
     assert_eq!(end, TryEnd::Ok, "{note:?}");
     let jobs = taker.join().unwrap();
     assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].id, format!("{id}-1"));
+    let row = a.b.outbox.store().get(&id).unwrap().unwrap();
+    assert_eq!(jobs[0].id, attempt_id(&row));
     assert_eq!(jobs[0].text, "hello there");
     assert_eq!(
         jobs[0].kind,
@@ -265,7 +270,11 @@ fn send_again_on_an_unsure_row_really_sends_a_new_job_while_the_same_attempt_nev
     let taker = sidecar(&link, Outcome::Unconfirmed { session: None });
     let (end, _, id) = deliver(&a, "hello");
     assert_eq!(end, TryEnd::Cut);
-    assert_eq!(taker.join().unwrap()[0].id, format!("{id}-1"));
+    let first = taker.join().unwrap()[0].id.clone();
+    assert_eq!(
+        first,
+        attempt_id(&a.b.outbox.store().get(&id).unwrap().unwrap())
+    );
 
     let taken = a.b.outbox.store().get(&id).unwrap().unwrap();
     let (again, _, _) = a.courier.deliver(&taken, false);
@@ -277,13 +286,43 @@ fn send_again_on_an_unsure_row_really_sends_a_new_job_while_the_same_attempt_nev
         .requeue(&id, &[State::Sending], false, T0)
         .unwrap();
     let taker = sidecar(&link, Outcome::Delivered { session: None });
-    let retaken = a.b.outbox.store().take(&id, T0).unwrap().unwrap();
+    let retaken = a.b.outbox.store().take(&id, T0 + 1_000).unwrap().unwrap();
     assert_eq!(retaken.tries, 2);
     let (end, note, _) = a.courier.deliver(&retaken, false);
     assert_eq!(end, TryEnd::Ok, "{note:?}");
     let jobs = taker.join().unwrap();
     assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].id, format!("{id}-2"));
+    assert_eq!(jobs[0].id, attempt_id(&retaken));
+    assert_ne!(jobs[0].id, first);
+}
+
+#[test]
+fn an_edited_unsure_row_is_a_new_attempt_even_though_its_tries_start_again() {
+    let a = agy();
+    choose(&a, "sidecar");
+    let link = link(&a);
+    let taker = sidecar(&link, Outcome::Unconfirmed { session: None });
+    let (end, _, id) = deliver(&a, "first words");
+    assert_eq!(end, TryEnd::Cut);
+    let first = taker.join().unwrap().remove(0);
+    let store = a.b.outbox.store();
+    store
+        .set_state(&id, &[State::Sending], State::Unsure, None, None, T0 + 10)
+        .unwrap();
+    store
+        .requeue(&id, &[State::Unsure], false, T0 + 15)
+        .unwrap();
+    store.edit(&id, "edited words", T0 + 20).unwrap();
+    let retaken = store.take(&id, T0 + 1_000).unwrap().unwrap();
+    assert_eq!(retaken.tries, 1);
+    assert_eq!(retaken.text, "edited words");
+    let taker = sidecar(&link, Outcome::Delivered { session: None });
+    let (end, note, _) = a.courier.deliver(&retaken, false);
+    assert_eq!(end, TryEnd::Ok, "{note:?}");
+    let second = taker.join().unwrap().remove(0);
+    assert_ne!(second.id, first.id);
+    assert_eq!(second.text, "edited words");
+    assert_eq!(first.text, "first words");
 }
 
 #[test]

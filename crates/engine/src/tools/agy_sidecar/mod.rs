@@ -66,6 +66,8 @@ impl Roots {
 #[cfg(test)]
 mod agentapi_tests;
 #[cfg(test)]
+mod blocked_tests;
+#[cfg(test)]
 mod bundle_tests;
 #[cfg(test)]
 mod config_file_tests;

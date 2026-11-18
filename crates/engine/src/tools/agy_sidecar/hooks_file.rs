@@ -187,6 +187,15 @@ pub fn apply(
     })
 }
 
+pub fn check(path: &Path, binary: &Path, os: Os, want: Want) -> Result<(), FileError> {
+    file::check_rewrite(path, &|text, state| {
+        if state == State::Missing && want == Want::Remove {
+            return Ok(None);
+        }
+        change(text, binary, os, want)
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Found {
     Missing,

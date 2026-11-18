@@ -310,3 +310,38 @@ fn a_waiting_job_is_given_up_at_once_when_the_sidecar_is_no_longer_there() {
     assert!(began.elapsed() < Duration::from_secs(2));
     assert_eq!(q.cancel("a"), Cancelled::Withdrawn);
 }
+
+#[test]
+fn a_take_that_a_newer_one_replaced_never_writes_its_process_over_the_newer_ones() {
+    let q = Arc::new(Queue::new());
+    let old = {
+        let q = q.clone();
+        std::thread::spawn(move || {
+            q.take_noting(Duration::from_secs(10), 5, &|| true, Some((&|| 1_000, 111)))
+        })
+    };
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(q.last_pid(), Some(111));
+    let new = {
+        let q = q.clone();
+        std::thread::spawn(move || {
+            q.take_noting(Duration::from_secs(10), 5, &|| true, Some((&|| 2_000, 222)))
+        })
+    };
+    assert!(old.join().unwrap().is_empty());
+    assert_eq!(q.last_pid(), Some(222));
+    q.submit(reply("a", "x")).unwrap();
+    assert_eq!(new.join().unwrap().len(), 1);
+    assert_eq!(q.last_pid(), Some(222));
+}
+
+#[test]
+fn a_take_whose_process_is_gone_does_not_note_itself_as_seen() {
+    let q = Queue::new();
+    let got = q.take_noting(SHORT, 5, &|| false, Some((&|| 5_000, 9)));
+    assert!(got.is_empty());
+    assert_eq!(q.last_pid(), None);
+    let none = Queue::new();
+    none.take_noting(SHORT, 5, &|| true, None);
+    assert_eq!(none.last_pid(), None);
+}

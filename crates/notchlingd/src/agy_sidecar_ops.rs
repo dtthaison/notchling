@@ -93,6 +93,10 @@ impl SidecarLink {
         self.queue.seen_by((self.clock)(), pid);
     }
 
+    pub fn now(&self) -> i64 {
+        (self.clock)()
+    }
+
     pub fn queue(&self) -> &Queue {
         &self.queue
     }
@@ -349,7 +353,6 @@ impl AgySidecarOps {
 
     fn take(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let pid = self.sidecar_caller(caller, "agy.sidecar.take")?;
-        self.link.saw(pid);
         let wait = args
             .get("waitMs")
             .and_then(Value::as_u64)
@@ -363,16 +366,14 @@ impl AgySidecarOps {
             });
         let processes = self.processes.clone();
         let up = move || processes.exe(pid).is_some();
+        let now = || self.link.now();
         let jobs: Vec<Value> = self
             .link
             .queue()
-            .take_for(wait, max, &up)
+            .take_noting(wait, max, &up, Some((&now, pid)))
             .iter()
             .map(Job::to_json)
             .collect();
-        if up() {
-            self.link.saw(pid);
-        }
         Ok(json!({"jobs": jobs}))
     }
 
@@ -514,9 +515,13 @@ impl AgySidecarOps {
         plugin::preflight(&self.roots, binary)?;
         config_file::check_enable(&self.roots.config_json(), SIDECAR_ID)
             .map_err(|e| e.to_string())?;
-        let text = std::fs::read_to_string(self.roots.hooks_json()).unwrap_or_default();
-        hooks_file::change(&text, binary, Os::current(), Want::Install)?;
-        Ok(())
+        hooks_file::check(
+            &self.roots.hooks_json(),
+            binary,
+            Os::current(),
+            Want::Install,
+        )
+        .map_err(|e| e.to_string())
     }
 
     fn setup(&self, args: &Value) -> Result<Value, ApiError> {

@@ -226,11 +226,26 @@ impl Queue {
     }
 
     pub fn take_for(&self, wait: Duration, max: usize, alive: &dyn Fn() -> bool) -> Vec<Job> {
+        self.take_noting(wait, max, alive, None)
+    }
+
+    pub fn take_noting(
+        &self,
+        wait: Duration,
+        max: usize,
+        alive: &dyn Fn() -> bool,
+        note: Option<(&dyn Fn() -> i64, u32)>,
+    ) -> Vec<Job> {
         let deadline = Instant::now() + wait;
         let mut inner = self.lock();
         inner.epoch += 1;
         let mine = inner.epoch;
         inner.waiters += 1;
+        if let Some((clock, pid)) = note {
+            if alive() {
+                inner.seen = Some((clock(), Some(pid)));
+            }
+        }
         self.changed.notify_all();
         let got = loop {
             if inner.closed || inner.epoch != mine || !alive() {
@@ -260,6 +275,11 @@ impl Queue {
                 .0;
         };
         inner.waiters -= 1;
+        if let Some((clock, pid)) = note {
+            if inner.epoch == mine && alive() {
+                inner.seen = Some((clock(), Some(pid)));
+            }
+        }
         got
     }
 

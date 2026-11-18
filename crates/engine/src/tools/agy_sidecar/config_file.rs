@@ -118,14 +118,10 @@ fn turned_off(text: &str, id: &str) -> Result<Option<String>, String> {
 }
 
 pub fn check_enable(path: &Path, id: &str) -> Result<(), EnableError> {
-    if !path.is_file() {
+    if std::fs::symlink_metadata(path).is_err() {
         return Err(EnableError::NoConfig);
     }
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| EnableError::File(FileError::Io(format!("config.json: {e}"))))?;
-    turned_on(&text, id)
-        .map(|_| ())
-        .map_err(|why| EnableError::File(FileError::Refused(why)))
+    file::check_rewrite(path, &|text, _| turned_on(text, id)).map_err(EnableError::File)
 }
 
 pub fn enable(
@@ -137,7 +133,7 @@ pub fn enable(
     if !confirmed {
         return Err(EnableError::NotConfirmed);
     }
-    if !path.is_file() {
+    if std::fs::symlink_metadata(path).is_err() {
         return Err(EnableError::NoConfig);
     }
     file::rewrite(path, stamp, &|text, _| turned_on(text, id)).map_err(EnableError::File)

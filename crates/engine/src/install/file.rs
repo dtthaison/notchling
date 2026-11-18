@@ -242,6 +242,34 @@ pub fn rewrite(path: &Path, stamp: u64, change: Change) -> Result<Rewritten, Fil
     })
 }
 
+pub fn check_rewrite(path: &Path, change: Change) -> Result<(), FileError> {
+    let loaded = load(path).map_err(|e| named(path, e))?;
+    let Some(text) = change(&loaded.text, loaded.state).map_err(FileError::Refused)? else {
+        return Ok(());
+    };
+    if text == loaded.text {
+        return Ok(());
+    }
+    if loaded.read_only {
+        return Err(FileError::Refused(format!(
+            "{} is read-only; it was left alone",
+            file_name(path)
+        )));
+    }
+    let dir = loaded.target.parent().unwrap_or(Path::new("."));
+    let probe = dir.join(format!(
+        ".{}.notchling-{}.probe",
+        file_name(&loaded.target),
+        std::process::id()
+    ));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    let made = options.open(&probe);
+    let _ = fs::remove_file(&probe);
+    made.map(|_| ())
+        .map_err(|e| named(path, io("the folder can't be written to", e)))
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
