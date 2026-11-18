@@ -113,17 +113,23 @@ pub fn from_log(root: &Path, session: &str, note: &str) -> (Conversation, bool) 
 }
 
 pub fn from_log_file(path: &Path, note: Option<&str>) -> (Conversation, bool) {
+    from_log_file_in(path, note, Source::Cli)
+}
+
+pub fn from_log_file_in(path: &Path, note: Option<&str>, source: Source) -> (Conversation, bool) {
     let lines = read_tail(path);
-    let (mut conversation, working) = from_lines(&lines);
+    let (mut conversation, working) = from_lines_in(&lines, source);
     if working {
         let open = match conversation.items.last().map(|i| &i.kind) {
             Some(ItemKind::Tools(calls)) => calls.iter().find(|c| !c.finished),
             _ => None,
         };
-        conversation.activity = Some(
-            open.map(|c| c.title.clone())
-                .unwrap_or_else(|| "Working elsewhere…".into()),
-        );
+        conversation.activity = Some(open.map(|c| c.title.clone()).unwrap_or_else(
+            || match source {
+                Source::Cli => "Working elsewhere…".into(),
+                Source::App => "Working…".into(),
+            },
+        ));
     }
     if let Some(note) = note {
         conversation.items.push(ChatItem {
@@ -188,7 +194,14 @@ fn read_tail(path: &Path) -> Vec<String> {
 }
 
 pub fn from_lines(lines: &[String]) -> (Conversation, bool) {
-    let mut log = Log::default();
+    from_lines_in(lines, Source::Cli)
+}
+
+pub fn from_lines_in(lines: &[String], source: Source) -> (Conversation, bool) {
+    let mut log = Log {
+        source,
+        ..Log::default()
+    };
     for (n, line) in lines.iter().enumerate() {
         if let Ok(step) = serde_json::from_str::<Value>(line) {
             log.step(n, &step);
@@ -197,8 +210,16 @@ pub fn from_lines(lines: &[String]) -> (Conversation, bool) {
     log.finish()
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Source {
+    #[default]
+    Cli,
+    App,
+}
+
 #[derive(Default)]
 struct Log {
+    source: Source,
     conversation: Conversation,
     working: bool,
     turn_start: Option<Timestamp>,
@@ -223,6 +244,15 @@ impl Log {
                 self.turn_tokens = 0;
                 let kind = ItemKind::user(&user_request(content));
                 self.push(format!("agy-log-{n}"), kind, date);
+            }
+            Some("SYSTEM_MESSAGE") if self.source == Source::App => {
+                if let Some(text) = system_message(content) {
+                    self.close_calls();
+                    self.working = true;
+                    self.turn_start = date;
+                    self.turn_tokens = 0;
+                    self.push(format!("agy-log-{n}"), ItemKind::user(&text), date);
+                }
             }
             Some("PLANNER_RESPONSE") => self.planner(n, step, content, date),
             Some("GENERIC") => self.result(step, content),
@@ -427,6 +457,20 @@ fn make_call(id: &str, name: &str, args: &Value) -> ToolCall {
             call(ToolKind::Other, name.to_owned(), input)
         }
     }
+}
+
+fn system_message(content: &str) -> Option<String> {
+    let inner = content
+        .rsplit_once("<SYSTEM_MESSAGE>")
+        .and_then(|(_, rest)| rest.split_once("</SYSTEM_MESSAGE>"))
+        .map(|(inner, _)| inner)?
+        .trim();
+    let (head, body) = inner.split_once("content=")?;
+    let head = head.strip_prefix("[Message]")?;
+    head.split_whitespace()
+        .any(|word| word == "sender=system")
+        .then(|| body.trim().to_owned())
+        .filter(|text| !text.is_empty())
 }
 
 fn user_request(content: &str) -> String {

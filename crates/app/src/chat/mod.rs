@@ -51,6 +51,8 @@ pub mod limit_ring;
 pub mod link_target;
 pub mod loader;
 #[cfg(test)]
+mod loader_app_tests;
+#[cfg(test)]
 mod loader_change_tests;
 pub mod log;
 #[cfg(test)]

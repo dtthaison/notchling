@@ -6,12 +6,26 @@ use serde_json::Value;
 const TAIL_BYTES: u64 = 512 * 1024;
 
 pub fn log_path(home: &Path, row_id: &str) -> Option<PathBuf> {
+    log_in(home, ".gemini/antigravity-cli/brain", row_id)
+}
+
+pub fn app_log_path(home: &Path, row_id: &str) -> Option<PathBuf> {
+    log_in(home, ".gemini/antigravity/brain", row_id)
+}
+
+pub fn found_log(home: &Path, row_id: &str) -> Option<PathBuf> {
+    log_path(home, row_id)
+        .filter(|p| p.is_file())
+        .or_else(|| app_log_path(home, row_id))
+}
+
+fn log_in(home: &Path, brain: &str, row_id: &str) -> Option<PathBuf> {
     let id = row_id.strip_prefix("agy:")?;
     if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         return None;
     }
     Some(
-        home.join(".gemini/antigravity-cli/brain")
+        home.join(brain)
             .join(id)
             .join(".system_generated/logs/transcript.jsonl"),
     )
@@ -67,6 +81,23 @@ mod tests {
         .unwrap();
         assert_eq!(context_tokens(&path), Some(11_715));
         assert_eq!(context_tokens(&dir.join("missing.jsonl")), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_conversation_without_a_cli_log_is_read_from_the_apps_brain() {
+        let dir = std::env::temp_dir().join(format!("nl-agy-context-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let app = app_log_path(&dir, "agy:79ba6320-1b32").unwrap();
+        assert!(app.ends_with(
+            ".gemini/antigravity/brain/79ba6320-1b32/.system_generated/logs/transcript.jsonl"
+        ));
+        assert_eq!(found_log(&dir, "agy:79ba6320-1b32"), Some(app.clone()));
+        let cli = log_path(&dir, "agy:79ba6320-1b32").unwrap();
+        std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        std::fs::write(&cli, "{}\n").unwrap();
+        assert_eq!(found_log(&dir, "agy:79ba6320-1b32"), Some(cli));
+        assert_eq!(found_log(&dir, "codex:x"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

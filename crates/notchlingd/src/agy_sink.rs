@@ -78,6 +78,13 @@ impl Shared {
             .publish(topics::TOOLS, topics::SESSION_CHANGED, &data);
     }
 
+    pub fn session_changed_row(&self, session: &str, change: &str, row: Value) {
+        let data = json!({"id": row_id(session), "session": session,
+                          "row": row, "change": change});
+        self.room
+            .publish(topics::TOOLS, topics::SESSION_CHANGED, &data);
+    }
+
     pub fn row(&self, session: &str) -> Value {
         let Some(runner) = self.runner.get() else {
             return Value::Null;

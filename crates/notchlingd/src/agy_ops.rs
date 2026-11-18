@@ -1,5 +1,6 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{broad_folder, text_arg, Room};
+use crate::agy_app::{AppSessions, NOT_SIDECAR};
 use crate::agy_elsewhere::Elsewhere;
 use crate::agy_phone::{LogReads, PhoneRead};
 use crate::agy_sidecar_ops::SidecarLink;
@@ -78,6 +79,7 @@ pub struct AgyOps {
     runner: Runner,
     setup: AgySetup,
     elsewhere: Arc<Elsewhere>,
+    app: Arc<AppSessions>,
     logs: LogReads,
     outbox: OnceLock<Arc<OutboxOps>>,
     sidecar: OnceLock<Arc<SidecarLink>>,
@@ -127,6 +129,11 @@ impl AgyOps {
             runner.clone(),
             shared.clone(),
         ));
+        let app = Arc::new(AppSessions::new(
+            setup.root.clone(),
+            setup.copy_dir.clone(),
+            shared.clone(),
+        ));
         AgyOps {
             acting,
             shared,
@@ -134,6 +141,7 @@ impl AgyOps {
             logs: LogReads::new(setup.root.clone()),
             setup,
             elsewhere,
+            app,
             outbox: OnceLock::new(),
             sidecar: OnceLock::new(),
             settings: OnceLock::new(),
@@ -189,6 +197,10 @@ impl AgyOps {
     }
 
     pub fn phone_read(&self, session: &str, row_working: bool) -> PhoneRead {
+        if self.app.is_app(session) {
+            let read = self.app.read(session, CONVERSATION_BYTES);
+            return PhoneRead::bounded(read.conversation, read.working, CONVERSATION_BYTES);
+        }
         if self.runner.is_open(session) && !self.runner.is_loading(session) {
             if let Some(open) = self.runner.peek_conversation(session) {
                 let working = self.runner.is_working(session);
@@ -353,12 +365,39 @@ impl AgyOps {
                 ));
             }
         }
+        for row in self.app.rows() {
+            if !listed.contains(&row.id) {
+                out.push(session_json(
+                    &row.row_id(),
+                    &row.title,
+                    &row.folder,
+                    row.modified,
+                    row.running,
+                ));
+            }
+        }
         out.sort_by(|a, b| since(b).total_cmp(&since(a)));
         Value::Array(out)
     }
 
     fn state(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
+        if self.app.is_app(&session) {
+            let read = self.app.read(&session, CONVERSATION_BYTES);
+            return Ok(json!({
+                "id": row_id(&session),
+                "open": true,
+                "loading": false,
+                "loadError": null,
+                "working": read.working,
+                "elsewhere": null,
+                "title": read.title,
+                "folder": read.folder,
+                "config": [],
+                "commands": [],
+                "permission": null,
+            }));
+        }
         let r = &self.runner;
         let elsewhere = self.elsewhere.watched(&session);
         let working = match &elsewhere {
@@ -382,6 +421,21 @@ impl AgyOps {
 
     fn conversation(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
+        if self.app.is_app(&session) {
+            let read = self.app.read(&session, CONVERSATION_BYTES);
+            let conversation =
+                serde_json::to_value(read.conversation).map_err(|e| failed(e.to_string()))?;
+            return Ok(json!({
+                "id": row_id(&session),
+                "open": true,
+                "loading": false,
+                "loadError": null,
+                "working": read.working,
+                "conversation": conversation,
+                "truncated": read.omitted > 0,
+                "omitted": read.omitted,
+            }));
+        }
         let peek = match args.get("peek") {
             None | Some(Value::Null) => false,
             Some(Value::Bool(peek)) => *peek,
@@ -426,6 +480,9 @@ impl AgyOps {
 
     fn open(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
+        if self.app.is_app(&session) {
+            return Ok(self.app.open(&session));
+        }
         let folder = self.folder_for(&session)?;
         if let Some(holder) = self.elsewhere.check(&session) {
             return Ok(json!({"id": row_id(&session), "loading": false,
@@ -456,6 +513,9 @@ impl AgyOps {
         }
         if args.get("id").is_some() {
             let session = self.session_arg(args)?;
+            if !self.sidecar_chosen() && self.app.is_app(&session) {
+                return Err(failed(NOT_SIDECAR));
+            }
             if let Some(outbox) = self.outbox.get() {
                 let row = outbox.send(&SendArgs {
                     id: row_id(&session),
@@ -529,6 +589,7 @@ impl AgyOps {
         let session = self
             .sidecar_link()?
             .start(&job, text, model.as_deref(), Some(&title))?;
+        self.app.started(&session, &title);
         Ok(json!({"id": row_id(&session), "sent": true}))
     }
 
@@ -543,6 +604,9 @@ impl AgyOps {
             } else {
                 Err(bad("No such session."))
             };
+        }
+        if self.app.is_app(session) {
+            return Err(failed(NOT_SIDECAR));
         }
         self.folder_for(session)
             .map_err(|_| bad("No such session."))?;
@@ -583,6 +647,9 @@ impl AgyOps {
                 .sidecar_link()
                 .map_err(|e| Delivery::Failed(e.message))?;
             return link.reply(job, session, text);
+        }
+        if self.app.is_app(session) {
+            return Err(Delivery::Failed(NOT_SIDECAR.to_owned()));
         }
         let folder = self
             .folder_for(session)
@@ -642,6 +709,7 @@ impl AgyOps {
         }
         self.rows()
             .into_iter()
+            .chain(self.app.rows())
             .find(|r| r.id == session)
             .map(|r| r.folder)
             .ok_or_else(|| bad(format!("no Antigravity session {session}")))
@@ -698,3 +766,7 @@ impl AgyOps {
 #[cfg(test)]
 #[path = "agy_ops_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "agy_ops_app_tests.rs"]
+mod app_tests;

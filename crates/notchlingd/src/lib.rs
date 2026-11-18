@@ -6,6 +6,7 @@ pub mod acting;
 mod acting_events;
 pub mod acting_ops;
 pub mod activity_ops;
+pub mod agy_app;
 pub mod agy_elsewhere;
 pub mod agy_hook_run;
 pub mod agy_link;
