@@ -1,7 +1,7 @@
 use super::backup;
 use super::book::{parse_doc, shadow_of, Organizations};
 use super::kinds::{self, FIELD, KINDS};
-use super::record::{Document, DOC};
+use super::record::{valid_id, Document, DOC};
 use super::view::{Gap, Source, State, View};
 use crate::machines::registry::{RegistryFiles, REGISTRY_DOC};
 use crate::store::{self, DocChange};
@@ -71,6 +71,12 @@ impl Organizations {
                         continue;
                     };
                     let field = kinds::field_of(entry);
+                    if field.as_deref().is_some_and(|f| !valid_id(f)) {
+                        report
+                            .skipped
+                            .push((kind.doc(), format!("{key}: not an organization id")));
+                        continue;
+                    }
                     let resolved = view.resolve(*kind, &key, field.as_deref());
                     if field.is_none() {
                         match resolved.source {

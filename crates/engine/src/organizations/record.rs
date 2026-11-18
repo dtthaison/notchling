@@ -149,6 +149,10 @@ impl Document {
     }
 
     pub fn problems(&self) -> Vec<Problem> {
+        self.problems_with(&|folder| folder.to_owned())
+    }
+
+    pub fn problems_with(&self, key: &dyn Fn(&str) -> String) -> Vec<Problem> {
         let mut out = Vec::new();
         let mut ids: Vec<&str> = Vec::new();
         let mut names: Vec<String> = Vec::new();
@@ -184,13 +188,14 @@ impl Document {
                 match normalize_folder(folder) {
                     None => out.push(Problem::FolderInvalid(folder.clone())),
                     Some(norm) => {
-                        if let Some((_, by)) = folders.iter().find(|(f, _)| *f == norm) {
+                        let same = key(&norm);
+                        if let Some((_, by)) = folders.iter().find(|(f, _)| *f == same) {
                             out.push(Problem::FolderTaken {
                                 folder: norm.clone(),
                                 by: (*by).into(),
                             });
                         }
-                        folders.push((norm, &org.id));
+                        folders.push((same, &org.id));
                     }
                 }
             }
@@ -288,21 +293,33 @@ impl Document {
     }
 
     pub fn set_folders(&mut self, id: &str, folders: &[String]) -> Result<(), Problem> {
+        self.set_folders_with(id, folders, &|folder| folder.to_owned())
+    }
+
+    pub fn set_folders_with(
+        &mut self,
+        id: &str,
+        folders: &[String],
+        key: &dyn Fn(&str) -> String,
+    ) -> Result<(), Problem> {
         let mut norm: Vec<String> = Vec::new();
+        let mut keys: Vec<String> = Vec::new();
         for folder in folders {
             let n =
                 normalize_folder(folder).ok_or_else(|| Problem::FolderInvalid(folder.clone()))?;
-            if !norm.contains(&n) {
+            let k = key(&n);
+            if !keys.contains(&k) {
+                keys.push(k);
                 norm.push(n);
             }
         }
         self.find_mut(id)?;
-        for n in &norm {
+        for (n, k) in norm.iter().zip(&keys) {
             let other = self.organizations.iter().find(|o| {
                 o.id != id
                     && o.folders
                         .iter()
-                        .any(|f| normalize_folder(f).as_deref() == Some(n))
+                        .any(|f| normalize_folder(f).is_some_and(|f| key(&f) == *k))
             });
             if let Some(o) = other {
                 return Err(Problem::FolderTaken {

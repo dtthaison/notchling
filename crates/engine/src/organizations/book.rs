@@ -1,9 +1,10 @@
 use super::backup;
+use super::folders;
 use super::kinds::{self, Kind, FIELD, KINDS};
 use super::migrate::MigrateError;
 use super::record::{Counts, Document, MachineSettings, Problem, DOC};
 use super::view::{Resolved, State, View};
-use crate::machines::registry::{RegistryFiles, RegistryState};
+use crate::machines::registry::{self, RegistryFiles, RegistryState, REGISTRY_DOC};
 use crate::store::{self, DocChange};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -20,6 +21,7 @@ pub enum EditError {
 #[derive(Clone, Debug)]
 pub struct Organizations {
     pub(super) data_dir: PathBuf,
+    home: Option<PathBuf>,
 }
 
 pub(super) fn parse_doc(row: Option<&str>) -> Result<Document, String> {
@@ -33,6 +35,21 @@ impl Organizations {
     pub fn new(data_dir: &Path) -> Organizations {
         Organizations {
             data_dir: data_dir.to_path_buf(),
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        }
+    }
+
+    pub fn with_home(mut self, home: &Path) -> Organizations {
+        self.home = Some(home.to_path_buf());
+        self
+    }
+
+    fn folder_key(&self) -> impl Fn(&str) -> String + '_ {
+        let fold = folders::folds_case();
+        move |folder| match &self.home {
+            Some(home) => folders::overlap_key(folder, home, fold),
+            None if fold => folder.to_lowercase(),
+            None => folder.to_owned(),
         }
     }
 
@@ -119,7 +136,7 @@ impl Organizations {
             };
             match change(&mut doc) {
                 Ok(value) => {
-                    let problems = doc.problems();
+                    let problems = doc.problems_with(&self.folder_key());
                     if !problems.is_empty() {
                         result = Some(Err(EditError::Problems(problems)));
                         return Err("the change is not valid".into());
@@ -170,7 +187,8 @@ impl Organizations {
     }
 
     pub fn set_folders(&self, id: &str, folders: &[String]) -> Result<(), EditError> {
-        self.edit(|doc| doc.set_folders(id, folders).map_err(|p| vec![p]))
+        let key = self.folder_key();
+        self.edit(|doc| doc.set_folders_with(id, folders, &key).map_err(|p| vec![p]))
     }
 
     pub fn set_machine_settings(
@@ -181,15 +199,14 @@ impl Organizations {
         self.edit(|doc| doc.set_machine_settings(id, settings).map_err(|p| vec![p]))
     }
 
-    pub fn delete(&self, id: &str, registry: Option<&RegistryFiles>) -> Result<(), EditError> {
-        let machines: Vec<Option<String>> = match registry.map(RegistryFiles::load) {
-            Some(RegistryState::Unreadable(why)) => return Err(EditError::Unreadable(why)),
-            Some(state) => state
+    pub fn delete(&self, id: &str, registry: &RegistryFiles) -> Result<(), EditError> {
+        let machines: Vec<Option<String>> = match registry.load() {
+            RegistryState::Unreadable(why) => return Err(EditError::Unreadable(why)),
+            state => state
                 .machines()
                 .into_iter()
                 .map(|m| m.organization)
                 .collect(),
-            None => Vec::new(),
         };
         self.import_legacy();
         let names = [
@@ -198,6 +215,7 @@ impl Organizations {
             KINDS[1].doc(),
             KINDS[2].doc(),
             KINDS[3].doc(),
+            REGISTRY_DOC,
         ];
         let mut failure: Option<EditError> = None;
         let stored = store::update_docs(&self.data_dir, &names, |old| {
@@ -209,8 +227,12 @@ impl Organizations {
                 }
             };
             let view = View::new(State::Loaded(doc.clone()));
+            let current = old[5]
+                .as_deref()
+                .and_then(registry::organizations_in)
+                .unwrap_or_else(|| machines.clone());
             let mut counts = Counts {
-                machines: machines
+                machines: current
                     .iter()
                     .filter(|m| view.machine(m.as_deref()).id == id)
                     .count(),
@@ -239,7 +261,7 @@ impl Organizations {
                 failure = Some(EditError::Problems(vec![problem]));
                 return Err("the change is refused".into());
             }
-            let problems = doc.problems();
+            let problems = doc.problems_with(&self.folder_key());
             if !problems.is_empty() {
                 failure = Some(EditError::Problems(problems));
                 return Err("the change is not valid".into());
@@ -317,26 +339,16 @@ impl Organizations {
         }
     }
 
-    pub fn move_shadow(&self, kind: Kind, from: &str, to: &str) -> Result<(), EditError> {
-        let from = kind.shadow_key(&kind.normal(from));
-        let to = kind.shadow_key(&kind.normal(to));
-        let State::Loaded(mut doc) = self.state() else {
-            return Ok(());
-        };
-        if !shadow_of(&mut doc, kind).contains_key(&from) {
-            return Ok(());
-        }
-        self.edit(|doc| {
-            let shadow = shadow_of(doc, kind);
-            if let Some(value) = shadow.remove(&from) {
-                shadow.insert(to, value);
-            }
-            Ok(())
-        })
-    }
-
     pub fn forget(&self, kind: Kind, key: &str) -> Result<(), EditError> {
         let shadow_key = kind.shadow_key(&kind.normal(key));
+        let mut doc = match self.state() {
+            State::Loaded(doc) => doc,
+            State::Missing => return Ok(()),
+            State::Unreadable(why) => return Err(EditError::Unreadable(why)),
+        };
+        if !shadow_of(&mut doc, kind).contains_key(&shadow_key) {
+            return Ok(());
+        }
         self.edit(|doc| {
             shadow_of(doc, kind).remove(&shadow_key);
             Ok(())

@@ -570,6 +570,11 @@ pub fn backup_path_v2(file: &Path) -> PathBuf {
 fn backup_path_with(file: &Path, suffix: &str) -> PathBuf {
     let mut name = file.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
+    if suffix == V2_BACKUP {
+        return file
+            .with_file_name(crate::organizations::backup::DIR)
+            .join(name);
+    }
     file.with_file_name(name)
 }
 
@@ -630,6 +635,15 @@ pub fn write_lock() -> MutexGuard<'static, ()> {
     WRITES.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+pub fn organizations_in(text: &str) -> Option<Vec<Option<String>>> {
+    match parse(text.as_bytes()) {
+        Raw::V2(machines) | Raw::V3(machines) => {
+            Some(machines.into_iter().map(|m| m.organization).collect())
+        }
+        _ => None,
+    }
+}
+
 pub fn pretty_sorted(value: Value) -> Vec<u8> {
     let mut data = serde_json::to_vec_pretty(&sort_keys(value)).unwrap_or_else(|_| b"{}".to_vec());
     data.push(b'\n');
@@ -678,7 +692,12 @@ fn write_backup(original: &[u8], file: &Path, suffix: &str) -> Option<PathBuf> {
         PathBuf::from(format!("{}-{stamp}", base.display())),
     ];
     candidates.extend((2..=50).map(|n| PathBuf::from(format!("{}-{stamp}-{n}", base.display()))));
-    notchling_platform::files::ensure_private_dir(file.parent()?).ok()?;
+    let dir = base.parent()?;
+    if Some(dir) == file.parent() {
+        std::fs::create_dir_all(dir).ok()?;
+    } else {
+        notchling_platform::files::ensure_private_dir(dir).ok()?;
+    }
     for candidate in candidates {
         if std::fs::symlink_metadata(&candidate).is_ok() {
             continue;

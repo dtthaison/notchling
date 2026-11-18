@@ -26,7 +26,10 @@ Facts as of 2026-11-19:
 - With only Personal every answer is today's. The only visible change in the stores is the added field, in each list.
 - Downgrading past this record makes the machines registry unreadable to the older build. It shows it as unreadable and never writes over it; the saved version 2 text is beside it.
 - The stores' own writers keep the field, and the new build never drops it; an older build does, and the shadow brings it back.
-- A stale shadow key stays until the entry is forgotten (`Organizations::forget`), so removing an account or a secret must call it from the phase that adds the removal UI.
+- The removal paths of the stores (Claude, Codex and Antigravity accounts, the vault) call `Organizations::forget`, so a re-added name starts in Personal. A vault rename moves the shadow key in the same write as the list.
+- The first start writes the stamped lists with their keys in sorted order (the JSON is read and written through `serde_json::Value`, which sorts keys); the text before the change is kept whole in `organizations-backup/`.
+- The version 2 registry text is kept in `organizations-backup/`, beside the registry, in a private folder.
+- Folders overlap on their expanded and resolved form, and match without regard to case on macOS.
 - Amends [cluster secrets and logins](XXXX-cluster-secrets-and-logins.md) once the rules land: release checks the organization. `Member.organization` is not part of this record.
 - Known gaps: Mac-wide logins; a vault entry renamed by an older build reads as Personal; a caller with no session is placed by its process folder.
 

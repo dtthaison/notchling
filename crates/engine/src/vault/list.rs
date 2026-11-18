@@ -2,6 +2,8 @@ use super::entry::{valid_name, valid_var, Kind, VaultEntry, VaultValue};
 use super::expiry;
 use super::url;
 use crate::docfile::{DocFile, UNREADABLE};
+use crate::organizations;
+use crate::store::{self, DocChange};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -39,6 +41,27 @@ pub fn encode(list: &[VaultEntry]) -> Vec<u8> {
 pub const INDEX_DOC: &str = "daemon/vault";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShadowEdit {
+    Move { from: String, to: String },
+    Remove(String),
+}
+
+impl ShadowEdit {
+    fn apply(&self, shadow: &mut std::collections::BTreeMap<String, String>) -> bool {
+        match self {
+            ShadowEdit::Move { from, to } => match shadow.remove(from) {
+                Some(value) => {
+                    shadow.insert(to.clone(), value);
+                    true
+                }
+                None => false,
+            },
+            ShadowEdit::Remove(key) => shadow.remove(key).is_some(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VaultIndex(DocFile);
 
 impl VaultIndex {
@@ -68,30 +91,61 @@ impl VaultIndex {
         &self,
         change: impl FnOnce(Vec<VaultEntry>) -> Result<Vec<VaultEntry>, IndexError>,
     ) -> Result<(), IndexError> {
-        self.0
-            .update(is_list, |row| {
-                let list = match row {
-                    None => Vec::new(),
-                    Some(text) => serde_json::from_str(&text)
-                        .map(sorted)
-                        .map_err(|_| UNREADABLE.to_owned())?,
-                };
-                let list = change(list).map_err(|e| match e {
-                    IndexError::Unreadable => UNREADABLE.to_owned(),
-                    IndexError::Write(why) => why,
-                })?;
-                String::from_utf8(encode(&list))
-                    .map(Some)
-                    .map_err(|e| e.to_string())
-            })
-            .map(|_| ())
-            .map_err(|why| {
-                if why == UNREADABLE {
-                    IndexError::Unreadable
-                } else {
-                    IndexError::Write(why)
-                }
-            })
+        self.update_shadow(change, None)
+    }
+
+    pub fn update_shadow(
+        &self,
+        change: impl FnOnce(Vec<VaultEntry>) -> Result<Vec<VaultEntry>, IndexError>,
+        shadow: Option<ShadowEdit>,
+    ) -> Result<(), IndexError> {
+        let next = |row: Option<String>| -> Result<String, String> {
+            let list = match row {
+                None => Vec::new(),
+                Some(text) => serde_json::from_str(&text)
+                    .map(sorted)
+                    .map_err(|_| UNREADABLE.to_owned())?,
+            };
+            let list = change(list).map_err(|e| match e {
+                IndexError::Unreadable => UNREADABLE.to_owned(),
+                IndexError::Write(why) => why,
+            })?;
+            String::from_utf8(encode(&list)).map_err(|e| e.to_string())
+        };
+        let result = match shadow {
+            None => self
+                .0
+                .update(is_list, |row| next(row).map(Some))
+                .map(|_| ()),
+            Some(edit) => {
+                self.0.import(is_list);
+                store::update_docs(&self.0.data_dir, &[INDEX_DOC, organizations::DOC], |old| {
+                    if self.0.strict
+                        && old[0].is_none()
+                        && std::fs::symlink_metadata(&self.0.old_file).is_ok()
+                    {
+                        return Err(UNREADABLE.to_owned());
+                    }
+                    let text = next(old[0].clone())?;
+                    let mut changes = vec![DocChange::Set(text), DocChange::Keep];
+                    if let Some(doc_text) = old[1].as_deref() {
+                        if let Ok(mut doc) = organizations::Document::parse(doc_text) {
+                            if edit.apply(&mut doc.shadow.vault) {
+                                changes[1] = DocChange::Set(doc.text()?);
+                            }
+                        }
+                    }
+                    Ok(changes)
+                })
+            }
+        };
+        result.map_err(|why| {
+            if why == UNREADABLE {
+                IndexError::Unreadable
+            } else {
+                IndexError::Write(why)
+            }
+        })
     }
 
     pub fn write(&self, list: &[VaultEntry]) -> Result<(), IndexError> {

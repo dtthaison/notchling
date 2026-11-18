@@ -553,3 +553,20 @@ fn switching_account_never_leaves_the_old_accounts_quota_for_the_delegate_comman
         "the credits of the account switched away from are gone"
     );
 }
+
+#[test]
+fn removing_an_account_forgets_its_shadow() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let rig = Rig::new("remove-shadow", FakeProcs::new(), FakeApps::new());
+    two_accounts(&rig);
+    rig.store.sync(false);
+    let orgs = Organizations::new(&rig.root);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Codex, "user-1:ws-1", "acme")
+        .unwrap();
+    rig.store.remove("user-1:ws-1");
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc.shadow.accounts.contains_key("codex:user-1:ws-1"));
+}

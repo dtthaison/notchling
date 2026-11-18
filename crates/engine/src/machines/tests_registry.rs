@@ -638,7 +638,12 @@ fn the_version_2_backup_and_its_folder_are_private_and_a_second_adoption_writes_
     assert_eq!(std::fs::read(&backup).unwrap(), OLD_V2.as_bytes());
     let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&backup), 0o600);
-    assert_eq!(mode(&dir.join("data")), 0o700);
+    assert_eq!(mode(backup.parent().unwrap()), 0o700);
+    assert_eq!(
+        mode(&dir.join("data")),
+        0o755,
+        "the data folder is left as it was"
+    );
     let after = doc(&reg);
     assert_eq!(reg.adopt_organizations(), Ok(0));
     assert_eq!(doc(&reg), after);

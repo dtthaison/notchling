@@ -409,3 +409,26 @@ fn a_list_read_before_an_organization_was_set_does_not_undo_it() {
         Some("acme")
     );
 }
+
+#[test]
+fn removing_an_account_forgets_its_shadow_so_a_re_added_one_starts_in_personal() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let w = World::new("acc-remove-shadow");
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    w.saved(2, 1, LATER);
+    w.store.sync().unwrap();
+    let orgs = Organizations::new(&w.tmp.path("data"));
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Claude, &id(2), "acme")
+        .unwrap();
+    w.store.remove(&id(2)).unwrap();
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc
+        .shadow
+        .accounts
+        .contains_key(&format!("claude:{}", id(2))));
+    assert_eq!(orgs.resolve(OrgKind::Claude, &id(2)).id, "personal");
+}

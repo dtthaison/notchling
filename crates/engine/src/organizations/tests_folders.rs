@@ -201,3 +201,21 @@ fn the_deeper_real_folder_wins_over_a_link_that_looks_deeper_and_a_tie_is_settle
     ];
     assert_eq!(id(&flipped, "/srv/x/app", &none), "alpha");
 }
+
+#[test]
+fn a_session_matches_a_folder_in_any_case_only_where_the_disk_ignores_case() {
+    let orgs = [org(PERSONAL_ID, &[]), org("acme", &["/Srv/X"])];
+    let none = links(&[]);
+    let by = |fold: bool| {
+        super::folders::find_folded(
+            &orgs,
+            Path::new("/srv/x/app"),
+            Path::new("/Users/me"),
+            &none,
+            fold,
+        )
+        .organization
+    };
+    assert_eq!(by(true), "acme");
+    assert_eq!(by(false), PERSONAL_ID);
+}

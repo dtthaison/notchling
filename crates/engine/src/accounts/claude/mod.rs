@@ -314,6 +314,8 @@ impl ClaudeAccounts {
         let mut list = self.saved_list();
         list.retain(|a| a.id != id);
         self.save_list(&list)?;
+        let _ = crate::organizations::Organizations::new(&self.env.data_dir)
+            .forget(crate::organizations::Kind::Claude, id);
         Ok(Snapshot {
             accounts: list,
             active: state.active.clone(),

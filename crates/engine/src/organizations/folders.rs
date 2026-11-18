@@ -46,11 +46,54 @@ pub fn real(path: &Path) -> Option<PathBuf> {
     std::fs::canonicalize(path).ok()
 }
 
+pub fn folds_case() -> bool {
+    cfg!(target_os = "macos")
+}
+
+fn same(a: &std::ffi::OsStr, b: &std::ffi::OsStr, fold: bool) -> bool {
+    if fold {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
+}
+
+pub fn within(path: &Path, base: &Path, fold: bool) -> bool {
+    let mut path = path.components();
+    base.components().all(|b| {
+        path.next()
+            .is_some_and(|p| same(p.as_os_str(), b.as_os_str(), fold))
+    })
+}
+
+pub fn overlap_key(folder: &str, home: &Path, fold: bool) -> String {
+    let Some(path) = expand(folder, home) else {
+        return folder.to_owned();
+    };
+    let path = real(&path).unwrap_or(path);
+    let text = path.to_string_lossy().into_owned();
+    if fold {
+        text.to_lowercase()
+    } else {
+        text
+    }
+}
+
 pub fn find(
     organizations: &[Organization],
     folder: &Path,
     home: &Path,
     resolve: &dyn Fn(&Path) -> Option<PathBuf>,
+) -> FolderMatch {
+    find_folded(organizations, folder, home, resolve, folds_case())
+}
+
+pub fn find_folded(
+    organizations: &[Organization],
+    folder: &Path,
+    home: &Path,
+    resolve: &dyn Fn(&Path) -> Option<PathBuf>,
+    fold: bool,
 ) -> FolderMatch {
     let personal = FolderMatch {
         organization: PERSONAL_ID.into(),
@@ -67,9 +110,9 @@ pub fn find(
                 continue;
             };
             let real = resolve(&path);
-            let textual = session.starts_with(&path);
+            let textual = within(&session, &path, fold);
             let canonical = match (&real, &session_real) {
-                (Some(a), Some(b)) => b.starts_with(a),
+                (Some(a), Some(b)) => within(b, a, fold),
                 _ => false,
             };
             if !textual && !canonical {

@@ -191,7 +191,7 @@ fn an_edit_that_breaks_the_document_is_rolled_back() {
     assert!(matches!(refused, Err(EditError::Problems(_))));
     assert_eq!(rig.orgs_text(), before);
     assert_eq!(
-        rig.orgs.delete(PERSONAL_ID, None),
+        rig.orgs.delete(PERSONAL_ID, &rig.registry),
         Err(EditError::Problems(vec![Problem::PersonalNotDeletable]))
     );
     assert_eq!(rig.orgs_text(), before);
@@ -219,13 +219,13 @@ fn counts_and_delete_follow_what_belongs_to_each_organization() {
         secrets: 1,
     };
     assert_eq!(
-        rig.orgs.delete("acme", Some(&rig.registry)),
+        rig.orgs.delete("acme", &rig.registry),
         Err(EditError::Problems(vec![Problem::NotEmpty(busy)]))
     );
     rig.orgs
         .set_organization(Kind::Vault, "github-read", PERSONAL_ID)
         .unwrap();
-    assert_eq!(rig.orgs.delete("acme", Some(&rig.registry)), Ok(()));
+    assert_eq!(rig.orgs.delete("acme", &rig.registry), Ok(()));
     assert_eq!(rig.orgs.view().organizations().len(), 1);
     let total: usize = KINDS.iter().map(|k| rig.orgs.resolve_all(*k).len()).sum();
     assert_eq!(total, 7);

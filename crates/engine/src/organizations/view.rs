@@ -1,6 +1,6 @@
 use super::folders::{self, FolderMatch};
 use super::kinds::Kind;
-use super::record::{Document, Organization, PERSONAL_ID};
+use super::record::{valid_id, Document, Organization, PERSONAL_ID};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,12 +90,19 @@ impl View {
         } else {
             &self.doc.shadow.vault
         };
+        if field.is_some_and(|f| !valid_id(f)) {
+            return Resolved {
+                id: PERSONAL_ID.into(),
+                source: Source::Field,
+                known: false,
+            };
+        }
         let (id, source) = match field {
             Some(id) => (id.to_owned(), Source::Field),
             None => match shadow
                 .get(&kind.shadow_key(key))
                 .map(|id| id.trim())
-                .filter(|id| !id.is_empty())
+                .filter(|id| valid_id(id))
             {
                 Some(id) => (id.to_owned(), Source::Shadow),
                 None => (PERSONAL_ID.to_owned(), Source::Default),

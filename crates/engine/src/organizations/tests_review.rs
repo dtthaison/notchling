@@ -1,5 +1,5 @@
 use super::tests_support::{Rig, CLAUDE, VAULT};
-use super::{EditError, Kind, MigrateError, Problem, State, View, DOC};
+use super::{folders, EditError, Kind, MigrateError, Organizations, Problem, State, View, DOC};
 use crate::accounts::book::{write_accounts, Saved, ANTIGRAVITY_DOC, CODEX_DOC};
 use crate::docfile::DocFile;
 use crate::store;
@@ -101,7 +101,7 @@ fn deleting_counts_what_is_stored_now_and_refuses_over_an_unreadable_store() {
         .set_organization(Kind::Codex, "u1:w1", "acme")
         .unwrap();
     assert!(matches!(
-        rig.orgs.delete("acme", Some(&rig.registry)),
+        rig.orgs.delete("acme", &rig.registry),
         Err(EditError::Problems(p)) if matches!(p[0], Problem::NotEmpty(_))
     ));
     rig.orgs
@@ -109,11 +109,11 @@ fn deleting_counts_what_is_stored_now_and_refuses_over_an_unreadable_store() {
         .unwrap();
     rig.put(Kind::Vault, "not a list");
     assert!(matches!(
-        rig.orgs.delete("acme", Some(&rig.registry)),
+        rig.orgs.delete("acme", &rig.registry),
         Err(EditError::Unreadable(_))
     ));
     rig.put(Kind::Vault, "[]");
-    assert_eq!(rig.orgs.delete("acme", Some(&rig.registry)), Ok(()));
+    assert_eq!(rig.orgs.delete("acme", &rig.registry), Ok(()));
     assert!(matches!(rig.orgs.state(), State::Loaded(d) if d.find("acme").is_none()));
 }
 
@@ -158,4 +158,91 @@ fn a_colour_is_trimmed_before_it_is_checked() {
         Ok("beta".into())
     );
     assert!(rig.orgs.set_color("acme", "  ").is_err());
+}
+
+#[test]
+fn a_field_that_is_not_an_id_is_left_alone_and_never_reaches_the_shadow() {
+    let rig = Rig::new("org-junk-field");
+    rig.put(
+        Kind::Codex,
+        r#"{"version":1,"accounts":[{"id":"u1:w1","email":"x@example.com","plan":null,"organization":"Acme Corp"},{"id":"u2:w2","email":"y@example.com","plan":null}]}"#,
+    );
+    let report = rig.orgs.migrate(None).unwrap();
+    assert_eq!(report.stamped, 1);
+    assert_eq!(report.skipped.len(), 1);
+    let State::Loaded(doc) = rig.orgs.state() else {
+        panic!("the document must stay readable");
+    };
+    assert!(!doc.shadow.accounts.contains_key("codex:u1:w1"));
+    assert_eq!(
+        doc.shadow.accounts.get("codex:u2:w2").map(String::as_str),
+        Some("personal")
+    );
+    assert_eq!(
+        field(&rig, Kind::Codex, "u1:w1").as_deref(),
+        Some("Acme Corp")
+    );
+    let resolved = rig.orgs.resolve(Kind::Codex, "u1:w1");
+    assert_eq!((resolved.id.as_str(), resolved.known), ("personal", false));
+    assert!(!rig.orgs.view().is_closed());
+    assert!(rig.orgs.migrate(None).is_ok());
+    assert!(!rig.orgs.view().is_closed());
+}
+
+#[test]
+fn deleting_counts_the_machines_of_the_registry_it_is_given() {
+    let rig = with_acme();
+    let mut machines = rig.registry.all();
+    machines[0].organization = Some("acme".into());
+    assert!(rig.registry.save(&machines));
+    assert!(matches!(
+        rig.orgs.delete("acme", &rig.registry),
+        Err(EditError::Problems(p)) if matches!(&p[0], Problem::NotEmpty(c) if c.machines == 1)
+    ));
+    machines[0].organization = Some("personal".into());
+    assert!(rig.registry.save(&machines));
+    assert_eq!(rig.orgs.delete("acme", &rig.registry), Ok(()));
+}
+
+#[test]
+fn folders_overlap_on_the_expanded_and_resolved_form_and_on_case_where_the_disk_ignores_it() {
+    use std::path::Path;
+    let rig = with_acme();
+    let orgs = Organizations::new(&rig.data).with_home(Path::new("/Users/me"));
+    orgs.create("Beta", None, None).unwrap();
+    orgs.set_folders("acme", &["~/work".to_owned()]).unwrap();
+    assert!(matches!(
+        orgs.set_folders("beta", &["/Users/me/work".to_owned()]),
+        Err(EditError::Problems(p)) if matches!(p[0], Problem::FolderTaken { .. })
+    ));
+    assert_eq!(
+        orgs.set_folders("acme", &["~/work".to_owned(), "/Users/me/work".to_owned()]),
+        Ok(())
+    );
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert_eq!(doc.find("acme").unwrap().folders, ["~/work"]);
+    let upper = orgs.set_folders("beta", &["/Users/ME/Work".to_owned()]);
+    if folders::folds_case() {
+        assert!(upper.is_err());
+    } else {
+        assert_eq!(upper, Ok(()));
+    }
+}
+
+#[test]
+fn a_remove_forgets_the_shadow_so_a_re_added_name_starts_in_personal() {
+    let rig = with_acme();
+    rig.orgs
+        .set_organization(Kind::Vault, "github-read", "acme")
+        .unwrap();
+    rig.orgs.forget(Kind::Vault, "GitHub-Read").unwrap();
+    let State::Loaded(doc) = rig.orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc.shadow.vault.contains_key("github-read"));
+    let before = rig.orgs_text();
+    rig.orgs.forget(Kind::Vault, "github-read").unwrap();
+    assert_eq!(rig.orgs_text(), before, "nothing to forget writes nothing");
 }
