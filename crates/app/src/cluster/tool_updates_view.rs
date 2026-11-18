@@ -13,6 +13,7 @@ use notchling_locale as t;
 
 use super::model::{ClusterModel, NodeRow};
 use super::tool_runs::{Run, ToolRuns};
+use super::tool_setup::{correct, setups, Marks, Setup, FRESH_MS};
 use super::tool_updates::{offers, run, start, Offer, State};
 use super::updates::machine_of;
 use super::view::ClusterSheetView;
@@ -22,17 +23,29 @@ const EVERY_SECS: u64 = 5;
 #[derive(Clone, Default)]
 pub(super) struct ToolView {
     pub(super) offers: Vec<Offer>,
+    pub(super) setups: Vec<Setup>,
+    corrected: Option<ClusterModel>,
     machines: BTreeMap<String, String>,
+}
+
+pub(super) struct LoginSheet {
+    pub(super) machine: String,
+    pub(super) tool: Tool,
 }
 
 pub(super) struct ToolUi {
     pub(super) runs: Arc<ToolRuns>,
-    seen: Option<(u64, bool, Instant, ToolView)>,
+    pub(super) sheet: Option<LoginSheet>,
+    pub(super) seen: Option<(u64, (bool, bool), Instant, ToolView)>,
 }
 
 impl ToolUi {
     pub(super) fn new(runs: Arc<ToolRuns>) -> ToolUi {
-        ToolUi { runs, seen: None }
+        ToolUi {
+            runs,
+            sheet: None,
+            seen: None,
+        }
     }
 }
 
@@ -40,15 +53,29 @@ impl ToolView {
     pub(super) fn machine(&self, node: &str) -> Option<&str> {
         self.machines.get(node).map(String::as_str)
     }
+
+    pub(super) fn rows(&self, model: &ClusterModel) -> Vec<NodeRow> {
+        self.corrected.as_ref().unwrap_or(model).rows()
+    }
+}
+
+pub(super) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 impl ClusterSheetView {
     pub(super) fn tool_view(&mut self, model: &ClusterModel) -> ToolView {
         let switches = self.access.switches.switches();
         let generation = self.feed.generation();
-        let install = switches.is_on(crate::switches::Switch::Install);
+        let gates = (
+            switches.is_on(crate::switches::Switch::Install),
+            switches.is_on(crate::switches::Switch::Accounts),
+        );
         if let Some((seen, was, at, view)) = &self.tools.seen {
-            if *seen == generation && *was == install && at.elapsed().as_secs() < EVERY_SECS {
+            if *seen == generation && *was == gates && at.elapsed().as_secs() < EVERY_SECS {
                 return view.clone();
             }
         }
@@ -65,6 +92,26 @@ impl ClusterSheetView {
                 };
                 let tools_of = |name: &str| parts.engine.worker_tools(name);
                 let mac = self.feed.mac();
+                let now = now_ms();
+                let signed = |machine: &str, tool: Tool| {
+                    self.tools
+                        .runs
+                        .signed_in_since(machine, tool)
+                        .is_some_and(|at| now - at <= FRESH_MS)
+                };
+                let installed = |machine: &str, tool: Tool| {
+                    self.tools
+                        .runs
+                        .installed_since(machine, tool)
+                        .filter(|(at, _)| now - at <= FRESH_MS)
+                        .map(|(_, version)| version)
+                };
+                let marks = Marks {
+                    signed: &signed,
+                    installed: &installed,
+                };
+                let fixed = correct(model, &machines, &node_of, &tools_of, &marks, now);
+                let model = &fixed;
                 let all = model.rows();
                 let names = all
                     .iter()
@@ -82,11 +129,13 @@ impl ClusterSheetView {
                         mac.as_ref(),
                         &switches,
                     ),
+                    setups: setups(model, &machines, &node_of, mac.as_ref(), &switches),
+                    corrected: Some(fixed.clone()),
                     machines: names,
                 }
             }
         };
-        self.tools.seen = Some((generation, install, Instant::now(), view.clone()));
+        self.tools.seen = Some((generation, gates, Instant::now(), view.clone()));
         view
     }
 

@@ -58,6 +58,14 @@ impl StepId {
         StepId(Cow::Owned(format!("tool-update:{}", tool.name())))
     }
 
+    pub fn tool_install(tool: Tool) -> StepId {
+        StepId(Cow::Owned(format!("tool-install:{}", tool.name())))
+    }
+
+    pub fn tool_login(tool: Tool) -> StepId {
+        StepId(Cow::Owned(format!("tool-login:{}", tool.name())))
+    }
+
     pub fn deploy_key(github: &str) -> StepId {
         StepId(Cow::Owned(format!("deploy-key:{github}")))
     }

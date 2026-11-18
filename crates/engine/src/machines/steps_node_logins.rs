@@ -63,16 +63,20 @@ fn exit_code(text: &str) -> Option<i32> {
 }
 
 fn parse_codex(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
-    if out.text.lines().any(|l| l.trim() == NONE) {
+    codex_check(&out.text)
+}
+
+pub(super) fn codex_check(text: &str) -> CheckResult {
+    if text.lines().any(|l| l.trim() == NONE) {
         return CheckResult::cant_tell("Codex isn't installed there");
     }
-    if out.text.lines().any(|l| l.trim() == TIMEOUT) {
+    if text.lines().any(|l| l.trim() == TIMEOUT) {
         return CheckResult::cant_tell("Codex didn't answer in time there");
     }
-    let Some(exit) = exit_code(&out.text) else {
+    let Some(exit) = exit_code(text) else {
         return CheckResult::cant_tell("couldn't ask Codex there");
     };
-    match codex_state(exit, &out.text) {
+    match codex_state(exit, text) {
         Some(true) => CheckResult::pass("signed in"),
         Some(false) => CheckResult::fail("not signed in"),
         None => CheckResult::cant_tell("couldn't tell from what Codex said"),
@@ -80,7 +84,11 @@ fn parse_codex(out: &RemoteOutput, _ctx: &StepContext) -> CheckResult {
 }
 
 fn parse_agy(out: &RemoteOutput, _ctx: &StepContext, mac: bool) -> CheckResult {
-    let seen = |word: &str| out.text.lines().any(|l| l.trim() == word);
+    agy_check(&out.text, mac)
+}
+
+pub(super) fn agy_check(text: &str, mac: bool) -> CheckResult {
+    let seen = |word: &str| text.lines().any(|l| l.trim() == word);
     if seen(NONE) {
         return CheckResult::cant_tell("Antigravity CLI isn't installed there");
     }

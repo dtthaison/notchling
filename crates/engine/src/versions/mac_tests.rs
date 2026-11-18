@@ -182,9 +182,43 @@ fn bin_entries_cannot_leave_the_package() {
         r#"{"version":"0.166.0","bin":"../../../../outside"}"#,
         "x",
     );
+    assert!(run(&dir, Tool::Codex).is_none());
+}
+
+#[test]
+fn a_manifest_without_its_binary_is_not_an_install() {
+    let dir = TempDir::new("mac-leftover");
+    dir.write(
+        ".codex/packages/standalone/releases/0.118.0/codex-package.json",
+        r#"{"version":"0.118.0"}"#,
+    );
+    assert!(run(&dir, Tool::Codex).is_none());
+    dir.write(
+        ".npm-global/lib/node_modules/@openai/codex/package.json",
+        r#"{"version":"0.118.0","bin":"bin/codex.js"}"#,
+    );
+    assert!(run(&dir, Tool::Codex).is_none());
+    dir.write("opt/homebrew/Caskroom/codex/0.118.0/.metadata", "x");
+    assert!(run(&dir, Tool::Codex).is_none());
+    dir.write("opt/homebrew/Caskroom/codex/0.118.0/codex", "bin");
     let found = run(&dir, Tool::Codex).unwrap();
-    assert!(found.identity.is_none());
-    assert!(!found.path.contains(".."));
+    assert_eq!(found.method, Method::Brew);
+}
+
+#[test]
+fn a_folder_with_its_binary_beats_a_leftover_manifest() {
+    let dir = TempDir::new("mac-leftover-newer");
+    dir.write(
+        ".codex/packages/standalone/releases/0.170.0/codex-package.json",
+        r#"{"version":"0.170.0"}"#,
+    );
+    dir.write(
+        ".codex/packages/standalone/releases/0.166.0/codex-package.json",
+        r#"{"version":"0.166.0"}"#,
+    );
+    dir.write(".codex/packages/standalone/releases/0.166.0/codex", "bin");
+    let found = run(&dir, Tool::Codex).unwrap();
+    assert_eq!(found.version.unwrap().as_str(), "0.166.0");
 }
 
 #[test]

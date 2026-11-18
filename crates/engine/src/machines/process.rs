@@ -1,4 +1,4 @@
-use super::runner::{Call, Channel, CommandResult, Runner, NOT_FOUND, TIMED_OUT};
+use super::runner::{Call, Channel, CommandResult, Runner, CANCELLED, NOT_FOUND, TIMED_OUT};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -199,11 +199,24 @@ impl Runner for ProcessRunner {
 
         let deadline = Instant::now() + call.timeout;
         let mut timed_out = false;
+        let mut cancelled = false;
         let mut status = None;
         loop {
             match child.try_wait() {
                 Ok(Some(s)) => {
                     status = Some(s);
+                    break;
+                }
+                Ok(None)
+                    if call
+                        .cancel
+                        .as_ref()
+                        .is_some_and(|f| f.load(std::sync::atomic::Ordering::SeqCst)) =>
+                {
+                    cancelled = true;
+                    end_group(pid);
+                    let _ = child.kill();
+                    status = child.wait().ok();
                     break;
                 }
                 Ok(None) if Instant::now() >= deadline => {
@@ -231,7 +244,9 @@ impl Runner for ProcessRunner {
                 .map(|(_, s)| lock(s).text())
                 .unwrap_or_default()
         };
-        let code = if timed_out {
+        let code = if cancelled {
+            CANCELLED
+        } else if timed_out {
             TIMED_OUT
         } else {
             match status {

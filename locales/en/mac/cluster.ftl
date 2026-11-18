@@ -574,6 +574,49 @@ cluster-tool-updating = Updating { $tools } on { $machine }…
 cluster-tool-nothing = No tool on this machine can be updated now.
 cluster-tool-dismiss = Dismiss
 
+## Install And Sign In Tools
+
+# Button on a machine's card for a tool it doesn't have; $tool is Codex or Antigravity, $machine the machine.
+cluster-tool-install-button = Install { $tool } on { $machine }
+# Button on a machine's card for a tool that isn't signed in; $machine is the machine.
+cluster-tool-sign-in-button = Sign In on { $machine }
+# Under an install button while the machine runs a job; $machine is its name, $count the jobs.
+cluster-tool-install-busy = { $count ->
+    [one] { $machine } is running a job. Install tools when it is done.
+   *[other] { $machine } is running { $count } jobs. Install tools when they are done.
+}
+# Progress on a machine's card; $tool is the tool, $machine the machine.
+cluster-tool-installing = Installing { $tool } on { $machine }…
+cluster-tool-signing-in = Signing in { $tool } on { $machine }…
+cluster-tool-checking-login = Checking the { $tool } sign-in on { $machine }…
+cluster-tool-install-nothing = Nothing can be installed on this machine now.
+cluster-tool-sign-in-nothing = No sign-in is needed on this machine now.
+
+## Sign In Sheet
+
+# Title of the sheet that shows a one-time code; $tool is Codex, $machine the machine.
+cluster-login-title = Sign In { $tool } on { $machine }
+# While the machine starts its sign-in and has not shown a link yet.
+cluster-login-starting = Starting the sign-in on { $machine }…
+# Steps under the link and code; $machine is the machine that waits.
+cluster-login-steps = Open the link in your browser on this Mac, sign in with the account this Mac uses, and enter the code. { $machine } signs itself in when you approve.
+# Label above the sign-in link.
+cluster-login-link-label = Link
+# Label above the one-time code.
+cluster-login-code-label = One-Time Code
+# Note under the code; it is shown only in this sheet.
+cluster-login-private = The link and code are shown only here. Notchling doesn't keep them.
+# Button that opens the sign-in link in the browser.
+cluster-login-open = Open Link
+# Button that stops the sign-in.
+cluster-login-cancel = Cancel
+# How long the sheet waits; $minutes is a number.
+cluster-login-waiting = Waiting for you to approve. This stops after { $minutes } minutes.
+# Button that closes the sheet without checking.
+cluster-login-close = Close
+# Button that reads the sign-in again.
+cluster-login-check = Check Again
+
 ## Admin password from the Vault
 
 # Button beside an admin password field; it opens the list of Vault entries.

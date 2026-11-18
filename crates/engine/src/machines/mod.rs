@@ -3,6 +3,7 @@ mod actions_util;
 pub mod address;
 pub mod admin_secret;
 pub mod catalog;
+pub mod device_login;
 pub mod dist_manifest;
 pub mod engine;
 pub mod engine_check;
@@ -53,6 +54,8 @@ mod steps_xcode;
 pub mod token_creation;
 pub mod token_scope;
 mod token_scope_net;
+pub mod tool_installs;
+pub mod tool_login;
 pub mod tool_updates;
 pub mod usage;
 pub mod versions_facts;
@@ -76,6 +79,8 @@ mod tests_actions_read;
 mod tests_address;
 #[cfg(test)]
 mod tests_admin_vault;
+#[cfg(test)]
+mod tests_device_login;
 #[cfg(test)]
 mod tests_dist_manifest;
 #[cfg(test)]
@@ -188,6 +193,10 @@ mod tests_token_scope;
 mod tests_token_scope_gh;
 #[cfg(test)]
 mod tests_token_scope_view;
+#[cfg(test)]
+mod tests_tool_installs;
+#[cfg(test)]
+mod tests_tool_login;
 #[cfg(test)]
 mod tests_tool_updates;
 #[cfg(test)]
