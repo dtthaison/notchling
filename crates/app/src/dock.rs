@@ -71,16 +71,25 @@ pub struct MainMenu {
 }
 
 pub fn main_menu() -> Vec<MainMenu> {
+    main_menu_for(true)
+}
+
+pub fn main_menu_for(app_shell: bool) -> Vec<MainMenu> {
+    let app_items = if app_shell {
+        vec![
+            MainItem::About,
+            MainItem::Separator,
+            MainItem::Settings,
+            MainItem::Separator,
+            MainItem::Quit,
+        ]
+    } else {
+        vec![MainItem::Quit]
+    };
     vec![
         MainMenu {
             name: "Notchling",
-            items: vec![
-                MainItem::About,
-                MainItem::Separator,
-                MainItem::Settings,
-                MainItem::Separator,
-                MainItem::Quit,
-            ],
+            items: app_items,
         },
         MainMenu {
             name: "Edit",
@@ -145,5 +154,12 @@ mod tests {
             ]
         );
         assert_eq!(MainItem::About.title(), "About Notchling");
+    }
+
+    #[test]
+    fn without_the_app_shell_the_app_menu_has_only_quit() {
+        let menus = main_menu_for(false);
+        assert_eq!(menus[0].items, [MainItem::Quit]);
+        assert_eq!(menus[1..], main_menu()[1..]);
     }
 }
