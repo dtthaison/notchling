@@ -103,11 +103,12 @@ pub fn offers(
         return Vec::new();
     };
     let mut out = Vec::new();
-    for row in model.rows() {
+    let all = model.rows();
+    for row in all.iter().cloned() {
         if !row.active || row.removed || row.me || !row.online {
             continue;
         }
-        let Some(machine) = machine_of(&row, machines, node_of) else {
+        let Some(machine) = machine_of(&row, &all, machines, node_of) else {
             continue;
         };
         let known = tools_of(&machine.name);

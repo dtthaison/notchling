@@ -97,7 +97,7 @@ pub fn busy_script(tool: Tool) -> String {
         .map(|m| format!(" || index($1 $2,\"{m}\")"))
         .collect();
     format!(
-        "ps -axo args= 2>/dev/null | awk 'function b(s,  a,n){{n=split(s,a,\"/\");return a[n]}} b($1)==\"{name}\" || b($2)==\"{name}\" || b($2)==\"{name}.js\"{extra} {{c++}} END{{print \"busy=\" c+0}}'"
+        "out=$(ps -axo args= 2>/dev/null) && [ -n \"$out\" ] && printf '%s\\n' \"$out\" | awk 'function b(s,  a,n){{n=split(s,a,\"/\");return a[n]}} b($1)==\"{name}\" || b($2)==\"{name}\" || b($2)==\"{name}.js\"{extra} {{c++}} END{{print \"busy=\" c+0}}'"
     )
 }
 

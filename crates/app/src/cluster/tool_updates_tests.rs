@@ -517,3 +517,82 @@ fn run_says_how_to_when_the_method_cannot_pin() {
     assert!(outcome.message.contains("Homebrew"), "{}", outcome.message);
     assert!(worker.installs.lock().unwrap().is_empty());
 }
+
+fn two_named_m1() -> ClusterModel {
+    let mut me = member(ME, "m5", json!({"claude": "2.1.327"}));
+    me["role"] = json!("home");
+    me["reference"] = json!(true);
+    let status = json!({
+        "cluster": {"id": "c1", "name": "home", "term": 1, "home": ME},
+        "me": ME,
+        "members": [
+            me,
+            member(M1, "m1", json!({"claude": "2.1.318"})),
+            member("99aabbccddeeff00", "m1", json!({"claude": "2.1.318"})),
+        ],
+        "jobs": [], "link": true, "tailscale": true, "listening": [47823],
+    });
+    ClusterModel::from_status(&status, ME)
+}
+
+#[test]
+fn two_rows_with_one_name_never_pick_a_machine_by_name() {
+    let model = two_named_m1();
+    let side = mac(Some("2.1.327"), None, None);
+    let list = made(&model, Some(&side), &unread, &Switches::all_on());
+    assert!(list.is_empty(), "{list:?}");
+}
+
+#[test]
+fn a_joined_node_id_binds_the_row_to_its_machine() {
+    let model = two_named_m1();
+    let side = mac(Some("2.1.327"), None, None);
+    let bound = |name: &str| (name == "m1").then(|| M1.to_string());
+    let list = offers(
+        &model,
+        &[machine()],
+        &bound,
+        &unread,
+        Some(&side),
+        &Switches::all_on(),
+    );
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert_eq!(list[0].node, M1);
+}
+
+#[test]
+fn a_machine_joined_to_another_node_is_not_matched_by_name() {
+    let model = drifted();
+    let side = mac(Some("2.1.327"), Some("0.166.0"), None);
+    let elsewhere = |name: &str| (name == "m1").then(|| "ffffffffffffffff".to_string());
+    let list = offers(
+        &model,
+        &[machine()],
+        &elsewhere,
+        &unread,
+        Some(&side),
+        &Switches::all_on(),
+    );
+    assert!(list.is_empty(), "{list:?}");
+}
+
+#[test]
+fn a_unique_name_with_no_joined_machine_still_matches() {
+    let side = mac(Some("2.1.327"), Some("0.166.0"), None);
+    let list = made(&drifted(), Some(&side), &unread, &Switches::all_on());
+    assert_eq!(list.len(), 2);
+}
+
+#[test]
+fn two_machines_with_one_name_match_nothing() {
+    let side = mac(Some("2.1.327"), Some("0.166.0"), None);
+    let list = offers(
+        &drifted(),
+        &[machine(), machine()],
+        &none,
+        &unread,
+        Some(&side),
+        &Switches::all_on(),
+    );
+    assert!(list.is_empty(), "{list:?}");
+}

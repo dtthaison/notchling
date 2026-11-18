@@ -65,11 +65,11 @@ impl ClusterSheetView {
                 };
                 let tools_of = |name: &str| parts.engine.worker_tools(name);
                 let mac = self.feed.mac();
-                let names = model
-                    .rows()
+                let all = model.rows();
+                let names = all
                     .iter()
                     .filter_map(|row| {
-                        machine_of(row, &machines, &node_of)
+                        machine_of(row, &all, &machines, &node_of)
                             .map(|m| (row.id.clone(), m.name.clone()))
                     })
                     .collect();

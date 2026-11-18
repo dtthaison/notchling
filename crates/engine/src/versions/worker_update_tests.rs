@@ -181,3 +181,47 @@ fn texts_name_the_tool_the_machine_and_the_cause() {
     let plain = failure_text(Tool::Claude, "m1", "", "");
     assert_eq!(plain, "Claude Code didn't install on m1");
 }
+
+fn run_busy(tool: Tool, ps: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("nl-busy-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("ps");
+    std::fs::write(&fake, format!("#!/bin/sh\n{ps}\n")).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:/usr/bin:/bin", dir.display());
+    let out = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(busy_script(tool))
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_ps_gives_no_answer_so_the_update_refuses() {
+    let out = run_busy(Tool::Claude, "exit 1");
+    assert_eq!(parse_busy(&out), None, "{out:?}");
+    let out = run_busy(Tool::Claude, "echo 'ps: unknown option' >&2; exit 64");
+    assert_eq!(parse_busy(&out), None, "{out:?}");
+    let out = run_busy(Tool::Codex, "exit 0");
+    assert_eq!(
+        parse_busy(&out),
+        None,
+        "no output at all is no answer: {out:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_working_ps_counts_the_tools_processes() {
+    let listing = "echo '/bin/zsh -l'; echo 'claude --resume x'; echo 'node /u/lib/node_modules/@anthropic-ai/claude-code/cli.js'; echo 'vim notes'";
+    assert_eq!(parse_busy(&run_busy(Tool::Claude, listing)), Some(2));
+    assert_eq!(parse_busy(&run_busy(Tool::Codex, listing)), Some(0));
+}
