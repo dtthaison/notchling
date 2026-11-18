@@ -1,5 +1,6 @@
 use crate::acting::ACTING_OFF;
 use crate::acting_ops::{ActingOps, Room};
+use crate::agy_ops::CHANNEL_WHY;
 use crate::bridge_cluster::PhoneCluster;
 use crate::catalog_ops::CatalogService;
 use crate::every_session::EverySession;
@@ -262,6 +263,14 @@ fn failure(e: ApiError) -> BridgeFailure {
     }
 }
 
+pub(crate) fn send_failure(e: ApiError) -> BridgeFailure {
+    let channel = e.data.as_ref().and_then(|d| d["why"].as_str()) == Some(CHANNEL_WHY);
+    if channel {
+        return BridgeFailure::view_only(e.message);
+    }
+    failure(e)
+}
+
 impl DaemonActing {
     fn call(&self, op: &str, args: Value) -> Result<Value, BridgeFailure> {
         self.ops.call(&bridge_caller(), op, &args).map_err(failure)
@@ -325,7 +334,7 @@ impl Acting for DaemonActing {
                 &json!({"id": id, "text": text, "via": "phone"}),
             )
             .map(|_| ())
-            .map_err(failure)
+            .map_err(send_failure)
     }
 
     fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {

@@ -9,6 +9,8 @@ struct SavedDrafts(HashMap<String, String>);
 
 impl Global for SavedDrafts {}
 use notchling_engine::catalog::{ModelInfo, Tool as CatalogTool};
+use notchling_engine::contract::channel::{self, Channel};
+use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models;
 use notchling_engine::transcript::model::Conversation;
@@ -48,11 +50,34 @@ pub struct Picker {
     pub more: bool,
 }
 
+pub const REMOTE_IN_KEY: &str = "antigravityRemoteIn";
+
+fn stored(root: &crate::chat::data::DataRoot, key: Option<&str>) -> String {
+    if root.fixture.is_some() {
+        return String::new();
+    }
+    notchling_engine::settings::Settings::open(&root.data_dir.join("settings.json"))
+        .ok()
+        .and_then(|s| s.get_str(key?))
+        .unwrap_or_default()
+}
+
+pub fn channel_in(root: &crate::chat::data::DataRoot) -> String {
+    stored(root, channel::setting_key(RowTool::Antigravity))
+}
+
+pub fn remote_in(root: &crate::chat::data::DataRoot) -> String {
+    stored(root, Some(REMOTE_IN_KEY))
+}
+
 pub struct ChatTools {
     pub live: ToolLive,
     pub drafts: HashMap<String, String>,
     pub sending: bool,
     pub error: Option<String>,
+    pub agy_channel: String,
+    pub agy_remote_in: String,
+    pub agy_note: Option<(String, &'static str)>,
     pub editing: Option<Editing>,
     pub edit_round: u64,
     pub picks: HashMap<String, Pick>,
@@ -98,6 +123,9 @@ impl ChatTools {
                 .unwrap_or_default(),
             sending: false,
             error: None,
+            agy_channel: String::new(),
+            agy_remote_in: String::new(),
+            agy_note: None,
             editing: None,
             edit_round: 0,
             picks: HashMap::new(),
@@ -121,6 +149,32 @@ impl ChatTools {
             focus,
             _editor_events: events,
         }
+    }
+
+    pub fn with_channel(mut self, id: String) -> ChatTools {
+        self.agy_channel = id;
+        self
+    }
+
+    pub fn with_remote_in(mut self, value: String) -> ChatTools {
+        self.agy_remote_in = value;
+        self
+    }
+
+    pub fn take_channel(&mut self, key: &str, value: &Value) -> bool {
+        if key == REMOTE_IN_KEY {
+            self.agy_remote_in = value.as_str().unwrap_or_default().to_owned();
+            return true;
+        }
+        if channel::setting_key(RowTool::Antigravity) != Some(key) {
+            return false;
+        }
+        self.agy_channel = value.as_str().unwrap_or_default().to_owned();
+        true
+    }
+
+    pub fn agy_channel(&self) -> &'static dyn Channel {
+        channel::chosen(RowTool::Antigravity, Some(&self.agy_channel))
     }
 
     pub fn draft(&self, id: &str) -> &str {
@@ -216,6 +270,7 @@ impl ChatView {
             return;
         };
         let text = self.tools.editor.read(cx).text().to_owned();
+        self.tools.agy_note = None;
         self.slash_typed(&text);
         self.save_draft(&id, &text, cx);
         if text.is_empty() {
@@ -289,6 +344,12 @@ impl ChatView {
         };
         if let Some(control) = self.remote_control(&session.agent.id, Action::Reply) {
             return control;
+        }
+        if super::tool::adapter(session).hand_off(self).is_some() {
+            return Control {
+                enabled: true,
+                tooltip: None,
+            };
         }
         match super::tool::adapter(session).refusal(self, session) {
             Some(why) if why == t::chat::agy_busy() && !gate.enabled => gate,

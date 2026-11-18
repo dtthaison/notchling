@@ -213,6 +213,9 @@ impl ChatView {
 
     pub fn applied_setting(&mut self, key: &str, value: &Value, cx: &mut Context<Self>) {
         crate::mac::settings_live::app_wide(key, value, cx);
+        if self.tools.take_channel(key, value) {
+            cx.notify();
+        }
         if crate::chat::history::on_change(key, value) {
             self.reload_now(cx);
         }

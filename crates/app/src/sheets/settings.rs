@@ -124,6 +124,17 @@ const ANTIGRAVITY_LIMIT_MODES: [(&str, Text); 3] = [
     ),
 ];
 
+const ANTIGRAVITY_CHANNELS: [(&str, Text); 3] = [
+    ("acp", t::settings::ANTIGRAVITY_CHANNEL_ACP),
+    ("app", t::settings::ANTIGRAVITY_CHANNEL_APP),
+    ("remote", t::settings::ANTIGRAVITY_CHANNEL_REMOTE),
+];
+
+const REMOTE_PLACES: [(&str, Text); 2] = [
+    ("panel", t::settings::ANTIGRAVITY_REMOTE_IN_PANEL),
+    ("browser", t::settings::ANTIGRAVITY_REMOTE_IN_BROWSER),
+];
+
 fn kebab(name: &str) -> String {
     let mut out = String::new();
     for (i, c) in name.chars().enumerate() {
@@ -322,6 +333,24 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             title: t::settings::section_codex(),
             rows: vec![toggle(read, "codexNetwork", t::settings::codex_network())],
             footer: None,
+        },
+        Section {
+            title: t::settings::section_antigravity(),
+            rows: vec![
+                choice(
+                    read,
+                    "antigravityChannel",
+                    t::settings::antigravity_channel(),
+                    &ANTIGRAVITY_CHANNELS,
+                ),
+                choice(
+                    read,
+                    "antigravityRemoteIn",
+                    t::settings::antigravity_remote_in(),
+                    &REMOTE_PLACES,
+                ),
+            ],
+            footer: Some(t::settings::footer_antigravity()),
         },
         Section {
             title: t::settings::section_chat(),
@@ -555,6 +584,7 @@ mod tests {
                 "Claude Code",
                 "When the Account in Use Nears Its Limit",
                 "Codex",
+                "Antigravity",
                 "Chat"
             ]
         );

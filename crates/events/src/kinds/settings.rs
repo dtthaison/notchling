@@ -28,6 +28,8 @@ log_choice! {
         LimitSwitchAt = "limitSwitchAt",
         CodexLimitMode = "codexLimitMode",
         AntigravityLimitMode = "antigravityLimitMode",
+        AntigravityChannel = "antigravityChannel",
+        AntigravityRemoteIn = "antigravityRemoteIn",
         CodexNetwork = "codexNetwork",
         MigratedFromAwake = "migratedFromAwake",
         ChatClosedSessions = "chatClosedSessions",
@@ -72,6 +74,11 @@ log_choice! {
         Dark = "dark",
         After30m = "30m",
         After1h = "1h",
+        Acp = "acp",
+        App = "app",
+        Remote = "remote",
+        Panel = "panel",
+        Browser = "browser",
     }
 }
 

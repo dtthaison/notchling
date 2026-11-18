@@ -221,6 +221,10 @@ pub const KEYS: &[KeySpec] = &[
         .ask("Codex limit", "When the Codex account in use nears its limit: off, notify, or notify and switch", "Notify and Switch moves to another login"),
     choice("antigravityLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Antigravity limit watching")
         .ask("Antigravity limit", "When the Antigravity account in use nears its limit: off, notify, or notify and switch", "Notify and Switch moves to another login"),
+    choice("antigravityChannel", "acp", &["acp", "app", "remote"], false, "How Notchling talks to Antigravity: acp runs the agy command line and sends for you, app opens the Antigravity app with the message as a draft you send there, remote opens the conversation in Antigravity Remote Control in the browser")
+        .ask("Antigravity channel", "How Notchling talks to Antigravity: through the agy command line (acp), by opening the Antigravity app with your message as a draft (app), or by opening the conversation in Remote Control in the browser (remote)", "it decides whether Notchling runs agy and sends text for you"),
+    choice("antigravityRemoteIn", "panel", &["panel", "browser"], false, "Where Antigravity Remote Control opens: panel is Chat's right-hand panel, browser is the default browser")
+        .free("Open Remote Control in", "Where Antigravity Remote Control opens: Chat's right-hand panel, or the default browser", "a display preference"),
     key("codexNetwork", K::Bool, D::Bool(true), true, "Open the network in Codex turns (Allow Network in Codex Turns)")
         .never("Allow network in Codex turns", "Codex turns and delegated Codex jobs may use the network", "a sandbox permission: an agent could open the network to its own delegated jobs"),
     key("migratedFromAwake", K::Bool, D::Bool(false), false, "The Awake migration already ran")

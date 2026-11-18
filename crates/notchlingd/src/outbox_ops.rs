@@ -28,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 pub type Wake = Arc<dyn Fn(&str) + Send + Sync>;
+pub type Gate = Arc<dyn Fn(bool) -> Result<(), ApiError> + Send + Sync>;
 pub type Check = Arc<dyn Fn(&str) -> Result<(), ApiError> + Send + Sync>;
 pub type Resume = Arc<dyn Fn(&Row) -> Result<(), ApiError> + Send + Sync>;
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -72,6 +73,7 @@ pub struct OutboxOps {
     remote: Mutex<Option<Arc<dyn RemoteRows>>>,
     codex_check: OnceLock<Check>,
     agy_check: OnceLock<Check>,
+    agy_gate: OnceLock<Gate>,
     saving: bool,
     clock: Clock,
     settle: Settle,
@@ -165,6 +167,7 @@ impl OutboxOps {
             remote: Mutex::new(None),
             codex_check: OnceLock::new(),
             agy_check: OnceLock::new(),
+            agy_gate: OnceLock::new(),
             saving: true,
             clock: Arc::new(now_ms),
             settle: Settle::default(),
@@ -297,6 +300,10 @@ impl OutboxOps {
 
     pub fn set_agy_check(&self, check: Check) {
         let _ = self.agy_check.set(check);
+    }
+
+    pub fn set_agy_gate(&self, gate: Gate) {
+        let _ = self.agy_gate.set(gate);
     }
 
     fn check_foreign(&self, tool: Tool, key: &str) -> Result<(), ApiError> {
@@ -481,6 +488,11 @@ impl OutboxOps {
     fn save(&self, args: &SendArgs, combine: bool) -> Result<(Row, bool), ApiError> {
         check_text(&args.text)?;
         let target = self.target(&args.id, &args.text)?;
+        if target.tool == Tool::Antigravity {
+            if let Some(gate) = self.agy_gate.get() {
+                gate(args.via == Via::Phone)?;
+            }
+        }
         if !self.saving {
             return Err(save_failed());
         }

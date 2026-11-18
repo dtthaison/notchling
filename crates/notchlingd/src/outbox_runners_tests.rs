@@ -477,3 +477,6 @@ fn agy_send_existing_session_queues_row() {
 
 #[path = "outbox_runners_dispatch_tests.rs"]
 mod dispatch;
+
+#[path = "outbox_runners_channel_tests.rs"]
+mod channel;

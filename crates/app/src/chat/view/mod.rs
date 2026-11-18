@@ -414,6 +414,8 @@ impl ChatView {
             }
         });
         let (accounts, switches) = crate::accounts::window::app_stores(cx);
+        let agy_channel = tools::channel_in(&root);
+        let agy_remote_in = tools::remote_in(&root);
         let mut view = ChatView {
             accounts,
             switches,
@@ -476,7 +478,9 @@ impl ChatView {
             overlay_open: false,
             page_covered: false,
             activity_drawn: std::cell::Cell::new(None),
-            tools: tools::ChatTools::new(cx),
+            tools: tools::ChatTools::new(cx)
+                .with_channel(agy_channel)
+                .with_remote_in(agy_remote_in),
             sheet: None,
             bridge: phone::app_bridge(cx),
             phone: None,

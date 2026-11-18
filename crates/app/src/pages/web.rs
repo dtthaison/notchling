@@ -23,9 +23,13 @@ use wry::{
 
 use super::local::{stays_local, PageSource};
 use super::set::counts_as_open;
-use crate::chat::page_panel::{appkit_frame, live_allows, opens_in_browser, Frame};
+use crate::chat::page_panel::{
+    antigravity_allows, appkit_frame, live_allows, opens_in_browser, Frame,
+};
 
 pub const LIVE_STORE: [u8; 16] = *b"notchling-claude";
+
+pub const ANTIGRAVITY_STORE: [u8; 16] = *b"notchling-agy-rc";
 
 const SIZE: (f64, f64) = (960.0, 720.0);
 const MIN_SIZE: (f64, f64) = (480.0, 360.0);
@@ -185,6 +189,7 @@ pub enum PanelPage<'a> {
     Local(&'a PageSource),
     Untrusted(&'a PageSource),
     Live(&'a str),
+    Antigravity(&'a str),
 }
 
 pub struct PanelHooks {
@@ -234,6 +239,28 @@ impl PanelWeb {
                 })
                 .with_data_store_identifier(LIVE_STORE)
                 .with_url(url),
+            PanelPage::Antigravity(url) => {
+                let leave = std::rc::Rc::new(leave);
+                let sent_out = leave.clone();
+                WebViewBuilder::new()
+                    .with_navigation_handler(move |url| {
+                        if antigravity_allows(&url) {
+                            return true;
+                        }
+                        if opens_in_browser(&url) {
+                            sent_out(url);
+                        }
+                        false
+                    })
+                    .with_new_window_req_handler(move |url, _| {
+                        if opens_in_browser(&url) {
+                            leave(url);
+                        }
+                        NewWindowResponse::Deny
+                    })
+                    .with_data_store_identifier(ANTIGRAVITY_STORE)
+                    .with_url(url)
+            }
         };
         let view = builder
             .with_document_title_changed_handler(move |t| {

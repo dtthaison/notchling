@@ -2,6 +2,7 @@ use crate::agy_ops::AgyOps;
 use crate::codex_ops::CodexOps;
 use crate::outbox_courier::{Courier, NOTHING};
 use crate::outbox_ops::OutboxOps;
+use notchling_engine::contract::channel::Ability;
 use notchling_engine::outbox::{Facts, Job, Row, Tried, TryEnd, TURN_SETTLE_MS};
 use std::sync::Arc;
 
@@ -110,6 +111,11 @@ pub fn link_agy(outbox: &Arc<OutboxOps>, agy: &Arc<AgyOps>) {
     outbox.set_agy_check(Arc::new(move |session| {
         weak.upgrade()
             .map_or(Ok(()), |agy| agy.check_session(session))
+    }));
+    let weak = Arc::downgrade(agy);
+    outbox.set_agy_gate(Arc::new(move |phone| {
+        weak.upgrade()
+            .map_or(Ok(()), |agy| agy.allow(Ability::Reply, phone))
     }));
 }
 

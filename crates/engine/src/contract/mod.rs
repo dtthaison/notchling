@@ -1,6 +1,10 @@
 pub mod antigravity;
 pub mod baseline;
 mod capability;
+pub mod channel;
+pub mod channel_draft;
+pub mod channel_remote;
+pub mod channels;
 pub mod claude;
 pub mod codex;
 pub mod conformance;

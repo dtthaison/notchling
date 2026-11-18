@@ -5,6 +5,7 @@ use super::ChatView;
 use crate::acting::Request;
 use crate::chat::data::{Session, Tool};
 use crate::chat::pickers::Menu;
+use crate::tools::agy_hand_off::Words;
 
 mod antigravity;
 mod claude;
@@ -25,6 +26,10 @@ pub(super) trait ChatTool: Sync {
 
     fn working(&self, _session: &Session) -> bool {
         false
+    }
+
+    fn hand_off(&self, _view: &ChatView) -> Option<Words> {
+        None
     }
 
     fn intercept(

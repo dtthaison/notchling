@@ -46,6 +46,9 @@ settings-section-account-limit = When the Account in Use Nears Its Limit
 # Section title on the General page: settings for Codex.
 settings-section-codex = { -brand-codex }
 
+# Section title on the General page: settings for Antigravity.
+settings-section-antigravity = { -brand-antigravity }
+
 # Section title on the General page: the Chat window.
 settings-section-chat = Chat
 
@@ -62,6 +65,9 @@ settings-footer-keep-mac-awake = Closing the lid still puts the Mac to sleep. Wh
 
 # Note under the section about the account in use nearing its limit. Notify and Notify and Switch are the names of two choices above it.
 settings-footer-account-limit = Notify tells you at 90% and 100% of a limit. Notify and Switch also moves to the saved account with the most room.
+
+# Note under the Antigravity section.
+settings-footer-antigravity = The app and Remote Control open { -brand-antigravity } for you: nothing is sent until you press Send there, and the phone can't reply to { -brand-antigravity } sessions then. Remote Control copies your message to paste.
 
 # Note under the Chat section.
 settings-footer-chat = Chat shows the newest part of a long session. More shows earlier turns and uses more memory. It applies the next time a session loads.
@@ -204,6 +210,27 @@ settings-limit-switch-at = Switch at
 
 # Row in the Codex section.
 settings-codex-network = Allow network in Codex turns
+
+# Row in the Antigravity section: how Notchling sends a message to Antigravity.
+settings-antigravity-channel = Talk to { -brand-antigravity } through
+
+# Row in the Antigravity section: where Remote Control opens.
+settings-antigravity-remote-in = Open Remote Control in
+
+# Choice of the Remote Control row: the right-hand panel of Chat.
+settings-antigravity-remote-in-panel = Chat panel
+
+# Choice of the Remote Control row: the default web browser.
+settings-antigravity-remote-in-browser = Browser
+
+# Choice of the Antigravity row: Notchling runs the agy command line and sends the message itself. acp is the name of the protocol; keep it.
+settings-antigravity-channel-acp = { -brand-antigravity } CLI (agy acp)
+
+# Choice of the Antigravity row: Notchling opens the Antigravity app with the message as a draft and the user presses Send there.
+settings-antigravity-channel-app = { -brand-antigravity } app (draft, you press Send)
+
+# Choice of the Antigravity row: Notchling opens the conversation in Antigravity Remote Control in the browser and the user presses Send there.
+settings-antigravity-channel-remote = { -brand-antigravity } Remote Control (browser, you press Send)
 
 # Row in the Chat section: how much of a long conversation Chat loads.
 settings-chat-history = Conversation history to load

@@ -99,7 +99,7 @@ fn choice_labels_are_per_setting() {
             choices += 1;
         }
     }
-    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4);
+    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 3 + 2 + 4);
 }
 
 #[test]
@@ -117,6 +117,7 @@ fn section_titles_and_footers_come_from_messages() {
             t::settings::SECTION_CLAUDE_CODE.get(),
             t::settings::SECTION_ACCOUNT_LIMIT.get(),
             t::settings::SECTION_CODEX.get(),
+            t::settings::SECTION_ANTIGRAVITY.get(),
             t::settings::SECTION_CHAT.get(),
         ]
     );
@@ -132,6 +133,7 @@ fn section_titles_and_footers_come_from_messages() {
             None,
             Some(t::settings::FOOTER_ACCOUNT_LIMIT.get()),
             None,
+            Some(t::settings::FOOTER_ANTIGRAVITY.get()),
             Some(t::settings::FOOTER_CHAT.get()),
         ]
     );

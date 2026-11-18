@@ -8,8 +8,11 @@ use crate::layout::Layout;
 use crate::outbox_ops::{OutboxOps, SendArgs};
 use crate::outbox_runners::Delivery;
 use crate::pages_ops::Titles;
+use notchling_engine::contract::channel::{self, Ability, Channel};
+use notchling_engine::contract::Tool;
 use notchling_engine::outbox::Via;
 use notchling_engine::search::index::TitledSession;
+use notchling_engine::settings::Settings;
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::agy::{self, RunError, Runner, Timing};
@@ -20,6 +23,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+pub const CHANNEL_KEY: &str = "antigravityChannel";
+
+pub const CHANNEL_WHY: &str = "channel";
+
+const APP_ONLY: &str =
+    "Antigravity is set to open in another app. Reply from Chat on the Mac, then press Send there.";
 
 const COPY_REUSE: Duration = Duration::from_secs(3);
 
@@ -64,6 +74,7 @@ pub struct AgyOps {
     elsewhere: Arc<Elsewhere>,
     logs: LogReads,
     outbox: OnceLock<Arc<OutboxOps>>,
+    settings: OnceLock<PathBuf>,
     held: Mutex<HashMap<String, (Instant, bool)>>,
 }
 
@@ -117,7 +128,41 @@ impl AgyOps {
             setup,
             elsewhere,
             outbox: OnceLock::new(),
+            settings: OnceLock::new(),
             held: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_settings(self, path: PathBuf) -> AgyOps {
+        self.set_settings(path);
+        self
+    }
+
+    pub(crate) fn set_settings(&self, path: PathBuf) {
+        let _ = self.settings.set(path);
+    }
+
+    pub(crate) fn channel(&self) -> &'static dyn Channel {
+        let value = self
+            .settings
+            .get()
+            .and_then(|path| Settings::open(path).ok())
+            .and_then(|settings| settings.get_str(CHANNEL_KEY));
+        channel::chosen(Tool::Antigravity, value.as_deref())
+    }
+
+    pub(crate) fn allow(&self, ability: Ability, phone: bool) -> Result<(), ApiError> {
+        let chosen = self.channel();
+        let refused = if phone {
+            channel::refusal(chosen, Ability::Phone)
+        } else {
+            None
+        }
+        .or_else(|| channel::refusal(chosen, ability))
+        .or_else(|| chosen.mode().user_sends().then(|| APP_ONLY.to_string()));
+        match refused {
+            Some(message) => Err(bad(message).with_data(json!({"why": CHANNEL_WHY}))),
+            None => Ok(()),
         }
     }
 
@@ -361,6 +406,12 @@ impl AgyOps {
     }
 
     fn send(&self, args: &Value) -> Result<Value, ApiError> {
+        let ability = if args.get("id").is_some() {
+            Ability::Reply
+        } else {
+            Ability::Start
+        };
+        self.allow(ability, false)?;
         let text = text_arg(args, "text")?;
         if text.trim().is_empty() {
             return Err(bad("the message is empty"));
@@ -455,6 +506,9 @@ impl AgyOps {
     }
 
     pub(crate) fn deliver(&self, session: &str, text: &str) -> Result<(), Delivery> {
+        if let Err(refused) = self.allow(Ability::Reply, false) {
+            return Err(Delivery::Failed(refused.message));
+        }
         if !self.acting.is_on() {
             return Err(Delivery::Busy);
         }
@@ -550,6 +604,7 @@ impl AgyOps {
         } else {
             agy::find_binary(&home)
         };
+        let settings = layout.data_dir.join("settings.json");
         AgyOps::new(
             acting,
             room,
@@ -564,6 +619,7 @@ impl AgyOps {
                 timing: Timing::default(),
             },
         )
+        .with_settings(settings)
     }
 }
 

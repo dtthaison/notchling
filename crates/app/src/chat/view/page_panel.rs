@@ -164,6 +164,7 @@ fn shown(opens: Opens) -> Shown {
     let (title, link) = match &opens {
         Opens::Saved(page) => (page.title.clone(), page.link.clone()),
         Opens::Live(link) => (t::chat::panel_artifact().to_owned(), link.live_url()),
+        Opens::Antigravity(url) => (t::chat::panel_antigravity().to_owned(), url.clone()),
         Opens::File(path) | Opens::Html(path) => (file_panel::title(path), String::new()),
         Opens::Diff(_) | Opens::Folder(_) | Opens::System(_) | Opens::Browser => {
             (String::new(), String::new())
@@ -283,6 +284,25 @@ impl ChatView {
         .detach();
     }
 
+    pub(super) fn open_remote_panel(&mut self, url: String, cx: &mut Context<Self>) {
+        cx.spawn(async move |_, cx| {
+            cx.update(|cx| match crate::mac::shell::chat_window(cx) {
+                Some(handle) => {
+                    let again = url.clone();
+                    let shown = handle.update(cx, move |view, window, cx| {
+                        view.show_page(Opens::Antigravity(url), "", window, cx);
+                    });
+                    if shown.is_err() {
+                        cx.open_url(&again);
+                    }
+                }
+                None => cx.open_url(&url),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(super) fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.show_page(file_panel::opens(&path), "", window, cx);
     }
@@ -304,7 +324,7 @@ impl ChatView {
         if !self.page.render_only
             && matches!(
                 page.opens,
-                Opens::Saved(_) | Opens::Live(_) | Opens::Html(_)
+                Opens::Saved(_) | Opens::Live(_) | Opens::Antigravity(_) | Opens::Html(_)
             )
         {
             match self.make_web(&page.opens, window, cx) {
@@ -384,6 +404,7 @@ impl ChatView {
                 PanelWeb::open(window, PanelPage::Local(&source), hooks)
             }
             Opens::Live(link) => PanelWeb::open(window, PanelPage::Live(&link.live_url()), hooks),
+            Opens::Antigravity(url) => PanelWeb::open(window, PanelPage::Antigravity(url), hooks),
             _ => Err(t::chat::panel_not_a_page().to_owned()),
         }
     }
@@ -429,6 +450,7 @@ fn web_page(view: &ChatView, shown: &Shown, a: Appearance) -> AnyElement {
     let note = match (&shown.error, &shown.opens) {
         (Some(error), _) => error.clone(),
         (None, Opens::Live(_)) => t::chat::panel_opening_live().to_owned(),
+        (None, Opens::Antigravity(_)) => t::chat::panel_opening_antigravity().to_owned(),
         (None, _) if shown.html.is_some() => t::chat::panel_opening_page().to_owned(),
         (None, _) => t::chat::panel_opening_saved().to_owned(),
     };
@@ -741,6 +763,14 @@ pub fn render(
         .children(open_with)
         .child(back);
 
+    let hint = matches!(shown.opens, Opens::Antigravity(_)).then(|| {
+        div().flex_shrink_0().px(px(12.0)).py(px(6.0)).child(label(
+            t::chat::panel_antigravity_hint(),
+            TypeRole::Meta,
+            Ink::TextMuted,
+            a,
+        ))
+    });
     let page = match (shown.file.as_ref(), shown.diff.as_ref()) {
         _ if html_page => web_page(view, shown, a),
         (_, Some(diff)) => diff_panel::body(diff, cx.entity().downgrade(), a),
@@ -768,6 +798,7 @@ pub fn render(
             .flex_col()
             .child(header)
             .child(div().h(px(1.0)).flex_shrink_0().fill(Ink::Hairline, a))
+            .children(hint)
             .child(page)
             .child(resize_edge())
             .window_region(a, cx)

@@ -25,6 +25,7 @@ impl ArtifactLink {
 pub enum Opens {
     Saved(Box<Page>),
     Live(ArtifactLink),
+    Antigravity(String),
     File(PathBuf),
     Html(PathBuf),
     Diff(String),
@@ -135,6 +136,7 @@ pub fn subtitle(opens: &Opens) -> String {
         }
         Opens::Saved(_) => t::chat::panel_saved_copy().to_owned(),
         Opens::Live(_) => t::chat::panel_live().to_owned(),
+        Opens::Antigravity(_) => t::chat::panel_antigravity_subtitle().to_owned(),
         Opens::File(_)
         | Opens::Html(_)
         | Opens::Diff(_)
@@ -149,7 +151,20 @@ fn live_host(host: &str) -> bool {
     under("claude.ai") || under("claudeusercontent.com") || host == "challenges.cloudflare.com"
 }
 
+fn google_host(host: &str) -> bool {
+    let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+    under("google.com") || under("gstatic.com") || under("googleusercontent.com")
+}
+
 pub fn live_allows(url: &str) -> bool {
+    https_allows(url, live_host)
+}
+
+pub fn antigravity_allows(url: &str) -> bool {
+    https_allows(url, google_host)
+}
+
+fn https_allows(url: &str, host_ok: impl Fn(&str) -> bool) -> bool {
     let lower = url.trim().to_ascii_lowercase();
     if lower.starts_with("about:") {
         return true;
@@ -166,7 +181,7 @@ pub fn live_allows(url: &str) -> bool {
         Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host,
         _ => authority,
     };
-    !host.is_empty() && live_host(host)
+    !host.is_empty() && host_ok(host)
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -456,6 +471,46 @@ mod tests {
         assert!(!opens_in_browser("file:///etc/passwd"));
         assert!(!opens_in_browser("javascript:alert(1)"));
         assert!(!opens_in_browser("mailto:a@b.c"));
+    }
+
+    #[test]
+    fn remote_control_stays_on_google_sign_in_and_antigravity() {
+        for url in [
+            "https://antigravity.google.com/r/0a1b2c3d-1111-4222-8333-444455556666-v2?p=c%2Fx",
+            "https://accounts.google.com/AccountChooser?Email=a%40example.com&continue=x",
+            "https://ACCOUNTS.google.com/v3/signin",
+            "https://www.google.com/",
+            "https://apis.google.com/js/api.js",
+            "https://ssl.gstatic.com/accounts/ui/x.js",
+            "https://www.gstatic.com/x",
+            "https://lh3.googleusercontent.com/a/x",
+            "https://accounts.google.com:443/x",
+            "about:blank",
+            "blob:https://antigravity.google.com/1234-5678",
+        ] {
+            assert!(antigravity_allows(url), "{url}");
+        }
+        for url in [
+            "http://accounts.google.com/",
+            "https://google.com.evil.example/",
+            "https://evilgoogle.com/",
+            "https://notgstatic.com/",
+            "https://accounts.google.com@evil.example/",
+            "https://user:pw@accounts.google.com/",
+            "https://evil.example/?u=https://accounts.google.com",
+            "https://claude.ai/artifact/abc",
+            "https://github.com/",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "blob:https://evil.example/1",
+            "https:///x",
+            "",
+        ] {
+            assert!(!antigravity_allows(url), "{url}");
+        }
+        assert!(!live_allows("https://accounts.google.com/"));
+        assert!(!antigravity_allows("https://claude.ai/"));
     }
 
     #[test]

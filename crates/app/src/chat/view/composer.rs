@@ -46,7 +46,9 @@ fn inset(base: f32, edge: f32) -> f32 {
 fn placeholder(view: &ChatView) -> &'static str {
     match view.selected_session() {
         Some(s) if is_draft(&s.agent.id) => t::chat::first_message_placeholder(),
-        Some(s) => super::tool::adapter(s).placeholder(),
+        Some(s) => super::tool::adapter(s)
+            .hand_off(view)
+            .map_or_else(|| super::tool::adapter(s).placeholder(), |w| w.placeholder),
         None => t::chat::reply_placeholder(),
     }
 }
@@ -90,6 +92,14 @@ fn status(
             sentence(&error_text(error, view.prompt.is_shown())),
             Ink::Needs,
         )
+    } else if let Some(note) = view
+        .tools
+        .agy_note
+        .as_ref()
+        .filter(|(row, _)| Some(row) == view.selected.as_ref())
+        .map(|(_, note)| *note)
+    {
+        (sentence(note), Ink::TextMuted)
     } else if let Some(note) = view.offline_note() {
         (note, Ink::TextMuted)
     } else if view.tools.sending {
@@ -433,6 +443,7 @@ fn sending_spinner(a: Appearance) -> Div {
 fn action_button(
     action: Action,
     enabled: bool,
+    send_tip: Option<&'static str>,
     a: Appearance,
     cx: &mut Context<ChatView>,
 ) -> Option<Stateful<Div>> {
@@ -480,6 +491,10 @@ fn action_button(
         .w(px(CONTROL))
         .h(px(CONTROL))
         .px(px(0.0));
+    let b = match (action, send_tip) {
+        (Action::Send, Some(tip)) => gate::tip_text(b, SharedString::from(tip), a),
+        _ => b,
+    };
     let b = match action {
         Action::Send if enabled => b.on_click(cx.listener(|this, _, _, cx| this.send_text(cx))),
         Action::Stop { dim: false } => b.on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
@@ -760,6 +775,10 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .part("Reply Box", a, cx);
     let working = view.selected_working() || view.composer.preview.working;
     let act = action(!empty, working, view.stopping(), view.tools.sending);
+    let send_tip = view
+        .selected_session()
+        .and_then(|s| super::tool::adapter(s).hand_off(view))
+        .map(|w| w.tip);
     let bottom = div()
         .h(px(CONTROL))
         .flex()
@@ -768,7 +787,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .child(
             add_button(view, control.enabled && !view.attach_refused(), a, cx).unwrap_or_else(div),
         )
-        .children(action_button(act, control.enabled, a, cx));
+        .children(action_button(act, control.enabled, send_tip, a, cx));
     let accent_edge = hsla(Ink::Accent.color(a));
     let editing = view.editing_here();
     let card = div()

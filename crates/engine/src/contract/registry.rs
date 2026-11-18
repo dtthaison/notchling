@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::antigravity::AntigravityProvider;
+use super::channel::Channel;
 use super::claude::ClaudeProvider;
 use super::codex::CodexProvider;
 use super::flows::delegate_jobs;
@@ -49,6 +50,10 @@ impl Registry {
 
     pub fn of(&self, tool: Tool) -> &dyn Provider {
         self.providers[tool.index()].as_ref()
+    }
+
+    pub fn channels(&self, tool: Tool) -> &'static [&'static dyn Channel] {
+        self.of(tool).channels()
     }
 
     pub fn support(&self, tool: Tool, c: Capability) -> Support {
