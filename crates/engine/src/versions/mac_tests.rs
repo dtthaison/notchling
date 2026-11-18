@@ -294,3 +294,23 @@ fn detect_starts_nothing() {
     let _ = watch_paths(&roots);
     assert!(!ran.exists());
 }
+
+#[test]
+fn a_cask_with_its_binary_under_bin_is_an_install() {
+    let dir = TempDir::new("mac-cask-bin");
+    dir.write("opt/homebrew/Caskroom/codex/0.169.1/bin/codex", "bin");
+    let found = run(&dir, Tool::Codex).unwrap();
+    assert_eq!(found.method, Method::Brew);
+    assert_eq!(found.version.unwrap().as_str(), "0.169.1");
+    assert!(found.path.ends_with("0.169.1/bin/codex"));
+    assert!(found.identity.is_some());
+}
+
+#[test]
+fn the_newest_cask_folder_with_a_binary_wins_over_a_newer_empty_one() {
+    let dir = TempDir::new("mac-cask-empty-newer");
+    dir.write("opt/homebrew/Caskroom/codex/0.166.0/bin/codex", "bin");
+    dir.write("opt/homebrew/Caskroom/codex/0.170.0/.metadata", "x");
+    let found = run(&dir, Tool::Codex).unwrap();
+    assert_eq!(found.version.unwrap().as_str(), "0.166.0");
+}

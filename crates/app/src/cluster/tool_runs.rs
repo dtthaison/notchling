@@ -12,7 +12,7 @@ pub enum Run {
     Done { ok: bool, text: String },
 }
 
-type Installed = (i64, Option<Version>);
+pub type Installed = (i64, Option<Version>);
 
 #[derive(Clone)]
 pub struct Session {
@@ -24,7 +24,8 @@ pub struct Session {
 pub struct ToolRuns {
     entries: Mutex<BTreeMap<String, Run>>,
     sessions: Mutex<BTreeMap<String, Session>>,
-    marks: Mutex<BTreeMap<(String, Tool), i64>>,
+    sheet: Mutex<Option<(String, Tool)>>,
+    logins: Mutex<BTreeMap<(String, Tool), (i64, bool)>>,
     installed: Mutex<BTreeMap<(String, Tool), Installed>>,
     revision: AtomicU64,
     generation: Arc<AtomicU64>,
@@ -36,12 +37,17 @@ impl Default for ToolRuns {
     }
 }
 
+fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl ToolRuns {
     pub fn tied_to(generation: Arc<AtomicU64>) -> ToolRuns {
         ToolRuns {
             entries: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
-            marks: Mutex::new(BTreeMap::new()),
+            sheet: Mutex::new(None),
+            logins: Mutex::new(BTreeMap::new()),
             installed: Mutex::new(BTreeMap::new()),
             revision: AtomicU64::new(0),
             generation,
@@ -49,7 +55,7 @@ impl ToolRuns {
     }
 
     fn entries(&self) -> MutexGuard<'_, BTreeMap<String, Run>> {
-        self.entries.lock().unwrap_or_else(|e| e.into_inner())
+        locked(&self.entries)
     }
 
     fn changed(&self) {
@@ -121,7 +127,7 @@ impl ToolRuns {
 
 impl ToolRuns {
     fn sessions(&self) -> MutexGuard<'_, BTreeMap<String, Session>> {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner())
+        locked(&self.sessions)
     }
 
     pub fn open_session(&self, machine: &str, tool: Tool) -> Option<Arc<AtomicBool>> {
@@ -144,12 +150,15 @@ impl ToolRuns {
         Some(cancel)
     }
 
-    pub fn offer(&self, machine: &str, prompt: DevicePrompt) {
+    pub fn offer(&self, machine: &str, owner: &Arc<AtomicBool>, prompt: DevicePrompt) {
         {
             let mut sessions = self.sessions();
             let Some(session) = sessions.get_mut(machine) else {
                 return;
             };
+            if !Arc::ptr_eq(&session.cancel, owner) {
+                return;
+            }
             session.prompt = Some(prompt);
         }
         self.changed();
@@ -159,48 +168,90 @@ impl ToolRuns {
         self.sessions().get(machine).cloned()
     }
 
-    pub fn cancel(&self, machine: &str) {
-        if let Some(session) = self.sessions().get(machine) {
-            session.cancel.store(true, Ordering::SeqCst);
-        }
+    pub fn cancel(&self, machine: &str, said: &str) {
+        let session = self.sessions().remove(machine);
+        let Some(session) = session else {
+            return;
+        };
+        session.cancel.store(true, Ordering::SeqCst);
+        self.clear_sheet_if(machine, session.tool);
+        self.entries().insert(
+            machine.to_owned(),
+            Run::Done {
+                ok: false,
+                text: said.to_owned(),
+            },
+        );
         self.changed();
     }
 
-    pub fn close_session(&self, machine: &str) {
-        let removed = self.sessions().remove(machine).is_some();
+    pub fn close_session(&self, machine: &str, owner: &Arc<AtomicBool>) {
+        let removed = {
+            let mut sessions = self.sessions();
+            match sessions.get(machine) {
+                Some(session) if Arc::ptr_eq(&session.cancel, owner) => {
+                    sessions.remove(machine).is_some()
+                }
+                _ => false,
+            }
+        };
         if removed {
             self.changed();
         }
     }
 
-    pub fn mark_signed_in(&self, machine: &str, tool: Tool, now_ms: i64) {
-        self.marks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert((machine.to_owned(), tool), now_ms);
+    pub fn set_sheet(&self, machine: &str, tool: Tool) {
+        *locked(&self.sheet) = Some((machine.to_owned(), tool));
         self.changed();
     }
 
-    pub fn signed_in_since(&self, machine: &str, tool: Tool) -> Option<i64> {
-        self.marks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+    pub fn sheet(&self) -> Option<(String, Tool)> {
+        locked(&self.sheet).clone()
+    }
+
+    pub fn clear_sheet(&self) {
+        let had = locked(&self.sheet).take().is_some();
+        if had {
+            self.changed();
+        }
+    }
+
+    pub fn clear_sheet_if(&self, machine: &str, tool: Tool) {
+        let cleared = {
+            let mut sheet = locked(&self.sheet);
+            if sheet
+                .as_ref()
+                .is_some_and(|(m, t)| m == machine && *t == tool)
+            {
+                *sheet = None;
+                true
+            } else {
+                false
+            }
+        };
+        if cleared {
+            self.changed();
+        }
+    }
+
+    pub fn mark_login(&self, machine: &str, tool: Tool, signed: bool, now_ms: i64) {
+        locked(&self.logins).insert((machine.to_owned(), tool), (now_ms, signed));
+        self.changed();
+    }
+
+    pub fn login_mark(&self, machine: &str, tool: Tool) -> Option<(i64, bool)> {
+        locked(&self.logins)
             .get(&(machine.to_owned(), tool))
             .copied()
     }
 
     pub fn mark_installed(&self, machine: &str, tool: Tool, version: Option<Version>, now_ms: i64) {
-        self.installed
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert((machine.to_owned(), tool), (now_ms, version));
+        locked(&self.installed).insert((machine.to_owned(), tool), (now_ms, version));
         self.changed();
     }
 
-    pub fn installed_since(&self, machine: &str, tool: Tool) -> Option<(i64, Option<Version>)> {
-        self.installed
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+    pub fn installed_since(&self, machine: &str, tool: Tool) -> Option<Installed> {
+        locked(&self.installed)
             .get(&(machine.to_owned(), tool))
             .cloned()
     }

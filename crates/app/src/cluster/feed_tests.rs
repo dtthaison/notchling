@@ -204,6 +204,29 @@ fn a_join_goes_to_the_daemon_and_an_error_never_carries_the_token() {
 }
 
 #[test]
+fn the_feed_remembers_when_a_nodes_tools_or_logins_last_changed() {
+    let with = |codex: &str, clock: &str| {
+        let mut next = status();
+        let member = next["members"]
+            .as_array_mut()
+            .and_then(|m| m.iter_mut().find(|m| m["id"] == STANDBY))
+            .expect("standby");
+        member["versions"]["tools"] = json!({"codex": codex});
+        member["versions"]["notchling"] = json!(clock);
+        next
+    };
+    let feed = ClusterFeed::none();
+    assert_eq!(feed.reported_at(STANDBY), None);
+    feed.take_status(&with("0.118.0", "1"));
+    assert_eq!(feed.reported_at(STANDBY), Some(0));
+    feed.take_status(&with("0.118.0", "2"));
+    assert_eq!(feed.reported_at(STANDBY), Some(0));
+    feed.take_status(&with("0.166.0", "2"));
+    assert!(feed.reported_at(STANDBY).is_some_and(|at| at > 0));
+    assert_eq!(feed.reported_at("nobody"), None);
+}
+
+#[test]
 fn an_event_keeps_the_readiness_and_set_facts_it_does_not_carry() {
     let last = replication();
     let mut event = status();

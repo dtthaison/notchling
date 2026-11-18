@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
@@ -12,9 +13,10 @@ use notchling_locale as t;
 
 use super::model::NodeRow;
 use super::tool_setup::{
-    run_check, run_install, run_sign_in, start_install, start_sign_in, Kind, Setup,
+    idle_now, run_check, run_install, run_sign_in, start_check, start_install, start_sign_in, Kind,
+    Setup,
 };
-use super::tool_updates_view::{now_ms, LoginSheet, ToolView};
+use super::tool_updates_view::{now_ms, ToolView};
 use super::view::ClusterSheetView;
 use crate::accounts::view_rows::mono;
 
@@ -45,7 +47,10 @@ impl ClusterSheetView {
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .spawn(async move {
-                    let outcome = run_install(&engine, &runs, &go);
+                    let outcome = match idle_now(&feed, &go.node, &go.machine, Kind::Install) {
+                        Some(busy) => busy,
+                        None => run_install(&engine, &runs, &go),
+                    };
                     if outcome.ok {
                         let version =
                             engine.worker_tools(&go.machine).and_then(|known| {
@@ -75,7 +80,7 @@ impl ClusterSheetView {
         let model = self.feed.snapshot();
         let view = self.tool_view(&model);
         let switches = self.access.switches.switches();
-        let go = match start_sign_in(&view.setups, node, tool, &switches) {
+        let go = match start_sign_in(&view.setups, node, tool, &model, &switches) {
             Ok(go) => go,
             Err(why) => {
                 self.note = Some((why, true));
@@ -83,61 +88,60 @@ impl ClusterSheetView {
                 return;
             }
         };
+        let runs = self.tools.runs.clone();
+        if runs.running(&go.machine) || runs.sheet().is_some() {
+            return;
+        }
         self.note = None;
         if !can_sign_in(tool) {
-            self.tools.sheet = Some(LoginSheet {
-                machine: go.machine,
-                tool,
-            });
+            runs.set_sheet(&go.machine, tool);
             cx.notify();
             return;
         }
         let Some(parts) = self.feed.add_source().parts() else {
             return;
         };
-        let runs = self.tools.runs.clone();
-        if runs.running(&go.machine) {
-            return;
-        }
         let Some(cancel) = runs.open_session(&go.machine, tool) else {
             return;
         };
         let text = t::cluster::tool_signing_in(tool.title(), &go.machine);
         if !runs.begin(&go.machine, &text) {
-            runs.close_session(&go.machine);
+            runs.close_session(&go.machine, &cancel);
             return;
         }
-        self.tools.sheet = Some(LoginSheet {
-            machine: go.machine.clone(),
-            tool,
-        });
+        runs.set_sheet(&go.machine, tool);
         let engine = parts.engine.clone();
         let feed = self.feed.clone();
         cx.spawn(async move |this, cx| {
-            let machine = go.machine.clone();
             cx.background_executor()
                 .spawn(async move {
                     let offered = runs.clone();
                     let to = go.machine.clone();
-                    let sink: PromptSink = Arc::new(move |prompt| offered.offer(&to, prompt));
-                    let outcome = run_sign_in(&engine, &runs, &go, sink, cancel);
-                    runs.close_session(&go.machine);
-                    if outcome.ok {
-                        runs.mark_signed_in(&go.machine, go.tool, now_ms());
+                    let owner = cancel.clone();
+                    let sink: PromptSink =
+                        Arc::new(move |prompt| offered.offer(&to, &owner, prompt));
+                    let outcome = match idle_now(&feed, &go.node, &go.machine, Kind::SignIn) {
+                        Some(busy) => busy,
+                        None => run_sign_in(&engine, &runs, &go, sink, cancel.clone()),
+                    };
+                    let cancelled = cancel.load(Ordering::SeqCst);
+                    runs.close_session(&go.machine, &cancel);
+                    if cancelled {
+                        let check = engine.check_login(&go.machine, go.tool);
+                        if let Some(signed) = check.signed {
+                            runs.mark_login(&go.machine, go.tool, signed, now_ms());
+                        }
+                    } else {
+                        if outcome.ok {
+                            runs.mark_login(&go.machine, go.tool, true, now_ms());
+                        }
+                        runs.finish(&go.machine, &outcome);
+                        runs.clear_sheet_if(&go.machine, go.tool);
                     }
-                    runs.finish(&go.machine, &outcome);
                     feed.refresh();
                 })
                 .await;
             this.update(cx, |view, cx| {
-                if view
-                    .tools
-                    .sheet
-                    .as_ref()
-                    .is_some_and(|s| s.machine == machine)
-                {
-                    view.tools.sheet = None;
-                }
                 view.tools.seen = None;
                 cx.notify();
             })
@@ -147,28 +151,55 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn check_login(&mut self, cx: &mut Context<Self>) {
-        let Some(sheet) = self.tools.sheet.take() else {
+    pub(super) fn start_check(&mut self, node: &str, tool: Tool, cx: &mut Context<Self>) {
+        self.menu = None;
+        let model = self.feed.snapshot();
+        let view = self.tool_view(&model);
+        match start_check(&view.setups, node, tool) {
+            Ok(go) => self.check_in_background(go.machine, go.tool, false, cx),
+            Err(why) => {
+                self.note = Some((why, true));
+                cx.notify();
+            }
+        }
+    }
+
+    fn check_from_sheet(&mut self, cx: &mut Context<Self>) {
+        let Some((machine, tool)) = self.tools.runs.sheet() else {
             return;
         };
+        self.check_in_background(machine, tool, true, cx);
+    }
+
+    fn check_in_background(
+        &mut self,
+        machine: String,
+        tool: Tool,
+        from_sheet: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(parts) = self.feed.add_source().parts() else {
             return;
         };
         let runs = self.tools.runs.clone();
-        let text = t::cluster::tool_checking_login(sheet.tool.title(), &sheet.machine);
-        if !runs.begin(&sheet.machine, &text) {
+        let text = t::cluster::tool_checking_login(tool.title(), &machine);
+        if !runs.begin(&machine, &text) {
             return;
         }
+        if from_sheet {
+            runs.clear_sheet_if(&machine, tool);
+        }
+        self.note = None;
         let engine = parts.engine.clone();
         let feed = self.feed.clone();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .spawn(async move {
-                    let outcome = run_check(&engine, &runs, &sheet.machine, sheet.tool);
-                    if outcome.ok {
-                        runs.mark_signed_in(&sheet.machine, sheet.tool, now_ms());
+                    let check = run_check(&engine, &runs, &machine, tool);
+                    if let Some(signed) = check.signed {
+                        runs.mark_login(&machine, tool, signed, now_ms());
                     }
-                    runs.finish(&sheet.machine, &outcome);
+                    runs.finish(&machine, &check.outcome);
                     feed.refresh();
                 })
                 .await;
@@ -214,7 +245,9 @@ impl ClusterSheetView {
         let id = match kind {
             Kind::Install => "node-tool-install",
             Kind::SignIn => "node-tool-sign-in",
+            Kind::Check => "node-tool-check",
         };
+        let machine = setup.machine.clone();
         let mut line = div().flex().items_center().gap(px(SPACE[1])).child(label(
             tool.title(),
             TypeRole::Meta,
@@ -234,9 +267,15 @@ impl ClusterSheetView {
                     },
                     a,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| match kind {
-                    Kind::Install => this.start_install(&node, tool, cx),
-                    Kind::SignIn => this.start_sign_in(&node, tool, cx),
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if this.tools.runs.running(&machine) {
+                        return;
+                    }
+                    match kind {
+                        Kind::Install => this.start_install(&node, tool, cx),
+                        Kind::SignIn => this.start_sign_in(&node, tool, cx),
+                        Kind::Check => this.start_check(&node, tool, cx),
+                    }
                 })),
             );
         }
@@ -257,9 +296,7 @@ impl ClusterSheetView {
     }
 
     pub(super) fn login_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
-        let sheet = self.tools.sheet.as_ref()?;
-        let machine = sheet.machine.clone();
-        let tool = sheet.tool;
+        let (machine, tool) = self.tools.runs.sheet()?;
         let mut inner = div().flex().flex_col().gap(px(SPACE[1])).child(label(
             &t::cluster::login_title(tool.title(), &machine),
             TypeRole::Heading,
@@ -272,7 +309,10 @@ impl ClusterSheetView {
             .justify_end()
             .gap(px(SPACE[1]));
         if can_sign_in(tool) {
-            let session = self.tools.runs.session(&machine)?;
+            let Some(session) = self.tools.runs.session(&machine) else {
+                self.tools.runs.clear_sheet_if(&machine, tool);
+                return None;
+            };
             match &session.prompt {
                 None => {
                     inner = inner.child(
@@ -311,6 +351,12 @@ impl ClusterSheetView {
                         ))
                         .child(mono(prompt.code(), a))
                         .child(label(
+                            &t::cluster::login_replaces(&machine),
+                            TypeRole::Body,
+                            Ink::Needs,
+                            a,
+                        ))
+                        .child(label(
                             &t::cluster::login_steps(&machine),
                             TypeRole::Body,
                             Ink::TextMuted,
@@ -340,8 +386,10 @@ impl ClusterSheetView {
                     a,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.tools.runs.cancel(&to);
-                    this.tools.sheet = None;
+                    this.tools
+                        .runs
+                        .cancel(&to, &t::cluster::tool_sign_in_cancelled(tool.title(), &to));
+                    this.tools.seen = None;
                     cx.notify();
                 })),
             );
@@ -379,7 +427,7 @@ impl ClusterSheetView {
                         a,
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.tools.sheet = None;
+                        this.tools.runs.clear_sheet();
                         cx.notify();
                     })),
                 )
@@ -391,7 +439,7 @@ impl ClusterSheetView {
                         PartState::Rest,
                         a,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.check_login(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.check_from_sheet(cx))),
                 );
         }
         Some(

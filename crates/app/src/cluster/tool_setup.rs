@@ -7,12 +7,14 @@ use notchling_engine::machines::engine_plan::{AdminAnswer, PlanKind};
 use notchling_engine::machines::registry::Machine;
 use notchling_engine::machines::step::FixOutcome;
 use notchling_engine::machines::tool_installs::ToolInstall;
+use notchling_engine::machines::tool_login::LoginCheck;
 use notchling_engine::versions::worker_install::{install_plan, INSTALLABLE};
 use notchling_engine::versions::{Tool, ToolState, Version, WorkerTools};
 use notchling_locale as t;
 
+use super::feed::ClusterFeed;
 use super::model::{ClusterModel, Login, NodeRow};
-use super::tool_runs::ToolRuns;
+use super::tool_runs::{Installed, ToolRuns};
 use super::tool_updates::State;
 use super::updates::machine_of;
 use crate::machines::versions_feed::MacSide;
@@ -26,6 +28,7 @@ const CHECKED: [Tool; 3] = [Tool::Claude, Tool::Codex, Tool::Agy];
 pub enum Kind {
     Install,
     SignIn,
+    Check,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,6 +47,7 @@ impl Setup {
         match self.kind {
             Kind::Install => t::cluster::tool_install_button(self.tool.title(), &self.machine),
             Kind::SignIn => t::cluster::tool_sign_in_button(&self.machine),
+            Kind::Check => t::cluster::tool_check_button(&self.machine),
         }
     }
 
@@ -70,6 +74,7 @@ pub trait Corrections {
     fn mark_absent(&mut self, tool: Tool);
     fn mark_present(&mut self, tool: Tool, version: Option<&Version>);
     fn mark_signed_in(&mut self, tool: Tool);
+    fn mark_signed_out(&mut self, tool: Tool);
     fn shows_installed(&self, tool: Tool) -> bool;
     fn login_of(&self, tool: Tool) -> Option<Login>;
 }
@@ -115,12 +120,29 @@ impl Corrections for NodeRow {
                 *login = Login::Unknown;
             }
         }
+        let gone: Vec<String> = self
+            .drifts
+            .iter()
+            .filter(|d| d.tool == tool)
+            .map(|d| d.text.clone())
+            .collect();
+        self.drifts.retain(|d| d.tool != tool);
+        self.warnings
+            .retain(|w| !gone.iter().any(|g| w.contains(g)));
     }
 
     fn mark_signed_in(&mut self, tool: Tool) {
         for (name, login) in &mut self.logins {
             if name == tool.title() && *login != Login::NotInstalled {
                 *login = Login::SignedIn;
+            }
+        }
+    }
+
+    fn mark_signed_out(&mut self, tool: Tool) {
+        for (name, login) in &mut self.logins {
+            if name == tool.title() && *login != Login::NotInstalled {
+                *login = Login::SignedOut;
             }
         }
     }
@@ -140,17 +162,26 @@ impl Corrections for NodeRow {
     }
 }
 
-fn known_absent(known: Option<&WorkerTools>, tool: Tool, now_ms: i64) -> bool {
+fn known_absent(known: Option<&WorkerTools>, tool: Tool, now_ms: i64, reported: i64) -> bool {
     known.is_some_and(|k| {
         now_ms - k.at_ms <= FRESH_MS
             && k.at_ms > 0
+            && k.at_ms >= reported
             && matches!(k.tools.get(&tool), Some(ToolState::NotInstalled))
     })
 }
 
+pub type LoginMark = Option<(i64, bool)>;
+
 pub struct Marks<'a> {
-    pub signed: &'a dyn Fn(&str, Tool) -> bool,
-    pub installed: &'a dyn Fn(&str, Tool) -> Option<Option<Version>>,
+    pub login: &'a dyn Fn(&str, Tool) -> LoginMark,
+    pub installed: &'a dyn Fn(&str, Tool) -> Option<Installed>,
+    pub reported: &'a dyn Fn(&str) -> Option<i64>,
+}
+
+fn standing(mark: Option<(i64, bool)>, now_ms: i64, reported: i64) -> Option<bool> {
+    mark.filter(|(at, _)| now_ms - at <= FRESH_MS && *at >= reported)
+        .map(|(_, signed)| signed)
 }
 
 pub fn correct(
@@ -170,19 +201,29 @@ pub fn correct(
             return row;
         };
         let known = tools_of(&machine.name);
+        let reported = (marks.reported)(&row.id).unwrap_or(0);
         for tool in CHECKED {
-            if row.shows_installed(tool) && known_absent(known.as_ref(), tool, now_ms) {
+            if row.shows_installed(tool) && known_absent(known.as_ref(), tool, now_ms, reported) {
                 row.mark_absent(tool);
             }
         }
         for tool in CHECKED {
-            if !row.shows_installed(tool) && row.versions.is_some() {
-                if let Some(version) = (marks.installed)(&machine.name, tool) {
+            if row.versions.is_some() {
+                let fresh = (marks.installed)(&machine.name, tool)
+                    .filter(|(at, _)| now_ms - at <= FRESH_MS && *at >= reported);
+                if let Some((_, version)) = fresh {
                     row.mark_present(tool, version.as_ref());
                 }
             }
-            if (marks.signed)(&machine.name, tool) && row.login_of(tool) != Some(Login::SignedIn) {
-                row.mark_signed_in(tool);
+            let mark = standing((marks.login)(&machine.name, tool), now_ms, reported);
+            match mark {
+                Some(true) if row.login_of(tool) != Some(Login::SignedIn) => {
+                    row.mark_signed_in(tool)
+                }
+                Some(false) if row.login_of(tool) != Some(Login::SignedOut) => {
+                    row.mark_signed_out(tool)
+                }
+                _ => {}
             }
         }
         row
@@ -216,11 +257,14 @@ pub fn setups(
                     model,
                     switches,
                 ));
-            } else if matches!(
-                row.login_of(tool),
-                Some(Login::SignedOut) | Some(Login::Unknown)
-            ) {
-                out.push(sign_in_offer(row, &machine.name, tool, switches));
+            } else {
+                match row.login_of(tool) {
+                    Some(Login::SignedOut) => {
+                        out.push(sign_in_offer(row, &machine.name, tool, model, switches))
+                    }
+                    Some(Login::Unknown) => out.push(check_offer(row, &machine.name, tool)),
+                    _ => {}
+                }
             }
         }
     }
@@ -261,10 +305,22 @@ fn install_offer(
     }
 }
 
-fn sign_in_offer(row: &NodeRow, machine: &str, tool: Tool, switches: &Switches) -> Setup {
-    let state = match switches.message(Switch::Accounts) {
-        Some(why) => State::Off(why.to_owned()),
-        None => State::Ready,
+fn sign_in_offer(
+    row: &NodeRow,
+    machine: &str,
+    tool: Tool,
+    model: &ClusterModel,
+    switches: &Switches,
+) -> Setup {
+    let state = if let Some(why) = switches.message(Switch::Accounts) {
+        State::Off(why.to_owned())
+    } else if model.running_jobs(&row.id) > 0 {
+        State::Busy(t::cluster::tool_sign_in_busy(
+            model.running_jobs(&row.id),
+            machine,
+        ))
+    } else {
+        State::Ready
     };
     Setup {
         node: row.id.clone(),
@@ -277,8 +333,21 @@ fn sign_in_offer(row: &NodeRow, machine: &str, tool: Tool, switches: &Switches) 
     }
 }
 
+fn check_offer(row: &NodeRow, machine: &str, tool: Tool) -> Setup {
+    Setup {
+        node: row.id.clone(),
+        machine: machine.to_owned(),
+        tool,
+        kind: Kind::Check,
+        mac: None,
+        note: None,
+        state: State::Ready,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstallGo {
+    pub node: String,
     pub machine: String,
     pub tool: Tool,
     pub mac: Option<Version>,
@@ -287,6 +356,12 @@ pub struct InstallGo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignInGo {
     pub node: String,
+    pub machine: String,
+    pub tool: Tool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckGo {
     pub machine: String,
     pub tool: Tool,
 }
@@ -313,6 +388,7 @@ pub fn start_install(
         return Err(t::cluster::tool_install_busy(jobs, &offer.machine));
     }
     Ok(InstallGo {
+        node: node.to_owned(),
         machine: offer.machine.clone(),
         tool,
         mac: offer.mac.clone(),
@@ -323,6 +399,7 @@ pub fn start_sign_in(
     list: &[Setup],
     node: &str,
     tool: Tool,
+    model: &ClusterModel,
     switches: &Switches,
 ) -> Result<SignInGo, String> {
     if let Some(why) = switches.message(Switch::Accounts) {
@@ -332,13 +409,41 @@ pub fn start_sign_in(
         return Err(t::cluster::tool_sign_in_nothing().to_owned());
     };
     match &offer.state {
-        State::HowTo(text) | State::Busy(text) | State::Off(text) => Err(text.clone()),
-        State::Ready => Ok(SignInGo {
-            node: node.to_owned(),
-            machine: offer.machine.clone(),
-            tool,
-        }),
+        State::HowTo(text) | State::Busy(text) | State::Off(text) => return Err(text.clone()),
+        State::Ready => {}
     }
+    let jobs = model.running_jobs(node);
+    if jobs > 0 {
+        return Err(t::cluster::tool_sign_in_busy(jobs, &offer.machine));
+    }
+    Ok(SignInGo {
+        node: node.to_owned(),
+        machine: offer.machine.clone(),
+        tool,
+    })
+}
+
+pub fn start_check(list: &[Setup], node: &str, tool: Tool) -> Result<CheckGo, String> {
+    let Some(offer) = find(list, node, tool, Kind::Check) else {
+        return Err(t::cluster::tool_sign_in_nothing().to_owned());
+    };
+    Ok(CheckGo {
+        machine: offer.machine.clone(),
+        tool,
+    })
+}
+
+pub fn idle_text(model: &ClusterModel, node: &str, machine: &str, kind: Kind) -> Option<String> {
+    let jobs = model.running_jobs(node);
+    (jobs > 0).then(|| match kind {
+        Kind::Install => t::cluster::tool_install_busy(jobs, machine),
+        Kind::SignIn | Kind::Check => t::cluster::tool_sign_in_busy(jobs, machine),
+    })
+}
+
+pub fn idle_now(feed: &ClusterFeed, node: &str, machine: &str, kind: Kind) -> Option<FixOutcome> {
+    feed.refresh();
+    idle_text(&feed.snapshot(), node, machine, kind).map(FixOutcome::fail)
 }
 
 pub fn run_install(engine: &SetupEngine, runs: &ToolRuns, go: &InstallGo) -> FixOutcome {
@@ -350,6 +455,7 @@ pub fn run_install(engine: &SetupEngine, runs: &ToolRuns, go: &InstallGo) -> Fix
     let kind = PlanKind::InstallTool(ToolInstall {
         tool: go.tool,
         mac: go.mac.clone(),
+        node: go.node.clone(),
     });
     let shown = match engine.plan(machine, kind) {
         Ok(shown) => shown,
@@ -377,10 +483,10 @@ pub fn run_sign_in(
         machine,
         &t::cluster::tool_signing_in(go.tool.title(), machine),
     );
-    engine.sign_in_tool(machine, go.tool, prompt, cancel)
+    engine.sign_in_tool(machine, go.tool, &go.node, prompt, cancel)
 }
 
-pub fn run_check(engine: &SetupEngine, runs: &ToolRuns, machine: &str, tool: Tool) -> FixOutcome {
+pub fn run_check(engine: &SetupEngine, runs: &ToolRuns, machine: &str, tool: Tool) -> LoginCheck {
     runs.say(
         machine,
         &t::cluster::tool_checking_login(tool.title(), machine),

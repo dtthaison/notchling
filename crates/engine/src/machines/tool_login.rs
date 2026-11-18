@@ -1,9 +1,12 @@
 use super::device_login::{DeviceFilter, PromptSink};
 use super::engine::SetupEngine;
+use super::masks::Masks;
+use super::registry::Machine;
 use super::runner::{Call, Channel, OutputSink, CANCELLED, TIMED_OUT};
 use super::shell;
-use super::step::{CheckState, FixContext, FixOutcome, StepId};
-use super::steps_node_logins::{agy_check, codex_check, codex_script, AGY_SCRIPT, WAIT_TENTHS};
+use super::step::{CheckResult, CheckState, FixContext, FixOutcome, StepId};
+use super::steps_node_logins::{agy_check, agy_script, codex_check, codex_script, WAIT_TENTHS};
+use super::tool_guard::guard;
 use crate::cluster::logins::{how_to, CODEX_COMMAND};
 use crate::versions::Tool;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +37,12 @@ pub fn how_to_text(tool: Tool, machine: &str) -> String {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoginCheck {
+    pub outcome: FixOutcome,
+    pub signed: Option<bool>,
+}
+
 fn tail_of(text: &str) -> String {
     let lines: Vec<&str> = text
         .lines()
@@ -44,11 +53,20 @@ fn tail_of(text: &str) -> String {
     lines.into_iter().rev().collect::<Vec<_>>().join("\n")
 }
 
+fn step_of(tool: Tool) -> Option<StepId> {
+    match tool {
+        Tool::Codex => Some(StepId::NODE_CODEX_LOGIN),
+        Tool::Agy => Some(StepId::NODE_AGY_LOGIN),
+        _ => None,
+    }
+}
+
 impl SetupEngine {
     pub fn sign_in_tool(
         &self,
         machine: &str,
         tool: Tool,
+        node: &str,
         prompt: PromptSink,
         cancel: Arc<AtomicBool>,
     ) -> FixOutcome {
@@ -60,64 +78,93 @@ impl SetupEngine {
         };
         let title = format!("Sign in {} on {machine}", tool.title());
         let outcome = self.perform(StepId::tool_login(tool), &title, &m, None, |ctx| {
-            self.login_one(ctx, tool, prompt, &cancel)
+            self.login_one(ctx, tool, node, prompt, &cancel)
         });
-        self.refresh(Some(&[machine.to_string()]), false);
+        self.changed();
         outcome
     }
 
-    pub fn check_login(&self, machine: &str, tool: Tool) -> FixOutcome {
+    pub fn check_login(&self, machine: &str, tool: Tool) -> LoginCheck {
         let Some(m) = self.machine(machine) else {
-            return FixOutcome::fail(format!("no machine named {machine}"));
+            return LoginCheck {
+                outcome: FixOutcome::fail(format!("no machine named {machine}")),
+                signed: None,
+            };
         };
-        let outcome = self.recheck(&m, tool, &self.masks(&m, None));
-        self.refresh(Some(&[machine.to_string()]), false);
-        outcome
+        self.recheck(&m, tool, &self.masks(&m, None))
     }
 
-    fn recheck(
-        &self,
-        m: &super::registry::Machine,
-        tool: Tool,
-        masks: &super::masks::Masks,
-    ) -> FixOutcome {
+    fn recheck(&self, m: &Machine, tool: Tool, masks: &Masks) -> LoginCheck {
         let name = &m.name;
         let mac = !m.is_linux();
         let script = match tool {
             Tool::Codex => codex_script(WAIT_TENTHS),
-            Tool::Agy => AGY_SCRIPT.to_string(),
-            _ => return FixOutcome::fail(format!("{} has no sign-in to check", tool.title())),
+            Tool::Agy => agy_script(mac),
+            _ => {
+                return LoginCheck {
+                    outcome: FixOutcome::fail(format!("{} has no sign-in to check", tool.title())),
+                    signed: None,
+                }
+            }
         };
         let call = Call::secs(shell::ssh_script(m, &script), CHECK_SECS);
         let result = self.deps.runner.run(&call);
-        let check = match tool {
+        let check: CheckResult = match tool {
             Tool::Codex => codex_check(&result.out),
             _ => agy_check(&result.out, mac),
         };
         let text = masks.apply(check.state.text());
-        match check.state {
-            CheckState::Pass(_) => {
-                FixOutcome::ok(format!("{} is signed in on {name}", tool.title()))
-            }
-            CheckState::Fail(_) => {
-                FixOutcome::fail(format!("{} isn't signed in on {name}", tool.title()))
-            }
-            CheckState::CantTell(_) => FixOutcome::fail(format!(
-                "Couldn't tell whether {} is signed in on {name}: {text}",
-                tool.title()
-            )),
+        let (outcome, signed) = match &check.state {
+            CheckState::Pass(_) => (
+                FixOutcome::ok(format!("{} is signed in on {name}", tool.title())),
+                Some(true),
+            ),
+            CheckState::Fail(_) => (
+                FixOutcome::fail(format!("{} isn't signed in on {name}", tool.title())),
+                Some(false),
+            ),
+            CheckState::CantTell(_) => (
+                FixOutcome::fail(format!(
+                    "Couldn't tell whether {} is signed in on {name}: {text}",
+                    tool.title()
+                )),
+                None,
+            ),
+        };
+        if let Some(id) = step_of(tool) {
+            self.show(name, id, check);
         }
+        LoginCheck { outcome, signed }
     }
 
     fn login_one(
         &self,
         ctx: &FixContext,
         tool: Tool,
+        node: &str,
         prompt: PromptSink,
         cancel: &Arc<AtomicBool>,
     ) -> FixOutcome {
         let m = &ctx.step.machine;
         let name = &m.name;
+        if let Err(why) = guard(ctx, tool, node) {
+            return FixOutcome::fail(why);
+        }
+        match self.recheck(m, tool, &ctx.masks).signed {
+            Some(false) => {}
+            Some(true) => {
+                return FixOutcome::fail(format!(
+                    "{} is already signed in on {name}. Nothing was changed.",
+                    tool.title()
+                ))
+            }
+            None => {
+                return FixOutcome::fail(format!(
+                    "Couldn't tell whether {} is signed in on {name}. Nothing was changed.",
+                    tool.title()
+                ))
+            }
+        }
         let filter = Arc::new(DeviceFilter::new(ctx.log.clone(), prompt));
         let feed = filter.clone();
         let sink: Arc<OutputSink> = Arc::new(move |c: Channel, t: &str| feed.feed(c, t));
@@ -132,33 +179,43 @@ impl SetupEngine {
             .cancellable(cancel.clone());
         let result = ctx.step.runner.run(&call);
         filter.finish();
-        if cancel.load(Ordering::SeqCst) || result.code == CANCELLED {
+        let code = result.code;
+        let said = if result.err.trim().is_empty() {
+            result.out.clone()
+        } else {
+            result.err.clone()
+        };
+        drop(result);
+        let hidden = filter.triggered();
+        let shown = if hidden {
+            String::new()
+        } else {
+            ctx.mask(&tail_of(&filter.scrub(&said)))
+        };
+        drop(said);
+        if cancel.load(Ordering::SeqCst) || code == CANCELLED {
             return FixOutcome::fail(format!(
                 "Signing in {} on {name} was cancelled",
                 tool.title()
             ));
         }
-        if result.code == TIMED_OUT || result.code == WATCHDOG_KILLED {
+        if code == TIMED_OUT || code == WATCHDOG_KILLED {
             return FixOutcome::fail(format!(
                 "Nobody approved the sign-in for {} on {name} within {} minutes",
                 tool.title(),
                 LOGIN_SECS / 60
             ));
         }
-        if result.code != 0 {
-            let said = if result.err.trim().is_empty() {
-                &result.out
-            } else {
-                &result.err
-            };
-            let shown = ctx.mask(&tail_of(&filter.scrub(said)));
+        if code != 0 {
             let mut line = format!("{} didn't sign in on {name}", tool.title());
-            if !shown.is_empty() {
+            if hidden {
+                line.push_str(&format!(" (exit {code})"));
+            } else if !shown.is_empty() {
                 line.push_str(": ");
                 line.push_str(&shown);
             }
             return FixOutcome::fail(line);
         }
-        self.recheck(m, tool, &ctx.masks)
+        self.recheck(m, tool, &ctx.masks).outcome
     }
 }

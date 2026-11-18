@@ -9,11 +9,21 @@ pub const NOT_FOUND: i32 = 127;
 pub const REFUSED: i32 = 126;
 pub const CANCELLED: i32 = 130;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CommandResult {
     pub code: i32,
     pub out: String,
     pub err: String,
+}
+
+impl fmt::Debug for CommandResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommandResult")
+            .field("code", &self.code)
+            .field("out_bytes", &self.out.len())
+            .field("err_bytes", &self.err.len())
+            .finish()
+    }
 }
 
 impl CommandResult {

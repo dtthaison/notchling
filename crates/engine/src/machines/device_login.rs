@@ -4,12 +4,15 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 pub const HIDDEN_LINK: &str = "[sign-in link]";
-pub const HIDDEN_CODE: &str = "[one-time code]";
+pub const WITHHELD: &str = "[sign-in output withheld]";
 
 const LINK_MAX: usize = 300;
 const LONG_LINE: usize = 4096;
-const CODE_PART: std::ops::RangeInclusive<usize> = 3..=8;
+const CODE_LEN: std::ops::RangeInclusive<usize> = 4..=40;
 const HOSTS: [&str; 2] = ["openai.com", "chatgpt.com"];
+const WRAP: &[char] = &[
+    '.', ',', ';', ':', ')', '(', '"', '\'', '`', '[', ']', '<', '>', '{', '}', '*', '_',
+];
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct DevicePrompt {
@@ -61,11 +64,30 @@ pub fn strip_ansi(text: &str) -> String {
             }
             Some(']') => {
                 chars.next();
-                for next in chars.by_ref() {
+                let mut body = String::new();
+                while let Some(next) = chars.next() {
                     if next == '\u{7}' {
                         break;
                     }
+                    if next == '\u{1b}' {
+                        if chars.peek() == Some(&'\\') {
+                            chars.next();
+                        }
+                        break;
+                    }
+                    body.push(next);
                 }
+                if let Some(uri) = body.strip_prefix("8;").and_then(|b| b.split_once(';')) {
+                    if !uri.1.is_empty() {
+                        out.push(' ');
+                        out.push_str(uri.1);
+                        out.push(' ');
+                    }
+                }
+            }
+            Some('(' | ')' | '*' | '+') => {
+                chars.next();
+                chars.next();
             }
             Some(_) => {
                 chars.next();
@@ -96,40 +118,91 @@ pub fn is_device_link(url: &str) -> bool {
 }
 
 pub fn is_device_code(token: &str) -> bool {
-    let Some((left, right)) = token.split_once('-') else {
-        return false;
-    };
-    let part = |s: &str| {
-        CODE_PART.contains(&s.len())
-            && s.bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-    };
-    part(left) && part(right)
+    CODE_LEN.contains(&token.len())
+        && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !token.starts_with('-')
+        && !token.ends_with('-')
+        && (token.contains('-')
+            || token.chars().any(|c| c.is_ascii_digit())
+            || token.chars().all(|c| c.is_ascii_uppercase()))
 }
 
 fn trimmed(token: &str) -> &str {
-    token.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | ')' | '(' | '"' | '\''))
+    token.trim_matches(WRAP)
 }
 
-#[derive(Default)]
+fn single_code(text: &str) -> Option<String> {
+    let mut words = text.split_whitespace();
+    let word = words.next()?;
+    if words.next().is_some() {
+        return None;
+    }
+    let word = word.rsplit(['=', ':']).next().unwrap_or(word);
+    let word = trimmed(word);
+    is_device_code(word).then(|| word.to_owned())
+}
+
+fn after_label(text: &str) -> Option<String> {
+    let at = text.rfind([':', '='])?;
+    single_code(&text[at + 1..])
+}
+
+fn is_marker(token: &str) -> bool {
+    matches!(
+        trimmed(token).to_ascii_lowercase().as_str(),
+        "code" | "codes" | "one-time" | "device-auth"
+    )
+}
+
+#[derive(Clone, Default)]
 pub struct Scanner {
     url: Option<String>,
     code: Option<String>,
+    expect_code: bool,
+    triggered: bool,
 }
 
 impl Scanner {
+    pub fn triggered(&self) -> bool {
+        self.triggered
+    }
+
     pub fn line(&mut self, raw: &str) -> Option<DevicePrompt> {
         let line = strip_ansi(raw);
-        if line.len() > 200 {
-            return None;
+        let text = line.trim();
+        if text.is_empty() {
+            return self.prompt();
         }
-        for token in line.split_whitespace().map(trimmed) {
-            if self.url.is_none() && is_device_link(token) {
-                self.url = Some(token.to_owned());
-            } else if self.url.is_some() && self.code.is_none() && is_device_code(token) {
-                self.code = Some(token.to_owned());
+        let has_link = text.contains("://");
+        let marker = text.split_whitespace().any(is_marker);
+        if has_link || marker {
+            self.triggered = true;
+        }
+        if has_link {
+            for token in text.split_whitespace().map(trimmed) {
+                if self.url.is_none() && is_device_link(token) {
+                    self.url = Some(token.to_owned());
+                }
             }
         }
+        if self.expect_code && !has_link && !marker {
+            if let Some(code) = single_code(text) {
+                self.code = Some(code);
+            }
+            self.expect_code = false;
+        } else if marker && !has_link {
+            self.expect_code = true;
+            if let Some(code) = after_label(text) {
+                self.code = Some(code);
+                self.expect_code = false;
+            }
+        } else {
+            self.expect_code = false;
+        }
+        self.prompt()
+    }
+
+    fn prompt(&self) -> Option<DevicePrompt> {
         match (&self.url, &self.code) {
             (Some(url), Some(code)) => DevicePrompt::new(url, code),
             _ => None,
@@ -137,6 +210,9 @@ impl Scanner {
     }
 
     pub fn scrub(&self, text: &str) -> String {
+        if self.triggered {
+            return WITHHELD.to_owned();
+        }
         let plain = strip_ansi(text);
         let mut out = String::with_capacity(plain.len());
         let mut token = String::new();
@@ -144,7 +220,11 @@ impl Scanner {
             if token.is_empty() {
                 return;
             }
-            out.push_str(&self.hide(token));
+            if token.contains("://") {
+                out.push_str(HIDDEN_LINK);
+            } else {
+                out.push_str(token);
+            }
             token.clear();
         };
         for c in plain.chars() {
@@ -158,19 +238,6 @@ impl Scanner {
         flush(&mut token, &mut out);
         out
     }
-
-    fn hide(&self, token: &str) -> String {
-        let core = trimmed(token);
-        let known_url = self.url.as_deref().is_some_and(|u| token.contains(u));
-        let known_code = self.code.as_deref().is_some_and(|c| token.contains(c));
-        if known_url || core.contains("://") {
-            return HIDDEN_LINK.to_owned();
-        }
-        if known_code || is_device_code(core) {
-            return HIDDEN_CODE.to_owned();
-        }
-        token.to_owned()
-    }
 }
 
 pub struct DeviceFilter {
@@ -178,7 +245,8 @@ pub struct DeviceFilter {
     prompt: PromptSink,
     scanner: Mutex<Scanner>,
     partial: Mutex<BTreeMap<Channel, String>>,
-    offered: Mutex<bool>,
+    offered: Mutex<Option<DevicePrompt>>,
+    withheld: Mutex<bool>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -192,56 +260,92 @@ impl DeviceFilter {
             prompt,
             scanner: Mutex::new(Scanner::default()),
             partial: Mutex::new(BTreeMap::new()),
-            offered: Mutex::new(false),
+            offered: Mutex::new(None),
+            withheld: Mutex::new(false),
         }
     }
 
     pub fn feed(&self, channel: Channel, chunk: &str) {
         let mut lines = Vec::new();
+        let rest;
         {
             let mut partial = lock(&self.partial);
             let buf = partial.entry(channel).or_default();
             buf.push_str(chunk);
-            while let Some(at) = buf.find('\n') {
-                lines.push(buf.drain(..=at).collect::<String>());
+            while let Some(at) = buf.find(['\n', '\r']) {
+                let line: String = buf.drain(..=at).collect();
+                if !line.trim().is_empty() {
+                    lines.push(line);
+                }
             }
             if buf.len() > LONG_LINE {
                 buf.clear();
                 lines.push("[output line cut]\n".into());
             }
+            rest = buf.clone();
         }
         for line in lines {
             self.emit(channel, &line);
+        }
+        if !rest.trim().is_empty() {
+            let peeked = lock(&self.scanner).clone().line(&rest);
+            self.offer(peeked);
         }
     }
 
     pub fn finish(&self) {
         let rest = std::mem::take(&mut *lock(&self.partial));
         for (channel, text) in rest {
-            if !text.is_empty() {
+            if !text.trim().is_empty() {
                 self.emit(channel, &format!("{text}\n"));
             }
         }
     }
 
+    pub fn triggered(&self) -> bool {
+        lock(&self.scanner).triggered()
+    }
+
     pub fn scrub(&self, text: &str) -> String {
-        lock(&self.scanner).scrub(text)
+        let scanner = lock(&self.scanner);
+        if scanner.triggered() {
+            String::new()
+        } else {
+            scanner.scrub(text)
+        }
+    }
+
+    fn offer(&self, found: Option<DevicePrompt>) {
+        let Some(found) = found else {
+            return;
+        };
+        let changed = {
+            let mut offered = lock(&self.offered);
+            if offered.as_ref() == Some(&found) {
+                false
+            } else {
+                *offered = Some(found.clone());
+                true
+            }
+        };
+        if changed {
+            (self.prompt)(found);
+        }
     }
 
     fn emit(&self, channel: Channel, line: &str) {
-        let (found, shown) = {
+        let (found, hidden, shown) = {
             let mut scanner = lock(&self.scanner);
             let found = scanner.line(line);
-            (found, scanner.scrub(line))
+            (found, scanner.triggered(), scanner.scrub(line))
         };
-        if let Some(found) = found {
-            let first = {
-                let mut offered = lock(&self.offered);
-                !std::mem::replace(&mut *offered, true)
-            };
+        self.offer(found);
+        if hidden {
+            let first = !std::mem::replace(&mut *lock(&self.withheld), true);
             if first {
-                (self.prompt)(found);
+                (self.sink)(channel, &format!("{WITHHELD}\n"));
             }
+            return;
         }
         (self.sink)(channel, &shown);
     }

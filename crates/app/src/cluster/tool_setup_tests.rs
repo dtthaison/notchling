@@ -11,8 +11,8 @@ use super::add_rig_tests::Rig;
 use super::model::{ClusterModel, Login};
 use super::tool_runs::ToolRuns;
 use super::tool_setup::{
-    correct, find, run_install, run_sign_in, setups, start_install, start_sign_in, Corrections,
-    InstallGo, Kind, Marks, SignInGo, FRESH_MS,
+    correct, find, idle_text, run_check, run_install, run_sign_in, setups, start_check,
+    start_install, start_sign_in, Corrections, InstallGo, Kind, Marks, SignInGo, FRESH_MS,
 };
 use super::tool_updates::{offers, State};
 use crate::machines::versions_feed::{MacSide, MacTool};
@@ -94,18 +94,23 @@ fn read(entries: Vec<(Tool, ToolState)>, at_ms: i64) -> WorkerTools {
     }
 }
 
-fn never(_: &str, _: Tool) -> bool {
-    false
+fn never(_: &str, _: Tool) -> Option<(i64, bool)> {
+    None
 }
 
-fn nothing(_: &str, _: Tool) -> Option<Option<Version>> {
+fn nothing(_: &str, _: Tool) -> Option<(i64, Option<Version>)> {
+    None
+}
+
+fn unreported(_: &str) -> Option<i64> {
     None
 }
 
 fn fixed(model: &ClusterModel, tools: &dyn Fn(&str) -> Option<WorkerTools>) -> ClusterModel {
     let marks = Marks {
-        signed: &never,
+        login: &never,
         installed: &nothing,
+        reported: &unreported,
     };
     correct(model, &[machine()], &none, tools, &marks, NOW)
 }
@@ -252,6 +257,7 @@ fn start_install_rechecks_the_switch_and_gives_the_target() {
     assert_eq!(
         go,
         InstallGo {
+            node: M1.into(),
             machine: "m1".into(),
             tool: Tool::Codex,
             mac: Some(v("0.166.0"))
@@ -275,14 +281,18 @@ fn signed(logins: Value) -> ClusterModel {
 fn an_installed_tool_that_is_not_signed_in_offers_a_sign_in() {
     let side = mac(Some("0.166.0"), Some("1.5.9"));
     let sw = Switches::all_on();
-    let out = offered(&signed(json!({"codex": false})), Some(&side), &sw);
+    let both = json!({"codex": false, "antigravity": false});
+    let out = offered(&signed(both), Some(&side), &sw);
     let codex = find(&out, M1, Tool::Codex, Kind::SignIn).unwrap();
     assert_eq!(codex.button(), "Sign In on m1");
     assert!(codex.ready());
     let agy = find(&out, M1, Tool::Agy, Kind::SignIn).unwrap();
     assert_eq!(agy.button(), "Sign In on m1");
     let unknown = offered(&signed(json!({})), Some(&side), &sw);
-    assert!(find(&unknown, M1, Tool::Codex, Kind::SignIn).is_some());
+    assert!(find(&unknown, M1, Tool::Codex, Kind::SignIn).is_none());
+    let check = find(&unknown, M1, Tool::Codex, Kind::Check).unwrap();
+    assert_eq!(check.button(), "Check Sign-In on m1");
+    assert!(check.ready());
     let done = offered(
         &signed(json!({"codex": true, "antigravity": true})),
         Some(&side),
@@ -297,7 +307,7 @@ fn a_missing_tool_has_no_sign_in_and_an_installed_one_no_install() {
     let list = offered(&missing_both(), Some(&side), &Switches::all_on());
     assert!(list.iter().all(|s| s.kind == Kind::Install));
     let full = offered(&signed(json!({})), Some(&side), &Switches::all_on());
-    assert!(full.iter().all(|s| s.kind == Kind::SignIn));
+    assert!(full.iter().all(|s| s.kind == Kind::Check));
 }
 
 #[test]
@@ -307,10 +317,10 @@ fn the_accounts_switch_gates_the_sign_in() {
     let off = offered(&model, Some(&side), &Switches::all_off());
     let codex = find(&off, M1, Tool::Codex, Kind::SignIn).unwrap();
     assert!(matches!(&codex.state, State::Off(text) if text.contains("accounts are off")));
-    let why = start_sign_in(&off, M1, Tool::Codex, &Switches::all_off()).unwrap_err();
+    let why = start_sign_in(&off, M1, Tool::Codex, &model, &Switches::all_off()).unwrap_err();
     assert!(why.contains("accounts are off"), "{why}");
     let list = offered(&model, Some(&side), &Switches::all_on());
-    let go = start_sign_in(&list, M1, Tool::Codex, &Switches::all_on()).unwrap();
+    let go = start_sign_in(&list, M1, Tool::Codex, &model, &Switches::all_on()).unwrap();
     assert_eq!(
         go,
         SignInGo {
@@ -319,17 +329,19 @@ fn the_accounts_switch_gates_the_sign_in() {
             tool: Tool::Codex
         }
     );
-    assert!(start_sign_in(&list, M1, Tool::Claude, &Switches::all_on()).is_err());
+    assert!(start_sign_in(&list, M1, Tool::Claude, &model, &Switches::all_on()).is_err());
 }
 
 #[test]
 fn a_finished_install_and_a_finished_sign_in_show_on_the_card_at_once() {
     let side = mac(Some("0.166.0"), None);
     let sw = Switches::all_on();
-    let installed = |_: &str, tool: Tool| (tool == Tool::Codex).then(|| Some(v("0.166.0")));
+    let installed =
+        |_: &str, tool: Tool| (tool == Tool::Codex).then(|| (NOW - 10, Some(v("0.166.0"))));
     let marks = Marks {
-        signed: &never,
+        login: &never,
         installed: &installed,
+        reported: &unreported,
     };
     let model = correct(&missing_both(), &[machine()], &none, &unread, &marks, NOW);
     let row = row_of(&model);
@@ -337,16 +349,18 @@ fn a_finished_install_and_a_finished_sign_in_show_on_the_card_at_once() {
     assert_eq!(row.login_of(Tool::Codex), Some(Login::Unknown));
     let list = offered(&model, Some(&side), &sw);
     assert!(find(&list, M1, Tool::Codex, Kind::Install).is_none());
-    assert!(find(&list, M1, Tool::Codex, Kind::SignIn).is_some());
-    let yes = |_: &str, tool: Tool| tool == Tool::Codex;
+    assert!(find(&list, M1, Tool::Codex, Kind::Check).is_some());
+    let yes = |_: &str, tool: Tool| (tool == Tool::Codex).then_some((NOW - 5, true));
     let marks = Marks {
-        signed: &yes,
+        login: &yes,
         installed: &installed,
+        reported: &unreported,
     };
     let model = correct(&missing_both(), &[machine()], &none, &unread, &marks, NOW);
     assert_eq!(row_of(&model).login_of(Tool::Codex), Some(Login::SignedIn));
     let list = offered(&model, Some(&side), &sw);
     assert!(find(&list, M1, Tool::Codex, Kind::SignIn).is_none());
+    assert!(find(&list, M1, Tool::Codex, Kind::Check).is_none());
 }
 
 #[test]
@@ -372,6 +386,17 @@ struct Worker {
 
 fn rig(worker: &Arc<Worker>, installs: bool) -> Rig {
     let rig = Rig::new(vec![machine()]);
+    rig.runner.on_call(
+        |argv| {
+            argv.last()
+                .is_some_and(|s| s.contains("cluster status --json"))
+        },
+        |_| CommandResult::ok(&format!("{{\"me\":\"{M1}\"}}\n")),
+    );
+    rig.runner.on_call(
+        |argv| argv.last().is_some_and(|s| s.contains("busy=")),
+        |_| CommandResult::ok("busy=0\n"),
+    );
     let w = worker.clone();
     rig.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains(PROBE)),
@@ -412,6 +437,7 @@ fn worker() -> Arc<Worker> {
 
 fn go() -> InstallGo {
     InstallGo {
+        node: M1.into(),
         machine: "m1".into(),
         tool: Tool::Codex,
         mac: Some(v("0.166.0")),
@@ -469,20 +495,204 @@ fn a_sign_in_session_holds_the_prompt_only_until_it_closes() {
     let cancel = runs.open_session("m1", Tool::Codex).unwrap();
     assert!(runs.open_session("m1", Tool::Codex).is_none());
     assert!(runs.session("m1").unwrap().prompt.is_none());
-    let prompt = notchling_engine::machines::device_login::DevicePrompt::new(
+    runs.offer("m1", &cancel, prompt());
+    let session = runs.session("m1").unwrap();
+    assert_eq!(session.prompt.as_ref().unwrap().code(), "TEST-00000");
+    runs.close_session("m1", &cancel);
+    assert!(runs.session("m1").is_none());
+    runs.offer("m1", &cancel, session.prompt.unwrap());
+    assert!(runs.session("m1").is_none());
+}
+
+fn prompt() -> notchling_engine::machines::device_login::DevicePrompt {
+    notchling_engine::machines::device_login::DevicePrompt::new(
         "https://auth.openai.com/codex/device",
         "TEST-00000",
     )
-    .unwrap();
-    runs.offer("m1", prompt);
-    let session = runs.session("m1").unwrap();
-    assert_eq!(session.prompt.as_ref().unwrap().code(), "TEST-00000");
-    runs.cancel("m1");
+    .unwrap()
+}
+
+#[test]
+fn cancel_clears_the_prompt_the_sheet_and_the_running_state_at_once() {
+    let runs = ToolRuns::default();
+    let cancel = runs.open_session("m1", Tool::Codex).unwrap();
+    assert!(runs.begin("m1", "signing in"));
+    runs.set_sheet("m1", Tool::Codex);
+    runs.offer("m1", &cancel, prompt());
+    runs.cancel("m1", "cancelled");
     assert!(cancel.load(std::sync::atomic::Ordering::SeqCst));
-    runs.close_session("m1");
     assert!(runs.session("m1").is_none());
-    runs.offer("m1", session.prompt.unwrap());
-    assert!(runs.session("m1").is_none());
+    assert!(runs.sheet().is_none());
+    assert!(!runs.running("m1"));
+    assert_eq!(
+        runs.get("m1"),
+        Some(super::tool_runs::Run::Done {
+            ok: false,
+            text: "cancelled".into()
+        })
+    );
+}
+
+#[test]
+fn an_old_run_cannot_touch_a_newer_session_on_the_same_machine() {
+    let runs = ToolRuns::default();
+    let old = runs.open_session("m1", Tool::Codex).unwrap();
+    runs.cancel("m1", "cancelled");
+    let new = runs.open_session("m1", Tool::Codex).unwrap();
+    runs.offer("m1", &old, prompt());
+    assert!(runs.session("m1").unwrap().prompt.is_none());
+    runs.close_session("m1", &old);
+    assert!(runs.session("m1").is_some());
+    runs.offer("m1", &new, prompt());
+    assert!(runs.session("m1").unwrap().prompt.is_some());
+}
+
+#[test]
+fn the_sheet_lives_with_the_runs_and_a_run_closes_only_its_own() {
+    let runs = Arc::new(ToolRuns::default());
+    runs.set_sheet("m1", Tool::Agy);
+    let again = runs.clone();
+    assert_eq!(again.sheet(), Some(("m1".to_string(), Tool::Agy)));
+    runs.clear_sheet_if("m1", Tool::Codex);
+    runs.clear_sheet_if("m2", Tool::Agy);
+    assert!(runs.sheet().is_some());
+    runs.clear_sheet_if("m1", Tool::Agy);
+    assert!(runs.sheet().is_none());
+}
+
+#[test]
+fn a_sign_in_is_offered_only_for_a_definite_signed_out_and_never_while_a_job_runs() {
+    let side = mac(Some("0.166.0"), None);
+    let sw = Switches::all_on();
+    let out = signed(json!({"codex": false}));
+    let list = offered(&out, Some(&side), &sw);
+    assert!(find(&list, M1, Tool::Codex, Kind::Check).is_none());
+    assert!(find(&list, M1, Tool::Codex, Kind::SignIn).is_some());
+    let jobs = json!([{"id": "j1", "node": M1, "state": "running", "tool": "claude"}]);
+    let busy = model(
+        json!({"claude": "2.1.327", "codex": "0.166.0"}),
+        json!({"codex": false}),
+        jobs,
+    );
+    let list = offered(&busy, Some(&side), &sw);
+    let codex = find(&list, M1, Tool::Codex, Kind::SignIn).unwrap();
+    assert!(matches!(&codex.state, State::Busy(text) if text.contains("running a job")));
+    let why = start_sign_in(&list, M1, Tool::Codex, &busy, &sw).unwrap_err();
+    assert!(why.contains("running a job"), "{why}");
+    let text = idle_text(&busy, M1, "m1", Kind::SignIn).unwrap();
+    assert!(text.contains("running a job"), "{text}");
+    assert!(idle_text(&out, M1, "m1", Kind::SignIn).is_none());
+}
+
+#[test]
+fn an_unknown_login_gets_a_check_that_changes_nothing_on_the_machine() {
+    let side = mac(Some("0.166.0"), None);
+    let unknown = signed(json!({}));
+    let list = offered(&unknown, Some(&side), &Switches::all_off());
+    let go = start_check(&list, M1, Tool::Codex).unwrap();
+    assert_eq!(go.machine, "m1");
+    assert!(start_check(&list, M1, Tool::Claude).is_err());
+}
+
+#[test]
+fn a_check_result_sets_the_card_both_ways() {
+    let side = mac(Some("0.166.0"), None);
+    let sw = Switches::all_on();
+    let unknown = signed(json!({}));
+    let out = |_: &str, tool: Tool| (tool == Tool::Codex).then_some((NOW - 5, false));
+    let marks = Marks {
+        login: &out,
+        installed: &nothing,
+        reported: &unreported,
+    };
+    let model = correct(&unknown, &[machine()], &none, &unread, &marks, NOW);
+    assert_eq!(row_of(&model).login_of(Tool::Codex), Some(Login::SignedOut));
+    let list = offered(&model, Some(&side), &sw);
+    assert!(find(&list, M1, Tool::Codex, Kind::SignIn).is_some());
+    assert!(find(&list, M1, Tool::Codex, Kind::Check).is_none());
+}
+
+#[test]
+fn a_newer_report_from_the_node_beats_an_older_mark_or_probe() {
+    let installed =
+        |_: &str, tool: Tool| (tool == Tool::Codex).then(|| (NOW - 100, Some(v("0.166.0"))));
+    let reported_later = |_: &str| Some(NOW - 50);
+    let marks = Marks {
+        login: &never,
+        installed: &installed,
+        reported: &reported_later,
+    };
+    let model = correct(&missing_both(), &[machine()], &none, &unread, &marks, NOW);
+    let texts = row_of(&model).tool_texts();
+    assert!(!texts.iter().any(|t| t == "Codex 0.166.0"), "{texts:?}");
+    let known = read(vec![(Tool::Codex, ToolState::NotInstalled)], NOW - 100);
+    let tools = move |_: &str| Some(known.clone());
+    let marks = Marks {
+        login: &never,
+        installed: &nothing,
+        reported: &reported_later,
+    };
+    let model = correct(&stale(), &[machine()], &none, &tools, &marks, NOW);
+    assert_eq!(row_of(&model), row_of(&stale()));
+    let known = read(vec![(Tool::Codex, ToolState::NotInstalled)], NOW - 10);
+    let tools = move |_: &str| Some(known.clone());
+    let model = correct(&stale(), &[machine()], &none, &tools, &marks, NOW);
+    let texts = row_of(&model).tool_texts();
+    assert!(
+        texts.iter().any(|t| t == "Codex not installed"),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn a_login_mark_older_than_the_nodes_report_gives_way() {
+    let yes = |_: &str, tool: Tool| (tool == Tool::Codex).then_some((NOW - 100, true));
+    let later = |_: &str| Some(NOW - 50);
+    let marks = Marks {
+        login: &yes,
+        installed: &nothing,
+        reported: &later,
+    };
+    let out = signed(json!({"codex": false}));
+    let model = correct(&out, &[machine()], &none, &unread, &marks, NOW);
+    assert_eq!(row_of(&model).login_of(Tool::Codex), Some(Login::SignedOut));
+}
+
+#[test]
+fn after_an_install_the_card_keeps_the_new_version_over_the_stale_report() {
+    let installed =
+        |_: &str, tool: Tool| (tool == Tool::Codex).then(|| (NOW - 10, Some(v("0.166.0"))));
+    let marks = Marks {
+        login: &never,
+        installed: &installed,
+        reported: &unreported,
+    };
+    let model = correct(&stale(), &[machine()], &none, &unread, &marks, NOW);
+    let row = row_of(&model);
+    let texts = row.tool_texts();
+    assert!(texts.iter().any(|t| t == "Codex 0.166.0"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.contains("0.118.0")), "{texts:?}");
+    assert!(row.drifts.iter().all(|d| d.tool != Tool::Codex));
+}
+
+#[test]
+fn run_check_reports_the_signed_state_without_a_login() {
+    let w = worker();
+    let rig = rig(&w, true);
+    rig.runner.on_call(
+        |argv| argv.last().is_some_and(|s| s.contains("login status")),
+        |_| CommandResult::ok("Logged in using ChatGPT\n@@exit=0\n"),
+    );
+    let runs = ToolRuns::default();
+    assert!(runs.begin("m1", "start"));
+    let check = run_check(&rig.engine, &runs, "m1", Tool::Codex);
+    assert_eq!(check.signed, Some(true));
+    assert!(check.outcome.ok);
+    assert!(rig
+        .runner
+        .calls()
+        .iter()
+        .all(|c| !c.argv.last().is_some_and(|s| s.contains("--device-auth"))));
 }
 
 #[test]

@@ -189,6 +189,7 @@ impl SetupEngine {
             admin_secrets,
         };
         engine.load_offers();
+        engine.load_tools();
         engine
     }
 
@@ -482,6 +483,23 @@ impl SetupEngine {
         }
         self.save_tools(tools_seen, &registry);
         self.changed();
+    }
+
+    fn load_tools(&self) {
+        let Some(data) = &self.deps.offers_data else {
+            return;
+        };
+        let names: Vec<String> = self
+            .current_machines()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        let loaded = versions_facts::load(data, &names);
+        let mut s = lock(&self.state);
+        for (name, tools) in loaded {
+            s.tools_saved.insert(name.clone(), tools.clone());
+            s.tools_known.insert(name, tools);
+        }
     }
 
     pub(super) fn save_tools(&self, seen: Vec<(String, WorkerTools)>, registry: &[String]) {

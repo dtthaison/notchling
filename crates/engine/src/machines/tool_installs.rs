@@ -2,6 +2,7 @@ use super::engine::SetupEngine;
 use super::engine_plan::{AdminNeed, ApprovedStep, PlanId, PlanKind, ShownPlan};
 use super::runner::Channel;
 use super::step::{run, FixContext, FixOutcome, StepId};
+use super::tool_guard::guard;
 use super::tool_updates::read_tools;
 use crate::versions::worker_install::{install_plan, verdict};
 use crate::versions::worker_update::failure_text;
@@ -13,6 +14,7 @@ const INSTALL_SECS: u64 = 900;
 pub struct ToolInstall {
     pub tool: Tool,
     pub mac: Option<Version>,
+    pub node: String,
 }
 
 impl SetupEngine {
@@ -61,14 +63,15 @@ impl SetupEngine {
             return FixOutcome::fail(format!("no machine named {machine}"));
         };
         let target = want.mac.clone().filter(|_| want.tool == Tool::Codex);
+        let node = want.node.clone();
         let outcome = self.perform(
             StepId::tool_install(want.tool),
             &step.title,
             &m,
             None,
-            |ctx| self.install_one(ctx, want.tool, target.as_ref(), &step.display),
+            |ctx| self.install_one(ctx, want.tool, target.as_ref(), &step.display, &node),
         );
-        self.refresh(Some(&[machine.to_string()]), false);
+        self.changed();
         outcome
     }
 
@@ -78,9 +81,13 @@ impl SetupEngine {
         tool: Tool,
         target: Option<&Version>,
         script: &str,
+        node: &str,
     ) -> FixOutcome {
         let m = &ctx.step.machine;
         let name = &m.name;
+        if let Err(why) = guard(ctx, tool, node) {
+            return FixOutcome::fail(why);
+        }
         (ctx.log)(Channel::Stdout, &format!("$ {script}\n"));
         let result = run::script(ctx, script, None, INSTALL_SECS);
         if result.code != 0 {

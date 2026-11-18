@@ -343,3 +343,35 @@ pub fn counting_fix(
         }
     }))
 }
+
+pub const NODE: &str = "0123456789abcdef";
+
+pub struct GuardKnobs {
+    pub node: Arc<Mutex<Option<String>>>,
+    pub busy: Arc<Mutex<Option<usize>>>,
+}
+
+pub fn guard_rules(runner: &ScriptedRunner) -> GuardKnobs {
+    let node = Arc::new(Mutex::new(Some(NODE.to_string())));
+    let busy = Arc::new(Mutex::new(Some(0usize)));
+    let n = node.clone();
+    runner.on_call(
+        |argv| {
+            argv.last()
+                .is_some_and(|s| s.contains("cluster status --json"))
+        },
+        move |_| match lock(&n).clone() {
+            Some(id) => CommandResult::ok(&format!("{{\"me\":\"{id}\"}}\n")),
+            None => CommandResult::new(1, "", "no daemon"),
+        },
+    );
+    let b = busy.clone();
+    runner.on_call(
+        |argv| argv.last().is_some_and(|s| s.contains("busy=")),
+        move |_| match *lock(&b) {
+            Some(count) => CommandResult::ok(&format!("busy={count}\n")),
+            None => CommandResult::new(1, "", "ps: not found"),
+        },
+    );
+    GuardKnobs { node, busy }
+}

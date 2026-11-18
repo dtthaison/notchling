@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -31,6 +32,24 @@ struct Shared {
     updates: Arc<UpdateSession>,
     runs: Arc<ToolRuns>,
     mac: Mutex<Option<MacSide>>,
+    reported: Mutex<BTreeMap<String, (Value, i64)>>,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn fingerprint(member: &Value) -> Value {
+    let versions = member.get("versions").unwrap_or(&Value::Null);
+    json!([
+        versions.get("tools"),
+        versions.get("logins"),
+        versions.get("own_logins"),
+        versions.get("ownLogins"),
+    ])
 }
 
 impl Shared {
@@ -42,6 +61,7 @@ impl Shared {
             adds: AddRuns::tied_to(generation.clone()),
             runs: Arc::new(ToolRuns::tied_to(generation.clone())),
             mac: Mutex::new(None),
+            reported: Mutex::new(BTreeMap::new()),
             generation,
             stop: AtomicBool::new(false),
             updates: Arc::new(UpdateSession::default()),
@@ -60,8 +80,32 @@ impl Shared {
         *self.last.lock().unwrap_or_else(|e| e.into_inner()) = status.clone();
     }
 
+    fn track(&self, status: &Value, now: i64) {
+        let Some(members) = status.get("members").and_then(Value::as_array) else {
+            return;
+        };
+        let mut reported = self.reported.lock().unwrap_or_else(|e| e.into_inner());
+        for member in members {
+            let Some(id) = member.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let now_print = fingerprint(member);
+            match reported.get_mut(id) {
+                None => {
+                    reported.insert(id.to_owned(), (now_print, 0));
+                }
+                Some((print, at)) if *print != now_print => {
+                    *print = now_print;
+                    *at = now;
+                }
+                Some(_) => {}
+            }
+        }
+    }
+
     fn load(&self, status: &Value) {
         self.remember(status);
+        self.track(status, now_ms());
         let me = status.get("me").and_then(Value::as_str).unwrap_or("");
         let next = ClusterModel::from_status(status, me);
         self.adds.seen(&next);
@@ -243,6 +287,20 @@ impl ClusterFeed {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    #[cfg(test)]
+    pub(super) fn take_status(&self, status: &Value) {
+        self.shared.load(status);
+    }
+
+    pub fn reported_at(&self, node: &str) -> Option<i64> {
+        self.shared
+            .reported
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(node)
+            .map(|(_, at)| *at)
     }
 
     pub fn with_mac(self, side: MacSide) -> ClusterFeed {

@@ -13,7 +13,7 @@ use notchling_locale as t;
 
 use super::model::{ClusterModel, NodeRow};
 use super::tool_runs::{Run, ToolRuns};
-use super::tool_setup::{correct, setups, Marks, Setup, FRESH_MS};
+use super::tool_setup::{correct, setups, Marks, Setup};
 use super::tool_updates::{offers, run, start, Offer, State};
 use super::updates::machine_of;
 use super::view::ClusterSheetView;
@@ -28,24 +28,14 @@ pub(super) struct ToolView {
     machines: BTreeMap<String, String>,
 }
 
-pub(super) struct LoginSheet {
-    pub(super) machine: String,
-    pub(super) tool: Tool,
-}
-
 pub(super) struct ToolUi {
     pub(super) runs: Arc<ToolRuns>,
-    pub(super) sheet: Option<LoginSheet>,
     pub(super) seen: Option<(u64, (bool, bool), Instant, ToolView)>,
 }
 
 impl ToolUi {
     pub(super) fn new(runs: Arc<ToolRuns>) -> ToolUi {
-        ToolUi {
-            runs,
-            sheet: None,
-            seen: None,
-        }
+        ToolUi { runs, seen: None }
     }
 }
 
@@ -93,22 +83,14 @@ impl ClusterSheetView {
                 let tools_of = |name: &str| parts.engine.worker_tools(name);
                 let mac = self.feed.mac();
                 let now = now_ms();
-                let signed = |machine: &str, tool: Tool| {
-                    self.tools
-                        .runs
-                        .signed_in_since(machine, tool)
-                        .is_some_and(|at| now - at <= FRESH_MS)
-                };
-                let installed = |machine: &str, tool: Tool| {
-                    self.tools
-                        .runs
-                        .installed_since(machine, tool)
-                        .filter(|(at, _)| now - at <= FRESH_MS)
-                        .map(|(_, version)| version)
-                };
+                let login = |machine: &str, tool: Tool| self.tools.runs.login_mark(machine, tool);
+                let installed =
+                    |machine: &str, tool: Tool| self.tools.runs.installed_since(machine, tool);
+                let reported = |node: &str| self.feed.reported_at(node);
                 let marks = Marks {
-                    signed: &signed,
+                    login: &login,
                     installed: &installed,
+                    reported: &reported,
                 };
                 let fixed = correct(model, &machines, &node_of, &tools_of, &marks, now);
                 let model = &fixed;

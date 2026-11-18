@@ -20,6 +20,17 @@ fn text(map: &Map<String, Value>) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+pub fn load(data: &Path, names: &[String]) -> std::collections::BTreeMap<String, WorkerTools> {
+    let Ok(Some(text)) = store::doc(data, DOC) else {
+        return std::collections::BTreeMap::new();
+    };
+    parse(Some(text))
+        .into_iter()
+        .filter(|(name, _)| names.contains(name))
+        .filter_map(|(name, value)| Some((name, serde_json::from_value(value).ok()?)))
+        .collect()
+}
+
 pub fn save(data: &Path, machine: &str, tools: &WorkerTools) -> Result<(), String> {
     let value = serde_json::to_value(tools).map_err(|e| e.to_string())?;
     store::update_doc(data, DOC, |old| {

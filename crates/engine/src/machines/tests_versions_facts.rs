@@ -77,6 +77,21 @@ fn refresh_saves_facts_once_per_change() {
 }
 
 #[test]
+fn a_new_engine_loads_the_saved_tools_of_machines_that_still_exist() {
+    let dir = temp("load");
+    save(&dir, "m1", &tools("codex.path=/a/codex\n")).unwrap();
+    save(&dir, "gone", &tools("codex.path=/a/codex\n")).unwrap();
+    let m = TestMachines::mac("m1");
+    let e = engine_with(&m, Some(dir.clone()));
+    let known = e.worker_tools("m1").unwrap();
+    assert!(known.tools.contains_key(&crate::versions::Tool::Codex));
+    assert!(e.worker_tools("gone").is_none());
+    let none = engine_with(&m, None);
+    assert!(none.worker_tools("m1").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn no_data_folder_saves_nothing() {
     let m = TestMachines::mac("m1");
     let e = engine_with(&m, None);

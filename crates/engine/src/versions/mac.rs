@@ -242,14 +242,18 @@ fn cask(roots: &Roots, name: &str, command: &str) -> Option<Found> {
             let newest = sorted_names(&base)
                 .into_iter()
                 .filter_map(|n| Version::parse(&n).map(|v| (v, n)))
-                .max();
-            let Some((version, dir_name)) = newest else {
+                .filter_map(|(v, n)| {
+                    let dir = base.join(&n);
+                    [command.to_string(), format!("bin/{command}")]
+                        .iter()
+                        .map(|rel| dir.join(rel))
+                        .find(|p| p.is_file())
+                        .map(|binary| (v, binary))
+                })
+                .max_by(|a, b| a.0.cmp(&b.0));
+            let Some((version, binary)) = newest else {
                 continue;
             };
-            let binary = base.join(&dir_name).join(command);
-            if !binary.is_file() {
-                continue;
-            }
             return Some(Found {
                 version: Some(version),
                 expected_version: true,

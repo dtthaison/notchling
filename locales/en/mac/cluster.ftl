@@ -585,6 +585,15 @@ cluster-tool-install-busy = { $count ->
     [one] { $machine } is running a job. Install tools when it is done.
    *[other] { $machine } is running { $count } jobs. Install tools when they are done.
 }
+# Button on a machine's card when a tool's sign-in can't be told; it reads the sign-in again. $machine is the machine.
+cluster-tool-check-button = Check Sign-In on { $machine }
+# Under a sign-in button while the machine runs a job; $machine is its name, $count the jobs.
+cluster-tool-sign-in-busy = { $count ->
+    [one] { $machine } is running a job. Sign in when it is done.
+   *[other] { $machine } is running { $count } jobs. Sign in when they are done.
+}
+# Result on a machine's card after Cancel in the sign-in sheet; $tool is the tool, $machine the machine.
+cluster-tool-sign-in-cancelled = Signing in { $tool } on { $machine } was cancelled.
 # Progress on a machine's card; $tool is the tool, $machine the machine.
 cluster-tool-installing = Installing { $tool } on { $machine }…
 cluster-tool-signing-in = Signing in { $tool } on { $machine }…
@@ -604,6 +613,8 @@ cluster-login-steps = Open the link in your browser on this Mac, sign in with th
 cluster-login-link-label = Link
 # Label above the one-time code.
 cluster-login-code-label = One-Time Code
+# Warning in the sheet: signing in again replaces the sign-in the machine has now. $machine is the machine.
+cluster-login-replaces = Signing in here replaces the sign-in { $machine } has now.
 # Note under the code; it is shown only in this sheet.
 cluster-login-private = The link and code are shown only here. Notchling doesn't keep them.
 # Button that opens the sign-in link in the browser.

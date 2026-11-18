@@ -14,6 +14,7 @@ struct Rig {
     codex: Arc<Mutex<Option<String>>>,
     agy: Arc<Mutex<bool>>,
     commands: Arc<Mutex<Vec<String>>>,
+    guard: GuardKnobs,
     audit: TempDir,
 }
 
@@ -31,6 +32,7 @@ fn want(tool: Tool, mac: Option<&str>) -> PlanKind {
     PlanKind::InstallTool(ToolInstall {
         tool,
         mac: mac.map(ver),
+        node: NODE.to_string(),
     })
 }
 
@@ -62,6 +64,7 @@ fn rig(b: Behavior) -> Rig {
     let codex: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let agy = Arc::new(Mutex::new(false));
     let commands = Arc::new(Mutex::new(Vec::new()));
+    let guard = guard_rules(&setup.runner);
     let (c, a) = (codex.clone(), agy.clone());
     setup.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains(PROBE)),
@@ -91,6 +94,7 @@ fn rig(b: Behavior) -> Rig {
         codex,
         agy,
         commands,
+        guard,
         audit,
     }
 }
@@ -301,4 +305,50 @@ fn the_run_goes_into_the_log_and_the_audit() {
     assert!(audit[0].contains("\"op\":\"machines.fix\""), "{}", audit[0]);
     assert!(audit[0].contains("Install Codex on m1"), "{}", audit[0]);
     assert!(audit[0].contains("\"ok\":true"), "{}", audit[0]);
+}
+
+#[test]
+fn a_busy_codex_refuses_and_nothing_is_installed() {
+    let r = rig(codex_ok("0.166.0"));
+    *lock(&r.guard.busy) = Some(1);
+    let out = r.install(want(Tool::Codex, Some("0.166.0")));
+    assert!(!out.ok);
+    assert!(out.message.contains("is running on m1"), "{}", out.message);
+    assert!(r.commands().is_empty());
+    *lock(&r.guard.busy) = None;
+    let out =
+        r.w.click("m1", want(Tool::Codex, Some("0.166.0")), AdminAnswer::None);
+    assert!(!out.ok);
+    assert!(out.message.contains("Couldn't tell"), "{}", out.message);
+    assert!(r.commands().is_empty());
+}
+
+#[test]
+fn another_node_on_that_host_refuses_and_nothing_is_installed() {
+    let r = rig(codex_ok("0.166.0"));
+    *lock(&r.guard.node) = Some("fedcba9876543210".into());
+    let out = r.install(want(Tool::Codex, Some("0.166.0")));
+    assert!(!out.ok);
+    assert!(
+        out.message.contains("not the machine on this card"),
+        "{}",
+        out.message
+    );
+    assert!(r.commands().is_empty());
+    *lock(&r.guard.node) = None;
+    let out =
+        r.w.click("m1", want(Tool::Codex, Some("0.166.0")), AdminAnswer::None);
+    assert!(!out.ok);
+    assert!(out.message.contains("Couldn't confirm"), "{}", out.message);
+    assert!(r.commands().is_empty());
+}
+
+#[test]
+fn an_install_never_reads_the_workers_codex_folder_back() {
+    let r = rig(codex_ok("0.166.0"));
+    assert!(r.install(want(Tool::Codex, Some("0.166.0"))).ok);
+    for call in r.w.runner.calls() {
+        let text = call.argv.join(" ");
+        assert!(!text.contains("config.toml"), "{text}");
+    }
 }

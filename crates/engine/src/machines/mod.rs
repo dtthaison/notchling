@@ -54,6 +54,7 @@ mod steps_xcode;
 pub mod token_creation;
 pub mod token_scope;
 mod token_scope_net;
+mod tool_guard;
 pub mod tool_installs;
 pub mod tool_login;
 pub mod tool_updates;
