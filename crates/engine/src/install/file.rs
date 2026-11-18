@@ -184,13 +184,71 @@ pub fn apply(path: &Path, wanted: &Wanted, stamp: u64) -> Result<Applied, FileEr
     })
 }
 
+#[derive(Debug)]
+pub struct Rewritten {
+    pub wrote: bool,
+    pub backup: Option<PathBuf>,
+    pub state: State,
+}
+
+fn named(path: &Path, e: FileError) -> FileError {
+    let name = file_name(path);
+    match e {
+        FileError::Refused(why) => FileError::Refused(why.replace("settings.json", &name)),
+        FileError::Io(why) => FileError::Io(why.replace("settings.json", &name)),
+        FileError::Changed => FileError::Refused(format!(
+            "{name} changed while it was being updated; nothing was written"
+        )),
+        other => other,
+    }
+}
+
+pub type Change<'a> = &'a dyn Fn(&str, State) -> Result<Option<String>, String>;
+
+pub fn rewrite(path: &Path, stamp: u64, change: Change) -> Result<Rewritten, FileError> {
+    let loaded = load(path).map_err(|e| named(path, e))?;
+    let Some(text) = change(&loaded.text, loaded.state).map_err(FileError::Refused)? else {
+        return Ok(Rewritten {
+            wrote: false,
+            backup: None,
+            state: loaded.state,
+        });
+    };
+    if text == loaded.text {
+        return Ok(Rewritten {
+            wrote: false,
+            backup: None,
+            state: loaded.state,
+        });
+    }
+    if loaded.read_only {
+        return Err(FileError::Refused(format!(
+            "{} is read-only; it was left alone",
+            file_name(path)
+        )));
+    }
+    let backup = match loaded.state {
+        State::Missing => None,
+        _ => Some(write_backup(path, &loaded.text, stamp).map_err(|e| named(path, e))?),
+    };
+    write_checked(&loaded, text.as_bytes()).map_err(|e| named(path, e))?;
+    if let Some(dir) = path.parent() {
+        prune_backups(dir, path);
+    }
+    Ok(Rewritten {
+        wrote: true,
+        backup,
+        state: loaded.state,
+    })
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "settings.json".into())
 }
 
-fn write_backup(path: &Path, text: &str, stamp: u64) -> Result<PathBuf, FileError> {
+pub(crate) fn write_backup(path: &Path, text: &str, stamp: u64) -> Result<PathBuf, FileError> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let base = format!("{}{BACKUP_SUFFIX}-{stamp}", file_name(path));
     for n in 0..100 {
@@ -210,7 +268,7 @@ fn write_backup(path: &Path, text: &str, stamp: u64) -> Result<PathBuf, FileErro
     Err(FileError::Io("no free name for the backup".into()))
 }
 
-fn prune_backups(dir: &Path, path: &Path) {
+pub(crate) fn prune_backups(dir: &Path, path: &Path) {
     let prefix = format!("{}{BACKUP_SUFFIX}-", file_name(path));
     let Ok(read) = fs::read_dir(dir) else {
         return;
@@ -235,7 +293,7 @@ fn prune_backups(dir: &Path, path: &Path) {
     }
 }
 
-pub(super) fn write_checked(loaded: &Loaded, data: &[u8]) -> Result<(), FileError> {
+pub(crate) fn write_checked(loaded: &Loaded, data: &[u8]) -> Result<(), FileError> {
     let target = &loaded.target;
     let dir = target.parent().unwrap_or(Path::new("."));
     let temp = dir.join(format!(

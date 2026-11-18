@@ -1,4 +1,4 @@
-use super::channel::{Abilities, Channel, Mode};
+use super::channel::{Abilities, Ability, Channel, Mode};
 use super::Tool;
 
 pub struct ClaudeTerminal;
@@ -11,11 +11,15 @@ pub struct AgyApp;
 
 pub struct AgyRemote;
 
+pub struct AgySidecar;
+
 pub const ACP: &str = "acp";
 
 pub const APP: &str = "app";
 
 pub const REMOTE: &str = "remote";
+
+pub const SIDECAR: &str = "sidecar";
 
 impl Channel for ClaudeTerminal {
     fn id(&self) -> &'static str {
@@ -57,7 +61,11 @@ impl Channel for CodexExec {
     }
 
     fn abilities(&self) -> Abilities {
-        Abilities::ALL
+        Abilities {
+            approve: false,
+            answer: false,
+            ..Abilities::ALL
+        }
     }
 }
 
@@ -79,7 +87,10 @@ impl Channel for AgyAcp {
     }
 
     fn abilities(&self) -> Abilities {
-        Abilities::ALL
+        Abilities {
+            answer: false,
+            ..Abilities::ALL
+        }
     }
 }
 
@@ -104,8 +115,7 @@ impl Channel for AgyApp {
         Abilities {
             reply: true,
             start: true,
-            phone: false,
-            stop: false,
+            ..Abilities::NONE
         }
     }
 }
@@ -131,9 +141,50 @@ impl Channel for AgyRemote {
         Abilities {
             reply: true,
             start: true,
-            phone: false,
-            stop: false,
+            ..Abilities::NONE
         }
+    }
+}
+
+impl Channel for AgySidecar {
+    fn id(&self) -> &'static str {
+        SIDECAR
+    }
+
+    fn tool(&self) -> Tool {
+        Tool::Antigravity
+    }
+
+    fn title(&self) -> &'static str {
+        "Antigravity app (full)"
+    }
+
+    fn mode(&self) -> Mode {
+        Mode::Sends
+    }
+
+    fn abilities(&self) -> Abilities {
+        Abilities {
+            reply: true,
+            start: true,
+            phone: true,
+            soft_stop: true,
+            approve: true,
+            ..Abilities::NONE
+        }
+    }
+
+    fn gap_notes(&self) -> &'static [(Ability, &'static str)] {
+        &[
+            (
+                Ability::Stop,
+                "No hook or sidecar call cancels a running turn; a stop ends it softly at the next model call (PreInvocation terminate).",
+            ),
+            (
+                Ability::Answer,
+                "No hook answers the agent's ask_question; the question is answered in the Antigravity app.",
+            ),
+        ]
     }
 }
 
@@ -141,7 +192,7 @@ static CLAUDE: [&dyn Channel; 1] = [&ClaudeTerminal];
 
 static CODEX: [&dyn Channel; 1] = [&CodexExec];
 
-static ANTIGRAVITY: [&dyn Channel; 3] = [&AgyAcp, &AgyApp, &AgyRemote];
+static ANTIGRAVITY: [&dyn Channel; 4] = [&AgyAcp, &AgyApp, &AgyRemote, &AgySidecar];
 
 pub fn of(tool: Tool) -> &'static [&'static dyn Channel] {
     match tool {
