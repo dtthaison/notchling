@@ -4,6 +4,7 @@ use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
 use crate::agy_ops::AgyOps;
+use crate::agy_sidecar_ops::AgySidecarOps;
 use crate::ask_ops::AskOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
@@ -31,13 +32,11 @@ use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
-use crate::outbox_courier::{real_clock, ClaudeCourier};
 use crate::outbox_inbox::OutboxNotice;
 use crate::outbox_ops::OutboxOps;
-use crate::outbox_postman::{Couriers, Postmen};
-use crate::outbox_runners::{link_agy, link_codex, AgyCourier, CodexCourier};
-use crate::outbox_verify::{SafeModes, TranscriptVerifier};
+use crate::outbox_postman::Postmen;
 use crate::pages_ops::{PagesOps, PagesSetup};
+use crate::postmen_wiring::postmen_for;
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
 use crate::quiet_ops;
@@ -459,39 +458,6 @@ fn outbox_ops(
     }
 }
 
-fn postmen_for(
-    outbox: &Arc<OutboxOps>,
-    acting: &Arc<ActingOps>,
-    layout: &Layout,
-    codex: &Arc<CodexOps>,
-    agy: &Arc<AgyOps>,
-) -> Postmen {
-    link_codex(outbox, codex);
-    link_agy(outbox, agy);
-    let safe = Arc::new(SafeModes::default());
-    let courier = Arc::new(ClaudeCourier::new(
-        acting.clone(),
-        layout.roots(),
-        real_clock(),
-        safe.clone(),
-    ));
-    let resume = courier.clone();
-    outbox.set_resume(Arc::new(move |row| resume.resume(row)));
-    let postmen = Postmen::build(
-        outbox.clone(),
-        Couriers {
-            claude: courier,
-            codex: Arc::new(CodexCourier::new(codex.clone())),
-            antigravity: Arc::new(AgyCourier::new(agy.clone())),
-        },
-        Arc::new(TranscriptVerifier::new(layout.roots(), safe)),
-        acting.acting_switch(),
-        real_clock(),
-    );
-    outbox.set_wake(postmen.waker());
-    postmen
-}
-
 pub struct Wired {
     pub acting: Arc<ActingOps>,
     pub codex: Arc<CodexOps>,
@@ -510,6 +476,7 @@ pub struct Wired {
     pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
+    pub sidecar: Arc<AgySidecarOps>,
     pub settings: Arc<SettingsOps>,
     pub versions: Arc<VersionsOps>,
     pub awake: Arc<AwakeLoop>,
@@ -717,6 +684,14 @@ impl Wired {
             events.clone(),
         ));
         let binary = std::env::current_exe().and_then(std::fs::canonicalize).ok();
+        let sidecar = AgySidecarOps::for_daemon(
+            layout,
+            &agy,
+            &acting,
+            switches.install.clone(),
+            binary.clone(),
+            events.clone(),
+        );
         let mut install = InstallOps::new(
             InstallSetup::from_layout(layout, binary.clone()),
             switches.install.clone(),
@@ -832,6 +807,7 @@ impl Wired {
             outbox_notice,
             vault,
             install: Arc::new(install),
+            sidecar,
             settings,
             versions,
             awake,
@@ -902,6 +878,7 @@ impl Wired {
             ))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
+            .with_group(self.sidecar.clone())
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
             .with_group(self.catalog.clone())

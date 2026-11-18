@@ -76,24 +76,31 @@ impl ActingOps {
                 "hook.request comes only from a hook the event's Claude Code session started",
             ));
         };
-        if !self.room.can_answer_prompts() {
-            return Ok(pass("no app is attached"));
-        }
         let wait = args
             .get("waitMs")
             .and_then(Value::as_u64)
             .map(Duration::from_millis)
             .map_or(HOOK_WAIT, |w| w.min(HOOK_WAIT));
-        let Some((prompt, rx)) = self.prompts.open(event.clone(), Some(pid), now_ms()) else {
-            return Ok(pass("the daemon is stopping"));
+        Ok(self.ask_user(event.clone(), pid, wait))
+    }
+
+    pub(crate) fn ask_user(&self, event: Value, pid: u32, wait: Duration) -> Value {
+        if !self.acting.is_on() {
+            return pass("acting is off");
+        }
+        if !self.room.can_answer_prompts() {
+            return pass("no app is attached");
+        }
+        let Some((prompt, rx)) = self.prompts.open(event, Some(pid), now_ms()) else {
+            return pass("the daemon is stopping");
         };
         self.room
             .publish(topics::PROMPTS, topics::PROMPT_PENDING, &prompt.to_json());
         let started = Instant::now();
         loop {
             match rx.recv_timeout(self.tick) {
-                Ok(decision) => return Ok(decision),
-                Err(RecvTimeoutError::Disconnected) => return Ok(pass("closed")),
+                Ok(decision) => return decision,
+                Err(RecvTimeoutError::Disconnected) => return pass("closed"),
                 Err(RecvTimeoutError::Timeout) => {}
             }
             let why = if started.elapsed() >= wait {
@@ -107,9 +114,9 @@ impl ActingOps {
             };
             if self.prompts.forget(&prompt.id).is_some() {
                 self.resolved(&prompt, "pass", why);
-                return Ok(pass(why));
+                return pass(why);
             }
-            return Ok(rx.try_recv().unwrap_or_else(|_| pass(why)));
+            return rx.try_recv().unwrap_or_else(|_| pass(why));
         }
     }
 }

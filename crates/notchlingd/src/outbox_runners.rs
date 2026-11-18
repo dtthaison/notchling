@@ -6,6 +6,7 @@ use notchling_engine::contract::channel::Ability;
 use notchling_engine::outbox::{Facts, Job, Row, Tried, TryEnd, TURN_SETTLE_MS};
 use std::sync::Arc;
 
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Delivery {
     Busy,
     Failed(String),
@@ -86,7 +87,7 @@ impl Courier for AgyCourier {
     }
 
     fn deliver(&self, row: &Row, _guarded: bool) -> (TryEnd, Tried, Option<String>) {
-        ended(self.ops.deliver(bare(row, "agy:"), &row.text))
+        ended(self.ops.deliver(&row.id, bare(row, "agy:"), &row.text))
     }
 
     fn close(&self, _session: &str) {}
