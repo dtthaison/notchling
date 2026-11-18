@@ -28,6 +28,7 @@ use super::renders::{
 };
 use super::secrets::VaultAccess;
 use super::secrets_view::{editor_body, editor_footer, editor_title, Editor, SecretsEvent};
+use super::tool_updates_view::ToolUi;
 use super::updates_view::UpdateUi;
 use super::view_secrets::{secrets_fixture, Editing};
 use super::wire::{self, Request};
@@ -65,6 +66,7 @@ pub struct ClusterSheetView {
     pub(super) installing: Option<InstallAsk>,
     pub(super) add: AddUi,
     pub(super) update: UpdateUi,
+    pub(super) tools: ToolUi,
     name: Entity<TextEditor>,
     token: Entity<TextEditor>,
     pub(super) busy: bool,
@@ -153,6 +155,7 @@ impl ClusterSheetView {
             }
         });
         let updates = feed.updates();
+        let runs = feed.tool_runs();
         ClusterSheetView {
             feed,
             access,
@@ -169,6 +172,7 @@ impl ClusterSheetView {
             installing: None,
             add: AddUi::default(),
             update: UpdateUi::new(updates),
+            tools: ToolUi::new(runs),
             name: editor,
             token,
             busy: false,
@@ -650,8 +654,9 @@ impl Render for ClusterSheetView {
             body = body.children(self.add_rows(a, cx));
             body = body.children(self.update_banner_row(&model, a, cx));
             body = body.children(self.waiting_block(&model, a, cx));
+            let tools = self.tool_view(&model);
             for row in model.rows() {
-                body = body.child(self.node_row(&row, a, cx));
+                body = body.child(self.node_row(&row, &tools, a, cx));
             }
             body = body.children(self.not_joined_block(&model, a, cx));
             body = body.children(self.copies_block(&model, a, cx));

@@ -1,9 +1,10 @@
+use super::masks::Masks;
 use super::registry::Machine;
 use super::step::{
     Cadence, CheckResult, Detected, Probe, RemoteOutput, SetupStep, StepContext, StepFix, StepId,
     SubRow,
 };
-use crate::versions::{Method, Tool, ToolState};
+use crate::versions::{Method, Tool, ToolState, WorkerTools};
 
 pub const TOOL_VERSIONS_SCRIPT: &str = r#"for t in claude codex agy notchling; do
   p=$(command -v "$t" 2>/dev/null)
@@ -42,19 +43,26 @@ fn row(tool: Tool, state: &ToolState) -> SubRow {
     }
 }
 
-fn parse_tool_versions(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
-    if !out.text.lines().take(64).any(|l| l.contains(".path=")) {
-        return CheckResult::cant_tell("couldn't read the tools");
+pub fn read(text: &str, now_ms: i64, masks: &Masks) -> Option<WorkerTools> {
+    if !text.lines().take(64).any(|l| l.contains(".path=")) {
+        return None;
     }
-    let mut tools = crate::versions::parse_probe(&out.text, (ctx.now * 1000.0) as i64);
+    let mut tools = crate::versions::parse_probe(text, now_ms);
     for state in tools.tools.values_mut() {
         if let ToolState::Installed { method, path, .. } = state {
-            if ctx.masks.leaks_into(path) {
+            if masks.leaks_into(path) {
                 path.clear();
                 *method = Method::Unknown;
             }
         }
     }
+    Some(tools)
+}
+
+fn parse_tool_versions(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
+    let Some(tools) = read(&out.text, (ctx.now * 1000.0) as i64, &ctx.masks) else {
+        return CheckResult::cant_tell("couldn't read the tools");
+    };
     let rows: Vec<SubRow> = Tool::ALL
         .into_iter()
         .filter_map(|t| tools.tools.get(&t).map(|s| row(t, s)))

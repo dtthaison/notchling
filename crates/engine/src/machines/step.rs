@@ -54,6 +54,10 @@ impl StepId {
         Tool::from_name(self.0.strip_prefix("self-update:")?)
     }
 
+    pub fn tool_update(tool: Tool) -> StepId {
+        StepId(Cow::Owned(format!("tool-update:{}", tool.name())))
+    }
+
     pub fn deploy_key(github: &str) -> StepId {
         StepId(Cow::Owned(format!("deploy-key:{github}")))
     }

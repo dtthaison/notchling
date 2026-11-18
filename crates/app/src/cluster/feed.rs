@@ -3,17 +3,19 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use notchling_engine::vault::entry::VaultEntry;
-use notchling_local_api::{topics, Client, ClientError, ClientKind, ConnectOptions, Event};
+use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event};
 use notchling_locale as t;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::add_runs::AddRuns;
 use super::add_source::AddSource;
 use super::model::ClusterModel;
+use super::tool_runs::ToolRuns;
 use super::updates_state::UpdateSession;
 use super::wire::{self, Request};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
+use crate::machines::versions_feed::{mac_side, MacSide};
 use crate::switches::feed::{config_for, FeedConfig};
 use crate::vault::store::Vault;
 
@@ -27,6 +29,8 @@ struct Shared {
     stop: AtomicBool,
     adds: AddRuns,
     updates: Arc<UpdateSession>,
+    runs: Arc<ToolRuns>,
+    mac: Mutex<Option<MacSide>>,
 }
 
 impl Shared {
@@ -36,6 +40,8 @@ impl Shared {
             model: Mutex::default(),
             last: Mutex::new(Value::Null),
             adds: AddRuns::tied_to(generation.clone()),
+            runs: Arc::new(ToolRuns::tied_to(generation.clone())),
+            mac: Mutex::new(None),
             generation,
             stop: AtomicBool::new(false),
             updates: Arc::new(UpdateSession::default()),
@@ -77,7 +83,17 @@ impl Shared {
         }
     }
 
+    fn set_mac(&self, side: Option<MacSide>) {
+        let mut mac = self.mac.lock().unwrap_or_else(|e| e.into_inner());
+        if *mac != side {
+            *mac = side;
+            drop(mac);
+            self.bump();
+        }
+    }
+
     fn lost(&self) {
+        self.set_mac(None);
         self.remember(&Value::Null);
         let mut model = self.model();
         if model.is_loaded() {
@@ -217,6 +233,23 @@ impl ClusterFeed {
         self.shared.updates.clone()
     }
 
+    pub fn tool_runs(&self) -> Arc<ToolRuns> {
+        self.shared.runs.clone()
+    }
+
+    pub fn mac(&self) -> Option<MacSide> {
+        self.shared
+            .mac
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn with_mac(self, side: MacSide) -> ClusterFeed {
+        self.shared.set_mac(Some(side));
+        self
+    }
+
     pub fn add_source(&self) -> Arc<AddSource> {
         self.add.clone()
     }
@@ -248,6 +281,13 @@ impl ClusterFeed {
     pub fn refresh(&self) {
         if let Ok(status) = self.send(&wire::status()) {
             self.shared.load(&status);
+        }
+        if let Some(transport) = &self.transport {
+            let side = transport
+                .call(ops::VERSIONS_GET, json!({}))
+                .ok()
+                .and_then(|reply| mac_side(&reply).ok());
+            self.shared.set_mac(side);
         }
     }
 }
@@ -290,7 +330,16 @@ fn connect(config: &FeedConfig) -> Result<(Client, Value), ClientError> {
     Ok((client, status))
 }
 
+fn read_mac(client: &mut Client, shared: &Shared) {
+    let side = client
+        .call(ops::VERSIONS_GET, json!({}))
+        .ok()
+        .and_then(|reply| mac_side(&reply).ok());
+    shared.set_mac(side);
+}
+
 fn follow(mut client: Client, shared: &Shared) {
+    read_mac(&mut client, shared);
     let mut last = Instant::now();
     while !shared.stopped() {
         match client.next_event(Duration::from_millis(250)) {
@@ -306,6 +355,7 @@ fn follow(mut client: Client, shared: &Shared) {
                 Err(ClientError::Api(_)) => {}
                 Err(_) => return,
             }
+            read_mac(&mut client, shared);
         }
     }
 }

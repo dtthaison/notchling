@@ -10,6 +10,8 @@ use notchling_locale as t;
 
 use super::model::{ClusterModel, NodeRow};
 use super::secrets_view::{login_line, secrets_line};
+use super::tool_updates::offers_runnable;
+use super::tool_updates_view::ToolView;
 use super::view::ClusterSheetView;
 use crate::mac::gate;
 
@@ -39,7 +41,13 @@ impl ClusterSheetView {
             .child(label(text, TypeRole::Label, ink, a))
     }
 
-    fn row_menu(&self, row: &NodeRow, a: Appearance, cx: &mut Context<Self>) -> Div {
+    fn row_menu(
+        &self,
+        row: &NodeRow,
+        tools: &ToolView,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let id = row.id.clone();
         let mut items = menu_panel(a);
         let master = id.clone();
@@ -86,6 +94,17 @@ impl ClusterSheetView {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.pick(&switch, ClusterModel::toggle_install, cx)
                 })),
+            );
+        }
+        if offers_runnable(&tools.offers, &id) {
+            let update = id.clone();
+            items = items.child(
+                MenuItem::new(
+                    SharedString::from(format!("node-update-tools-{id}")),
+                    t::cluster::update_tools(),
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| this.start_tools(&update, None, cx))),
             );
         }
         if self.feed_offers_install(&id) {
@@ -166,7 +185,13 @@ impl ClusterSheetView {
             .child(items)
     }
 
-    pub(super) fn node_row(&self, row: &NodeRow, a: Appearance, cx: &mut Context<Self>) -> Div {
+    pub(super) fn node_row(
+        &self,
+        row: &NodeRow,
+        fixes: &ToolView,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let id = row.id.clone();
         let mut title = div()
             .flex()
@@ -272,6 +297,7 @@ impl ClusterSheetView {
             .children(login_line(row, dim, a))
             .children(secrets_line(row, dim, a));
         for warning in &row.warnings {
+            let (action, note) = self.tool_warning_extras(fixes, row, warning, a, cx);
             body = body.child(
                 div()
                     .flex()
@@ -288,11 +314,14 @@ impl ClusterSheetView {
                         TypeRole::Meta,
                         Ink::Needs,
                         a,
-                    ))),
+                    )))
+                    .children(action),
             );
+            body = body.children(note);
         }
+        body = body.children(self.tool_run_line(fixes, row, a, cx));
         let menu = (self.menu.as_deref() == Some(row.id.as_str()) && row.offers_menu())
-            .then(|| deferred(self.row_menu(row, a, cx)).with_priority(1));
+            .then(|| deferred(self.row_menu(row, fixes, a, cx)).with_priority(1));
         card(a)
             .relative()
             .p(px(SPACE[2]))

@@ -28,6 +28,10 @@ pub mod replication;
 pub mod secrets;
 #[cfg(target_os = "macos")]
 pub mod secrets_view;
+pub mod tool_runs;
+pub mod tool_updates;
+#[cfg(target_os = "macos")]
+mod tool_updates_view;
 pub mod updates;
 mod updates_state;
 #[cfg(target_os = "macos")]
@@ -67,6 +71,8 @@ mod promote_tests;
 mod replication_tests;
 #[cfg(test)]
 mod secrets_tests;
+#[cfg(test)]
+mod tool_updates_tests;
 #[cfg(test)]
 mod updates_state_tests;
 #[cfg(test)]

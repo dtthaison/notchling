@@ -20,6 +20,13 @@ pub struct MacSide {
 }
 
 impl MacSide {
+    pub fn usable(&self, tool: Tool) -> Option<Version> {
+        self.tools
+            .get(&tool)
+            .filter(|t| t.usable)
+            .and_then(|t| t.reference.clone())
+    }
+
     pub fn compare_with(&self) -> BTreeMap<Tool, Version> {
         self.tools
             .iter()

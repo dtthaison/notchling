@@ -13,15 +13,24 @@ use notchling_locale as t;
 use super::model::{ClusterModel, NodeRow};
 use crate::machines::runs::AdminAsks;
 
-fn machine_of<'a>(
+pub(super) fn machine_of<'a>(
     row: &NodeRow,
+    rows: &[NodeRow],
     machines: &'a [Machine],
     node_of: &dyn Fn(&str) -> Option<String>,
 ) -> Option<&'a Machine> {
-    machines
+    if let Some(bound) = machines
         .iter()
         .find(|m| node_of(&m.name).as_deref() == Some(row.id.as_str()))
-        .or_else(|| machines.iter().find(|m| m.name == row.name))
+    {
+        return Some(bound);
+    }
+    let mut named = machines.iter().filter(|m| m.name == row.name);
+    let (Some(only), None) = (named.next(), named.next()) else {
+        return None;
+    };
+    let alone = rows.iter().filter(|r| r.name == row.name).count() == 1;
+    (alone && node_of(&only.name).is_none()).then_some(only)
 }
 
 pub fn is_moving(model: &ClusterModel, row: &NodeRow) -> bool {
@@ -39,12 +48,11 @@ pub fn members(
     machines: &[Machine],
     node_of: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<MemberBuild> {
-    model
-        .rows()
-        .iter()
+    let all = model.rows();
+    all.iter()
         .filter(|row| row.active && !row.removed && !row.me)
         .map(|row| {
-            let name = machine_of(row, machines, node_of)
+            let name = machine_of(row, &all, machines, node_of)
                 .map(|m| m.name.clone())
                 .unwrap_or_else(|| row.name.clone());
             let (os, arch) = row
