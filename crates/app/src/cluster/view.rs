@@ -655,7 +655,7 @@ impl Render for ClusterSheetView {
             body = body.children(self.update_banner_row(&model, a, cx));
             body = body.children(self.waiting_block(&model, a, cx));
             let tools = self.tool_view(&model);
-            for row in model.rows() {
+            for row in tools.rows(&model) {
                 body = body.child(self.node_row(&row, &tools, a, cx));
             }
             body = body.children(self.not_joined_block(&model, a, cx));
@@ -684,6 +684,7 @@ impl Render for ClusterSheetView {
         let moving = self.move_overlay(&model, a, cx);
         let adding = self.add_overlay(window, a, cx);
         let updating = self.update_overlay(window, a, cx);
+        let login = self.login_overlay(a, cx);
         let vault_new = self.vault_overlay();
         let on: Handler<Self, SecretsEvent> =
             Rc::new(|this, event, cx| this.secrets_event(event, cx));
@@ -737,6 +738,7 @@ impl Render for ClusterSheetView {
             .children(moving)
             .children(adding)
             .children(updating)
+            .children(login)
             .children(vault_new)
             .part("Cluster View", a, cx)
     }

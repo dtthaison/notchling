@@ -1,8 +1,10 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use notchling_engine::vault::entry::VaultEntry;
+use notchling_engine::versions::Tool;
 use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event};
 use notchling_locale as t;
 use serde_json::{json, Value};
@@ -31,6 +33,33 @@ struct Shared {
     updates: Arc<UpdateSession>,
     runs: Arc<ToolRuns>,
     mac: Mutex<Option<MacSide>>,
+    reported: Mutex<BTreeMap<(String, String), (Value, i64)>>,
+}
+
+pub(super) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn tool_prints(member: &Value) -> BTreeMap<String, Value> {
+    let versions = member.get("versions").unwrap_or(&Value::Null);
+    let kinds = ["tools", "logins", "own_logins", "ownLogins"];
+    let mut keys: Vec<String> = Vec::new();
+    for kind in kinds {
+        if let Some(map) = versions.get(kind).and_then(Value::as_object) {
+            keys.extend(map.keys().cloned());
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys.into_iter()
+        .map(|key| {
+            let print = json!(kinds.map(|kind| versions.get(kind).and_then(|m| m.get(&key))));
+            (key, print)
+        })
+        .collect()
 }
 
 impl Shared {
@@ -42,6 +71,7 @@ impl Shared {
             adds: AddRuns::tied_to(generation.clone()),
             runs: Arc::new(ToolRuns::tied_to(generation.clone())),
             mac: Mutex::new(None),
+            reported: Mutex::new(BTreeMap::new()),
             generation,
             stop: AtomicBool::new(false),
             updates: Arc::new(UpdateSession::default()),
@@ -60,8 +90,40 @@ impl Shared {
         *self.last.lock().unwrap_or_else(|e| e.into_inner()) = status.clone();
     }
 
+    fn track(&self, status: &Value, now: i64) {
+        let Some(members) = status.get("members").and_then(Value::as_array) else {
+            return;
+        };
+        let mut reported = self.reported.lock().unwrap_or_else(|e| e.into_inner());
+        for member in members {
+            let Some(id) = member.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let mut prints = tool_prints(member);
+            for (node, key) in reported.keys() {
+                if node == id {
+                    prints.entry(key.clone()).or_insert(Value::Null);
+                }
+            }
+            for (key, print) in prints {
+                match reported.get_mut(&(id.to_owned(), key.clone())) {
+                    Some((old, at)) => {
+                        if *old != print {
+                            *old = print;
+                            *at = now;
+                        }
+                    }
+                    None => {
+                        reported.insert((id.to_owned(), key), (print, 0));
+                    }
+                }
+            }
+        }
+    }
+
     fn load(&self, status: &Value) {
         self.remember(status);
+        self.track(status, now_ms());
         let me = status.get("me").and_then(Value::as_str).unwrap_or("");
         let next = ClusterModel::from_status(status, me);
         self.adds.seen(&next);
@@ -245,6 +307,20 @@ impl ClusterFeed {
             .clone()
     }
 
+    #[cfg(test)]
+    pub(super) fn take_status(&self, status: &Value) {
+        self.shared.load(status);
+    }
+
+    pub fn reported_at(&self, node: &str, tool: Tool) -> Option<i64> {
+        self.shared
+            .reported
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(node.to_owned(), tool.name().to_owned()))
+            .map(|(_, at)| *at)
+    }
+
     pub fn with_mac(self, side: MacSide) -> ClusterFeed {
         self.shared.set_mac(Some(side));
         self
@@ -278,10 +354,14 @@ impl ClusterFeed {
         wire::token_of(&reply).ok_or_else(|| t::cluster::token_none().to_owned())
     }
 
-    pub fn refresh(&self) {
-        if let Ok(status) = self.send(&wire::status()) {
-            self.shared.load(&status);
-        }
+    pub fn refresh(&self) -> bool {
+        let read = match self.send(&wire::status()) {
+            Ok(status) => {
+                self.shared.load(&status);
+                true
+            }
+            Err(_) => false,
+        };
         if let Some(transport) = &self.transport {
             let side = transport
                 .call(ops::VERSIONS_GET, json!({}))
@@ -289,6 +369,7 @@ impl ClusterFeed {
                 .and_then(|reply| mac_side(&reply).ok());
             self.shared.set_mac(side);
         }
+        read
     }
 }
 

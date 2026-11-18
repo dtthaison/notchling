@@ -460,6 +460,12 @@ fn live_jobs(status: &Value) -> BTreeMap<String, usize> {
 }
 
 impl ClusterModel {
+    pub fn map_rows(&self, f: impl FnMut(NodeRow) -> NodeRow) -> ClusterModel {
+        let mut next = self.clone();
+        next.rows = self.rows.iter().cloned().map(f).collect();
+        next
+    }
+
     pub fn running_jobs(&self, node: &str) -> usize {
         self.live_jobs.get(node).copied().unwrap_or(0)
     }

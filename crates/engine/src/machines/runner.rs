@@ -1,17 +1,29 @@
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const TIMED_OUT: i32 = 124;
 pub const NOT_FOUND: i32 = 127;
 pub const REFUSED: i32 = 126;
+pub const CANCELLED: i32 = 130;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CommandResult {
     pub code: i32,
     pub out: String,
     pub err: String,
+}
+
+impl fmt::Debug for CommandResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommandResult")
+            .field("code", &self.code)
+            .field("out_bytes", &self.out.len())
+            .field("err_bytes", &self.err.len())
+            .finish()
+    }
 }
 
 impl CommandResult {
@@ -48,6 +60,7 @@ pub struct Call {
     pub stdin: Option<Vec<u8>>,
     pub timeout: Duration,
     pub on_output: Option<Arc<OutputSink>>,
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl fmt::Debug for Call {
@@ -71,6 +84,7 @@ impl Call {
             stdin: None,
             timeout,
             on_output: None,
+            cancel: None,
         }
     }
 
@@ -90,6 +104,11 @@ impl Call {
 
     pub fn cwd(mut self, dir: PathBuf) -> Call {
         self.cwd = Some(dir);
+        self
+    }
+
+    pub fn cancellable(mut self, flag: Arc<AtomicBool>) -> Call {
+        self.cancel = Some(flag);
         self
     }
 

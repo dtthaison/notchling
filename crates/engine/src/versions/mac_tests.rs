@@ -182,9 +182,43 @@ fn bin_entries_cannot_leave_the_package() {
         r#"{"version":"0.166.0","bin":"../../../../outside"}"#,
         "x",
     );
+    assert!(run(&dir, Tool::Codex).is_none());
+}
+
+#[test]
+fn a_manifest_without_its_binary_is_not_an_install() {
+    let dir = TempDir::new("mac-leftover");
+    dir.write(
+        ".codex/packages/standalone/releases/0.118.0/codex-package.json",
+        r#"{"version":"0.118.0"}"#,
+    );
+    assert!(run(&dir, Tool::Codex).is_none());
+    dir.write(
+        ".npm-global/lib/node_modules/@openai/codex/package.json",
+        r#"{"version":"0.118.0","bin":"bin/codex.js"}"#,
+    );
+    assert!(run(&dir, Tool::Codex).is_none());
+    dir.write("opt/homebrew/Caskroom/codex/0.118.0/.metadata", "x");
+    assert!(run(&dir, Tool::Codex).is_none());
+    dir.write("opt/homebrew/Caskroom/codex/0.118.0/codex", "bin");
     let found = run(&dir, Tool::Codex).unwrap();
-    assert!(found.identity.is_none());
-    assert!(!found.path.contains(".."));
+    assert_eq!(found.method, Method::Brew);
+}
+
+#[test]
+fn a_folder_with_its_binary_beats_a_leftover_manifest() {
+    let dir = TempDir::new("mac-leftover-newer");
+    dir.write(
+        ".codex/packages/standalone/releases/0.170.0/codex-package.json",
+        r#"{"version":"0.170.0"}"#,
+    );
+    dir.write(
+        ".codex/packages/standalone/releases/0.166.0/codex-package.json",
+        r#"{"version":"0.166.0"}"#,
+    );
+    dir.write(".codex/packages/standalone/releases/0.166.0/codex", "bin");
+    let found = run(&dir, Tool::Codex).unwrap();
+    assert_eq!(found.version.unwrap().as_str(), "0.166.0");
 }
 
 #[test]
@@ -259,4 +293,24 @@ fn detect_starts_nothing() {
     }
     let _ = watch_paths(&roots);
     assert!(!ran.exists());
+}
+
+#[test]
+fn a_cask_with_its_binary_under_bin_is_an_install() {
+    let dir = TempDir::new("mac-cask-bin");
+    dir.write("opt/homebrew/Caskroom/codex/0.169.1/bin/codex", "bin");
+    let found = run(&dir, Tool::Codex).unwrap();
+    assert_eq!(found.method, Method::Brew);
+    assert_eq!(found.version.unwrap().as_str(), "0.169.1");
+    assert!(found.path.ends_with("0.169.1/bin/codex"));
+    assert!(found.identity.is_some());
+}
+
+#[test]
+fn the_newest_cask_folder_with_a_binary_wins_over_a_newer_empty_one() {
+    let dir = TempDir::new("mac-cask-empty-newer");
+    dir.write("opt/homebrew/Caskroom/codex/0.166.0/bin/codex", "bin");
+    dir.write("opt/homebrew/Caskroom/codex/0.170.0/.metadata", "x");
+    let found = run(&dir, Tool::Codex).unwrap();
+    assert_eq!(found.version.unwrap().as_str(), "0.166.0");
 }

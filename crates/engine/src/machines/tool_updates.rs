@@ -55,7 +55,7 @@ impl SetupEngine {
         Ok(tools)
     }
 
-    fn remember_tools(&self, machine: &str, tools: &WorkerTools) {
+    pub(super) fn remember_tools(&self, machine: &str, tools: &WorkerTools) {
         {
             lock(&self.state)
                 .tools_known

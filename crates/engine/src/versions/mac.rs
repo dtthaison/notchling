@@ -199,16 +199,19 @@ fn npm(roots: &Roots, scope: &str, package: &str, command: &str) -> Option<Found
             .get("version")
             .and_then(|v| v.as_str())
             .and_then(Version::parse);
-        let bin = bin_entry(&json, command)
+        let Some(bin) = bin_entry(&json, command)
             .filter(|b| !b.contains("..") && !b.starts_with('/'))
-            .map(|b| dir.join(b));
-        let path = bin.clone().unwrap_or_else(|| dir.join("package.json"));
+            .map(|b| dir.join(b))
+            .filter(|b| b.is_file())
+        else {
+            continue;
+        };
         return Some(Found {
             version,
             expected_version: true,
             method: Method::Npm,
-            path,
-            identity_path: bin,
+            path: bin.clone(),
+            identity_path: Some(bin),
         });
     }
     None
@@ -239,18 +242,24 @@ fn cask(roots: &Roots, name: &str, command: &str) -> Option<Found> {
             let newest = sorted_names(&base)
                 .into_iter()
                 .filter_map(|n| Version::parse(&n).map(|v| (v, n)))
-                .max();
-            let Some((version, dir_name)) = newest else {
+                .filter_map(|(v, n)| {
+                    let dir = base.join(&n);
+                    [command.to_string(), format!("bin/{command}")]
+                        .iter()
+                        .map(|rel| dir.join(rel))
+                        .find(|p| p.is_file())
+                        .map(|binary| (v, binary))
+                })
+                .max_by(|a, b| a.0.cmp(&b.0));
+            let Some((version, binary)) = newest else {
                 continue;
             };
-            let binary = base.join(&dir_name).join(command);
-            let identity_path = binary.is_file().then(|| binary.clone());
             return Some(Found {
                 version: Some(version),
                 expected_version: true,
                 method: Method::Brew,
-                path: binary,
-                identity_path,
+                path: binary.clone(),
+                identity_path: Some(binary),
             });
         }
     }
@@ -272,9 +281,16 @@ fn codex_standalone(roots: &Roots) -> Option<Found> {
             folders.push(dir);
         }
     }
-    let mut best: Option<(Option<Version>, PathBuf)> = None;
+    let mut best: Option<(Option<Version>, PathBuf, PathBuf)> = None;
     for folder in folders {
         let Some(json) = read_json(&folder.join("codex-package.json")) else {
+            continue;
+        };
+        let Some(binary) = ["codex", "bin/codex"]
+            .iter()
+            .map(|rel| folder.join(rel))
+            .find(|p| p.is_file())
+        else {
             continue;
         };
         let version = json
@@ -283,23 +299,19 @@ fn codex_standalone(roots: &Roots) -> Option<Found> {
             .and_then(Version::parse);
         let better = match &best {
             None => true,
-            Some((current, _)) => version > *current,
+            Some((current, _, _)) => version > *current,
         };
         if better {
-            best = Some((version, folder));
+            best = Some((version, folder, binary));
         }
     }
-    let (version, folder) = best?;
-    let binary = ["codex", "bin/codex"]
-        .iter()
-        .map(|rel| folder.join(rel))
-        .find(|p| p.is_file());
+    let (version, _, binary) = best?;
     Some(Found {
         version,
         expected_version: true,
         method: Method::Standalone,
-        path: binary.clone().unwrap_or(folder),
-        identity_path: binary,
+        path: binary.clone(),
+        identity_path: Some(binary),
     })
 }
 

@@ -15,6 +15,7 @@ pub mod soak;
 pub mod update;
 mod version;
 pub mod worker;
+pub mod worker_install;
 pub mod worker_update;
 
 #[cfg(test)]
@@ -49,6 +50,8 @@ mod soak_tests;
 mod update_tests;
 #[cfg(test)]
 mod version_tests;
+#[cfg(test)]
+mod worker_install_tests;
 #[cfg(test)]
 mod worker_tests;
 #[cfg(test)]

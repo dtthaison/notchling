@@ -343,3 +343,65 @@ pub fn counting_fix(
         }
     }))
 }
+
+pub const NODE: &str = "0123456789abcdef";
+
+pub struct GuardKnobs {
+    pub node: Arc<Mutex<Option<String>>>,
+    pub busy: Arc<Mutex<Option<usize>>>,
+    pub node_exit: Arc<Mutex<i32>>,
+    pub busy_exit: Arc<Mutex<i32>>,
+    pub node_extra: Arc<Mutex<bool>>,
+    pub trip: Arc<Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>>,
+}
+
+pub fn guard_rules(runner: &ScriptedRunner) -> GuardKnobs {
+    let node = Arc::new(Mutex::new(Some(NODE.to_string())));
+    let busy = Arc::new(Mutex::new(Some(0usize)));
+    let node_exit = Arc::new(Mutex::new(0));
+    let busy_exit = Arc::new(Mutex::new(0));
+    let node_extra = Arc::new(Mutex::new(false));
+    let trip: Arc<Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>> = Arc::new(Mutex::new(None));
+    let (n, e, x, t) = (
+        node.clone(),
+        node_exit.clone(),
+        node_extra.clone(),
+        trip.clone(),
+    );
+    runner.on_call(
+        |argv| {
+            argv.last()
+                .is_some_and(|s| s.contains("cluster status --json"))
+        },
+        move |_| {
+            if let Some(flag) = lock(&t).as_ref() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            let code = *lock(&e);
+            let extra = if *lock(&x) { "trailing words\n" } else { "" };
+            match lock(&n).clone() {
+                Some(id) => CommandResult::new(code, &format!("{{\"me\":\"{id}\"}}\n{extra}"), ""),
+                None => CommandResult::new(1, "", "no daemon"),
+            }
+        },
+    );
+    let (b, e) = (busy.clone(), busy_exit.clone());
+    runner.on_call(
+        |argv| argv.last().is_some_and(|s| s.contains("busy=")),
+        move |_| {
+            let code = *lock(&e);
+            match *lock(&b) {
+                Some(count) => CommandResult::new(code, &format!("busy={count}\n"), ""),
+                None => CommandResult::new(1, "", "ps: not found"),
+            }
+        },
+    );
+    GuardKnobs {
+        node,
+        busy,
+        node_exit,
+        busy_exit,
+        node_extra,
+        trip,
+    }
+}

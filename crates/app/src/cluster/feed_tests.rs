@@ -7,13 +7,14 @@ use notchling_local_api::{
 };
 use serde_json::{json, Value};
 
-use super::feed::{carried, ClusterFeed};
+use super::feed::{carried, now_ms, ClusterFeed};
 use super::renders::{moving, replication, status, ME, STANDBY};
 use super::wire;
 use crate::actions::Transport;
 use crate::session_source::Backoff;
 use crate::switches::feed::FeedConfig;
 use crate::testutil::Scratch;
+use notchling_engine::versions::Tool;
 use notchling_local_api::{Client, ClientError, ClientKind, ConnectOptions};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -201,6 +202,34 @@ fn a_join_goes_to_the_daemon_and_an_error_never_carries_the_token() {
     drop(feed);
     handle.shutdown();
     let _ = thread.join();
+}
+
+#[test]
+fn the_feed_stamps_a_tool_or_login_only_when_it_changes_after_first_sight() {
+    let with = |codex: &str, claude: &str, clock: &str| {
+        let mut next = status();
+        let member = next["members"]
+            .as_array_mut()
+            .and_then(|m| m.iter_mut().find(|m| m["id"] == STANDBY))
+            .expect("standby");
+        member["versions"]["tools"] = json!({"codex": codex, "claude": claude});
+        member["versions"]["notchling"] = json!(clock);
+        next
+    };
+    let feed = ClusterFeed::none();
+    assert_eq!(feed.reported_at(STANDBY, Tool::Codex), None);
+    feed.take_status(&with("0.118.0", "2.1.0", "1"));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Codex), Some(0));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Claude), Some(0));
+    feed.take_status(&with("0.118.0", "2.1.0", "2"));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Codex), Some(0));
+    let before = now_ms();
+    feed.take_status(&with("0.166.0", "2.1.0", "2"));
+    assert!(feed
+        .reported_at(STANDBY, Tool::Codex)
+        .is_some_and(|at| at >= before));
+    assert_eq!(feed.reported_at(STANDBY, Tool::Claude), Some(0));
+    assert_eq!(feed.reported_at("nobody", Tool::Codex), None);
 }
 
 #[test]

@@ -319,6 +319,7 @@ impl ClusterSheetView {
             );
             body = body.children(note);
         }
+        body = body.children(self.setup_lines(fixes, row, a, cx));
         body = body.children(self.tool_run_line(fixes, row, a, cx));
         let menu = (self.menu.as_deref() == Some(row.id.as_str()) && row.offers_menu())
             .then(|| deferred(self.row_menu(row, fixes, a, cx)).with_priority(1));

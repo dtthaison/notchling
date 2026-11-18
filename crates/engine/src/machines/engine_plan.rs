@@ -4,6 +4,7 @@ use super::registry::{AdminAccess, Machine};
 
 use super::shell;
 use super::step::{FixOutcome, SetupStep, StepFix, StepId};
+use super::tool_installs::ToolInstall;
 use super::tool_updates::ToolMove;
 use super::usage::SecretUsage;
 use crate::accounts::Secret;
@@ -21,6 +22,7 @@ pub enum PlanKind {
     Update(String),
     UpdateNotchling(Vec<String>),
     UpdateTools(Vec<ToolMove>),
+    InstallTool(ToolInstall),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -249,6 +251,7 @@ impl SetupEngine {
                 self.update_notchling(names, &plan.steps, ask_admin)
             }
             PlanKind::UpdateTools(moves) => self.update_tools(&plan.machine, moves, &plan.steps),
+            PlanKind::InstallTool(want) => self.install_tool(&plan.machine, want, &plan.steps),
             PlanKind::SetUpAll => fail("Set up all runs on its own"),
         }
     }
@@ -315,6 +318,9 @@ impl SetupEngine {
         }
         if let PlanKind::UpdateTools(moves) = kind {
             return self.update_tools_plan(machine, moves);
+        }
+        if let PlanKind::InstallTool(want) = kind {
+            return self.install_tool_plan(machine, want);
         }
         let m = self
             .machine(machine)
@@ -415,9 +421,10 @@ impl SetupEngine {
                 let a = self.delivery_step(usage, format!("Send {} again", usage.name))?;
                 Ok(shown(&m, a.title.clone(), vec![a], AdminNeed::None))
             }
-            PlanKind::Update(_) | PlanKind::UpdateNotchling(_) | PlanKind::UpdateTools(_) => {
-                Err("unreachable".into())
-            }
+            PlanKind::Update(_)
+            | PlanKind::UpdateNotchling(_)
+            | PlanKind::UpdateTools(_)
+            | PlanKind::InstallTool(_) => Err("unreachable".into()),
         }
     }
 
