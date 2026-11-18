@@ -37,16 +37,16 @@ settings-section-keep-mac-awake = Keep Mac Awake
 # Section title on the General page: the notch.
 settings-section-notch = Notch
 
-# Section title on the General page: settings for Claude Code.
+# Section title on the Claude Code tab of the Agents page: settings for Claude Code.
 settings-section-claude-code = { -brand-claude-code }
 
-# Section title on the General page: what happens when the account in use nears its usage limit.
+# Section title on the Agents page, above the tool tabs: what happens when the account in use nears its usage limit.
 settings-section-account-limit = When the Account in Use Nears Its Limit
 
-# Section title on the General page: settings for Codex.
+# Section title on the Codex tab of the Agents page: settings for Codex.
 settings-section-codex = { -brand-codex }
 
-# Section title on the General page: settings for Antigravity.
+# Section title on the Antigravity tab of the Agents page: settings for Antigravity.
 settings-section-antigravity = { -brand-antigravity }
 
 # Section title on the General page: the Chat window.

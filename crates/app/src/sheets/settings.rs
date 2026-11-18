@@ -2,6 +2,7 @@ use notchling_engine::settings::spec;
 use notchling_locale::{self as t, Text};
 use serde_json::{json, Value};
 
+use super::agents::Tool;
 use crate::acting::Acting;
 use crate::appearance;
 use crate::chat::history;
@@ -202,12 +203,7 @@ fn choice(
     }
 }
 
-pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
-    let mut show_notch = toggle(read, "hideNotch", t::settings::hide_notch());
-    if let Field::Toggle { on, inverted } = &mut show_notch.field {
-        *on = !*on;
-        *inverted = true;
-    }
+fn limit_section(read: &dyn Fn(&str) -> Option<Value>) -> Section {
     let switching = ["limitMode", "codexLimitMode", "antigravityLimitMode"]
         .iter()
         .any(|k| {
@@ -250,6 +246,69 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
                 max,
             },
         });
+    }
+    Section {
+        title: t::settings::section_account_limit(),
+        rows: limits,
+        footer: Some(t::settings::footer_account_limit()),
+    }
+}
+
+pub fn shared_agent_sections(read: &dyn Fn(&str) -> Option<Value>) -> Vec<Section> {
+    vec![limit_section(read)]
+}
+
+pub fn tool_sections(tool: Tool, read: &dyn Fn(&str) -> Option<Value>) -> Vec<Section> {
+    match tool {
+        Tool::ClaudeCode => vec![Section {
+            title: t::settings::section_claude_code(),
+            rows: vec![
+                toggle(read, "answerFromNotch", t::settings::answer_from_notch()),
+                toggle(read, "keepPages", t::settings::keep_pages()),
+            ],
+            footer: None,
+        }],
+        Tool::Codex => vec![Section {
+            title: t::settings::section_codex(),
+            rows: vec![toggle(read, "codexNetwork", t::settings::codex_network())],
+            footer: None,
+        }],
+        Tool::Antigravity => vec![Section {
+            title: t::settings::section_antigravity(),
+            rows: vec![
+                choice(
+                    read,
+                    "antigravityChannel",
+                    t::settings::antigravity_channel(),
+                    &ANTIGRAVITY_CHANNELS,
+                ),
+                choice(
+                    read,
+                    "antigravityRemoteIn",
+                    t::settings::antigravity_remote_in(),
+                    &REMOTE_PLACES,
+                ),
+            ],
+            footer: Some(t::settings::footer_antigravity()),
+        }],
+    }
+}
+
+#[cfg(test)]
+pub fn every_section(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
+    let mut all = sections(read, daemon);
+    all.extend(shared_agent_sections(read));
+    for tool in Tool::ALL {
+        all.extend(tool_sections(tool, read));
+    }
+    all
+}
+
+pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
+    let mut show_notch = toggle(read, "hideNotch", t::settings::hide_notch());
+    if let Field::Toggle { on, inverted } = &mut show_notch.field {
+        *on = !*on;
+        *inverted = true;
     }
     vec![
         Section {
@@ -318,42 +377,6 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             footer: None,
         },
         Section {
-            title: t::settings::section_claude_code(),
-            rows: vec![
-                toggle(read, "answerFromNotch", t::settings::answer_from_notch()),
-                toggle(read, "keepPages", t::settings::keep_pages()),
-            ],
-            footer: None,
-        },
-        Section {
-            title: t::settings::section_account_limit(),
-            rows: limits,
-            footer: Some(t::settings::footer_account_limit()),
-        },
-        Section {
-            title: t::settings::section_codex(),
-            rows: vec![toggle(read, "codexNetwork", t::settings::codex_network())],
-            footer: None,
-        },
-        Section {
-            title: t::settings::section_antigravity(),
-            rows: vec![
-                choice(
-                    read,
-                    "antigravityChannel",
-                    t::settings::antigravity_channel(),
-                    &ANTIGRAVITY_CHANNELS,
-                ),
-                choice(
-                    read,
-                    "antigravityRemoteIn",
-                    t::settings::antigravity_remote_in(),
-                    &REMOTE_PLACES,
-                ),
-            ],
-            footer: Some(t::settings::footer_antigravity()),
-        },
-        Section {
             title: t::settings::section_chat(),
             rows: vec![choice(
                 read,
@@ -401,7 +424,7 @@ mod tests {
     }
 
     fn rows_of(read: &dyn Fn(&str) -> Option<Value>, acting: Acting) -> Vec<Row> {
-        sections(read, &with(acting))
+        every_section(read, &with(acting))
             .into_iter()
             .flat_map(|s| s.rows)
             .collect()
@@ -582,10 +605,6 @@ mod tests {
                 "Daemon",
                 "Keep Mac Awake",
                 "Notch",
-                "Claude Code",
-                "When the Account in Use Nears Its Limit",
-                "Codex",
-                "Antigravity",
                 "Chat"
             ]
         );

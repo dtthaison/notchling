@@ -5,7 +5,7 @@ use notchling_kit::ui::{card, hsla, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::capabilities::{parts, CapabilityRow};
+use super::capabilities::{rows, CapabilityRow};
 
 fn tag(text: &str, a: Appearance) -> Div {
     div()
@@ -55,17 +55,16 @@ fn block(tool: Tool, rows: &[CapabilityRow], a: Appearance) -> Div {
         )
 }
 
-pub fn capabilities_section(a: Appearance, cx: &App) -> Div {
+pub fn capabilities_section(tool: Tool, a: Appearance, cx: &App) -> Div {
     let mut section = div().flex().flex_col().gap(px(10.0)).child(label(
         t::settings::capabilities_title(),
         TypeRole::Section,
         Ink::TextFaint,
         a,
     ));
-    for (tool, rows) in parts() {
-        if !rows.is_empty() {
-            section = section.child(block(tool, &rows, a));
-        }
+    let rows = rows(tool);
+    if !rows.is_empty() {
+        section = section.child(block(tool, &rows, a));
     }
     section
         .child(label(

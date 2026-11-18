@@ -23,11 +23,14 @@ use super::client_model::{self, ClientPart};
 use super::client_view::ClientHandlers;
 use super::hook_rows::HooksShown;
 use super::models_rows::ModelsShown;
-use super::settings::{change, sections, Daemon, Field, Row};
+use super::settings::{
+    change, sections, shared_agent_sections, tool_sections, Daemon, Field, Row, Section,
+};
 use super::settings_skills_view::{skills_page, SkillsHandlers, SkillsPageState};
 use super::skills_models;
 use super::skills_rows::{reinstall_result, SkillsShown};
 use super::view::{sheet_header, Acts, Dismiss};
+use crate::accounts::view_rows::{segmented, Handler};
 use crate::activity::view::ActivityView;
 mod cluster;
 mod shortcut;
@@ -125,6 +128,21 @@ impl SettingsView {
 
     pub fn with_page(mut self, page: Page) -> SettingsView {
         self.page = page;
+        self
+    }
+
+    pub fn with_tool(mut self, tool: Tool) -> SettingsView {
+        self.tool = tool;
+        self
+    }
+
+    pub fn with_values(mut self, values: Map<String, Value>) -> SettingsView {
+        self.values.extend(values);
+        self
+    }
+
+    pub fn with_sidecar(mut self, shown: Option<super::sidecar_rows::Shown>) -> SettingsView {
+        self.sidecar_shown(shown);
         self
     }
 
@@ -484,6 +502,74 @@ impl SettingsView {
             }))
     }
 
+    fn tool_tabs(&self, a: Appearance, cx: &mut Context<Self>) -> Div {
+        let options: Vec<(String, String)> = Tool::ALL
+            .iter()
+            .map(|t| (t.id().to_owned(), t.title().to_owned()))
+            .collect();
+        let pick: Handler<SettingsView, String> = Rc::new(|this, id, cx| {
+            if let Some(tool) = Tool::from_id(&id) {
+                this.tool = tool;
+                cx.notify();
+            }
+        });
+        let strip = segmented("settings-tool", &options, self.tool.id(), a, cx, pick);
+        strip.part("Settings Agent Tabs", a, cx)
+    }
+
+    fn section_view(
+        &self,
+        section: &Section,
+        n: &mut usize,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut rows = card(a).flex().flex_col();
+        for (k, row) in section.rows.iter().enumerate() {
+            *n += 1;
+            let note = match &row.field {
+                Field::ReadOnly {
+                    note: Some(note), ..
+                } => Some(label(&sentence(note), TypeRole::Meta, Ink::TextFaint, a)),
+                Field::Shortcut(_) => self.shortcut_note(a, cx),
+                _ => None,
+            };
+            rows = rows.child(
+                div()
+                    .px(px(14.0))
+                    .py(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .when(k > 0, |r| {
+                        r.border_t(px(1.0))
+                            .border_color(hsla(Ink::Hairline.color(a)))
+                    })
+                    .child(
+                        div()
+                            .min_h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
+                            .child(label(row.title, TypeRole::Body, Ink::Text, a).flex_1())
+                            .child(self.field(row, *n, a, cx)),
+                    )
+                    .children(note),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(label(section.title, TypeRole::Section, Ink::TextFaint, a))
+            .child(rows)
+            .children(
+                section
+                    .footer
+                    .map(|f| label(f, TypeRole::Meta, Ink::TextFaint, a)),
+            )
+    }
+
     fn field(&self, row: &Row, i: usize, a: Appearance, cx: &mut Context<Self>) -> Div {
         let id = |part: &str| SharedString::from(format!("setting-{i}-{part}"));
         match &row.field {
@@ -612,64 +698,28 @@ impl Render for SettingsView {
         } else {
             Vec::new()
         };
-        for (at, section) in general.into_iter().enumerate() {
-            let mut rows = card(a).flex().flex_col();
-            for (k, row) in section.rows.iter().enumerate() {
-                n += 1;
-                let note = match &row.field {
-                    Field::ReadOnly {
-                        note: Some(note), ..
-                    } => Some(label(&sentence(note), TypeRole::Meta, Ink::TextFaint, a)),
-                    Field::Shortcut(_) => self.shortcut_note(a, cx),
-                    _ => None,
-                };
-                rows = rows.child(
-                    div()
-                        .px(px(14.0))
-                        .py(px(8.0))
-                        .flex()
-                        .flex_col()
-                        .gap(px(4.0))
-                        .when(k > 0, |r| {
-                            r.border_t(px(1.0))
-                                .border_color(hsla(Ink::Hairline.color(a)))
-                        })
-                        .child(
-                            div()
-                                .min_h(px(24.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(12.0))
-                                .child(label(row.title, TypeRole::Body, Ink::Text, a).flex_1())
-                                .child(self.field(row, n, a, cx)),
-                        )
-                        .children(note),
-                );
-            }
-            list = list.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.0))
-                    .child(label(section.title, TypeRole::Section, Ink::TextFaint, a))
-                    .child(rows)
-                    .children(
-                        section
-                            .footer
-                            .map(|f| label(f, TypeRole::Meta, Ink::TextFaint, a)),
-                    ),
-            );
-            if section.title == t::settings::section_antigravity() {
-                list = list.children(self.sidecar_section(a, cx));
-            }
+        for (at, section) in general.iter().enumerate() {
+            list = list.child(self.section_view(section, &mut n, a, cx));
             if at == CLUSTER_AFTER {
                 list = list.children(self.cluster_section(a, cx));
             }
         }
         if self.page == Page::Agents {
+            for section in shared_agent_sections(&read) {
+                list = list.child(self.section_view(&section, &mut n, a, cx));
+            }
+            list = list.child(self.tool_tabs(a, cx));
+            let mut settings = Vec::new();
+            for section in tool_sections(self.tool, &read) {
+                settings.push(self.section_view(&section, &mut n, a, cx));
+                if self.tool == Tool::Antigravity {
+                    settings.extend(self.sidecar_section(a, cx));
+                }
+            }
             let handlers = self.client_handlers(cx);
             list = list.child(agents_page(
                 self.tool,
+                settings,
                 &self.hooks,
                 self.client.as_ref(),
                 &handlers,

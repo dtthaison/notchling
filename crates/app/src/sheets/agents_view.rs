@@ -12,6 +12,8 @@ use super::settings_hooks_view::hooks_section;
 fn mark(tool: Tool) -> ToolMark {
     match tool {
         Tool::ClaudeCode => ToolMark::Claude,
+        Tool::Codex => ToolMark::Codex,
+        Tool::Antigravity => ToolMark::Antigravity,
     }
 }
 
@@ -26,6 +28,7 @@ fn header(tool: Tool, a: Appearance) -> Div {
 
 pub fn agents_page(
     tool: Tool,
+    settings: Vec<Div>,
     hooks: &HooksShown,
     client: Option<&ClientPart>,
     handlers: &ClientHandlers,
@@ -33,12 +36,14 @@ pub fn agents_page(
     cx: &App,
 ) -> Div {
     let mut page = div().flex().flex_col().gap(px(14.0)).child(header(tool, a));
+    let mut settings = Some(settings);
     for section in tool.sections() {
-        page = page.child(match section {
-            Section::Client => client_section(client, handlers, a, cx),
-            Section::Hooks => hooks_section(hooks, a, cx),
-        });
+        page = match section {
+            Section::Settings => page.children(settings.take().unwrap_or_default()),
+            Section::Client => page.child(client_section(client, handlers, a, cx)),
+            Section::Hooks => page.child(hooks_section(hooks, a, cx)),
+            Section::Capabilities => page.child(capabilities_section(tool.contract(), a, cx)),
+        };
     }
-    page.child(capabilities_section(a, cx))
-        .part("Agents Page", a, cx)
+    page.part("Agents Page", a, cx)
 }

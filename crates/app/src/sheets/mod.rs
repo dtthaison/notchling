@@ -40,6 +40,8 @@ mod settings_cluster_tests;
 pub mod settings_hooks_view;
 #[cfg(target_os = "macos")]
 pub mod settings_skills_view;
+#[cfg(test)]
+mod settings_tabs_tests;
 #[cfg(target_os = "macos")]
 pub mod settings_view;
 #[cfg(test)]

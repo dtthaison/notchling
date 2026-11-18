@@ -19,6 +19,10 @@ pub struct SidecarUi {
 }
 
 impl SettingsView {
+    pub(super) fn sidecar_shown(&mut self, shown: Option<Shown>) {
+        self.sidecar.shown = shown;
+    }
+
     pub fn ask_sidecar(&mut self, cx: &mut Context<Self>) {
         let actions = self.acts.actions.clone();
         cx.spawn(async move |this, cx| {
