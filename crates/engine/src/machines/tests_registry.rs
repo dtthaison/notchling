@@ -166,7 +166,7 @@ fn v1_migrates_every_field_and_keeps_a_byte_identical_backup() {
         V1_TEXT.as_bytes()
     );
     let text = doc(&reg).unwrap();
-    assert!(text.contains("\"version\": 2"), "{text}");
+    assert!(text.contains("\"version\": 3"), "{text}");
     assert!(
         !reg.old_own.exists(),
         "the old file moved into the database"
@@ -289,7 +289,7 @@ fn an_unreadable_registry_is_never_overwritten() {
 fn unknown_version_or_job_kind_is_unreadable() {
     let dir = TempDir::new("reg");
     let cases = [
-        ("v3", r#"{"version":3,"machines":[]}"#),
+        ("v4", r#"{"version":4,"machines":[]}"#),
         (
             "kind",
             r#"{"version":2,"machines":[{"name":"m","host":"m","user":"u","jobs":[{"kind":"triage-bot"}]}]}"#,
@@ -357,7 +357,7 @@ fn v2_fields_may_be_missing_except_name_host_user() {
 }
 
 #[test]
-fn save_writes_when_missing_and_round_trips_v2() {
+fn save_writes_when_missing_and_round_trips_v3() {
     let dir = TempDir::new("reg");
     let reg = registry(&dir, "data");
     let mut worker = SdWorkerSettings::new("vps-sing-1");
@@ -396,7 +396,7 @@ fn save_writes_when_missing_and_round_trips_v2() {
     assert_eq!(reg.all(), vec![m.clone()]);
     assert_eq!(m.python(), "/usr/bin/python3.12");
     let text = doc(&reg).unwrap();
-    assert!(text.contains("\"version\": 2"));
+    assert!(text.contains("\"version\": 3"));
     assert!(text.find("\"admin\"").unwrap() < text.find("\"claudeSecret\"").unwrap());
     assert!(
         text.contains("\"root-ssh\"")
@@ -587,7 +587,7 @@ fn two_first_loads_of_a_v1_registry_migrate_it_once() {
         };
         assert_eq!(machine_names(machines), vec!["m1", "vps-sing-1"]);
     }
-    assert!(doc(&reg).unwrap().contains("\"version\": 2"));
+    assert!(doc(&reg).unwrap().contains("\"version\": 3"));
     assert_eq!(
         std::fs::read(backup_path(&reg.old_own)).unwrap(),
         V1_TEXT.as_bytes()

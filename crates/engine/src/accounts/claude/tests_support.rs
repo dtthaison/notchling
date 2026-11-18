@@ -159,6 +159,7 @@ impl World {
             email: email(n),
             plan: "Max 5x".into(),
             needs_login: false,
+            organization: None,
         });
         self.store.save_list(&list).unwrap();
     }

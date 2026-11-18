@@ -293,6 +293,7 @@ fn a_saved_account_that_is_not_live_is_read_from_its_saved_copy() {
         id: "user-2:ws-2".into(),
         email: "b@example.com".into(),
         plan: None,
+        organization: None,
     });
     crate::accounts::book::write_accounts(&file, &book);
     let rig2 = Rig::at(

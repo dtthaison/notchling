@@ -60,6 +60,7 @@ fn every_doc_constant_has_a_class() {
         OFFERS_DOC,
         REGISTRY_DOC,
         INDEX_DOC,
+        crate::organizations::DOC,
     ] {
         assert_eq!(doc_class(name), Some(Class::Node), "{name}");
     }

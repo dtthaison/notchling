@@ -38,6 +38,7 @@ fn the_old_list_file_is_read_then_moved_into_the_database_by_the_first_save() {
             email: email(5),
             plan: "Pro".into(),
             needs_login: false,
+            organization: None,
         }])
         .unwrap(),
     );
@@ -65,6 +66,7 @@ fn two_stores_saving_at_once_leave_one_readable_list() {
             email: email(n),
             plan: "Pro".into(),
             needs_login: false,
+            organization: None,
         }]
     };
     std::thread::scope(|scope| {
@@ -360,4 +362,25 @@ fn no_error_or_snapshot_carries_a_token() {
             "{text}"
         );
     }
+}
+
+#[test]
+fn a_sync_that_saves_the_account_again_keeps_its_organization() {
+    let w = World::new("acc-org-kept");
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    w.store.sync().unwrap();
+    let mut list = w.store.saved_list();
+    list[0].organization = Some("aptusfit".into());
+    w.store.save_list(&list).unwrap();
+
+    w.signed_in(1, 2);
+    w.answers_profile(1);
+    let snap = w.store.sync().unwrap();
+    assert_eq!(snap.accounts.len(), 1);
+    assert_eq!(snap.accounts[0].organization.as_deref(), Some("aptusfit"));
+    assert_eq!(
+        w.store.saved_list()[0].organization.as_deref(),
+        Some("aptusfit")
+    );
 }

@@ -223,6 +223,7 @@ impl AntigravityStore {
                     id: known.id.clone(),
                     email: known.email.clone(),
                     plan: None,
+                    organization: known.organization.clone(),
                 };
             }
         }

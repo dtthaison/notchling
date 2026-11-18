@@ -35,6 +35,7 @@ pub fn account_in(login: &str) -> Option<Saved> {
             id: format!("{EMAIL_ID_PREFIX}{}", email.to_lowercase()),
             email: email.to_string(),
             plan: None,
+            organization: None,
         });
     };
     let claims = jwt::claims(token)?;
@@ -47,6 +48,7 @@ pub fn account_in(login: &str) -> Option<Saved> {
             .unwrap_or("Google Account")
             .to_string(),
         plan: None,
+        organization: None,
     })
 }
 

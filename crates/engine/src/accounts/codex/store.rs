@@ -194,6 +194,7 @@ impl CodexStore {
                 id: who.id.clone(),
                 email: who.email.clone(),
                 plan: who.plan.clone(),
+                organization: None,
             }),
         }
         inner.active = Some(who.id.clone());
@@ -325,13 +326,17 @@ impl CodexStore {
             )));
         }
         let mut inner = lock(&self.inner);
-        let account = Saved {
+        let mut account = Saved {
             id: who.id,
             email: who.email,
             plan: who.plan,
+            organization: None,
         };
         match inner.accounts.iter_mut().find(|a| a.id == account.id) {
-            Some(existing) => *existing = account,
+            Some(existing) => {
+                account.organization = existing.organization.take();
+                *existing = account;
+            }
             None => inner.accounts.push(account),
         }
         let accounts = inner.accounts.clone();

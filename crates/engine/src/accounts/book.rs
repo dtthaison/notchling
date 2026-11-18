@@ -10,6 +10,7 @@ pub struct Saved {
     pub id: String,
     pub email: String,
     pub plan: Option<String>,
+    pub organization: Option<String>,
 }
 
 pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
@@ -25,6 +26,10 @@ pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
                         id: a.get("id")?.as_str()?.to_string(),
                         email: a.get("email")?.as_str()?.to_string(),
                         plan: a.get("plan").and_then(Value::as_str).map(str::to_string),
+                        organization: a
+                            .get("organization")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     })
                 })
                 .collect()
@@ -35,7 +40,13 @@ pub fn read_accounts(file: &DocFile) -> Vec<Saved> {
 pub fn write_accounts(file: &DocFile, accounts: &[Saved]) -> bool {
     let list: Vec<Value> = accounts
         .iter()
-        .map(|a| json!({"id": a.id, "email": a.email, "plan": a.plan}))
+        .map(|a| {
+            let mut entry = json!({"id": a.id, "email": a.email, "plan": a.plan});
+            if let Some(organization) = &a.organization {
+                entry["organization"] = json!(organization);
+            }
+            entry
+        })
         .collect();
     write_json(file, "accounts", &json!({"version": 1, "accounts": list}))
 }
@@ -82,11 +93,13 @@ mod tests {
                 id: "u:w".into(),
                 email: "a@example.com".into(),
                 plan: Some("Plus".into()),
+                organization: None,
             },
             Saved {
                 id: "x:y".into(),
                 email: "b@example.com".into(),
                 plan: None,
+                organization: None,
             },
         ]
     }

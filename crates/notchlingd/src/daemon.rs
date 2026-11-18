@@ -12,6 +12,8 @@ use crate::log_start;
 use crate::signals;
 use notchling_engine::bridge::net::ports as bridge_ports;
 use notchling_engine::logs::KeyStore;
+use notchling_engine::machines::roots::MachineRoots;
+use notchling_engine::organizations::Organizations;
 use notchling_engine::sessions::{config_dirs, Monitor, Probes};
 use notchling_events::kinds::choices::SwitchName;
 use notchling_events::kinds::security::{DaemonStopped, StopCause, SwitchCause, SwitchChanged};
@@ -222,6 +224,13 @@ impl Default for DaemonOptions {
     }
 }
 
+pub(crate) fn migrate_organizations(layout: &Layout) -> bool {
+    let registry = MachineRoots::in_data(&layout.data_dir).registry();
+    Organizations::new(&layout.data_dir)
+        .migrate(Some(&registry))
+        .is_ok()
+}
+
 pub fn run(
     layout: Layout,
     options: DaemonOptions,
@@ -242,6 +251,7 @@ pub fn run(
         }
         None => None,
     };
+    let _ = migrate_organizations(&layout);
     let allowlist = Allowlist::for_daemon(
         &installed_app_paths(),
         std::env::var_os(APP_TIER_PATHS_ENV).as_deref(),

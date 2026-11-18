@@ -239,3 +239,22 @@ fn the_socket_answers_while_the_keychain_is_blocked() {
     assert!(verified["sealing"].is_string(), "{verified}");
     assert!(began.elapsed() < Duration::from_secs(2));
 }
+
+#[test]
+fn the_first_start_makes_the_personal_organization_and_a_second_start_changes_nothing() {
+    use notchling_engine::organizations::{Organizations, State, PERSONAL_ID};
+    let daemon = Running::start("orgs", DaemonOptions::default(), false);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    let orgs = Organizations::new(&daemon.layout.data_dir);
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("no organizations document after the first start");
+    };
+    assert_eq!(doc.organizations.len(), 1);
+    assert_eq!(doc.organizations[0].id, PERSONAL_ID);
+    let text = notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap();
+    assert!(super::daemon::migrate_organizations(&daemon.layout));
+    assert_eq!(
+        notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap(),
+        text
+    );
+}

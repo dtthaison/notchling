@@ -40,6 +40,8 @@ pub struct VaultEntry {
     pub name: String,
     #[serde(default)]
     pub note: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
     #[serde(default, rename = "secretVar")]
     pub secret_var: String,
     #[serde(default)]
@@ -91,6 +93,7 @@ impl VaultEntry {
             kind,
             name: name.to_string(),
             note: String::new(),
+            organization: None,
             secret_var: secret,
             updated: String::new(),
             url: None,

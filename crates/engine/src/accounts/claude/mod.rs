@@ -41,6 +41,8 @@ pub struct ClaudeAccount {
     pub plan: String,
     #[serde(rename = "needsLogin", default)]
     pub needs_login: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -272,6 +274,7 @@ impl ClaudeAccounts {
             email: info.str("emailAddress").unwrap_or("Unknown").to_string(),
             plan: plan_name(&info, &login),
             needs_login: false,
+            organization: None,
         };
         upsert(&mut list, account.clone());
         self.save_list(&list)?;
@@ -361,6 +364,7 @@ impl ClaudeAccounts {
                 email: info.str("emailAddress").unwrap_or("Unknown").to_string(),
                 plan: plan_name(&info, &oauth),
                 needs_login: false,
+                organization: None,
             },
         );
         Ok(())
@@ -457,7 +461,13 @@ pub fn account_value(account: &ClaudeAccount) -> serde_json::Value {
 
 fn upsert(list: &mut Vec<ClaudeAccount>, account: ClaudeAccount) {
     match list.iter_mut().find(|a| a.id == account.id) {
-        Some(slot) => *slot = account,
+        Some(slot) => {
+            let organization = slot.organization.take();
+            *slot = account;
+            if slot.organization.is_none() {
+                slot.organization = organization;
+            }
+        }
         None => list.push(account),
     }
 }
