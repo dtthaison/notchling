@@ -53,6 +53,7 @@ mod steps_xcode;
 pub mod token_creation;
 pub mod token_scope;
 mod token_scope_net;
+pub mod tool_updates;
 pub mod usage;
 pub mod versions_facts;
 pub mod worker_json;
@@ -187,6 +188,8 @@ mod tests_token_scope;
 mod tests_token_scope_gh;
 #[cfg(test)]
 mod tests_token_scope_view;
+#[cfg(test)]
+mod tests_tool_updates;
 #[cfg(test)]
 mod tests_versions_facts;
 #[cfg(test)]

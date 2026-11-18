@@ -504,6 +504,7 @@ impl SetupEngine {
             s.logs.remove(machine);
             s.last_slow.remove(machine);
             s.facts.remove(machine);
+            s.tools_known.remove(machine);
             s.sign_in.remove(machine);
             s.saved_state.remove(machine);
             s.expiry_sent.remove(machine);

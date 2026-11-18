@@ -93,6 +93,7 @@ pub(super) struct State {
     pub shown: BTreeMap<u64, ShownRecord>,
     pub revision: u64,
     pub tools_saved: BTreeMap<String, WorkerTools>,
+    pub tools_known: BTreeMap<String, WorkerTools>,
     pub sign_in: BTreeMap<String, String>,
 }
 
@@ -466,6 +467,7 @@ impl SetupEngine {
                 s.last_slow.insert(m.name.clone(), (self.deps.clock)());
             }
             if let Some(tools) = &e.detected.tools {
+                s.tools_known.insert(m.name.clone(), tools.clone());
                 tools_seen.push((m.name.clone(), tools.clone()));
             }
             if e.detected != Detected::default() {
@@ -482,7 +484,7 @@ impl SetupEngine {
         self.changed();
     }
 
-    fn save_tools(&self, seen: Vec<(String, WorkerTools)>, registry: &[String]) {
+    pub(super) fn save_tools(&self, seen: Vec<(String, WorkerTools)>, registry: &[String]) {
         let Some(data) = &self.deps.offers_data else {
             return;
         };

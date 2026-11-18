@@ -13,7 +13,7 @@ use notchling_locale as t;
 use super::model::{ClusterModel, NodeRow};
 use crate::machines::runs::AdminAsks;
 
-fn machine_of<'a>(
+pub(super) fn machine_of<'a>(
     row: &NodeRow,
     machines: &'a [Machine],
     node_of: &dyn Fn(&str) -> Option<String>,

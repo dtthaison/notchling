@@ -554,6 +554,26 @@ cluster-update-password-placeholder = Admin password
 # Second sentence of the update line in the Machines window.
 cluster-update-from-cluster = Update them from the Cluster sheet in Notchling.
 
+## Update Tools
+
+# Button on a version warning; $tool is Claude Code, Codex or Antigravity, $machine the machine, $version the version this Mac checked.
+cluster-tool-update-button = Update { $tool } on { $machine } to { $version }
+# The same button when this Mac's version is older than the machine's.
+cluster-tool-update-down = Move { $tool } on { $machine } down to { $version }
+# Row menu item that updates every tool that differs from this Mac's.
+cluster-update-tools = Update Tools
+# Under a warning while the machine runs a job; $machine is its name, $count the jobs.
+cluster-tool-busy = { $count ->
+    [one] { $machine } is running a job. Update its tools when it is done.
+   *[other] { $machine } is running { $count } jobs. Update its tools when they are done.
+}
+# Progress on a machine's card while its tools are read; $machine is its name.
+cluster-tool-reading = Reading the tools on { $machine }…
+# Progress on a machine's card; $tools are the tools, $machine its name.
+cluster-tool-updating = Updating { $tools } on { $machine }…
+cluster-tool-nothing = No tool on this machine can be updated now.
+cluster-tool-dismiss = Dismiss
+
 ## Admin password from the Vault
 
 # Button beside an admin password field; it opens the list of Vault entries.

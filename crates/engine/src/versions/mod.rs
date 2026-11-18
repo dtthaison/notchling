@@ -15,6 +15,7 @@ pub mod soak;
 pub mod update;
 mod version;
 pub mod worker;
+pub mod worker_update;
 
 #[cfg(test)]
 mod check_tests;
@@ -50,6 +51,8 @@ mod update_tests;
 mod version_tests;
 #[cfg(test)]
 mod worker_tests;
+#[cfg(test)]
+mod worker_update_tests;
 
 pub use identity::{Identity, IdentityCache};
 pub use mark::{mark, Mark};

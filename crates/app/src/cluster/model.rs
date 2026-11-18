@@ -1,6 +1,6 @@
 use notchling_engine::cluster::grants::SecretAllow;
 use notchling_engine::cluster::{compat, Compat, Desired, Purpose, Tool as ClusterTool, Versions};
-use notchling_engine::versions::Tool as VersionTool;
+use notchling_engine::versions::{mismatch_between, Tool as VersionTool, Version};
 use notchling_locale as t;
 use serde_json::Value;
 
@@ -48,6 +48,13 @@ pub struct VaultNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolDrift {
+    pub tool: VersionTool,
+    pub found: Version,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeRow {
     pub id: String,
     pub name: String,
@@ -65,6 +72,7 @@ pub struct NodeRow {
     pub worker_login: Option<bool>,
     pub secrets: SecretAllow,
     pub warnings: Vec<String>,
+    pub drifts: Vec<ToolDrift>,
     pub desired: (bool, bool, bool),
     pub me: bool,
     pub pending: bool,
@@ -199,6 +207,7 @@ pub struct ClusterModel {
     main: BTreeSet<String>,
     kept: BTreeSet<String>,
     shell_jobs: BTreeMap<String, usize>,
+    live_jobs: BTreeMap<String, usize>,
     moving: Option<MoveStatus>,
     link: bool,
     listening: bool,
@@ -270,6 +279,24 @@ fn warnings_for(reference: &Versions, node: &Versions, name: &str) -> Vec<String
     out
 }
 
+fn drifts_for(reference: &Versions, node: &Versions, name: &str) -> Vec<ToolDrift> {
+    let keep = |tools: &BTreeMap<VersionTool, Version>| -> BTreeMap<VersionTool, Version> {
+        tools
+            .iter()
+            .filter(|(tool, _)| TOOLS.iter().any(|(t, _)| t == *tool))
+            .map(|(tool, version)| (*tool, version.clone()))
+            .collect()
+    };
+    mismatch_between(&keep(&reference.tools), name, &keep(&node.tools))
+        .into_iter()
+        .map(|m| ToolDrift {
+            tool: m.tool,
+            text: m.text(),
+            found: m.worker,
+        })
+        .collect()
+}
+
 fn login_of(versions: &Versions, tool: VersionTool) -> Login {
     if !versions.tools.contains_key(&tool) {
         return Login::NotInstalled;
@@ -331,6 +358,12 @@ fn row_of(member: &Value, status: &Value, me: &str, reference: Option<&Versions>
         }
         _ => Vec::new(),
     };
+    let drifts = match (reference, versions.as_ref()) {
+        (Some(reference), Some(node)) if !flag(member, "reference") => {
+            drifts_for(reference, node, &name)
+        }
+        _ => Vec::new(),
+    };
     let tools = versions
         .as_ref()
         .map(|v| {
@@ -374,6 +407,7 @@ fn row_of(member: &Value, status: &Value, me: &str, reference: Option<&Versions>
         worker_login,
         secrets: secrets_of(member),
         warnings,
+        drifts,
         desired: (
             desired_flag("acting"),
             desired_flag("bridge"),
@@ -414,7 +448,22 @@ fn shell_jobs(status: &Value) -> BTreeMap<String, usize> {
     counts
 }
 
+fn live_jobs(status: &Value) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    let jobs = status.get("jobs").and_then(Value::as_array);
+    for job in jobs.into_iter().flatten() {
+        if matches!(text(job, "state"), "running" | "dispatching") {
+            *counts.entry(text(job, "node").to_owned()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
 impl ClusterModel {
+    pub fn running_jobs(&self, node: &str) -> usize {
+        self.live_jobs.get(node).copied().unwrap_or(0)
+    }
+
     pub fn running_shell_jobs(&self, node: &str) -> usize {
         self.shell_jobs.get(node).copied().unwrap_or(0)
     }
@@ -467,6 +516,7 @@ impl ClusterModel {
             main: id_set(status, "main"),
             kept: id_set(status, "kept"),
             shell_jobs: shell_jobs(status),
+            live_jobs: live_jobs(status),
             moving: MoveStatus::of(status),
             link: flag(status, "link"),
             listening: status
