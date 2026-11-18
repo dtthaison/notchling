@@ -181,7 +181,8 @@ fn the_sidecar_row_belongs_to_the_antigravity_tab_when_app_full_is_chosen() {
         .expect("the channel row is on the Antigravity tab");
     assert!(matches!(
         &channel.field,
-        super::settings::Field::Choice { selected, .. } if selected == sidecar_rows::CHANNEL
+        super::settings::Field::List { selected, options } if selected == sidecar_rows::CHANNEL
+            && options.len() == 4
     ));
     for tool in [Tool::ClaudeCode, Tool::Codex] {
         assert!(tool_sections(tool, &read)

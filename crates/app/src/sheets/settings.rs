@@ -20,6 +20,10 @@ pub enum Field {
         options: Vec<(&'static str, &'static str)>,
         selected: String,
     },
+    List {
+        options: Vec<(&'static str, &'static str)>,
+        selected: String,
+    },
     Stepper {
         value: i64,
         min: i64,
@@ -276,7 +280,7 @@ pub fn tool_sections(tool: Tool, read: &dyn Fn(&str) -> Option<Value>) -> Vec<Se
         Tool::Antigravity => vec![Section {
             title: t::settings::section_antigravity(),
             rows: vec![
-                choice(
+                list(
                     read,
                     "antigravityChannel",
                     t::settings::antigravity_channel(),
@@ -302,6 +306,19 @@ pub fn every_section(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> V
         all.extend(tool_sections(tool, read));
     }
     all
+}
+
+fn list(
+    read: &dyn Fn(&str) -> Option<Value>,
+    key: &'static str,
+    title: &'static str,
+    options: &[(&'static str, Text)],
+) -> Row {
+    let mut row = choice(read, key, title, options);
+    if let Field::Choice { options, selected } = row.field {
+        row.field = Field::List { options, selected };
+    }
+    row
 }
 
 pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Section> {
@@ -395,7 +412,7 @@ pub fn change(row: &Row, option: &str) -> Option<(&'static str, Value)> {
             let shown = !*on;
             Some((row.key, json!(if *inverted { !shown } else { shown })))
         }
-        Field::Choice { options, .. } => options
+        Field::Choice { options, .. } | Field::List { options, .. } => options
             .iter()
             .find(|(v, _)| *v == option)
             .map(|(v, _)| (row.key, json!(v))),

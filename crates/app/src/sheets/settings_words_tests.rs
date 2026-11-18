@@ -89,7 +89,7 @@ fn choice_labels_are_per_setting() {
     let mut seen = HashSet::new();
     let mut choices = 0;
     for row in &rows {
-        let Field::Choice { options, .. } = &row.field else {
+        let (Field::Choice { options, .. } | Field::List { options, .. }) = &row.field else {
             continue;
         };
         for (value, label) in options {

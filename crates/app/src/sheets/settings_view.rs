@@ -10,7 +10,8 @@ use notchling_engine::settings::Settings;
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitPart, KitStyled,
+    button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitPart,
+    KitStyled, MenuItem,
 };
 use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
@@ -30,7 +31,7 @@ use super::settings_skills_view::{skills_page, SkillsHandlers, SkillsPageState};
 use super::skills_models;
 use super::skills_rows::{reinstall_result, SkillsShown};
 use super::view::{sheet_header, Acts, Dismiss};
-use crate::accounts::view_rows::{segmented, Handler};
+use crate::accounts::view_rows::{segmented_full, Handler};
 use crate::activity::view::ActivityView;
 mod cluster;
 mod shortcut;
@@ -513,8 +514,31 @@ impl SettingsView {
                 cx.notify();
             }
         });
-        let strip = segmented("settings-tool", &options, self.tool.id(), a, cx, pick);
+        let strip = segmented_full("settings-tool", &options, self.tool.id(), a, cx, pick);
         strip.part("Settings Agent Tabs", a, cx)
+    }
+
+    fn choice_list(
+        &self,
+        row: &Row,
+        options: &[(&'static str, &'static str)],
+        selected: &str,
+        i: usize,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .pb(px(4.0))
+            .children(options.iter().map(|(value, title)| {
+                let r = row.clone();
+                let value = (*value).to_owned();
+                MenuItem::new(format!("setting-{i}-{value}"), *title)
+                    .checked(selected == value)
+                    .build(a)
+                    .on_click(cx.listener(move |this, _, _, cx| this.apply(&r, &value, cx)))
+            }))
     }
 
     fn section_view(
@@ -532,6 +556,9 @@ impl SettingsView {
                     note: Some(note), ..
                 } => Some(label(&sentence(note), TypeRole::Meta, Ink::TextFaint, a)),
                 Field::Shortcut(_) => self.shortcut_note(a, cx),
+                Field::List { options, selected } => {
+                    Some(self.choice_list(row, options, selected, *n, a, cx))
+                }
                 _ => None,
             };
             rows = rows.child(
@@ -640,6 +667,7 @@ impl SettingsView {
                 }
             }
             Field::Shortcut(setting) => self.shortcut_field(*setting, a, cx),
+            Field::List { .. } => div(),
             Field::ReadOnly { value, .. } => div()
                 .px(px(8.0))
                 .h(px(20.0))
