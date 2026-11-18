@@ -232,6 +232,54 @@ settings-antigravity-channel-app = { -brand-antigravity } app (draft, you press 
 # Choice of the Antigravity row: Notchling opens the conversation in Antigravity Remote Control in the browser and the user presses Send there.
 settings-antigravity-channel-remote = { -brand-antigravity } Remote Control (browser, you press Send)
 
+# Choice of the Antigravity row: Notchling drives the Antigravity app through its sidecar and hooks, so it sends, starts, stops softly and answers permission prompts itself.
+settings-antigravity-channel-sidecar = { -brand-antigravity } app (full: Notchling sends and approves)
+
+# Row under the Antigravity section, shown when the sidecar choice is on: turns on Notchling's sidecar inside Antigravity. Sidecar is Antigravity's word for a helper program it runs; keep it.
+settings-antigravity-sidecar = Turn on the Notchling sidecar in { -brand-antigravity }
+
+# State of the sidecar row while Notchling is still asking the daemon.
+settings-sidecar-state-checking = Checking
+
+# State of the sidecar row: everything is in place and Antigravity runs the sidecar.
+settings-sidecar-state-on = On
+
+# State of the sidecar row: everything is in place but Antigravity has not started the sidecar yet.
+settings-sidecar-state-waiting = On, not started yet
+
+# State of the sidecar row: nothing of it is set up.
+settings-sidecar-state-off = Off
+
+# State of the sidecar row: some of it is set up, some is not.
+settings-sidecar-state-partial = Partly on
+
+# State of the sidecar row: the Antigravity app is missing, so it can't be turned on.
+settings-sidecar-state-no-app = { -brand-antigravity } app not installed
+
+# State of the sidecar row: something in Antigravity's folders is not Notchling's or can't be read, so Notchling leaves it alone.
+settings-sidecar-state-blocked = Can't turn on: a file in { -brand-antigravity }'s folder is in the way
+
+# Button of the sidecar row: asks for a confirmation, then sets the sidecar up.
+settings-sidecar-turn-on = Turn On
+
+# Button of the sidecar row: takes the sidecar and hooks Notchling put in Antigravity out again.
+settings-sidecar-turn-off = Turn Off
+
+# Button of the sidecar row: confirms writing to Antigravity's config.json.
+settings-sidecar-confirm = Confirm
+
+# Button of the sidecar row: backs out of the confirmation.
+settings-sidecar-cancel = Cancel
+
+# Question under the sidecar row before it writes. config.json is a file name; keep it.
+settings-sidecar-confirm-note = This adds one line to { -brand-antigravity }'s config.json, keeps a backup of it, and puts Notchling's sidecar and hooks in place. Continue?
+
+# Note under the sidecar row: what to expect from this choice.
+settings-sidecar-note = Your messages show in { -brand-antigravity } as "Message from System". Stop ends the turn at its next step. A new conversation has no workspace folder. Questions from { -brand-antigravity } are answered in { -brand-antigravity }. Worker machines keep the { -brand-antigravity } CLI.
+
+# Shown under the sidecar row after Turn On or Turn Off worked.
+settings-sidecar-done = Done.
+
 # Row in the Chat section: how much of a long conversation Chat loads.
 settings-chat-history = Conversation history to load
 

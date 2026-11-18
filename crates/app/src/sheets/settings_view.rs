@@ -31,6 +31,7 @@ use super::view::{sheet_header, Acts, Dismiss};
 use crate::activity::view::ActivityView;
 mod cluster;
 mod shortcut;
+mod sidecar;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
 use crate::switches::Switch;
@@ -57,6 +58,7 @@ pub struct SettingsView {
     activity: Option<Entity<ActivityView>>,
     shortcut: shortcut::ShortcutState,
     cluster: Option<Arc<crate::cluster::feed::ClusterFeed>>,
+    sidecar: sidecar::SidecarUi,
 }
 
 pub struct SettingChanged {
@@ -94,6 +96,7 @@ impl SettingsView {
             activity: None,
             shortcut: shortcut::ShortcutState::default(),
             cluster: None,
+            sidecar: sidecar::SidecarUi::default(),
         }
     }
 
@@ -445,6 +448,9 @@ impl SettingsView {
                 .detach();
         }
         self.values.insert(key.to_owned(), value.clone());
+        if key == super::sidecar_rows::CHANNEL_KEY {
+            self.ask_sidecar(cx);
+        }
         cx.emit(SettingChanged {
             key: key.to_owned(),
             value,
@@ -653,6 +659,9 @@ impl Render for SettingsView {
                             .map(|f| label(f, TypeRole::Meta, Ink::TextFaint, a)),
                     ),
             );
+            if section.title == t::settings::section_antigravity() {
+                list = list.children(self.sidecar_section(a, cx));
+            }
             if at == CLUSTER_AFTER {
                 list = list.children(self.cluster_section(a, cx));
             }

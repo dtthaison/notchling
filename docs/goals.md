@@ -84,8 +84,11 @@ The app:
 - Change more of your config than its own part: in `~/.claude/settings.json` only Notchling's hook
   entries, and the `agent` key only while you have Plan-Only Main Chat on (with a backup, your other
   hooks and keys kept); on a worker set up in Machines, only the one key per tool that turns its
-  self-update off (with a backup, everything else kept); only `claudeAiOauth` in the
-  `Claude Code-credentials` Keychain item; only `oauthAccount` in `~/.claude.json`.
+  self-update off (with a backup, everything else kept); in Antigravity's `~/.gemini/config` only
+  Notchling's own entries in `hooks.json` and, after you confirm Turn On in Settings, the one key
+  `sidecars."notchling/sidecar".enabled` in `config.json` (with a backup, everything else kept);
+  only `claudeAiOauth` in the `Claude Code-credentials` Keychain item; only `oauthAccount` in
+  `~/.claude.json`.
 - Write anything into an agent tool's folders but its own instructions: the `notchling-*` files and
   Antigravity's `notchling` plugin that [decision 0019](decisions/0019-agent-instructions-per-tool.md)
   lists, and `~/.codex/AGENTS.md` only when you have none. It never changes or removes a file it

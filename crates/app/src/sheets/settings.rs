@@ -124,10 +124,11 @@ const ANTIGRAVITY_LIMIT_MODES: [(&str, Text); 3] = [
     ),
 ];
 
-const ANTIGRAVITY_CHANNELS: [(&str, Text); 3] = [
+const ANTIGRAVITY_CHANNELS: [(&str, Text); 4] = [
     ("acp", t::settings::ANTIGRAVITY_CHANNEL_ACP),
     ("app", t::settings::ANTIGRAVITY_CHANNEL_APP),
     ("remote", t::settings::ANTIGRAVITY_CHANNEL_REMOTE),
+    ("sidecar", t::settings::ANTIGRAVITY_CHANNEL_SIDECAR),
 ];
 
 const REMOTE_PLACES: [(&str, Text); 2] = [

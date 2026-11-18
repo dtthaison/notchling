@@ -99,7 +99,7 @@ fn choice_labels_are_per_setting() {
             choices += 1;
         }
     }
-    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 3 + 2 + 4);
+    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4 + 2 + 4);
 }
 
 #[test]
