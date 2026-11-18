@@ -5,7 +5,7 @@ use gpui::{div, prelude::*, px, AnyView, Context, Div, Render, SharedString, Win
 use notchling_kit::metric::{RADIUS_SM, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, claude_mark, hsla, label, resize_edges, scrollable, window_appearance, KitStyled,
+    brand_mark, button, card, hsla, label, resize_edges, scrollable, window_appearance, KitStyled,
     TopBorder,
 };
 use notchling_kit::{sentence, Appearance, Ink, TypeRole};
@@ -294,7 +294,7 @@ impl Render for FirstRunView {
                             .flex()
                             .items_center()
                             .gap(px(14.0))
-                            .child(claude_mark(40.0, a))
+                            .child(brand_mark(40.0))
                             .child(
                                 div()
                                     .flex()
@@ -448,7 +448,7 @@ impl Render for AboutView {
             .gap(px(18.0))
             .p(px(28.0))
             .fill(Ink::Window, a)
-            .child(claude_mark(64.0, a))
+            .child(brand_mark(64.0))
             .child(
                 div()
                     .flex()

@@ -10,7 +10,7 @@ use notchling_kit::metric::SPINNER_MINI;
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, button_with, claude_mark, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
+    brand_mark, button, button_with, hsla, icon, label, spinner as kit_spinner, KitPart, KitStyled,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
@@ -533,7 +533,7 @@ pub(super) fn empty_column(
                 .items_center()
                 .justify_center()
                 .gap(px(8.0))
-                .child(claude_mark(40.0, a))
+                .child(brand_mark(40.0))
                 .child(label(
                     t::chat::no_sessions_yet(),
                     TypeRole::Heading,

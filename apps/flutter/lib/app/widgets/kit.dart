@@ -121,18 +121,28 @@ class KitClaudeMark extends StatelessWidget {
   Widget build(BuildContext context) {
     final Kit kit = Kit.of(context);
     return ExcludeSemantics(
-      child: Container(
+      child: SizedBox(
         width: size,
         height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: <Color>[const Color(0xFFFFB47E), kit.accent],
-          ),
-        ),
-        child: Icon(Icons.auto_awesome, size: size * 0.55, color: kit.onAccent),
+        child: Icon(Icons.auto_awesome, size: size * 0.75, color: kit.accent),
+      ),
+    );
+  }
+}
+
+class KitBrandMark extends StatelessWidget {
+  const KitBrandMark({super.key, this.size = 24});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: Image.asset(
+        'assets/icon/icon-1024.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
       ),
     );
   }
@@ -337,7 +347,7 @@ class _KitPetState extends State<KitPet> {
         fit: BoxFit.contain,
         filterQuality: FilterQuality.medium,
         errorBuilder: (BuildContext context, Object error, StackTrace? stack) =>
-            KitClaudeMark(size: widget.size / 2),
+            KitBrandMark(size: widget.size / 2),
       ),
     );
     return ExcludeSemantics(
