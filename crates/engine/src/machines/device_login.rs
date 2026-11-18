@@ -1,13 +1,15 @@
 use super::runner::{Channel, OutputSink};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-pub const HIDDEN_LINK: &str = "[sign-in link]";
 pub const WITHHELD: &str = "[sign-in output withheld]";
 
 const LINK_MAX: usize = 300;
 const LONG_LINE: usize = 4096;
+const PAUSE: Duration = Duration::from_millis(250);
 const CODE_LEN: std::ops::RangeInclusive<usize> = 4..=40;
 const HOSTS: [&str; 2] = ["openai.com", "chatgpt.com"];
 const WRAP: &[char] = &[
@@ -159,14 +161,9 @@ pub struct Scanner {
     url: Option<String>,
     code: Option<String>,
     expect_code: bool,
-    triggered: bool,
 }
 
 impl Scanner {
-    pub fn triggered(&self) -> bool {
-        self.triggered
-    }
-
     pub fn line(&mut self, raw: &str) -> Option<DevicePrompt> {
         let line = strip_ansi(raw);
         let text = line.trim();
@@ -175,9 +172,6 @@ impl Scanner {
         }
         let has_link = text.contains("://");
         let marker = text.split_whitespace().any(is_marker);
-        if has_link || marker {
-            self.triggered = true;
-        }
         if has_link {
             for token in text.split_whitespace().map(trimmed) {
                 if self.url.is_none() && is_device_link(token) {
@@ -185,19 +179,25 @@ impl Scanner {
                 }
             }
         }
-        if self.expect_code && !has_link && !marker {
-            if let Some(code) = single_code(text) {
-                self.code = Some(code);
-            }
-            self.expect_code = false;
-        } else if marker && !has_link {
-            self.expect_code = true;
-            if let Some(code) = after_label(text) {
-                self.code = Some(code);
+        if self.code.is_none() {
+            if marker {
+                let bare: Vec<&str> = text
+                    .split_whitespace()
+                    .filter(|t| !t.contains("://"))
+                    .collect();
+                match after_label(&bare.join(" ")) {
+                    Some(code) => {
+                        self.code = Some(code);
+                        self.expect_code = false;
+                    }
+                    None => self.expect_code = true,
+                }
+            } else if has_link {
+                self.expect_code = false;
+            } else if self.expect_code {
+                self.code = single_code(text);
                 self.expect_code = false;
             }
-        } else {
-            self.expect_code = false;
         }
         self.prompt()
     }
@@ -208,45 +208,20 @@ impl Scanner {
             _ => None,
         }
     }
-
-    pub fn scrub(&self, text: &str) -> String {
-        if self.triggered {
-            return WITHHELD.to_owned();
-        }
-        let plain = strip_ansi(text);
-        let mut out = String::with_capacity(plain.len());
-        let mut token = String::new();
-        let flush = |token: &mut String, out: &mut String| {
-            if token.is_empty() {
-                return;
-            }
-            if token.contains("://") {
-                out.push_str(HIDDEN_LINK);
-            } else {
-                out.push_str(token);
-            }
-            token.clear();
-        };
-        for c in plain.chars() {
-            if c.is_whitespace() {
-                flush(&mut token, &mut out);
-                out.push(c);
-            } else {
-                token.push(c);
-            }
-        }
-        flush(&mut token, &mut out);
-        out
-    }
 }
 
-pub struct DeviceFilter {
+struct Inner {
     sink: Arc<OutputSink>,
     prompt: PromptSink,
     scanner: Mutex<Scanner>,
     partial: Mutex<BTreeMap<Channel, String>>,
     offered: Mutex<Option<DevicePrompt>>,
     withheld: Mutex<bool>,
+    seq: AtomicU64,
+}
+
+pub struct DeviceFilter {
+    inner: Arc<Inner>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -256,20 +231,24 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl DeviceFilter {
     pub fn new(sink: Arc<OutputSink>, prompt: PromptSink) -> DeviceFilter {
         DeviceFilter {
-            sink,
-            prompt,
-            scanner: Mutex::new(Scanner::default()),
-            partial: Mutex::new(BTreeMap::new()),
-            offered: Mutex::new(None),
-            withheld: Mutex::new(false),
+            inner: Arc::new(Inner {
+                sink,
+                prompt,
+                scanner: Mutex::new(Scanner::default()),
+                partial: Mutex::new(BTreeMap::new()),
+                offered: Mutex::new(None),
+                withheld: Mutex::new(false),
+                seq: AtomicU64::new(0),
+            }),
         }
     }
 
     pub fn feed(&self, channel: Channel, chunk: &str) {
+        let seq = self.inner.seq.fetch_add(1, Ordering::SeqCst) + 1;
         let mut lines = Vec::new();
         let rest;
         {
-            let mut partial = lock(&self.partial);
+            let mut partial = lock(&self.inner.partial);
             let buf = partial.entry(channel).or_default();
             buf.push_str(chunk);
             while let Some(at) = buf.find(['\n', '\r']) {
@@ -285,36 +264,32 @@ impl DeviceFilter {
             rest = buf.clone();
         }
         for line in lines {
-            self.emit(channel, &line);
+            self.inner.emit(channel, &line);
         }
         if !rest.trim().is_empty() {
-            let peeked = lock(&self.scanner).clone().line(&rest);
-            self.offer(peeked);
+            let inner = self.inner.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(PAUSE);
+                if inner.seq.load(Ordering::SeqCst) == seq {
+                    let peeked = lock(&inner.scanner).clone().line(&rest);
+                    inner.offer(peeked);
+                }
+            });
         }
     }
 
     pub fn finish(&self) {
-        let rest = std::mem::take(&mut *lock(&self.partial));
+        self.inner.seq.fetch_add(1, Ordering::SeqCst);
+        let rest = std::mem::take(&mut *lock(&self.inner.partial));
         for (channel, text) in rest {
             if !text.trim().is_empty() {
-                self.emit(channel, &format!("{text}\n"));
+                self.inner.emit(channel, &format!("{text}\n"));
             }
         }
     }
+}
 
-    pub fn triggered(&self) -> bool {
-        lock(&self.scanner).triggered()
-    }
-
-    pub fn scrub(&self, text: &str) -> String {
-        let scanner = lock(&self.scanner);
-        if scanner.triggered() {
-            String::new()
-        } else {
-            scanner.scrub(text)
-        }
-    }
-
+impl Inner {
     fn offer(&self, found: Option<DevicePrompt>) {
         let Some(found) = found else {
             return;
@@ -334,19 +309,11 @@ impl DeviceFilter {
     }
 
     fn emit(&self, channel: Channel, line: &str) {
-        let (found, hidden, shown) = {
-            let mut scanner = lock(&self.scanner);
-            let found = scanner.line(line);
-            (found, scanner.triggered(), scanner.scrub(line))
-        };
+        let found = lock(&self.scanner).line(line);
         self.offer(found);
-        if hidden {
-            let first = !std::mem::replace(&mut *lock(&self.withheld), true);
-            if first {
-                (self.sink)(channel, &format!("{WITHHELD}\n"));
-            }
-            return;
+        let first = !std::mem::replace(&mut *lock(&self.withheld), true);
+        if first {
+            (self.sink)(channel, &format!("{WITHHELD}\n"));
         }
-        (self.sink)(channel, &shown);
     }
 }

@@ -5,8 +5,11 @@ use super::registry::Machine;
 use super::runner::{Call, Channel, OutputSink, CANCELLED, TIMED_OUT};
 use super::shell;
 use super::step::{CheckResult, CheckState, FixContext, FixOutcome, StepId};
-use super::steps_node_logins::{agy_check, agy_script, codex_check, codex_script, WAIT_TENTHS};
-use super::tool_guard::guard;
+use super::steps_node_logins::{
+    agy_check, agy_script, codex_check, codex_script, codex_state_snippet, state_word, API_KEY,
+    SIGNED_IN, WAIT_TENTHS,
+};
+use super::tool_guard::{guard, verify_node};
 use crate::cluster::logins::{how_to, CODEX_COMMAND};
 use crate::versions::Tool;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +19,8 @@ pub const LOGIN_SECS: u64 = 600;
 const WATCHDOG_SECS: u64 = LOGIN_SECS + 10;
 const CHECK_SECS: u64 = 60;
 const WATCHDOG_KILLED: i32 = 143;
+const REFUSED: i32 = 64;
+const SSH_FAILED: i32 = 255;
 
 pub fn can_sign_in(tool: Tool) -> bool {
     tool == Tool::Codex
@@ -23,7 +28,8 @@ pub fn can_sign_in(tool: Tool) -> bool {
 
 pub fn login_script() -> String {
     format!(
-        "command -v codex >/dev/null 2>&1 || {{ echo @@none; exit 127; }}; {CODEX_COMMAND} </dev/null & p=$!; ( sleep {WATCHDOG_SECS}; kill $p 2>/dev/null ) >/dev/null 2>&1 & w=$!; wait $p; c=$?; kill $w 2>/dev/null; exit $c"
+        "{}; if [ \"$s\" != signed_out ]; then echo \"@@$s\"; exit {REFUSED}; fi; {CODEX_COMMAND} </dev/null & p=$!; ( sleep {WATCHDOG_SECS}; kill $p 2>/dev/null ) >/dev/null 2>&1 & w=$!; wait $p; c=$?; kill $w 2>/dev/null; exit $c",
+        codex_state_snippet(WAIT_TENTHS, 127, REFUSED)
     )
 }
 
@@ -43,22 +49,16 @@ pub struct LoginCheck {
     pub signed: Option<bool>,
 }
 
-fn tail_of(text: &str) -> String {
-    let lines: Vec<&str> = text
-        .lines()
-        .rev()
-        .filter(|l| !l.trim().is_empty())
-        .take(3)
-        .collect();
-    lines.into_iter().rev().collect::<Vec<_>>().join("\n")
-}
-
 fn step_of(tool: Tool) -> Option<StepId> {
     match tool {
         Tool::Codex => Some(StepId::NODE_CODEX_LOGIN),
         Tool::Agy => Some(StepId::NODE_AGY_LOGIN),
         _ => None,
     }
+}
+
+fn cancelled_text(tool: Tool, name: &str) -> String {
+    format!("Signing in {} on {name} was cancelled", tool.title())
 }
 
 impl SetupEngine {
@@ -84,13 +84,19 @@ impl SetupEngine {
         outcome
     }
 
-    pub fn check_login(&self, machine: &str, tool: Tool) -> LoginCheck {
+    pub fn check_login(&self, machine: &str, tool: Tool, node: &str) -> LoginCheck {
         let Some(m) = self.machine(machine) else {
             return LoginCheck {
                 outcome: FixOutcome::fail(format!("no machine named {machine}")),
                 signed: None,
             };
         };
+        if let Err(why) = verify_node(self.deps.runner.as_ref(), &m, node, &None) {
+            return LoginCheck {
+                outcome: FixOutcome::fail(why),
+                signed: None,
+            };
+        }
         self.recheck(&m, tool, &self.masks(&m, None))
     }
 
@@ -147,23 +153,20 @@ impl SetupEngine {
     ) -> FixOutcome {
         let m = &ctx.step.machine;
         let name = &m.name;
-        if let Err(why) = guard(ctx, tool, node) {
-            return FixOutcome::fail(why);
+        let stopped = || cancel.load(Ordering::SeqCst);
+        if stopped() {
+            return FixOutcome::fail(cancelled_text(tool, name));
         }
-        match self.recheck(m, tool, &ctx.masks).signed {
-            Some(false) => {}
-            Some(true) => {
-                return FixOutcome::fail(format!(
-                    "{} is already signed in on {name}. Nothing was changed.",
-                    tool.title()
-                ))
-            }
-            None => {
-                return FixOutcome::fail(format!(
-                    "Couldn't tell whether {} is signed in on {name}. Nothing was changed.",
-                    tool.title()
-                ))
-            }
+        let shared = Some(cancel.clone());
+        if let Err(why) = guard(ctx.step.runner.as_ref(), m, tool, node, &shared) {
+            return FixOutcome::fail(if stopped() {
+                cancelled_text(tool, name)
+            } else {
+                why
+            });
+        }
+        if stopped() {
+            return FixOutcome::fail(cancelled_text(tool, name));
         }
         let filter = Arc::new(DeviceFilter::new(ctx.log.clone(), prompt));
         let feed = filter.clone();
@@ -180,24 +183,22 @@ impl SetupEngine {
         let result = ctx.step.runner.run(&call);
         filter.finish();
         let code = result.code;
-        let said = if result.err.trim().is_empty() {
-            result.out.clone()
-        } else {
-            result.err.clone()
-        };
+        let word = state_word(&result.out).map(str::to_owned);
         drop(result);
-        let hidden = filter.triggered();
-        let shown = if hidden {
-            String::new()
-        } else {
-            ctx.mask(&tail_of(&filter.scrub(&said)))
-        };
-        drop(said);
-        if cancel.load(Ordering::SeqCst) || code == CANCELLED {
-            return FixOutcome::fail(format!(
-                "Signing in {} on {name} was cancelled",
-                tool.title()
-            ));
+        if stopped() || code == CANCELLED {
+            return FixOutcome::fail(cancelled_text(tool, name));
+        }
+        if code == REFUSED {
+            return FixOutcome::fail(match word.as_deref() {
+                Some(SIGNED_IN) | Some(API_KEY) => format!(
+                    "{} is already signed in on {name}. Nothing was changed.",
+                    tool.title()
+                ),
+                _ => format!(
+                    "Couldn't tell whether {} is signed in on {name}. Nothing was changed.",
+                    tool.title()
+                ),
+            });
         }
         if code == TIMED_OUT || code == WATCHDOG_KILLED {
             return FixOutcome::fail(format!(
@@ -206,15 +207,20 @@ impl SetupEngine {
                 LOGIN_SECS / 60
             ));
         }
+        if code == SSH_FAILED {
+            return FixOutcome::fail(format!(
+                "Couldn't reach {name} over ssh to sign {} in",
+                tool.title()
+            ));
+        }
+        if code == 127 || word.as_deref() == Some("none") {
+            return FixOutcome::fail(format!("{} isn't installed on {name}", tool.title()));
+        }
         if code != 0 {
-            let mut line = format!("{} didn't sign in on {name}", tool.title());
-            if hidden {
-                line.push_str(&format!(" (exit {code})"));
-            } else if !shown.is_empty() {
-                line.push_str(": ");
-                line.push_str(&shown);
-            }
-            return FixOutcome::fail(line);
+            return FixOutcome::fail(format!(
+                "{} didn't sign in on {name} (exit {code})",
+                tool.title()
+            ));
         }
         self.recheck(m, tool, &ctx.masks).outcome
     }

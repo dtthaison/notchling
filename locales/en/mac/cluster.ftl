@@ -592,6 +592,10 @@ cluster-tool-sign-in-busy = { $count ->
     [one] { $machine } is running a job. Sign in when it is done.
    *[other] { $machine } is running { $count } jobs. Sign in when they are done.
 }
+# Result on a machine's card when the cluster can't be read just before an install or sign-in; $machine is the machine.
+cluster-tool-refresh-failed = Couldn't read the cluster before changing { $machine }. Nothing was changed.
+# Progress on a machine's card while Cancel stops a sign-in; $machine is the machine.
+cluster-tool-sign-in-stopping = Stopping the sign-in on { $machine }…
 # Result on a machine's card after Cancel in the sign-in sheet; $tool is the tool, $machine the machine.
 cluster-tool-sign-in-cancelled = Signing in { $tool } on { $machine } was cancelled.
 # Progress on a machine's card; $tool is the tool, $machine the machine.

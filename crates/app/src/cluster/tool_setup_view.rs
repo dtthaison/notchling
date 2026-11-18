@@ -1,4 +1,3 @@
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
@@ -13,8 +12,8 @@ use notchling_locale as t;
 
 use super::model::NodeRow;
 use super::tool_setup::{
-    idle_now, run_check, run_install, run_sign_in, start_check, start_install, start_sign_in, Kind,
-    Setup,
+    idle_now, run_check, run_install, run_sign_in, settle_check, settle_sign_in, start_check,
+    start_install, start_sign_in, CheckGo, Kind, Setup,
 };
 use super::tool_updates_view::{now_ms, ToolView};
 use super::view::ClusterSheetView;
@@ -38,9 +37,9 @@ impl ClusterSheetView {
             return;
         };
         let runs = self.tools.runs.clone();
-        if !runs.begin(&go.machine, &t::cluster::tool_reading(&go.machine)) {
+        let Some(id) = runs.begin_run(&go.machine, &t::cluster::tool_reading(&go.machine)) else {
             return;
-        }
+        };
         self.note = None;
         let engine = parts.engine.clone();
         let feed = self.feed.clone();
@@ -61,7 +60,7 @@ impl ClusterSheetView {
                             });
                         runs.mark_installed(&go.machine, go.tool, version, now_ms());
                     }
-                    runs.finish(&go.machine, &outcome);
+                    runs.finish_run(&go.machine, id, &outcome);
                     feed.refresh();
                 })
                 .await;
@@ -94,7 +93,7 @@ impl ClusterSheetView {
         }
         self.note = None;
         if !can_sign_in(tool) {
-            runs.set_sheet(&go.machine, tool);
+            runs.set_sheet(&go.machine, tool, &go.node);
             cx.notify();
             return;
         }
@@ -105,11 +104,11 @@ impl ClusterSheetView {
             return;
         };
         let text = t::cluster::tool_signing_in(tool.title(), &go.machine);
-        if !runs.begin(&go.machine, &text) {
+        let Some(id) = runs.begin_run(&go.machine, &text) else {
             runs.close_session(&go.machine, &cancel);
             return;
-        }
-        runs.set_sheet(&go.machine, tool);
+        };
+        runs.set_sheet(&go.machine, tool, &go.node);
         let engine = parts.engine.clone();
         let feed = self.feed.clone();
         cx.spawn(async move |this, cx| {
@@ -124,20 +123,7 @@ impl ClusterSheetView {
                         Some(busy) => busy,
                         None => run_sign_in(&engine, &runs, &go, sink, cancel.clone()),
                     };
-                    let cancelled = cancel.load(Ordering::SeqCst);
-                    runs.close_session(&go.machine, &cancel);
-                    if cancelled {
-                        let check = engine.check_login(&go.machine, go.tool);
-                        if let Some(signed) = check.signed {
-                            runs.mark_login(&go.machine, go.tool, signed, now_ms());
-                        }
-                    } else {
-                        if outcome.ok {
-                            runs.mark_login(&go.machine, go.tool, true, now_ms());
-                        }
-                        runs.finish(&go.machine, &outcome);
-                        runs.clear_sheet_if(&go.machine, go.tool);
-                    }
+                    settle_sign_in(&engine, &runs, &go, id, &cancel, &outcome, now_ms());
                     feed.refresh();
                 })
                 .await;
@@ -156,7 +142,7 @@ impl ClusterSheetView {
         let model = self.feed.snapshot();
         let view = self.tool_view(&model);
         match start_check(&view.setups, node, tool) {
-            Ok(go) => self.check_in_background(go.machine, go.tool, false, cx),
+            Ok(go) => self.check_in_background(go, false, cx),
             Err(why) => {
                 self.note = Some((why, true));
                 cx.notify();
@@ -165,29 +151,28 @@ impl ClusterSheetView {
     }
 
     fn check_from_sheet(&mut self, cx: &mut Context<Self>) {
-        let Some((machine, tool)) = self.tools.runs.sheet() else {
+        let Some(sheet) = self.tools.runs.sheet() else {
             return;
         };
-        self.check_in_background(machine, tool, true, cx);
+        let go = CheckGo {
+            node: sheet.node,
+            machine: sheet.machine,
+            tool: sheet.tool,
+        };
+        self.check_in_background(go, true, cx);
     }
 
-    fn check_in_background(
-        &mut self,
-        machine: String,
-        tool: Tool,
-        from_sheet: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn check_in_background(&mut self, go: CheckGo, from_sheet: bool, cx: &mut Context<Self>) {
         let Some(parts) = self.feed.add_source().parts() else {
             return;
         };
         let runs = self.tools.runs.clone();
-        let text = t::cluster::tool_checking_login(tool.title(), &machine);
-        if !runs.begin(&machine, &text) {
+        let text = t::cluster::tool_checking_login(go.tool.title(), &go.machine);
+        let Some(id) = runs.begin_run(&go.machine, &text) else {
             return;
-        }
+        };
         if from_sheet {
-            runs.clear_sheet_if(&machine, tool);
+            runs.clear_sheet_if(&go.machine, go.tool);
         }
         self.note = None;
         let engine = parts.engine.clone();
@@ -195,11 +180,8 @@ impl ClusterSheetView {
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .spawn(async move {
-                    let check = run_check(&engine, &runs, &machine, tool);
-                    if let Some(signed) = check.signed {
-                        runs.mark_login(&machine, tool, signed, now_ms());
-                    }
-                    runs.finish(&machine, &check.outcome);
+                    let check = run_check(&engine, &runs, &go.machine, go.tool, &go.node);
+                    settle_check(&runs, &go, id, &check, now_ms());
                     feed.refresh();
                 })
                 .await;
@@ -296,7 +278,8 @@ impl ClusterSheetView {
     }
 
     pub(super) fn login_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
-        let (machine, tool) = self.tools.runs.sheet()?;
+        let sheet = self.tools.runs.sheet()?;
+        let (machine, tool) = (sheet.machine, sheet.tool);
         let mut inner = div().flex().flex_col().gap(px(SPACE[1])).child(label(
             &t::cluster::login_title(tool.title(), &machine),
             TypeRole::Heading,

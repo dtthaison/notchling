@@ -1,6 +1,6 @@
 use super::device_login::{
     is_device_code, is_device_link, strip_ansi, DeviceFilter, DevicePrompt, PromptSink, Scanner,
-    HIDDEN_LINK, WITHHELD,
+    WITHHELD,
 };
 use super::runner::{Channel, CommandResult, OutputSink};
 use std::sync::{Arc, Mutex};
@@ -59,12 +59,8 @@ fn the_filter_offers_the_prompt_once_and_withholds_the_rest_from_the_log() {
         assert!(!log.contains(CODE), "{log}");
         assert!(!log.contains('\u{1b}'), "{log}");
         assert!(!log.contains("Device codes"), "{log}");
-        assert!(log.contains("Welcome to Codex"), "{log}");
-        assert_eq!(log.matches(WITHHELD).count(), 1, "{log}");
-        assert!(filter.triggered());
-        assert!(filter
-            .scrub("error: TEST-00000 at https://auth.openai.com/x")
-            .is_empty());
+        assert!(!log.contains("Welcome"), "{log}");
+        assert_eq!(log, format!("{WITHHELD}\n"));
     }
 }
 
@@ -75,7 +71,8 @@ fn output_split_in_the_middle_of_a_line_is_still_found_and_hidden() {
         filter.feed(Channel::Stdout, std::str::from_utf8(chunk).unwrap());
     }
     filter.finish();
-    assert_eq!(lock(&seen).last().unwrap().code(), CODE);
+    assert_eq!(lock(&seen).len(), 1);
+    assert_eq!(lock(&seen)[0].code(), CODE);
     let log = lock(&log).clone();
     assert!(!log.contains(CODE), "{log}");
     assert!(!log.contains("openai.com/codex"), "{log}");
@@ -110,12 +107,71 @@ fn a_code_in_any_shape_is_withheld_even_when_it_is_not_recognised() {
 }
 
 #[test]
-fn a_code_line_without_a_newline_is_offered_at_once() {
+fn a_code_line_without_a_newline_is_offered_after_a_short_pause_and_not_before() {
     let (filter, seen, log) = rig();
     filter.feed(Channel::Stdout, &format!("{STEPS}   {CODE}"));
+    assert!(lock(&seen).is_empty());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while lock(&seen).is_empty() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(lock(&seen).last().unwrap().code(), CODE);
     filter.finish();
     assert!(!lock(&log).contains(CODE));
+}
+
+#[test]
+fn half_a_code_is_never_offered_when_more_bytes_follow() {
+    let (filter, seen, _log) = rig();
+    filter.feed(Channel::Stdout, &format!("{STEPS}   ABCD"));
+    filter.feed(Channel::Stdout, "-12345\n");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let seen = lock(&seen);
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].code(), "ABCD-12345");
+}
+
+#[test]
+fn the_first_code_is_kept_whatever_the_output_says_afterwards() {
+    let (filter, seen, _log) = rig();
+    filter.feed(
+        Channel::Stdout,
+        &format!(
+            "{STEPS}   {CODE}\nDevice codes are a common phishing target. Never share this code.\nWAITING\nHTTP-200\n"
+        ),
+    );
+    filter.finish();
+    let seen = lock(&seen);
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].code(), CODE);
+}
+
+#[test]
+fn a_line_with_the_link_and_the_code_word_still_finds_the_code() {
+    let mut scanner = Scanner::default();
+    assert!(scanner
+        .line("Open https://auth.openai.com/codex/device and enter this one-time code:")
+        .is_none());
+    let found = scanner.line(CODE).unwrap();
+    assert_eq!(found.url(), URL);
+    assert_eq!(found.code(), CODE);
+    let mut scanner = Scanner::default();
+    let found = scanner
+        .line("Open https://auth.openai.com/codex/device and enter one-time code: ABCD-12345")
+        .unwrap();
+    assert_eq!(found.code(), "ABCD-12345");
+}
+
+#[test]
+fn output_before_the_prompt_is_withheld_too() {
+    for said in [
+        "Welcome\nuser_code=ZQ7-ABCD\n",
+        "ZQ7-ABCD\n",
+        "error: ZQ7-ABCD\n",
+    ] {
+        let shown = log_after(said);
+        assert_eq!(shown, format!("{WITHHELD}\n"), "{said}");
+    }
 }
 
 #[test]
@@ -175,21 +231,6 @@ fn a_label_with_the_code_on_the_same_line_is_read() {
     assert!(scanner.line(URL).is_none());
     let found = scanner.line("one-time code: abcd-12345").unwrap();
     assert_eq!(found.code(), "abcd-12345");
-}
-
-#[test]
-fn text_before_the_prompt_is_logged_and_any_link_starts_the_withholding() {
-    let shown = log_after("Welcome\nsee https://example.test/docs for more\nafter\n");
-    assert!(shown.contains("Welcome"), "{shown}");
-    assert!(shown.contains(WITHHELD), "{shown}");
-    assert!(!shown.contains("example.test"), "{shown}");
-    assert!(!shown.contains("after"), "{shown}");
-    let (filter, _seen, _log) = rig();
-    assert_eq!(
-        filter.scrub("see ftp://x.test now"),
-        "see [sign-in link] now"
-    );
-    assert!(HIDDEN_LINK.starts_with('['));
 }
 
 #[test]

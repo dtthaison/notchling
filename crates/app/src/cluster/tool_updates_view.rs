@@ -86,7 +86,7 @@ impl ClusterSheetView {
                 let login = |machine: &str, tool: Tool| self.tools.runs.login_mark(machine, tool);
                 let installed =
                     |machine: &str, tool: Tool| self.tools.runs.installed_since(machine, tool);
-                let reported = |node: &str| self.feed.reported_at(node);
+                let reported = |node: &str, tool: Tool| self.feed.reported_at(node, tool);
                 let marks = Marks {
                     login: &login,
                     installed: &installed,

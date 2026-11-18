@@ -11,24 +11,23 @@ use std::sync::Arc;
 const CODEX: StepId = StepId::NODE_CODEX_LOGIN;
 const AGY: StepId = StepId::NODE_AGY_LOGIN;
 
-fn codex(text: &str, exit: i32) -> String {
-    format!("{text}\n@@exit={exit}\n")
-}
-
 #[test]
 fn codex_step_reads_signed_in_signed_out_and_unknown() {
     let rig = Rig::new(node_linux());
-    let on = probe(&rig, &CODEX, &codex("Logged in using ChatGPT", 0), 0);
+    let on = probe(&rig, &CODEX, "@@signed_in\n", 0);
     assert_eq!(on, CheckState::Pass("signed in".to_string()));
-    let off = probe(&rig, &CODEX, &codex("Not logged in", 1), 0);
+    let off = probe(&rig, &CODEX, "@@signed_out\n", 0);
     assert_eq!(off, CheckState::Fail("not signed in".to_string()));
     for text in [
-        "@@none\n".to_string(),
-        "sh: codex: not found".to_string(),
-        codex("error: unexpected argument", 2),
-        codex("", 124),
+        "@@none\n",
+        "@@timeout\n",
+        "@@unknown\n",
+        "@@api_key\n",
+        "sh: codex: not found",
+        "",
+        "Logged in using ChatGPT\n",
     ] {
-        let state = probe(&rig, &CODEX, &text, 0);
+        let state = probe(&rig, &CODEX, text, 0);
         assert!(
             matches!(state, CheckState::CantTell(_)),
             "{text}: {state:?}"
@@ -37,12 +36,18 @@ fn codex_step_reads_signed_in_signed_out_and_unknown() {
 }
 
 #[test]
-fn the_codex_pass_text_never_echoes_what_codex_said() {
+fn the_codex_texts_never_echo_what_codex_said() {
     let rig = Rig::new(node_linux());
-    let said = "Logged in using an API key - sk-NL-MARKER-8";
-    let state = probe(&rig, &CODEX, &codex(said, 0), 0);
+    let said = "Logged in using an API key - sk-NL-MARKER-8\n@@api_key\n";
+    let state = probe(&rig, &CODEX, said, 0);
     assert!(!state.text().contains("NL-MARKER"), "{state:?}");
-    let off = probe(&rig, &CODEX, &codex("Not logged in sk-NL-MARKER-8", 1), 0);
+    assert!(matches!(state, CheckState::CantTell(_)), "{state:?}");
+    let off = probe(
+        &rig,
+        &CODEX,
+        "Not logged in sk-NL-MARKER-8\n@@signed_out\n",
+        0,
+    );
     assert!(!off.text().contains("NL-MARKER"), "{off:?}");
 }
 
@@ -173,14 +178,72 @@ mod on_this_machine {
         (text, started.elapsed())
     }
 
+    fn login_with(status_says: &str, status_exit: i32) -> (String, i32, bool) {
+        let dir = std::env::temp_dir().join(format!(
+            "nl-codex-login-{}-{}",
+            std::process::id(),
+            status_exit
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ran = dir.join("ran");
+        let body = format!(
+            "#!/bin/sh\nif [ \"$2\" = status ]; then echo '{status_says}'; exit {status_exit}; fi\ntouch {}\necho 'login done'\n",
+            ran.display()
+        );
+        let path = dir.join("codex");
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(crate::machines::tool_login::login_script())
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let started = ran.exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        (text, out.status.code().unwrap_or(-1), started)
+    }
+
     #[test]
-    fn the_script_reports_the_exit_code_and_the_text() {
+    fn the_login_script_runs_the_login_only_when_the_status_says_signed_out() {
+        let (text, code, started) = login_with("Not logged in", 1);
+        assert!(started, "{text}");
+        assert_eq!(code, 0, "{text}");
+        for (says, word) in [
+            ("Logged in using ChatGPT", "@@signed_in"),
+            ("Logged in using an API key - sk-proj-***ABCDE", "@@api_key"),
+        ] {
+            let (text, code, started) = login_with(says, 0);
+            assert!(!started, "{text}");
+            assert_eq!(code, 64);
+            assert_eq!(text.trim(), word);
+            assert!(!text.contains("ABCDE"), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_script_sends_back_one_fixed_word_and_never_codexs_text() {
         let rig = Rig::new(node_linux());
         let (on, _) = run_with(Some("echo 'Logged in using ChatGPT'"), 20);
+        assert_eq!(on.trim(), "@@signed_in");
         assert!(probe(&rig, &CODEX, &on, 0).is_pass(), "{on}");
         let (off, _) = run_with(Some("echo 'Not logged in'; exit 1"), 20);
+        assert_eq!(off.trim(), "@@signed_out");
         assert!(probe(&rig, &CODEX, &off, 0).is_fail(), "{off}");
+        let (key, _) = run_with(
+            Some("echo 'Logged in using an API key - sk-proj-***ABCDE'"),
+            20,
+        );
+        assert_eq!(key.trim(), "@@api_key");
+        assert!(!key.contains("sk-") && !key.contains("ABCDE"), "{key}");
+        let (odd, _) = run_with(Some("echo 'Not logged in'"), 20);
+        assert_eq!(odd.trim(), "@@unknown");
+        let (weird, _) = run_with(Some("echo 'error: unexpected argument'; exit 2"), 20);
+        assert_eq!(weird.trim(), "@@unknown");
         let (none, _) = run_with(None, 20);
+        assert_eq!(none.trim(), "@@none");
         assert!(matches!(
             probe(&rig, &CODEX, &none, 0),
             CheckState::CantTell(_)

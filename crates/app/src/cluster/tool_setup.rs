@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use notchling_engine::machines::device_login::PromptSink;
@@ -7,7 +7,7 @@ use notchling_engine::machines::engine_plan::{AdminAnswer, PlanKind};
 use notchling_engine::machines::registry::Machine;
 use notchling_engine::machines::step::FixOutcome;
 use notchling_engine::machines::tool_installs::ToolInstall;
-use notchling_engine::machines::tool_login::LoginCheck;
+use notchling_engine::machines::tool_login::{can_sign_in, LoginCheck};
 use notchling_engine::versions::worker_install::{install_plan, INSTALLABLE};
 use notchling_engine::versions::{Tool, ToolState, Version, WorkerTools};
 use notchling_locale as t;
@@ -176,7 +176,13 @@ pub type LoginMark = Option<(i64, bool)>;
 pub struct Marks<'a> {
     pub login: &'a dyn Fn(&str, Tool) -> LoginMark,
     pub installed: &'a dyn Fn(&str, Tool) -> Option<Installed>,
-    pub reported: &'a dyn Fn(&str) -> Option<i64>,
+    pub reported: &'a dyn Fn(&str, Tool) -> Option<i64>,
+}
+
+fn absent_after(known: Option<&WorkerTools>, tool: Tool, at: i64) -> bool {
+    known.is_some_and(|k| {
+        k.at_ms > at && matches!(k.tools.get(&tool), Some(ToolState::NotInstalled))
+    })
 }
 
 fn standing(mark: Option<(i64, bool)>, now_ms: i64, reported: i64) -> Option<bool> {
@@ -201,16 +207,22 @@ pub fn correct(
             return row;
         };
         let known = tools_of(&machine.name);
-        let reported = (marks.reported)(&row.id).unwrap_or(0);
+        let node_id = row.id.clone();
+        let reported_of = |tool: Tool| (marks.reported)(&node_id, tool).unwrap_or(0);
         for tool in CHECKED {
+            let reported = reported_of(tool);
             if row.shows_installed(tool) && known_absent(known.as_ref(), tool, now_ms, reported) {
                 row.mark_absent(tool);
             }
         }
         for tool in CHECKED {
+            let reported = reported_of(tool);
             if row.versions.is_some() {
-                let fresh = (marks.installed)(&machine.name, tool)
-                    .filter(|(at, _)| now_ms - at <= FRESH_MS && *at >= reported);
+                let fresh = (marks.installed)(&machine.name, tool).filter(|(at, _)| {
+                    now_ms - at <= FRESH_MS
+                        && *at >= reported
+                        && !absent_after(known.as_ref(), tool, *at)
+                });
                 if let Some((_, version)) = fresh {
                     row.mark_present(tool, version.as_ref());
                 }
@@ -362,6 +374,7 @@ pub struct SignInGo {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckGo {
+    pub node: String,
     pub machine: String,
     pub tool: Tool,
 }
@@ -428,6 +441,7 @@ pub fn start_check(list: &[Setup], node: &str, tool: Tool) -> Result<CheckGo, St
         return Err(t::cluster::tool_sign_in_nothing().to_owned());
     };
     Ok(CheckGo {
+        node: node.to_owned(),
         machine: offer.machine.clone(),
         tool,
     })
@@ -442,7 +456,9 @@ pub fn idle_text(model: &ClusterModel, node: &str, machine: &str, kind: Kind) ->
 }
 
 pub fn idle_now(feed: &ClusterFeed, node: &str, machine: &str, kind: Kind) -> Option<FixOutcome> {
-    feed.refresh();
+    if !feed.refresh() {
+        return Some(FixOutcome::fail(t::cluster::tool_refresh_failed(machine)));
+    }
     idle_text(&feed.snapshot(), node, machine, kind).map(FixOutcome::fail)
 }
 
@@ -486,10 +502,55 @@ pub fn run_sign_in(
     engine.sign_in_tool(machine, go.tool, &go.node, prompt, cancel)
 }
 
-pub fn run_check(engine: &SetupEngine, runs: &ToolRuns, machine: &str, tool: Tool) -> LoginCheck {
+pub fn run_check(
+    engine: &SetupEngine,
+    runs: &ToolRuns,
+    machine: &str,
+    tool: Tool,
+    node: &str,
+) -> LoginCheck {
     runs.say(
         machine,
         &t::cluster::tool_checking_login(tool.title(), machine),
     );
-    engine.check_login(machine, tool)
+    engine.check_login(machine, tool, node)
+}
+
+pub fn settle_sign_in(
+    engine: &SetupEngine,
+    runs: &ToolRuns,
+    go: &SignInGo,
+    id: u64,
+    cancel: &Arc<AtomicBool>,
+    outcome: &FixOutcome,
+    now: i64,
+) {
+    let cancelled = cancel.load(Ordering::SeqCst);
+    runs.close_session(&go.machine, cancel);
+    if cancelled {
+        let said = t::cluster::tool_sign_in_cancelled(go.tool.title(), &go.machine);
+        runs.finish_run(&go.machine, id, &FixOutcome::fail(said));
+        let check = engine.check_login(&go.machine, go.tool, &go.node);
+        if let Some(signed) = check.signed {
+            runs.mark_login_run(&go.machine, id, go.tool, signed, now);
+        }
+        return;
+    }
+    if outcome.ok {
+        runs.mark_login_run(&go.machine, id, go.tool, true, now);
+    }
+    runs.finish_run(&go.machine, id, outcome);
+    if runs.is_current(&go.machine, id) {
+        runs.clear_sheet_if(&go.machine, go.tool);
+    }
+}
+
+pub fn settle_check(runs: &ToolRuns, go: &CheckGo, id: u64, check: &LoginCheck, now: i64) {
+    if let Some(signed) = check.signed {
+        runs.mark_login_run(&go.machine, id, go.tool, signed, now);
+    }
+    runs.finish_run(&go.machine, id, &check.outcome);
+    if check.signed.is_none() && !can_sign_in(go.tool) && runs.is_current(&go.machine, id) {
+        runs.set_sheet(&go.machine, go.tool, &go.node);
+    }
 }

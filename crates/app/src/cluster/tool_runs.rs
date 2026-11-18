@@ -12,6 +12,13 @@ pub enum Run {
     Done { ok: bool, text: String },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sheet {
+    pub machine: String,
+    pub tool: Tool,
+    pub node: String,
+}
+
 pub type Installed = (i64, Option<Version>);
 
 #[derive(Clone)]
@@ -24,7 +31,9 @@ pub struct Session {
 pub struct ToolRuns {
     entries: Mutex<BTreeMap<String, Run>>,
     sessions: Mutex<BTreeMap<String, Session>>,
-    sheet: Mutex<Option<(String, Tool)>>,
+    sheet: Mutex<Option<Sheet>>,
+    ids: Mutex<BTreeMap<String, u64>>,
+    next_id: AtomicU64,
     logins: Mutex<BTreeMap<(String, Tool), (i64, bool)>>,
     installed: Mutex<BTreeMap<(String, Tool), Installed>>,
     revision: AtomicU64,
@@ -47,6 +56,8 @@ impl ToolRuns {
             entries: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
             sheet: Mutex::new(None),
+            ids: Mutex::new(BTreeMap::new()),
+            next_id: AtomicU64::new(0),
             logins: Mutex::new(BTreeMap::new()),
             installed: Mutex::new(BTreeMap::new()),
             revision: AtomicU64::new(0),
@@ -68,15 +79,32 @@ impl ToolRuns {
     }
 
     pub fn begin(&self, machine: &str, text: &str) -> bool {
-        {
+        self.begin_run(machine, text).is_some()
+    }
+
+    pub fn begin_run(&self, machine: &str, text: &str) -> Option<u64> {
+        let id = {
             let mut entries = self.entries();
             if matches!(entries.get(machine), Some(Run::Running(_))) {
-                return false;
+                return None;
             }
             entries.insert(machine.to_owned(), Run::Running(text.to_owned()));
-        }
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+            locked(&self.ids).insert(machine.to_owned(), id);
+            id
+        };
         self.changed();
-        true
+        Some(id)
+    }
+
+    pub fn is_current(&self, machine: &str, id: u64) -> bool {
+        locked(&self.ids).get(machine) == Some(&id)
+    }
+
+    pub fn finish_run(&self, machine: &str, id: u64, outcome: &FixOutcome) {
+        if self.is_current(machine, id) {
+            self.finish(machine, outcome);
+        }
     }
 
     pub fn say(&self, machine: &str, text: &str) {
@@ -168,20 +196,19 @@ impl ToolRuns {
         self.sessions().get(machine).cloned()
     }
 
-    pub fn cancel(&self, machine: &str, said: &str) {
+    pub fn cancel(&self, machine: &str, stopping: &str) {
         let session = self.sessions().remove(machine);
         let Some(session) = session else {
             return;
         };
         session.cancel.store(true, Ordering::SeqCst);
         self.clear_sheet_if(machine, session.tool);
-        self.entries().insert(
-            machine.to_owned(),
-            Run::Done {
-                ok: false,
-                text: said.to_owned(),
-            },
-        );
+        {
+            let mut entries = self.entries();
+            if matches!(entries.get(machine), Some(Run::Running(_))) {
+                entries.insert(machine.to_owned(), Run::Running(stopping.to_owned()));
+            }
+        }
         self.changed();
     }
 
@@ -200,12 +227,16 @@ impl ToolRuns {
         }
     }
 
-    pub fn set_sheet(&self, machine: &str, tool: Tool) {
-        *locked(&self.sheet) = Some((machine.to_owned(), tool));
+    pub fn set_sheet(&self, machine: &str, tool: Tool, node: &str) {
+        *locked(&self.sheet) = Some(Sheet {
+            machine: machine.to_owned(),
+            tool,
+            node: node.to_owned(),
+        });
         self.changed();
     }
 
-    pub fn sheet(&self) -> Option<(String, Tool)> {
+    pub fn sheet(&self) -> Option<Sheet> {
         locked(&self.sheet).clone()
     }
 
@@ -221,7 +252,7 @@ impl ToolRuns {
             let mut sheet = locked(&self.sheet);
             if sheet
                 .as_ref()
-                .is_some_and(|(m, t)| m == machine && *t == tool)
+                .is_some_and(|s| s.machine == machine && s.tool == tool)
             {
                 *sheet = None;
                 true
@@ -237,6 +268,12 @@ impl ToolRuns {
     pub fn mark_login(&self, machine: &str, tool: Tool, signed: bool, now_ms: i64) {
         locked(&self.logins).insert((machine.to_owned(), tool), (now_ms, signed));
         self.changed();
+    }
+
+    pub fn mark_login_run(&self, machine: &str, id: u64, tool: Tool, signed: bool, now_ms: i64) {
+        if self.is_current(machine, id) {
+            self.mark_login(machine, tool, signed, now_ms);
+        }
     }
 
     pub fn login_mark(&self, machine: &str, tool: Tool) -> Option<(i64, bool)> {

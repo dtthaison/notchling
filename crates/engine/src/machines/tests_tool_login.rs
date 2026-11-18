@@ -20,7 +20,7 @@ struct Rig {
     prompts: Prompts,
     audit: TempDir,
     guard: GuardKnobs,
-    before: Arc<std::sync::Mutex<Option<&'static str>>>,
+    before: Arc<std::sync::Mutex<&'static str>>,
     timeouts: Arc<std::sync::Mutex<Vec<Duration>>>,
 }
 
@@ -29,6 +29,7 @@ enum Login {
     Hold,
     Said(i32, &'static str),
     Silent(i32, &'static str),
+    Early(i32, &'static str),
 }
 
 fn rig(login: Login, status: &'static str) -> Rig {
@@ -42,24 +43,31 @@ fn rig_on(machine: Machine, login: Login, status: &'static str) -> Rig {
     setup.audit = Some(audit.join("audit.jsonl"));
     let guard = guard_rules(&setup.runner);
     let timeouts = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let before: Arc<std::sync::Mutex<Option<&'static str>>> =
-        Arc::new(std::sync::Mutex::new(Some(SIGNED_OUT)));
-    let ran = Arc::new(AtomicBool::new(false));
+    let before: Arc<std::sync::Mutex<&'static str>> = Arc::new(std::sync::Mutex::new("signed_out"));
     let t = timeouts.clone();
-    let started = ran.clone();
+    let gate = before.clone();
     setup.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains("--device-auth")),
         move |call| {
-            started.store(true, Ordering::SeqCst);
+            let word = *lock(&gate);
+            if word != "signed_out" {
+                return CommandResult::new(64, &format!("@@{word}\n"), "");
+            }
             lock(&t).push(call.timeout);
             if let Login::Silent(code, err) = &login {
                 return CommandResult::new(*code, "", err);
+            }
+            if let Login::Early(code, text) = &login {
+                if let Some(sink) = &call.on_output {
+                    sink(Channel::Stdout, text);
+                }
+                return CommandResult::new(*code, text, text);
             }
             if let Some(sink) = &call.on_output {
                 sink(Channel::Stdout, PLAIN);
             }
             match &login {
-                Login::Silent(..) => unreachable!(),
+                Login::Silent(..) | Login::Early(..) => unreachable!(),
                 Login::Done(code) => CommandResult::new(*code, PLAIN, ""),
                 Login::Said(code, err) => CommandResult::new(*code, PLAIN, err),
                 Login::Hold => {
@@ -73,13 +81,9 @@ fn rig_on(machine: Machine, login: Login, status: &'static str) -> Rig {
             }
         },
     );
-    let (gate, seen_run) = (before.clone(), ran.clone());
     setup.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains("login status")),
-        move |_| match *lock(&gate) {
-            Some(first) if !seen_run.load(Ordering::SeqCst) => CommandResult::ok(first),
-            _ => CommandResult::ok(status),
-        },
+        move |_| CommandResult::ok(status),
     );
     setup.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains("jetski-standalone")),
@@ -119,12 +123,11 @@ impl Rig {
     }
 
     fn check(&self, tool: Tool) -> super::tool_login::LoginCheck {
-        *lock(&self.before) = None;
-        self.w.engine.check_login("m1", tool)
+        self.w.engine.check_login("m1", tool, NODE)
     }
 
     fn login_ran(&self) -> bool {
-        self.calls().iter().any(|c| c.contains("--device-auth"))
+        !lock(&self.timeouts).is_empty()
     }
 
     fn calls(&self) -> Vec<String> {
@@ -143,11 +146,14 @@ impl Rig {
 }
 
 fn statuses(calls: &[String]) -> usize {
-    calls.iter().filter(|c| c.contains("login status")).count()
+    calls
+        .iter()
+        .filter(|c| c.contains("login status") && !c.contains("--device-auth"))
+        .count()
 }
 
-const SIGNED_IN: &str = "Logged in using ChatGPT\n@@exit=0\n";
-const SIGNED_OUT: &str = "Not logged in\n@@exit=1\n";
+const SIGNED_IN: &str = "@@signed_in\n";
+const SIGNED_OUT: &str = "@@signed_out\n";
 
 #[test]
 fn success_needs_the_status_check_after_the_login_command() {
@@ -165,12 +171,21 @@ fn success_needs_the_status_check_after_the_login_command() {
         .rposition(|c| c.contains("login status"))
         .unwrap();
     assert!(login < status, "{calls:?}");
-    assert_eq!(statuses(&calls), 2, "{calls:?}");
-    let first = calls
+    assert_eq!(statuses(&calls), 1, "{calls:?}");
+    assert!(calls
         .iter()
-        .position(|c| c.contains("login status"))
-        .unwrap();
-    assert!(first < login, "{calls:?}");
+        .take(login)
+        .all(|c| !c.contains("login status")));
+}
+
+#[test]
+fn the_status_is_read_in_the_same_ssh_run_right_before_the_login() {
+    let script = login_script();
+    let status = script.find("login status").unwrap();
+    let refuse = script.rfind("exit 64").unwrap();
+    let login = script.find("codex login --device-auth").unwrap();
+    assert!(status < refuse && refuse < login, "{script}");
+    assert!(script.contains("signed_out"));
 }
 
 #[test]
@@ -203,7 +218,7 @@ fn a_clean_exit_is_not_a_success_while_the_status_says_signed_out() {
         "{}",
         out.message
     );
-    let r = rig(Login::Done(0), "error: unexpected argument\n@@exit=2\n");
+    let r = rig(Login::Done(0), "@@unknown\n");
     let out = r.sign_in();
     assert!(!out.ok);
     assert!(out.message.contains("Couldn't tell"), "{}", out.message);
@@ -220,7 +235,7 @@ fn the_wait_is_bounded_to_ten_minutes_and_a_timeout_says_so() {
         vec![Duration::from_secs(LOGIN_SECS)]
     );
     assert_eq!(LOGIN_SECS, 600);
-    assert_eq!(statuses(&r.calls()), 1);
+    assert_eq!(statuses(&r.calls()), 0);
     assert!(!r.everything_written().contains(CODE));
 }
 
@@ -244,7 +259,7 @@ fn cancelling_ends_the_command_and_skips_the_status_check() {
     });
     assert!(!out.ok);
     assert!(out.message.contains("was cancelled"), "{}", out.message);
-    assert_eq!(statuses(&r.calls()), 1);
+    assert_eq!(statuses(&r.calls()), 0);
     assert!(!r.everything_written().contains(CODE));
     assert_eq!(r.w.engine.running("m1"), None);
 }
@@ -268,18 +283,77 @@ fn a_failing_command_after_the_prompt_says_only_the_exit_code() {
 }
 
 #[test]
-fn a_failure_before_any_prompt_shows_a_scrubbed_error() {
+fn a_failure_before_any_prompt_gets_a_fixed_note_and_never_the_workers_text() {
     let r = rig(
         Login::Silent(255, "ssh: connect to host m1.test: Connection refused"),
         SIGNED_OUT,
     );
     let out = r.sign_in();
     assert!(!out.ok);
+    assert!(out.message.contains("Couldn't reach m1"), "{}", out.message);
+    assert!(!out.message.contains("refused"), "{}", out.message);
+}
+
+#[test]
+fn output_before_the_prompt_never_reaches_the_log_or_the_error() {
+    let r = rig(Login::Early(2, "user_code=ZQ7-ABCD\n"), SIGNED_OUT);
+    let out = r.sign_in();
+    assert!(!out.ok);
+    assert!(out.message.contains("(exit 2)"), "{}", out.message);
+    assert!(!out.message.contains("ZQ7"), "{}", out.message);
+    let written = r.everything_written();
+    assert!(!written.contains("ZQ7"), "{written}");
+}
+
+#[test]
+fn a_cancel_before_or_during_the_preflight_never_starts_the_login() {
+    let r = rig(Login::Done(0), SIGNED_IN);
+    let flag = Arc::new(AtomicBool::new(true));
+    let out =
+        r.w.engine
+            .sign_in_tool("m1", Tool::Codex, NODE, r.sink(), flag);
+    assert!(!out.ok);
+    assert!(out.message.contains("was cancelled"), "{}", out.message);
+    assert!(!r.login_ran());
+    let r = rig(Login::Done(0), SIGNED_IN);
+    let flag = Arc::new(AtomicBool::new(false));
+    *lock(&r.guard.trip) = Some(flag.clone());
+    let out =
+        r.w.engine
+            .sign_in_tool("m1", Tool::Codex, NODE, r.sink(), flag);
+    assert!(!out.ok);
+    assert!(out.message.contains("was cancelled"), "{}", out.message);
+    assert!(!r.login_ran());
+    assert!(!r.calls().iter().any(|c| c.contains("--device-auth")));
+}
+
+#[test]
+fn a_check_verifies_the_node_and_never_reads_the_status_of_another() {
+    let r = rig(Login::Done(0), SIGNED_IN);
+    *lock(&r.guard.node) = Some("fedcba9876543210".into());
+    let check = r.check(Tool::Codex);
+    assert_eq!(check.signed, None);
+    assert!(!check.outcome.ok);
     assert!(
-        out.message.contains("Connection refused"),
+        check.outcome.message.contains("not the machine"),
         "{}",
-        out.message
+        check.outcome.message
     );
+    assert_eq!(statuses(&r.calls()), 0);
+}
+
+#[test]
+fn a_guard_probe_that_fails_is_not_trusted_even_with_a_matching_answer() {
+    let r = rig(Login::Done(0), SIGNED_IN);
+    *lock(&r.guard.node_exit) = 1;
+    assert!(r.sign_in().message.contains("Couldn't confirm"));
+    *lock(&r.guard.node_exit) = 0;
+    *lock(&r.guard.busy_exit) = 1;
+    assert!(r.sign_in().message.contains("Couldn't tell"));
+    *lock(&r.guard.busy_exit) = 0;
+    *lock(&r.guard.node_extra) = true;
+    assert!(r.sign_in().message.contains("Couldn't confirm"));
+    assert!(!r.login_ran());
 }
 
 #[test]
@@ -328,7 +402,7 @@ fn check_again_reports_signed_in_signed_out_and_unknown_apart() {
     assert_eq!(check.signed, Some(true));
     let r = rig(Login::Done(0), SIGNED_OUT);
     assert_eq!(r.check(Tool::Codex).signed, Some(false));
-    let r = rig(Login::Done(0), "API key configured\n@@exit=0\n");
+    let r = rig(Login::Done(0), "@@api_key\n");
     let check = r.check(Tool::Codex);
     assert_eq!(check.signed, None);
     assert!(!check.outcome.ok);
@@ -414,12 +488,15 @@ fn a_machine_that_is_not_registered_is_refused() {
 #[test]
 fn a_login_is_never_started_over_a_working_or_unreadable_one() {
     let r = rig(Login::Done(0), SIGNED_IN);
-    *lock(&r.before) = Some(SIGNED_IN);
+    *lock(&r.before) = "signed_in";
     let out = r.sign_in();
     assert!(!out.ok);
     assert!(out.message.contains("already signed in"), "{}", out.message);
     assert!(!r.login_ran());
-    *lock(&r.before) = Some("API key configured\n@@exit=0\n");
+    *lock(&r.before) = "api_key";
+    let out = r.sign_in();
+    assert!(out.message.contains("already signed in"), "{}", out.message);
+    *lock(&r.before) = "unknown";
     let out = r.sign_in();
     assert!(!out.ok);
     assert!(out.message.contains("Couldn't tell"), "{}", out.message);

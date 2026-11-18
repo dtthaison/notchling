@@ -85,7 +85,7 @@ impl SetupEngine {
     ) -> FixOutcome {
         let m = &ctx.step.machine;
         let name = &m.name;
-        if let Err(why) = guard(ctx, tool, node) {
+        if let Err(why) = guard(ctx.step.runner.as_ref(), m, tool, node, &None) {
             return FixOutcome::fail(why);
         }
         (ctx.log)(Channel::Stdout, &format!("$ {script}\n"));

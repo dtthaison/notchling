@@ -4,15 +4,19 @@ use std::sync::{Arc, Mutex};
 
 use notchling_engine::machines::registry::{Machine, MachineOs, NodeSettings};
 use notchling_engine::machines::runner::CommandResult;
+use notchling_engine::machines::step::FixOutcome;
+use notchling_engine::machines::tool_login::LoginCheck;
 use notchling_engine::versions::{Method, Tool, ToolState, Version, WorkerTools};
 use serde_json::{json, Value};
 
 use super::add_rig_tests::Rig;
+use super::feed::ClusterFeed;
 use super::model::{ClusterModel, Login};
 use super::tool_runs::ToolRuns;
 use super::tool_setup::{
-    correct, find, idle_text, run_check, run_install, run_sign_in, setups, start_check,
-    start_install, start_sign_in, Corrections, InstallGo, Kind, Marks, SignInGo, FRESH_MS,
+    correct, find, idle_now, idle_text, run_check, run_install, run_sign_in, settle_check,
+    settle_sign_in, setups, start_check, start_install, start_sign_in, CheckGo, Corrections,
+    InstallGo, Kind, Marks, SignInGo, FRESH_MS,
 };
 use super::tool_updates::{offers, State};
 use crate::machines::versions_feed::{MacSide, MacTool};
@@ -102,7 +106,7 @@ fn nothing(_: &str, _: Tool) -> Option<(i64, Option<Version>)> {
     None
 }
 
-fn unreported(_: &str) -> Option<i64> {
+fn unreported(_: &str, _: Tool) -> Option<i64> {
     None
 }
 
@@ -517,19 +521,16 @@ fn cancel_clears_the_prompt_the_sheet_and_the_running_state_at_once() {
     let runs = ToolRuns::default();
     let cancel = runs.open_session("m1", Tool::Codex).unwrap();
     assert!(runs.begin("m1", "signing in"));
-    runs.set_sheet("m1", Tool::Codex);
+    runs.set_sheet("m1", Tool::Codex, M1);
     runs.offer("m1", &cancel, prompt());
-    runs.cancel("m1", "cancelled");
+    runs.cancel("m1", "stopping");
     assert!(cancel.load(std::sync::atomic::Ordering::SeqCst));
     assert!(runs.session("m1").is_none());
     assert!(runs.sheet().is_none());
-    assert!(!runs.running("m1"));
+    assert!(runs.running("m1"));
     assert_eq!(
         runs.get("m1"),
-        Some(super::tool_runs::Run::Done {
-            ok: false,
-            text: "cancelled".into()
-        })
+        Some(super::tool_runs::Run::Running("stopping".into()))
     );
 }
 
@@ -537,7 +538,7 @@ fn cancel_clears_the_prompt_the_sheet_and_the_running_state_at_once() {
 fn an_old_run_cannot_touch_a_newer_session_on_the_same_machine() {
     let runs = ToolRuns::default();
     let old = runs.open_session("m1", Tool::Codex).unwrap();
-    runs.cancel("m1", "cancelled");
+    runs.cancel("m1", "stopping");
     let new = runs.open_session("m1", Tool::Codex).unwrap();
     runs.offer("m1", &old, prompt());
     assert!(runs.session("m1").unwrap().prompt.is_none());
@@ -550,9 +551,13 @@ fn an_old_run_cannot_touch_a_newer_session_on_the_same_machine() {
 #[test]
 fn the_sheet_lives_with_the_runs_and_a_run_closes_only_its_own() {
     let runs = Arc::new(ToolRuns::default());
-    runs.set_sheet("m1", Tool::Agy);
+    runs.set_sheet("m1", Tool::Agy, M1);
     let again = runs.clone();
-    assert_eq!(again.sheet(), Some(("m1".to_string(), Tool::Agy)));
+    let sheet = again.sheet().expect("a sheet");
+    assert_eq!(
+        (sheet.machine.as_str(), sheet.tool, sheet.node.as_str()),
+        ("m1", Tool::Agy, M1)
+    );
     runs.clear_sheet_if("m1", Tool::Codex);
     runs.clear_sheet_if("m2", Tool::Agy);
     assert!(runs.sheet().is_some());
@@ -616,7 +621,7 @@ fn a_check_result_sets_the_card_both_ways() {
 fn a_newer_report_from_the_node_beats_an_older_mark_or_probe() {
     let installed =
         |_: &str, tool: Tool| (tool == Tool::Codex).then(|| (NOW - 100, Some(v("0.166.0"))));
-    let reported_later = |_: &str| Some(NOW - 50);
+    let reported_later = |_: &str, _: Tool| Some(NOW - 50);
     let marks = Marks {
         login: &never,
         installed: &installed,
@@ -647,7 +652,7 @@ fn a_newer_report_from_the_node_beats_an_older_mark_or_probe() {
 #[test]
 fn a_login_mark_older_than_the_nodes_report_gives_way() {
     let yes = |_: &str, tool: Tool| (tool == Tool::Codex).then_some((NOW - 100, true));
-    let later = |_: &str| Some(NOW - 50);
+    let later = |_: &str, _: Tool| Some(NOW - 50);
     let marks = Marks {
         login: &yes,
         installed: &nothing,
@@ -681,11 +686,11 @@ fn run_check_reports_the_signed_state_without_a_login() {
     let rig = rig(&w, true);
     rig.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains("login status")),
-        |_| CommandResult::ok("Logged in using ChatGPT\n@@exit=0\n"),
+        |_| CommandResult::ok("@@signed_in\n"),
     );
     let runs = ToolRuns::default();
     assert!(runs.begin("m1", "start"));
-    let check = run_check(&rig.engine, &runs, "m1", Tool::Codex);
+    let check = run_check(&rig.engine, &runs, "m1", Tool::Codex, M1);
     assert_eq!(check.signed, Some(true));
     assert!(check.outcome.ok);
     assert!(rig
@@ -705,7 +710,7 @@ fn run_sign_in_goes_through_the_engine_and_needs_the_status_check() {
     );
     rig.runner.on_call(
         |argv| argv.last().is_some_and(|s| s.contains("login status")),
-        |_| CommandResult::ok("Not logged in\n@@exit=1\n"),
+        |_| CommandResult::ok("@@signed_out\n"),
     );
     let runs = ToolRuns::default();
     assert!(runs.begin("m1", "start"));
@@ -728,4 +733,194 @@ fn run_sign_in_goes_through_the_engine_and_needs_the_status_check() {
         "{}",
         outcome.message
     );
+}
+
+#[test]
+fn a_cancelled_run_stays_running_until_it_ends_and_cannot_touch_a_retry() {
+    let runs = ToolRuns::default();
+    let cancel = runs.open_session("m1", Tool::Codex).unwrap();
+    let old = runs.begin_run("m1", "signing in").unwrap();
+    runs.cancel("m1", "stopping");
+    assert!(runs.running("m1"));
+    assert!(runs.begin_run("m1", "again").is_none());
+    runs.finish_run("m1", old, &FixOutcome::fail("cancelled"));
+    assert!(!runs.running("m1"));
+    let retry = runs.begin_run("m1", "again").unwrap();
+    assert_ne!(old, retry);
+    runs.finish_run("m1", old, &FixOutcome::fail("late"));
+    runs.mark_login_run("m1", old, Tool::Codex, true, NOW);
+    assert_eq!(runs.login_mark("m1", Tool::Codex), None);
+    assert_eq!(
+        runs.get("m1"),
+        Some(super::tool_runs::Run::Running("again".into()))
+    );
+    runs.mark_login_run("m1", retry, Tool::Codex, true, NOW);
+    assert_eq!(runs.login_mark("m1", Tool::Codex), Some((NOW, true)));
+    runs.close_session("m1", &cancel);
+}
+
+fn sign_in_go() -> SignInGo {
+    SignInGo {
+        node: M1.into(),
+        machine: "m1".into(),
+        tool: Tool::Codex,
+    }
+}
+
+#[test]
+fn a_cancelled_sign_in_ends_as_cancelled_and_rechecks_the_status_before_marking() {
+    let w = worker();
+    let rig = rig(&w, true);
+    rig.runner.on_call(
+        |argv| argv.last().is_some_and(|s| s.contains("login status")),
+        |_| CommandResult::ok("@@signed_out\n"),
+    );
+    let runs = ToolRuns::default();
+    let cancel = runs.open_session("m1", Tool::Codex).unwrap();
+    let id = runs.begin_run("m1", "signing in").unwrap();
+    runs.set_sheet("m1", Tool::Codex, M1);
+    runs.cancel("m1", "stopping");
+    let outcome = FixOutcome::fail("cancelled");
+    settle_sign_in(
+        &rig.engine,
+        &runs,
+        &sign_in_go(),
+        id,
+        &cancel,
+        &outcome,
+        NOW,
+    );
+    assert!(!runs.running("m1"));
+    match runs.get("m1") {
+        Some(super::tool_runs::Run::Done { ok, text }) => {
+            assert!(!ok);
+            assert!(text.contains("cancel"), "{text}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(runs.login_mark("m1", Tool::Codex), Some((NOW, false)));
+    assert!(runs.sheet().is_none());
+}
+
+#[test]
+fn a_finished_sign_in_marks_and_closes_the_sheet() {
+    let w = worker();
+    let rig = rig(&w, true);
+    let runs = ToolRuns::default();
+    let cancel = runs.open_session("m1", Tool::Codex).unwrap();
+    let id = runs.begin_run("m1", "signing in").unwrap();
+    runs.set_sheet("m1", Tool::Codex, M1);
+    let outcome = FixOutcome::ok("signed in");
+    settle_sign_in(
+        &rig.engine,
+        &runs,
+        &sign_in_go(),
+        id,
+        &cancel,
+        &outcome,
+        NOW,
+    );
+    assert_eq!(runs.login_mark("m1", Tool::Codex), Some((NOW, true)));
+    assert!(runs.sheet().is_none());
+    assert!(runs.session("m1").is_none());
+}
+
+fn check_go(tool: Tool) -> CheckGo {
+    CheckGo {
+        node: M1.into(),
+        machine: "m1".into(),
+        tool,
+    }
+}
+
+#[test]
+fn an_unknown_antigravity_check_brings_back_the_how_to_and_codex_does_not() {
+    let runs = ToolRuns::default();
+    let unknown = LoginCheck {
+        outcome: FixOutcome::fail("couldn't tell"),
+        signed: None,
+    };
+    let id = runs.begin_run("m1", "checking").unwrap();
+    settle_check(&runs, &check_go(Tool::Agy), id, &unknown, NOW);
+    let sheet = runs.sheet().expect("the how-to");
+    assert_eq!((sheet.tool, sheet.node.as_str()), (Tool::Agy, M1));
+    runs.clear_sheet();
+    runs.dismiss("m1");
+    let id = runs.begin_run("m1", "checking").unwrap();
+    settle_check(&runs, &check_go(Tool::Codex), id, &unknown, NOW);
+    assert!(runs.sheet().is_none());
+    runs.dismiss("m1");
+    let id = runs.begin_run("m1", "checking").unwrap();
+    let known = LoginCheck {
+        outcome: FixOutcome::ok("signed in"),
+        signed: Some(true),
+    };
+    settle_check(&runs, &check_go(Tool::Agy), id, &known, NOW);
+    assert!(runs.sheet().is_none());
+    assert_eq!(runs.login_mark("m1", Tool::Agy), Some((NOW, true)));
+}
+
+#[test]
+fn a_check_carries_the_node_it_was_offered_for() {
+    let side = mac(Some("0.166.0"), None);
+    let unknown = signed(json!({}));
+    let list = offered(&unknown, Some(&side), &Switches::all_off());
+    assert_eq!(start_check(&list, M1, Tool::Codex).unwrap().node, M1);
+}
+
+#[test]
+fn an_install_waits_on_the_reports_of_its_own_tool_only() {
+    let installed =
+        |_: &str, tool: Tool| (tool == Tool::Codex).then(|| (NOW - 100, Some(v("0.166.0"))));
+    let claude_later = |_: &str, tool: Tool| (tool == Tool::Claude).then_some(NOW - 50);
+    let marks = Marks {
+        login: &never,
+        installed: &installed,
+        reported: &claude_later,
+    };
+    let model = correct(&missing_both(), &[machine()], &none, &unread, &marks, NOW);
+    let texts = row_of(&model).tool_texts();
+    assert!(texts.iter().any(|t| t == "Codex 0.166.0"), "{texts:?}");
+    let codex_later = |_: &str, tool: Tool| (tool == Tool::Codex).then_some(NOW - 50);
+    let marks = Marks {
+        login: &never,
+        installed: &installed,
+        reported: &codex_later,
+    };
+    let model = correct(&missing_both(), &[machine()], &none, &unread, &marks, NOW);
+    let texts = row_of(&model).tool_texts();
+    assert!(!texts.iter().any(|t| t == "Codex 0.166.0"), "{texts:?}");
+}
+
+#[test]
+fn an_install_mark_gives_way_to_a_newer_absence_probe() {
+    let installed =
+        |_: &str, tool: Tool| (tool == Tool::Codex).then(|| (NOW - 10, Some(v("0.166.0"))));
+    let marks = Marks {
+        login: &never,
+        installed: &installed,
+        reported: &unreported,
+    };
+    let known = read(vec![(Tool::Codex, ToolState::NotInstalled)], NOW - 5);
+    let tools = move |_: &str| Some(known.clone());
+    let model = correct(&stale(), &[machine()], &none, &tools, &marks, NOW);
+    let texts = row_of(&model).tool_texts();
+    assert!(
+        texts.iter().any(|t| t == "Codex not installed"),
+        "{texts:?}"
+    );
+    let known = read(vec![(Tool::Codex, ToolState::NotInstalled)], NOW - 20);
+    let tools = move |_: &str| Some(known.clone());
+    let model = correct(&stale(), &[machine()], &none, &tools, &marks, NOW);
+    let texts = row_of(&model).tool_texts();
+    assert!(texts.iter().any(|t| t == "Codex 0.166.0"), "{texts:?}");
+}
+
+#[test]
+fn nothing_changes_when_the_cluster_cannot_be_read_first() {
+    let feed = ClusterFeed::none();
+    let refused = idle_now(&feed, M1, "m1", Kind::Install).expect("refused");
+    assert!(!refused.ok);
+    assert!(refused.message.contains("m1"), "{}", refused.message);
+    assert!(idle_now(&feed, M1, "m1", Kind::SignIn).is_some());
 }
