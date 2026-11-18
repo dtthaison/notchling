@@ -173,7 +173,7 @@ fn https_allows(url: &str, host_ok: impl Fn(&str) -> bool) -> bool {
     let Some(rest) = lower.strip_prefix("https://") else {
         return false;
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
     if authority.contains('@') {
         return false;
     }
@@ -181,7 +181,13 @@ fn https_allows(url: &str, host_ok: impl Fn(&str) -> bool) -> bool {
         Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host,
         _ => authority,
     };
-    !host.is_empty() && host_ok(host)
+    let plain = !host.is_empty()
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+    plain && host_ok(host)
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -511,6 +517,34 @@ mod tests {
         }
         assert!(!live_allows("https://accounts.google.com/"));
         assert!(!antigravity_allows("https://claude.ai/"));
+    }
+
+    #[test]
+    fn odd_hosts_are_blocked_by_both_checks() {
+        for url in [
+            "https://evil.example\\.claude.ai/",
+            "https://evil.example\\api.claude.ai/",
+            "blob:https://evil.example\\.claude.ai/1",
+            "https://evil.example%2e.claude.ai/",
+            "https://evil.example .claude.ai/",
+            "https://evil_example.claude.ai/",
+            "https://.claude.ai/",
+            "https://claude.ai./",
+        ] {
+            assert!(!live_allows(url), "{url}");
+        }
+        for url in [
+            "https://evil.example\\.google.com/",
+            "https://evil.example\\accounts.google.com/",
+            "blob:https://evil.example\\.google.com/1",
+            "https://evil.example%2e.google.com/",
+            "https://evil.example .google.com/",
+            "https://evil_example.google.com/",
+            "https://.google.com/",
+            "https://google.com./",
+        ] {
+            assert!(!antigravity_allows(url), "{url}");
+        }
     }
 
     #[test]
