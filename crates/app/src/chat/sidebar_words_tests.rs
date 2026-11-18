@@ -179,7 +179,6 @@ fn the_menus_words_are_what_they_were() {
         t::chat::remove_note(),
         "Claude Code stops it and removes it from its list. This can't be undone."
     );
-    assert_eq!(t::chat::codex_accounts(), "Codex Accounts…");
     assert_eq!(t::chat::move_failed("no"), "Couldn't move it: no");
     assert_eq!(
         t::chat::save_used_failed("no"),

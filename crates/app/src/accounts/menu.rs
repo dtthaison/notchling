@@ -71,7 +71,6 @@ pub enum Entry {
     Separator,
     MoveAll,
     AddAccount,
-    CodexAccounts,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,12 +82,7 @@ pub struct AccountMenu {
     pub entries: Vec<Entry>,
 }
 
-pub fn account_menu(
-    s: &Snapshot,
-    config_dir: Option<&str>,
-    movable: bool,
-    codex: bool,
-) -> AccountMenu {
+pub fn account_menu(s: &Snapshot, config_dir: Option<&str>, movable: bool) -> AccountMenu {
     let targets = targets(s);
     let lane = config_dir.and_then(|dir| s.lanes.iter().find(|l| l.path == dir));
     let current = match lane {
@@ -129,9 +123,6 @@ pub fn account_menu(
     }
     entries.push(Entry::Separator);
     entries.push(Entry::AddAccount);
-    if codex {
-        entries.push(Entry::CodexAccounts);
-    }
     AccountMenu {
         label,
         lane: lane_name,
@@ -226,7 +217,7 @@ mod tests {
     #[test]
     fn a_job_lists_every_target_and_a_terminal_only_its_own() {
         let s = snapshot();
-        let job = account_menu(&s, Some("/h/.claude-lanes/night"), true, true);
+        let job = account_menu(&s, Some("/h/.claude-lanes/night"), true);
         assert_eq!(job.label, "ops@example.com");
         assert_eq!(job.lane.as_deref(), Some("night"));
         assert_eq!(
@@ -256,10 +247,9 @@ mod tests {
                 Entry::MoveAll,
                 Entry::Separator,
                 Entry::AddAccount,
-                Entry::CodexAccounts,
             ]
         );
-        let terminal = account_menu(&s, None, false, false);
+        let terminal = account_menu(&s, None, false);
         assert_eq!(terminal.label, "me@example.com");
         assert_eq!(
             terminal.tooltip,
@@ -269,7 +259,6 @@ mod tests {
             index: 0,
             current: true
         }));
-        assert!(!terminal.entries.contains(&Entry::CodexAccounts));
         assert_eq!(
             terminal
                 .entries
@@ -278,7 +267,7 @@ mod tests {
                 .count(),
             1
         );
-        let alone = account_menu(&Snapshot::default(), None, true, false);
+        let alone = account_menu(&Snapshot::default(), None, true);
         assert!(!alone.entries.contains(&Entry::MoveAll));
     }
 }

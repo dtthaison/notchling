@@ -360,7 +360,6 @@ impl ChatView {
         let now = now_ms();
         if now - self.accounts_polled_ms >= accounts::POLL.as_millis() as i64 {
             self.accounts_polled_ms = now;
-            self.codex_installed = accounts::codex_installed(&self.root.home);
             self.poll_accounts(cx);
         }
     }
