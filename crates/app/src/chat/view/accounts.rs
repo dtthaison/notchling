@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::Duration;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
@@ -14,7 +13,7 @@ use super::ChatView;
 use crate::accounts::menu::{
     account_menu, move_all_account, move_needs_accounts, AccountMenu, Entry, Place, Target,
 };
-use crate::accounts::model::{CLAUDE_CODE, CODEX};
+use crate::accounts::model::CLAUDE_CODE;
 use crate::acting::{Control, Request};
 use crate::chat::data::Tool;
 use crate::chat::remote_control::Action;
@@ -22,15 +21,6 @@ use crate::mac::gate;
 use crate::switches::Switch;
 
 pub(super) const POLL: Duration = Duration::from_secs(10);
-
-pub(super) fn codex_installed(home: &Path) -> bool {
-    notchling_engine::tools::codex::plan::find_binary(
-        home,
-        &std::env::var("PATH").unwrap_or_default(),
-        Path::is_file,
-    )
-    .is_some()
-}
 
 impl ChatView {
     pub(super) fn poll_accounts(&self, cx: &mut Context<Self>) {
@@ -89,7 +79,6 @@ impl ChatView {
             &self.accounts.snapshot(),
             agent.config_dir.as_deref(),
             movable,
-            self.codex_installed,
         ))
     }
 
@@ -178,10 +167,6 @@ impl ChatView {
             Entry::AddAccount => {
                 self.account_menu = false;
                 self.open_accounts_sheet(Some(CLAUDE_CODE), cx);
-            }
-            Entry::CodexAccounts => {
-                self.account_menu = false;
-                self.open_accounts_sheet(Some(CODEX), cx);
             }
             Entry::MoveAll | Entry::Header(_) | Entry::Note(_) | Entry::Separator => {}
         }
@@ -316,12 +301,8 @@ pub(super) fn render_menu(
                 }
                 items = items.children(std::mem::take(&mut move_all));
             }
-            Entry::AddAccount | Entry::CodexAccounts => {
-                let title = if *entry == Entry::AddAccount {
-                    t::chat::add_account()
-                } else {
-                    t::chat::codex_accounts()
-                };
+            Entry::AddAccount => {
+                let title = t::chat::add_account();
                 let (entry, menu_clone) = (entry.clone(), menu.clone());
                 items = items.child(menu_item(format!("account-entry-{i}"), title, a).on_click(
                     cx.listener(move |this, _, _, cx| {

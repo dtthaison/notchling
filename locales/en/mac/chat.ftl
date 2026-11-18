@@ -42,7 +42,6 @@ chat-save-closed-failed = Couldn't save the closed sessions: { $error }
 
 chat-move-all-to = Move All Sessions To
 chat-add-account = Add Account…
-chat-codex-accounts = { -brand-codex } Accounts…
 # Shown in the error line; $error is the reason.
 chat-move-failed = Couldn't move it: { $error }
 
