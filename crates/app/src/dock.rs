@@ -14,6 +14,7 @@ pub fn policy_for(titled_windows: usize) -> Policy {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainItem {
+    About,
     Settings,
     Quit,
     Undo,
@@ -30,6 +31,7 @@ pub enum MainItem {
 impl MainItem {
     pub fn title(self) -> &'static str {
         match self {
+            MainItem::About => "About Notchling",
             MainItem::Settings => "Settings…",
             MainItem::Quit => "Quit Notchling",
             MainItem::Undo => "Undo",
@@ -46,6 +48,7 @@ impl MainItem {
 
     pub fn key(self) -> Option<&'static str> {
         match self {
+            MainItem::About => None,
             MainItem::Settings => Some("cmd-,"),
             MainItem::Quit => Some("cmd-q"),
             MainItem::Undo => Some("cmd-z"),
@@ -71,7 +74,13 @@ pub fn main_menu() -> Vec<MainMenu> {
     vec![
         MainMenu {
             name: "Notchling",
-            items: vec![MainItem::Settings, MainItem::Separator, MainItem::Quit],
+            items: vec![
+                MainItem::About,
+                MainItem::Separator,
+                MainItem::Settings,
+                MainItem::Separator,
+                MainItem::Quit,
+            ],
         },
         MainMenu {
             name: "Edit",
@@ -114,10 +123,27 @@ mod tests {
             assert!(!item.title().contains("Hide"));
             assert_eq!(
                 item.key().is_some(),
-                *item != MainItem::Separator,
+                !matches!(item, MainItem::Separator | MainItem::About),
                 "{:?}",
                 item
             );
         }
+    }
+
+    #[test]
+    fn app_menu_starts_with_about_then_a_separator() {
+        let app = &main_menu()[0];
+        assert_eq!(app.name, "Notchling");
+        assert_eq!(
+            app.items,
+            [
+                MainItem::About,
+                MainItem::Separator,
+                MainItem::Settings,
+                MainItem::Separator,
+                MainItem::Quit
+            ]
+        );
+        assert_eq!(MainItem::About.title(), "About Notchling");
     }
 }
