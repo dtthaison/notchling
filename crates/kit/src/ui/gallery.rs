@@ -4,7 +4,7 @@ use super::icons::{icon, spinner};
 use super::scrollbar::scrollable;
 use super::text_editor::TextEditor;
 use super::widgets::{
-    account_line, avatar, button, claude_mark, field, label, option_row, session_row,
+    account_line, avatar, brand_mark, button, field, label, option_row, session_row,
     session_row_marked, status_pill, tool_icon, ToolMark,
 };
 use super::{hsla, window_appearance, KitStyled};
@@ -290,7 +290,7 @@ fn small_parts(a: Appearance) -> Div {
                 .items_center()
                 .gap(px(8.0))
                 .children(names.map(|name| avatar(name, 30.0, Some(Status::Needs), Ink::Window, a)))
-                .child(claude_mark(24.0, a)),
+                .child(brand_mark(24.0)),
         )
         .child(div().w(px(220.0)).child(field("", "Search", false, a)))
         .child(

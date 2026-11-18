@@ -150,10 +150,6 @@ impl Ink {
     }
 }
 
-pub fn claude_mark_top() -> Color {
-    p::ORANGE300
-}
-
 pub fn avatar(name: &str) -> (Color, Color) {
     let mut hash: u64 = 1_469_598_103_934_665_603;
     for byte in name.bytes() {

@@ -10,7 +10,7 @@ use gpui::{
 use notchling_kit::metric::{SIDEBAR_WIDTH, SIDE_PADDING, TITLE_BAR, WINDOW_DEFAULT, WINDOW_MIN};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, claude_mark, hsla, label, parts_button, resize_edges, toggle_parts, window_appearance,
+    brand_mark, button, hsla, label, parts_button, resize_edges, toggle_parts, window_appearance,
     KitStyled, TopBorder,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
@@ -102,7 +102,7 @@ impl Render for ShellView {
                     .items_center()
                     .justify_center()
                     .gap(px(12.0))
-                    .child(claude_mark(48.0, a))
+                    .child(brand_mark(48.0))
                     .child(label(
                         "No home folder to read sessions from",
                         TypeRole::Heading,

@@ -1,12 +1,14 @@
+use std::sync::{Arc, OnceLock};
+
 use gpui::{
-    div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Stateful,
-    StyleRefinement,
+    div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Image,
+    ImageFormat, Stateful, StyleRefinement,
 };
 
 use super::icons::{icon, icon_in};
 use super::tool_images::tool_image;
 use super::{hsla, KitStyled, SYSTEM_FONT};
-use crate::ink::{avatar as avatar_colors, claude_mark_top};
+use crate::ink::avatar as avatar_colors;
 use crate::metric::{
     BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
     SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW, SESSION_ROW_ACCOUNT, TOOL_ICON,
@@ -148,23 +150,30 @@ pub fn avatar(
     element
 }
 
-pub fn claude_mark(size: f32, appearance: Appearance) -> Div {
-    div()
-        .flex_shrink_0()
-        .size(px(size))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(linear_gradient(
-            135.0,
-            linear_color_stop(hsla(claude_mark_top()), 0.0),
-            linear_color_stop(hsla(Ink::Accent.color(appearance)), 1.0),
-        ))
-        .ink(Ink::OnAccent, appearance)
-        .text_size(px(size * 0.5))
-        .font_weight(FontWeight::MEDIUM)
-        .child(Icon::Claude.glyph())
+const BRAND_PADDING: f32 = 100.0 / 1024.0;
+
+pub fn brand_image() -> Arc<Image> {
+    static IMAGE: OnceLock<Arc<Image>> = OnceLock::new();
+    IMAGE
+        .get_or_init(|| {
+            Arc::new(Image::from_bytes(
+                ImageFormat::Png,
+                include_bytes!("../../../../assets/brand/icon-1024.png").to_vec(),
+            ))
+        })
+        .clone()
+}
+
+pub fn brand_mark(size: f32) -> Div {
+    let full = size / (1.0 - 2.0 * BRAND_PADDING);
+    let inset = (full - size) / 2.0;
+    div().flex_shrink_0().relative().size(px(size)).child(
+        gpui::img(brand_image())
+            .absolute()
+            .left(px(-inset))
+            .top(px(-inset))
+            .size(px(full)),
+    )
 }
 
 pub fn phone_mark(size: f32, ink: Ink, appearance: Appearance) -> Div {
@@ -279,16 +288,17 @@ pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {
             .size(px(size))
             .child(gpui::img(image).size(px(size)));
     }
-    match tool {
-        ToolMark::Claude => claude_mark(size, appearance),
-        other => div()
-            .flex_shrink_0()
-            .size(px(size))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(icon(other.icon(), size * 0.75, Ink::TextMuted, appearance)),
-    }
+    let ink = match tool {
+        ToolMark::Claude => Ink::Accent,
+        _ => Ink::TextMuted,
+    };
+    div()
+        .flex_shrink_0()
+        .size(px(size))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(icon(tool.icon(), size * 0.75, ink, appearance))
 }
 
 pub fn account_line(text: &str, lane: bool, appearance: Appearance) -> Div {
@@ -494,5 +504,22 @@ mod press_tests {
         let text = style.text.expect("a text style");
         assert_eq!(text.font_size, Some(px(TypeRole::Label.spec().size).into()));
         assert!(text.color.is_some());
+    }
+}
+
+#[cfg(test)]
+mod brand_tests {
+    use super::*;
+
+    #[test]
+    fn the_brand_mark_is_the_sweep_icon_file() {
+        let file = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/brand/icon-1024.png"
+        ))
+        .expect("the brand icon");
+        let image = brand_image();
+        assert_eq!(image.bytes(), file.as_slice());
+        assert_eq!(&file[..8], b"\x89PNG\r\n\x1a\n");
     }
 }
