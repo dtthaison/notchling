@@ -6,6 +6,7 @@ use images::ImageRef;
 pub use steps::{cap_output, result_text, step, tagged, DiffRow, DiffRowKind, ToolStep};
 pub use window::{read_window, strip_base64};
 
+use super::browser;
 use super::model::Timestamp;
 use super::tail::MAX_LINE_BYTES;
 use super::tally::ToolTally;
@@ -13,7 +14,7 @@ use super::text::{collapse_pastes, prefix_chars};
 use super::typed::typed_prompt;
 use super::util::{date_field, parse_object, str_of};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const TAIL_BYTES: u64 = 2_000_000;
 pub const MAX_TEXT_CHARACTERS: usize = 3000;
@@ -143,6 +144,7 @@ struct State {
     tally_index: HashMap<String, usize>,
     flushed_steps: HashMap<String, (usize, usize)>,
     tally_images: Vec<ImageRef>,
+    browser_ids: HashSet<String>,
 }
 
 impl State {
@@ -176,6 +178,13 @@ impl State {
     }
 
     fn attach_result(&mut self, id: &str, output: String) {
+        let output = if self.browser_ids.contains(id) {
+            browser::plain_fault(&output)
+                .map(String::from)
+                .unwrap_or_default()
+        } else {
+            output
+        };
         if output.is_empty() {
             return;
         }
@@ -334,11 +343,15 @@ fn parse_source(
                     _ => {}
                 }
                 let text = collapse_pastes(&text).trim().to_string();
-                let pictures: Vec<ImageRef> =
-                    images::refs(attachment.get("prompt"), source.offset, &stripped)
-                        .into_iter()
-                        .map(|(image, _)| image)
-                        .collect();
+                let pictures: Vec<ImageRef> = images::refs(
+                    attachment.get("prompt"),
+                    source.offset,
+                    &stripped,
+                    &st.browser_ids,
+                )
+                .into_iter()
+                .map(|(image, _)| image)
+                .collect();
                 if !(origin.is_none() || origin == Some("human"))
                     || (text.is_empty() && pictures.is_empty())
                     || text.starts_with('<')
@@ -438,6 +451,9 @@ fn parse_source(
                             || format!("{seed}:{}", st.tally_steps.len()),
                             String::from,
                         );
+                        if browser::is_browser(name) {
+                            st.browser_ids.insert(call_id.clone());
+                        }
                         st.tally_index.insert(call_id.clone(), st.tally_steps.len());
                         st.tally_steps.push(step(&call_id, name, input));
                     }
@@ -451,10 +467,14 @@ fn parse_source(
             }
         }
         let text = collapse_pastes(&text).trim().to_string();
-        let (own, tool_pictures): (Vec<_>, Vec<_>) =
-            images::refs(message.get("content"), source.offset, &stripped)
-                .into_iter()
-                .partition(|(_, in_tool_result)| !in_tool_result);
+        let (own, tool_pictures): (Vec<_>, Vec<_>) = images::refs(
+            message.get("content"),
+            source.offset,
+            &stripped,
+            &st.browser_ids,
+        )
+        .into_iter()
+        .partition(|(_, in_tool_result)| !in_tool_result);
         let (text, marked) = images::file_markers(&text, home);
         let mut pictures: Vec<ImageRef> = own.into_iter().map(|(image, _)| image).collect();
         pictures.extend(marked);

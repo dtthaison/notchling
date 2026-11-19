@@ -1,15 +1,16 @@
 use super::queue::Queue;
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
+use crate::transcript::browser;
 use crate::transcript::scan::HEAD_BYTES;
 use crate::transcript::shells;
 use crate::transcript::snapshot::{self, PendingQuestion};
 use crate::transcript::subagents::{notification_statuses, result_end, resume_end};
-use crate::transcript::tail::LineParser;
+use crate::transcript::tail::{LineParser, Spot};
 use crate::transcript::util::{count_of, date_field, parse_object, str_of};
 use crate::transcript::{glance::has, model::*};
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 pub(crate) const MAX_LINE: usize = 400_000;
 const KEEP_ITEMS: usize = 500;
@@ -31,6 +32,7 @@ pub struct Parser {
     pub include_sidechain: bool,
     last_question: Option<PendingQuestion>,
     last_question_answered: bool,
+    image_calls: VecDeque<String>,
 }
 
 impl LineParser for Parser {
@@ -39,8 +41,8 @@ impl LineParser for Parser {
         self.trim();
     }
 
-    fn consume_oversized(&mut self, head: &[u8], _len: u64) {
-        self.oversized_result(head);
+    fn consume_oversized(&mut self, head: &[u8], _len: u64, spot: Option<Spot<'_>>) {
+        self.oversized_result(head, spot);
     }
 }
 
@@ -60,12 +62,12 @@ impl Parser {
         LineParser::consume(self, line);
     }
 
-    pub fn consume_oversized(&mut self, head: &[u8], len: u64) {
-        LineParser::consume_oversized(self, head, len);
+    pub fn consume_oversized(&mut self, head: &[u8], len: u64, spot: Option<Spot<'_>>) {
+        LineParser::consume_oversized(self, head, len, spot);
     }
 
-    fn oversized_result(&mut self, head: &[u8]) {
-        self.oversized_output(head);
+    fn oversized_result(&mut self, head: &[u8], spot: Option<Spot<'_>>) {
+        self.oversized_output(head, spot);
         if self.oversized_ends_batch(head) {
             self.queue.end_batch();
         }
@@ -82,7 +84,7 @@ impl Parser {
         has(top, br#""type":"user""#) || has(top, br#""type":"assistant""#)
     }
 
-    fn oversized_output(&mut self, head: &[u8]) {
+    fn oversized_output(&mut self, head: &[u8], spot: Option<Spot<'_>>) {
         let Some(id) = oversized_tool_result(head) else {
             return;
         };
@@ -100,14 +102,31 @@ impl Parser {
             return;
         };
         call.finished = true;
-        call.output = Some(
+        let mut queued = None;
+        if call.kind == ToolKind::Browser {
             if id.1 {
-                "[Image]"
-            } else {
-                "(too large to show)"
+                let state = call.browser_mut();
+                state.shots = state.shots.max(1);
+                if let Some(spot) = spot {
+                    state.spots = vec![browser::spot_for(spot.path, spot.at)];
+                    queued = Some(call.id.clone());
+                }
             }
-            .to_string(),
-        );
+            call.output = None;
+        } else {
+            call.output = Some(
+                if id.1 {
+                    "[Image]"
+                } else {
+                    "(too large to show)"
+                }
+                .to_string(),
+            );
+        }
+        if let Some(queued) = queued {
+            self.image_calls.push_back(queued);
+        }
+        self.drop_old_images();
     }
 
     fn next_id(&mut self, prefix: &str) -> String {
@@ -138,7 +157,7 @@ impl Parser {
 
     fn parse_line(&mut self, line: &[u8]) {
         if line.len() > MAX_LINE {
-            self.oversized_result(&line[..line.len().min(HEAD_BYTES)]);
+            self.oversized_result(&line[..line.len().min(HEAD_BYTES)], None);
             return;
         }
         let Some(map) = parse_object(line) else {
@@ -505,6 +524,13 @@ impl Parser {
         if matches!(call.kind, ToolKind::Edit | ToolKind::Write) {
             call.output = None;
         }
+        if call.kind == ToolKind::Browser {
+            browser::finish(&mut call, &text, block.get("content"), is_error);
+            call.input = String::new();
+            if !call.images().is_empty() {
+                self.image_calls.push_back(call.id.clone());
+            }
+        }
         if call.kind == ToolKind::Shell {
             if let Some(launch) = shells::launch(&text) {
                 if !self.c.shells.iter().any(|s| s.id == launch.id) {
@@ -526,7 +552,30 @@ impl Parser {
         {
             calls[index] = call;
         }
+        self.drop_old_images();
         apply_task_result(&name, result, &mut self.c);
+    }
+
+    fn drop_old_images(&mut self) {
+        while self.image_calls.len() > browser::KEEP_IMAGE_CALLS {
+            let Some(old) = self.image_calls.pop_front() else {
+                break;
+            };
+            let Some(&(item, index)) = self.call_index.get(&old) else {
+                continue;
+            };
+            if let Some(ChatItem {
+                kind: ItemKind::Tools(calls),
+                ..
+            }) = self.c.items.get_mut(item)
+            {
+                if let Some(call) = calls.get_mut(index) {
+                    let state = call.browser_mut();
+                    state.images = Vec::new();
+                    state.spots = Vec::new();
+                }
+            }
+        }
     }
 
     fn attachment(&mut self, obj: &Value, date: Option<Timestamp>) {
@@ -577,6 +626,8 @@ impl Parser {
                 .filter_map(|(k, (item, call))| (item >= drop).then(|| (k, (item - drop, call))))
                 .collect();
             self.thinking_at = self.thinking_at.and_then(|at| at.checked_sub(drop));
+            let live = &self.call_index;
+            self.image_calls.retain(|id| live.contains_key(id));
         }
         if self.counted_order.len() > 4000 {
             for id in self.counted_order.drain(..2000) {
@@ -630,7 +681,7 @@ fn oversized_tool_result(head: &[u8]) -> Option<(&str, bool)> {
     let len = head[from..].iter().position(|&b| b == b'"')?;
     let id = std::str::from_utf8(&head[from..from + len]).ok()?;
     let rest = &head[from + len..];
-    let image = find(rest, br#""content":[{"type":"image""#).is_some();
+    let image = find(rest, br#""type":"image""#).is_some();
     Some((id, image))
 }
 

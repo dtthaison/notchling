@@ -11,6 +11,7 @@ pub mod branch_list;
 pub mod branch_rows;
 pub mod branches_preview;
 pub mod branches_state;
+pub mod browser_rows;
 pub mod changes_target;
 #[cfg(test)]
 mod children_tests;

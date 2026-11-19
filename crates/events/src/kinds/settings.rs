@@ -12,6 +12,7 @@ log_choice! {
         HideNotch = "hideNotch",
         AnswerFromNotch = "answerFromNotch",
         KeepPages = "keepPages",
+        ClaudeUseChrome = "claudeUseChrome",
         ShowPet = "showPet",
         ReplyFromNotch = "replyFromNotch",
         ShowLastReply = "showLastReply",

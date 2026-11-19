@@ -29,13 +29,16 @@ pub fn agents_page(
     hooks: &HooksShown,
     client: Option<&ClientPart>,
     handlers: &ClientHandlers,
+    chrome: Div,
     a: Appearance,
     cx: &App,
 ) -> Div {
+    let mut chrome = Some(chrome);
     let mut page = div().flex().flex_col().gap(px(14.0)).child(header(tool, a));
     for section in tool.sections() {
         page = page.child(match section {
             Section::Client => client_section(client, handlers, a, cx),
+            Section::Chrome => chrome.take().unwrap_or_else(div),
             Section::Hooks => hooks_section(hooks, a, cx),
         });
     }

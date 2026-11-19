@@ -29,6 +29,7 @@ use super::skills_models;
 use super::skills_rows::{reinstall_result, SkillsShown};
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::activity::view::ActivityView;
+mod chrome;
 mod cluster;
 mod organizations;
 mod shortcut;
@@ -566,7 +567,7 @@ impl SettingsView {
     }
 }
 
-fn switch(id: SharedString, on: bool, a: Appearance) -> Stateful<Div> {
+pub(super) fn switch(id: SharedString, on: bool, a: Appearance) -> Stateful<Div> {
     div()
         .id(id)
         .w(px(32.0))
@@ -671,6 +672,7 @@ impl Render for SettingsView {
                 &self.hooks,
                 self.client.as_ref(),
                 &handlers,
+                self.chrome_section(a, cx),
                 a,
                 cx,
             ));

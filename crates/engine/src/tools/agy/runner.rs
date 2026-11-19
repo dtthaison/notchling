@@ -42,7 +42,7 @@ pub enum Change {
     Chunk,
     TurnStarted,
     TurnEnded(Option<String>),
-    PermissionPending(Permission),
+    PermissionPending(Box<Permission>),
     PermissionResolved { rpc_id: String, outcome: String },
     Options,
     OptionFailed(String),

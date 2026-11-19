@@ -18,6 +18,7 @@ fn phrase(kind: ToolKind, n: usize) -> String {
         ToolKind::Task => t::chat::steps_updated_tasks(n),
         ToolKind::Ask => t::chat::steps_asked_questions(n),
         ToolKind::Skill => t::chat::steps_used_skills(n),
+        ToolKind::Browser => t::chat::steps_used_chrome(n),
         ToolKind::Other => t::chat::steps_used_tools(n),
     }
 }
@@ -44,7 +45,7 @@ pub fn summary(steps: &[ToolRow]) -> String {
         }
     }
     if let [step] = steps {
-        if step.kind == ToolKind::Other {
+        if matches!(step.kind, ToolKind::Other | ToolKind::Browser) {
             return step.title.clone();
         }
     }
@@ -95,6 +96,7 @@ pub fn icons(steps: &[ToolRow]) -> Vec<Icon> {
 pub enum Detail {
     None,
     Diff,
+    Browser,
     Text {
         input_title: Option<&'static str>,
         has_output: bool,
@@ -102,6 +104,13 @@ pub enum Detail {
 }
 
 pub fn detail(step: &ToolRow) -> Detail {
+    if step.kind == ToolKind::Browser {
+        return match &step.browser {
+            Some(b) if b.fault.is_some() || !b.steps.is_empty() => Detail::Browser,
+            _ if step.is_error && step.output.is_some() => Detail::Browser,
+            _ => Detail::None,
+        };
+    }
     if !step.diff.is_empty() {
         return Detail::Diff;
     }
@@ -132,21 +141,25 @@ pub fn input_text(step: &ToolRow) -> Option<String> {
     }
 }
 
+pub fn output_text_of(step: &ToolRow) -> Option<String> {
+    step.output.as_ref().map(|output| {
+        if output.more > 0 {
+            format!(
+                "{}\n{}",
+                output.text,
+                t::chat::output_more(&output.more.to_string())
+            )
+        } else {
+            output.text.clone()
+        }
+    })
+}
+
 pub fn output_text(step: &ToolRow) -> Option<String> {
     match detail(step) {
         Detail::Text {
             has_output: true, ..
-        } => step.output.as_ref().map(|output| {
-            if output.more > 0 {
-                format!(
-                    "{}\n{}",
-                    output.text,
-                    t::chat::output_more(&output.more.to_string())
-                )
-            } else {
-                output.text.clone()
-            }
-        }),
+        } => output_text_of(step),
         _ => None,
     }
 }
@@ -169,6 +182,7 @@ mod tests {
             removed: 0,
             is_error: false,
             finished: true,
+            browser: None,
         }
     }
 

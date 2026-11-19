@@ -168,6 +168,10 @@ fn value(read: &dyn Fn(&str) -> Option<Value>, key: &str) -> Option<Value> {
     read(key).or_else(|| spec(key).and_then(|s| s.default_value()))
 }
 
+pub fn chrome_row(read: &dyn Fn(&str) -> Option<Value>) -> Row {
+    toggle(read, "claudeUseChrome", t::settings::claude_use_chrome())
+}
+
 fn toggle(read: &dyn Fn(&str) -> Option<Value>, key: &'static str, title: &'static str) -> Row {
     Row {
         key,

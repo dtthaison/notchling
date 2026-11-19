@@ -1,3 +1,4 @@
+use crate::transcript::browser::{self, url_host};
 use crate::transcript::model::*;
 use crate::transcript::text::{last_path_component, prefix_chars};
 use crate::transcript::util::{int_of, str_of};
@@ -15,19 +16,10 @@ fn file_in(input: &Map<String, Value>, key: &str) -> String {
     last_path_component(&str_in(input, key)).to_string()
 }
 
-fn url_host(url: &str) -> Option<String> {
-    let rest = url.split_once("://")?.1;
-    let authority = rest.split(['/', '?', '#']).next()?;
-    let host_port = authority.rsplit('@').next()?;
-    let host = host_port.split(':').next()?;
-    if host.is_empty() || url.contains(' ') {
-        None
-    } else {
-        Some(host.to_string())
-    }
-}
-
 pub fn make_call(id: &str, name: &str, input: &Map<String, Value>) -> ToolCall {
+    if browser::is_browser(name) {
+        return browser::call(id, name, input);
+    }
     let s = |k: &str| str_in(input, k);
     let call =
         |kind: ToolKind, title: String, text: String| ToolCall::new(id, name, kind, title, text);
