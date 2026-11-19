@@ -10,7 +10,6 @@ cluster-title = Machines
 cluster-section-cluster = Cluster
 # Heading above the machines that are members of the cluster.
 cluster-section-members = In the Cluster
-cluster-done = Done
 # Shown on the sheet when the app has no connection to the daemon.
 cluster-detached = The daemon isn't running, so the cluster can't be read.
 # Shown on the sheet before the daemon has answered.
@@ -92,10 +91,8 @@ cluster-move-intro = { $name } becomes the primary. Sessions whose code is pushe
 # Text of the Move sheet while the request is out; $name is the machine.
 cluster-move-starting = Asking the primary to move to { $name }…
 cluster-move-start = Move the Primary
-cluster-move-cancel = Cancel
 # Button that stops waiting for sessions to finish their turns and stops the working ones now.
 cluster-move-now = Move Now
-cluster-move-close = Close
 # Shown in the Move sheet when Move Now fails; $error is the reason.
 cluster-move-now-failed = Couldn't move now: { $error }
 # Shown when the Move sheet's Move is pressed but the machine can no longer take the primary.
@@ -357,7 +354,6 @@ cluster-secrets-empty = The vault has no secrets yet.
 # Beside a checked name that is no longer saved in the vault.
 cluster-secrets-gone = Not in the vault
 cluster-secrets-save = Save
-cluster-secrets-cancel = Cancel
 cluster-secrets-failed = Couldn't change the secrets: { $error }
 cluster-secrets-vault-failed = Couldn't read the vault: { $error }
 # Shown when Save finds the machine can no longer take secrets (removed, inactive or a client).
@@ -654,12 +650,8 @@ cluster-login-replaces = Signing in here replaces the sign-in { $machine } has n
 cluster-login-private = The link and code are shown only here. Notchling doesn't keep them.
 # Button that opens the sign-in link in the browser.
 cluster-login-open = Open Link
-# Button that stops the sign-in.
-cluster-login-cancel = Cancel
 # How long the sheet waits; $minutes is a number.
 cluster-login-waiting = Waiting for you to approve. This stops after { $minutes } minutes.
-# Button that closes the sheet without checking.
-cluster-login-close = Close
 # Button that reads the sign-in again.
 cluster-login-check = Check Again
 

@@ -11,6 +11,7 @@ use super::form_view::{clipboard_key, form_body, form_footer, FormEvent};
 use super::store::Vault;
 use super::wire::PendingRequest;
 use crate::accounts::view_rows::Handler;
+use crate::sheets::header::close_button;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
@@ -219,7 +220,14 @@ impl Render for VaultRequestView {
                         Ink::TextMuted,
                         a,
                     ))
-                    .child(label(self.form.title(), TypeRole::Heading, Ink::Text, a)),
+                    .child(label(self.form.title(), TypeRole::Heading, Ink::Text, a))
+                    .child(div().flex_1())
+                    .child(close_button(
+                        "sheet-close",
+                        a,
+                        cx,
+                        |this: &mut Self, _, cx| this.cancel(cx),
+                    )),
             )
             .child(scrollable(form_body(&self.form, self.today(), a, cx, on)))
             .child(footer)

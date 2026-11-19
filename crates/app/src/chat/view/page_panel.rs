@@ -14,7 +14,7 @@ use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, icon, icon_button, label, KitPart, KitStyled};
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::diff_panel::{self, DiffState};
 use super::render_map::WindowRegion;
@@ -684,14 +684,7 @@ pub fn render(
     };
     let tool = |id: &'static str, shape: Icon, tip: &'static str| {
         gate::tip_text(
-            icon_button(
-                id,
-                shape,
-                IconSize::Button.points(),
-                ButtonKind::Ghost,
-                PartState::Rest,
-                a,
-            ),
+            icon_button(id, shape, ButtonKind::Ghost, PartState::Rest, a),
             tip.into(),
             a,
         )

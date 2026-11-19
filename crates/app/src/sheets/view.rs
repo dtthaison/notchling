@@ -7,16 +7,17 @@ use gpui::{
 };
 use notchling_kit::metric::{
     CONTROL, RADIUS_CARD, RADIUS_MD, SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW,
-    SIDE_PADDING, SPINNER_SMALL, TITLE_BAR, TOOL_ICON,
+    SIDE_PADDING, SPINNER_SMALL, TOOL_ICON,
 };
-use notchling_kit::part::{ButtonKind, PartState};
+use notchling_kit::part::ButtonKind;
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    button, card, hsla, icon, icon as kit_icon, label, scrollable, spinner, tool_icon,
-    window_appearance, KitStyled, TextEditor, TextEditorEvent, ToolMark,
+    button, card, hsla, icon, label, scrollable, spinner, tool_icon, window_appearance, KitStyled,
+    TextEditor, TextEditorEvent, ToolMark,
 };
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::header::{close_button, sheet_header};
 use super::new_session::{folder_title, parent_line, trust_text, NewSession, Plan, Section, Stage};
 use super::run_on_view::{code_column, run_on_column, tool_column};
 use super::settings_view::switch;
@@ -58,28 +59,6 @@ impl Acts {
             .is_some_and(|s| s.view().link == Link::Daemon);
         self.actions.acting(attached)
     }
-}
-
-pub fn sheet_header(icon: Icon, title: &str, end: Stateful<Div>, a: Appearance) -> Div {
-    div()
-        .h(px(TITLE_BAR + 6.0))
-        .flex_shrink_0()
-        .px(px(SIDE_PADDING))
-        .flex()
-        .items_center()
-        .gap(px(10.0))
-        .fill(Ink::Card, a)
-        .border_b(px(1.0))
-        .border_color(hsla(Ink::Hairline.color(a)))
-        .child(kit_icon(
-            icon,
-            TypeRole::Heading.spec().size,
-            Ink::TextMuted,
-            a,
-        ))
-        .child(label(title, TypeRole::Heading, Ink::Text, a))
-        .child(div().flex_1())
-        .child(end)
 }
 
 pub fn choice_row(
@@ -573,17 +552,10 @@ impl NewSessionView {
         let trust = gate::tip(trust, control, a).when(control.enabled, |b| {
             b.on_click(cx.listener(|this, _, _, cx| this.trust(cx)))
         });
-        let cancel = button(
-            "trust-cancel",
-            t::chat::sheet_cancel(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
+        let close = close_button("trust-close", a, cx, |this: &mut Self, _, cx| {
             this.model.cancel_trust();
             cx.notify();
-        }));
+        });
         let note = control
             .tooltip
             .map(|why| label(why, TypeRole::Meta, Ink::TextMuted, a));
@@ -608,18 +580,26 @@ impl NewSessionView {
                                 .flex()
                                 .items_center()
                                 .gap(px(8.0))
-                                .child(icon(
-                                    Icon::Permission,
-                                    TypeRole::Heading.spec().size,
-                                    Ink::AccentText,
-                                    a,
-                                ))
-                                .child(label(
-                                    t::chat::sheet_trust_title(),
-                                    TypeRole::Heading,
-                                    Ink::Text,
-                                    a,
-                                )),
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(icon(
+                                            Icon::Permission,
+                                            TypeRole::Heading.spec().size,
+                                            Ink::AccentText,
+                                            a,
+                                        ))
+                                        .child(label(
+                                            t::chat::sheet_trust_title(),
+                                            TypeRole::Heading,
+                                            Ink::Text,
+                                            a,
+                                        )),
+                                )
+                                .child(close),
                         )
                         .child(label(
                             &trust_text(&folder),
@@ -634,7 +614,6 @@ impl NewSessionView {
                                 .flex()
                                 .justify_end()
                                 .gap(px(8.0))
-                                .child(cancel)
                                 .child(trust),
                         ),
                 ),
@@ -651,14 +630,6 @@ impl Render for NewSessionView {
         } else {
             Vec::new()
         };
-        let cancel = button(
-            "cancel",
-            t::chat::sheet_cancel(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         div()
             .relative()
             .size_full()
@@ -670,8 +641,9 @@ impl Render for NewSessionView {
             .child(sheet_header(
                 Icon::Sessions,
                 t::chat::sheet_new_session(),
-                cancel,
+                Vec::new(),
                 a,
+                cx,
             ))
             .child(
                 div()

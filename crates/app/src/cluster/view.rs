@@ -36,7 +36,8 @@ use super::view_secrets::{secrets_fixture, Editing};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
-use crate::sheets::view::{sheet_header, Dismiss};
+use crate::sheets::header::sheet_header_closing;
+use crate::sheets::view::Dismiss;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switches;
 use crate::vault::store::Vault;
@@ -730,14 +731,6 @@ impl Render for ClusterSheetView {
         if machines {
             body = body.children(self.add_row(a, cx));
         }
-        let done = button(
-            "cluster-done",
-            t::cluster::done(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let alert = self.remove_alert(&model, a, cx);
         let machine_alert = self.machine_remove_alert(a, cx);
         let switch_alert = self.switch_alert(a, cx);
@@ -788,11 +781,19 @@ impl Render for ClusterSheetView {
             .flex_col()
             .fill(Ink::Window, a)
             .overflow_hidden()
-            .child(sheet_header(
+            .child(sheet_header_closing(
                 Icon::Server,
                 &title,
-                div().id("cluster-header-end").child(done),
+                Vec::new(),
                 a,
+                cx,
+                |this, _, cx| {
+                    if this.editing.is_some() {
+                        this.secrets_event(SecretsEvent::Cancel, cx);
+                    } else {
+                        cx.emit(Dismiss);
+                    }
+                },
             ))
             .child(content)
             .children(footer)

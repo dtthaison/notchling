@@ -5,7 +5,7 @@ use gpui::{div, prelude::*, px, relative, Context, Div, FontWeight};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SIDE_PADDING;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{card, icon, icon_button, label, KitPart, KitStyled};
+use notchling_kit::ui::{card, icon, icon_button_small, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::render_map::WindowRegion;
@@ -92,16 +92,13 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opt
     let open = view.tasks_open(cx);
 
     let close = gate::tip_text(
-        icon_button(
+        icon_button_small(
             "tasks-bar-close",
             Icon::Close,
-            11.0,
             ButtonKind::Ghost,
             PartState::Rest,
             a,
-        )
-        .w(px(20.0))
-        .h(px(20.0)),
+        ),
         t::chat::tasks_hide().into(),
         a,
     )

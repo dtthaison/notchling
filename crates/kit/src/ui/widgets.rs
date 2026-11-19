@@ -10,13 +10,14 @@ use super::tool_images::tool_image;
 use super::{hsla, KitStyled, SYSTEM_FONT};
 use crate::ink::avatar as avatar_colors;
 use crate::metric::{
-    BUTTON_PADDING, CONTROL, OPTION_BADGE, PILL_HEIGHT, RADIUS_CARD, RADIUS_MD, RADIUS_SM,
-    SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW, SESSION_ROW_ACCOUNT, TOOL_ICON,
+    BUTTON_PADDING, CONTROL, ICON_BUTTON, ICON_BUTTON_SMALL, OPTION_BADGE, PILL_HEIGHT,
+    RADIUS_CARD, RADIUS_MD, RADIUS_SM, SESSION_LINE_HEADING, SESSION_LINE_META, SESSION_ROW,
+    SESSION_ROW_ACCOUNT, TOOL_ICON,
 };
 use crate::part::{
     button_look, field_look, initials, option_look, row_look, ButtonKind, Look, PartState,
 };
-use crate::{Appearance, Icon, Ink, Status, TypeRole};
+use crate::{Appearance, Icon, IconSize, Ink, Status, TypeRole};
 
 pub fn label(text: &str, role: TypeRole, ink: Ink, appearance: Appearance) -> Div {
     div()
@@ -98,13 +99,41 @@ pub fn button_with(
 pub fn icon_button(
     id: impl Into<ElementId>,
     glyph: Icon,
-    points: f32,
     kind: ButtonKind,
     state: PartState,
     appearance: Appearance,
 ) -> Stateful<Div> {
     let color = button_look(kind, state, appearance).text;
-    button_with(id, icon_in(glyph, points, color), kind, state, appearance)
+    button_with(
+        id,
+        icon_in(glyph, IconSize::Button.points(), color),
+        kind,
+        state,
+        appearance,
+    )
+    .size(px(ICON_BUTTON))
+    .px(px(0.0))
+    .flex_shrink_0()
+}
+
+pub fn icon_button_small(
+    id: impl Into<ElementId>,
+    glyph: Icon,
+    kind: ButtonKind,
+    state: PartState,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    let color = button_look(kind, state, appearance).text;
+    button_with(
+        id,
+        icon_in(glyph, IconSize::Row.points(), color),
+        kind,
+        state,
+        appearance,
+    )
+    .size(px(ICON_BUTTON_SMALL))
+    .px(px(0.0))
+    .flex_shrink_0()
 }
 
 pub fn avatar(

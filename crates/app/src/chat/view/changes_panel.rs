@@ -10,10 +10,11 @@ use gpui::{
 use notchling_kit::metric::{MENU_MAX_HEIGHT, PILL_HEIGHT, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    hsla, icon, icon_button, label, menu_note, menu_panel, menu_section, scrollable_list,
-    window_appearance, KitStyled, MenuItem, TextEditor, TextEditorEvent, ThumbRecord,
+    hsla, icon, icon_button, icon_button_small, label, menu_note, menu_panel, menu_section,
+    scrollable_list, window_appearance, KitStyled, MenuItem, TextEditor, TextEditorEvent,
+    ThumbRecord,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::ChatView;
 use crate::chat::branch::{self, BranchModel, Branches, ChangedFile};
@@ -277,10 +278,9 @@ fn file_row(
         .child(counts(file.added, file.removed, a))
         .children(open.then(|| {
             gate::tip_text(
-                icon_button(
+                icon_button_small(
                     SharedString::from(format!("change-open-{ix}")),
                     Icon::Expand,
-                    IconSize::Row.points(),
                     ButtonKind::Ghost,
                     PartState::Rest,
                     a,
@@ -386,7 +386,6 @@ impl ChangesPanel {
             icon_button(
                 "changes-close",
                 Icon::Close,
-                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 PartState::Rest,
                 a,

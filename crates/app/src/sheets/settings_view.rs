@@ -13,7 +13,7 @@ use notchling_kit::ui::{
     button, card, hsla, icon, icon_button, label, scrollable, window_appearance, KitPart,
     KitStyled, MenuItem,
 };
-use notchling_kit::{sentence, Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 use serde_json::{Map, Value};
 
@@ -22,6 +22,7 @@ use super::agents_view::{agents_page, OwnSections};
 use super::banner::Banners;
 use super::client_model::{self, ClientPart};
 use super::client_view::ClientHandlers;
+use super::header::sheet_header;
 use super::hook_rows::HooksShown;
 use super::models_refresh;
 use super::models_rows::ModelsShown;
@@ -31,7 +32,7 @@ use super::settings::{
 use super::settings_skills_view::{skills_page, SkillsHandlers, SkillsPageState};
 use super::skills_models;
 use super::skills_rows::{reinstall_result, SkillsShown};
-use super::view::{sheet_header, Acts, Dismiss};
+use super::view::{Acts, Dismiss};
 use crate::accounts::view_rows::{segmented_full, Handler};
 use crate::activity::view::ActivityView;
 mod chrome;
@@ -675,7 +676,6 @@ impl SettingsView {
                         icon_button(
                             id("down"),
                             Icon::Minus,
-                            IconSize::Button.points(),
                             ButtonKind::Secondary,
                             PartState::Rest,
                             a,
@@ -687,7 +687,6 @@ impl SettingsView {
                         icon_button(
                             id("up"),
                             Icon::Plus,
-                            IconSize::Button.points(),
                             ButtonKind::Secondary,
                             PartState::Rest,
                             a,
@@ -741,14 +740,6 @@ impl Render for SettingsView {
         let values = self.values.clone();
         let read = move |key: &str| values.get(key).cloned();
         let daemon = self.daemon(cx);
-        let done = button(
-            "settings-done",
-            t::settings::done(),
-            ButtonKind::Primary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let mut list = div()
             .id("settings-list")
             .flex_1()
@@ -840,7 +831,13 @@ impl Render for SettingsView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(Icon::Settings, t::settings::title(), done, a))
+            .child(sheet_header(
+                Icon::Settings,
+                t::settings::title(),
+                Vec::new(),
+                a,
+                cx,
+            ))
             .child(body)
             .children(self.error.as_deref().map(|e| {
                 label(e, TypeRole::Meta, Ink::Needs, a)
@@ -861,7 +858,6 @@ impl Render for BannersView {
             let dismiss = icon_button(
                 SharedString::from(format!("banner-dismiss-{i}")),
                 Icon::Close,
-                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 PartState::Rest,
                 a,

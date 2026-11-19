@@ -7,12 +7,13 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, card, hsla, icon_button, label, KitPart, TextEditor, TextEditorEvent,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::add_parts::AddParts;
 use super::from_tailscale::{import_machines, FromTailscale, Read};
 use super::view::{field_box, ClusterSheetView};
+use crate::sheets::header::{card_title, close_button};
 
 const SHEET_WIDTH: f32 = 600.0;
 const SHEET_MARGIN: f32 = 60.0;
@@ -272,16 +273,6 @@ impl ClusterSheetView {
             .gap(px(SPACE[1]))
             .child(
                 button(
-                    "tailscale-close",
-                    t::cluster::done(),
-                    ButtonKind::Ghost,
-                    PartState::Rest,
-                    a,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.tailscale_close(cx))),
-            )
-            .child(
-                button(
                     "tailscale-import",
                     &import_title,
                     ButtonKind::Primary,
@@ -290,6 +281,9 @@ impl ClusterSheetView {
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.tailscale_import(cx))),
             );
+        let close = close_button("tailscale-close", a, cx, |this: &mut Self, _, cx| {
+            this.tailscale_close(cx)
+        });
         Some(
             div()
                 .absolute()
@@ -307,11 +301,14 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
-                        .child(label(
-                            t::cluster::tailscale_title(),
-                            TypeRole::Heading,
-                            Ink::Text,
-                            a,
+                        .child(card_title(
+                            label(
+                                t::cluster::tailscale_title(),
+                                TypeRole::Heading,
+                                Ink::Text,
+                                a,
+                            ),
+                            close,
                         ))
                         .child(head)
                         .child(body)
@@ -457,7 +454,6 @@ impl ClusterSheetView {
                         } else {
                             Icon::Circle
                         },
-                        IconSize::Button.points(),
                         if row.chosen {
                             ButtonKind::Primary
                         } else {

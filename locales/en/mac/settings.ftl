@@ -6,8 +6,6 @@
 # Title at the top of the Settings sheet.
 settings-title = Settings
 
-# The button that closes the Settings sheet.
-settings-done = Done
 
 ## Pages
 

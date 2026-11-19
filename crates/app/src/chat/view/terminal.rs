@@ -15,11 +15,12 @@ use notchling_engine::terminal::pty::Signal;
 use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome, TermCell, TerminalScreen};
 use notchling_kit::labels::Corner;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{hsla, icon, icon_button, label, KitPart, KitStyled, MONO_FONT};
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::ui::{
+    hsla, icon, icon_button, icon_button_small, label, KitPart, KitStyled, MONO_FONT,
+};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::render_map::WindowRegion;
-use super::sidebar::HEADER_BUTTON;
 use super::ChatView;
 use crate::chat::format::short_path;
 use crate::chat::page_panel::panel_width;
@@ -439,14 +440,10 @@ fn tool(
         icon_button(
             gpui::ElementId::Name(id.into()),
             shape,
-            IconSize::Button.points(),
             ButtonKind::Ghost,
             PartState::Rest,
             a,
-        )
-        .flex_shrink_0()
-        .size(px(HEADER_BUTTON))
-        .px(px(0.0)),
+        ),
         tip.into(),
         a,
     )
@@ -465,19 +462,13 @@ fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     for (i, (title, shell)) in view.terminal.tabs.iter().enumerate() {
         let group = SharedString::from(format!("term-tab-{i}"));
         let is_active = i == active;
-        let button = icon_button(
+        let button = icon_button_small(
             gpui::ElementId::Name(format!("term-close-{i}").into()),
             Icon::Close,
-            IconSize::Button.points(),
             ButtonKind::Ghost,
             PartState::Rest,
             a,
         )
-        .flex_shrink_0()
-        .px(px(0.0))
-        .cursor_pointer()
-        .h(px(20.0))
-        .w(px(20.0))
         .on_click(cx.listener(move |this, _, window, cx| {
             cx.stop_propagation();
             this.close_terminal(i, window, cx);
@@ -954,16 +945,7 @@ pub fn button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> imp
         ButtonKind::Ghost
     };
     gate::tip_text(
-        icon_button(
-            "terminal-button",
-            Icon::Terminal,
-            IconSize::Button.points(),
-            kind,
-            PartState::Rest,
-            a,
-        )
-        .size(px(super::sidebar::HEADER_BUTTON))
-        .px(px(0.0)),
+        icon_button("terminal-button", Icon::Terminal, kind, PartState::Rest, a),
         t::chat::terminal_button_tip().into(),
         a,
     )

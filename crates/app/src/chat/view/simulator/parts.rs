@@ -12,7 +12,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, hsla, icon, icon_button, label, menu_panel, menu_rule, KitPart, KitStyled, MenuItem,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::super::render_map::WindowRegion;
 use super::super::ChatView;
@@ -20,6 +20,7 @@ use super::{NewSimulator, AREA_PAD, HEADER, PEN, PEN_SHARE, WIDTH};
 use crate::chat::page_panel::panel_width;
 use crate::chat::simulator::{frame_for, menu, Device, SimKey, Zoom};
 use crate::mac::gate;
+use crate::sheets::header::{card_title, close_button};
 
 fn tool(
     id: &'static str,
@@ -39,12 +40,7 @@ fn tool(
     } else {
         PartState::Disabled
     };
-    gate::tip_text(
-        icon_button(id, shape, IconSize::Button.points(), kind, state, a),
-        tip.into(),
-        a,
-    )
-    .flex_shrink_0()
+    gate::tip_text(icon_button(id, shape, kind, state, a), tip.into(), a).flex_shrink_0()
 }
 
 fn header(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div {
@@ -331,7 +327,13 @@ fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatV
         .flex()
         .flex_col()
         .gap(px(10.0))
-        .child(label(t::chat::sim_new(), TypeRole::Heading, Ink::Text, a))
+        .child(card_title(
+            label(t::chat::sim_new(), TypeRole::Heading, Ink::Text, a),
+            close_button("sim-new-close", a, cx, |this: &mut ChatView, _, cx| {
+                this.simulator.adding = None;
+                cx.notify();
+            }),
+        ))
         .child(runtimes)
         .child(
             div()
@@ -342,39 +344,22 @@ fn new_simulator_form(form: &NewSimulator, a: Appearance, cx: &mut Context<ChatV
                 .child(list),
         )
         .child(
-            div()
-                .flex()
-                .justify_end()
-                .gap(px(8.0))
-                .child(
-                    button(
-                        "sim-new-cancel",
-                        t::chat::sim_cancel(),
-                        ButtonKind::Ghost,
-                        PartState::Rest,
-                        a,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.simulator.adding = None;
-                        cx.notify();
-                    })),
+            div().flex().justify_end().gap(px(8.0)).child(
+                button(
+                    "sim-new-create",
+                    t::chat::sim_create(),
+                    ButtonKind::Primary,
+                    if can {
+                        PartState::Rest
+                    } else {
+                        PartState::Disabled
+                    },
+                    a,
                 )
-                .child(
-                    button(
-                        "sim-new-create",
-                        t::chat::sim_create(),
-                        ButtonKind::Primary,
-                        if can {
-                            PartState::Rest
-                        } else {
-                            PartState::Disabled
-                        },
-                        a,
-                    )
-                    .when(can, |b| {
-                        b.on_click(cx.listener(|this, _, _, cx| this.create_simulator(cx)))
-                    }),
-                ),
+                .when(can, |b| {
+                    b.on_click(cx.listener(|this, _, _, cx| this.create_simulator(cx)))
+                }),
+            ),
         )
 }
 
@@ -789,13 +774,10 @@ pub fn button_in_header(
         icon_button(
             "simulator-button",
             Icon::Simulator,
-            IconSize::Button.points(),
             kind,
             PartState::Rest,
             a,
-        )
-        .size(px(crate::chat::view::sidebar::HEADER_BUTTON))
-        .px(px(0.0)),
+        ),
         SharedString::from(t::chat::sim_button_tip()),
         a,
     )

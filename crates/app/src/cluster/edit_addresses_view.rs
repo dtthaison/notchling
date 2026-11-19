@@ -14,6 +14,7 @@ use super::machine_add::set_addresses;
 use super::view::ClusterSheetView;
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
+use crate::sheets::header::{card_title, close_button};
 use notchling_kit::labels::Corner;
 
 const SHEET_WIDTH: f32 = 560.0;
@@ -146,16 +147,6 @@ impl ClusterSheetView {
             .gap(px(SPACE[1]))
             .child(
                 button(
-                    "edit-addresses-cancel",
-                    t::cluster::add_cancel(),
-                    ButtonKind::Ghost,
-                    PartState::Rest,
-                    a,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.edit_cancel(cx))),
-            )
-            .child(
-                button(
                     "edit-addresses-save",
                     t::cluster::address_edit_save(),
                     ButtonKind::Primary,
@@ -164,6 +155,9 @@ impl ClusterSheetView {
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.edit_save(cx))),
             );
+        let close = close_button("edit-addresses-close", a, cx, |this: &mut Self, _, cx| {
+            this.edit_cancel(cx)
+        });
         Some(
             div()
                 .absolute()
@@ -181,11 +175,14 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
-                        .child(label(
-                            &t::cluster::address_edit_title(&sheet.name),
-                            TypeRole::Heading,
-                            Ink::Text,
-                            a,
+                        .child(card_title(
+                            label(
+                                &t::cluster::address_edit_title(&sheet.name),
+                                TypeRole::Heading,
+                                Ink::Text,
+                                a,
+                            ),
+                            close,
                         ))
                         .child(body)
                         .child(buttons)

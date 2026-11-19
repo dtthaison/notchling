@@ -8,7 +8,8 @@ use notchling_kit::ui::{button, hsla, label, scrollable, window_appearance, KitS
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::view::{sheet_header, Acts, Dismiss};
+use super::header::sheet_header;
+use super::view::{Acts, Dismiss};
 use crate::mac::gate;
 use crate::notch::answer::{type_key, Typed};
 use crate::tools::second_opinion::{tool_name, SecondOpinionSheet, Stage, NO_TOOLS};
@@ -173,14 +174,6 @@ impl SecondOpinionView {
             .model
             .run_control(self.acts.acting(), self.store.is_some());
         let failed = matches!(self.model.stage, Stage::Failed(_));
-        let cancel = button(
-            "cancel",
-            t::chat::sheet_cancel(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let run = button(
             "run",
             t::chat::sheet_run(),
@@ -211,7 +204,6 @@ impl SecondOpinionView {
                 .min_w(px(0.0))
                 .line_clamp(2),
             )
-            .child(cancel)
             .child(run)
     }
 }
@@ -219,14 +211,6 @@ impl SecondOpinionView {
 impl Render for SecondOpinionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        let close = button(
-            "close",
-            t::chat::sheet_close(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let models: Vec<(String, String)> = self
             .model
             .models()
@@ -305,8 +289,9 @@ impl Render for SecondOpinionView {
             .child(sheet_header(
                 Icon::Check,
                 t::chat::second_opinion(),
-                close,
+                Vec::new(),
                 a,
+                cx,
             ))
             .child(
                 div()

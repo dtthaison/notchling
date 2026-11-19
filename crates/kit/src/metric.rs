@@ -1,6 +1,8 @@
 pub const SIDEBAR_WIDTH: f32 = 272.0;
 pub const TITLE_BAR: f32 = 38.0;
 pub const CONTROL: f32 = 28.0;
+pub const ICON_BUTTON: f32 = 28.0;
+pub const ICON_BUTTON_SMALL: f32 = 20.0;
 pub const SESSION_ROW: f32 = 52.0;
 pub const SESSION_ROW_ACCOUNT: f32 = 52.0;
 pub const SESSION_LINE_HEADING: f32 = 16.0;
@@ -74,5 +76,11 @@ mod tests {
         );
         assert_eq!((MENU_PADDING, MENU_ROW_X, MENU_ROW_Y), (4.0, 8.0, 3.0));
         assert!(WINDOW_MIN.0 <= WINDOW_DEFAULT.0 && WINDOW_MIN.1 <= WINDOW_DEFAULT.1);
+    }
+
+    #[test]
+    fn icon_buttons_are_the_headers_box_and_one_small_size() {
+        assert_eq!((ICON_BUTTON, ICON_BUTTON_SMALL), (28.0, 20.0));
+        assert_eq!(ICON_BUTTON, CONTROL);
     }
 }

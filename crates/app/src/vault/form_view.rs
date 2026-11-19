@@ -489,7 +489,7 @@ pub fn form_footer<V: 'static>(
         enabled: off.is_none() && form.can_save() && !busy,
         tooltip: off,
     };
-    let (save_on, cancel_on) = (on.clone(), on);
+    let save_on = on;
     let save = gate::tip(
         button(
             "vault-save",
@@ -504,14 +504,6 @@ pub fn form_footer<V: 'static>(
     .when(control.enabled, |b| {
         b.on_click(cx.listener(move |this, _, _, cx| save_on(this, FormEvent::Save, cx)))
     });
-    let cancel = button(
-        "vault-cancel",
-        "Cancel",
-        ButtonKind::Secondary,
-        PartState::Rest,
-        a,
-    )
-    .on_click(cx.listener(move |this, _, _, cx| cancel_on(this, FormEvent::Cancel, cx)));
     let problem = form.error.as_deref().or(form.blocker());
     div()
         .flex_shrink_0()
@@ -533,7 +525,6 @@ pub fn form_footer<V: 'static>(
                         .flex_1()
                         .min_w(px(0.0)),
                 )
-                .child(cancel)
                 .child(save),
         )
 }

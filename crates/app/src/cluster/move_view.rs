@@ -12,6 +12,7 @@ use super::move_sheet::{
 };
 use super::promote::{MoveKind, PromoteSheet};
 use super::view::ClusterSheetView;
+use crate::sheets::header::{card_title, close_button};
 
 const MOVE_MAX_HEIGHT: f32 = 640.0;
 
@@ -170,15 +171,14 @@ impl ClusterSheetView {
                 t::cluster::move_anyway(),
                 ButtonKind::Primary,
             ),
-            Button::Cancel => ("move-cancel", t::cluster::move_cancel(), ButtonKind::Ghost),
             Button::MoveNow => ("move-now", t::cluster::move_now(), ButtonKind::Secondary),
-            Button::Close => ("move-close", t::cluster::move_close(), ButtonKind::Ghost),
+            Button::Cancel | Button::Close => return div(),
         };
         let clickable = button(id, title, kind, PartState::Rest, a).on_click(cx.listener(
             move |this, _, _, cx| match which {
                 Button::Start | Button::Anyway => this.start_move(cx),
                 Button::MoveNow => this.move_now(cx),
-                Button::Cancel | Button::Close => this.close_move(cx),
+                Button::Cancel | Button::Close => {}
             },
         ));
         div().child(clickable)
@@ -203,9 +203,16 @@ impl ClusterSheetView {
             .flex()
             .justify_end()
             .gap(px(SPACE[1]));
-        for which in &view.buttons {
+        for which in view
+            .buttons
+            .iter()
+            .filter(|b| !matches!(b, Button::Cancel | Button::Close))
+        {
             buttons = buttons.child(self.move_button(*which, a, cx));
         }
+        let close = close_button("move-close", a, cx, |this: &mut Self, _, cx| {
+            this.close_move(cx)
+        });
         Some(
             div()
                 .absolute()
@@ -223,7 +230,10 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
-                        .child(label(&view.title, TypeRole::Heading, Ink::Text, a))
+                        .child(card_title(
+                            label(&view.title, TypeRole::Heading, Ink::Text, a),
+                            close,
+                        ))
                         .child(
                             div()
                                 .id("move-body")

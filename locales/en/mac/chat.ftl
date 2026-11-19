@@ -732,7 +732,6 @@ chat-sheet-choose-folder = Choose Folder…
 chat-sheet-choose = Choose
 chat-sheet-start = Start Session
 chat-sheet-trust-start = Trust Folder and Start
-chat-sheet-cancel = Cancel
 chat-sheet-no-accounts-lane = No accounts to make a lane with
 chat-sheet-no-accounts-switch = No accounts to switch
 chat-sheet-main-login = Main login

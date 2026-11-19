@@ -18,6 +18,7 @@ use super::updates_state::{Offered, UpdateSession};
 use super::view::ClusterSheetView;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
+use crate::sheets::header::{card_title, close_button};
 use crate::vault::pick::VaultPick;
 use crate::vault::pick_view::{pick_block, PickEvent};
 
@@ -485,20 +486,9 @@ impl ClusterSheetView {
             .flex()
             .justify_end()
             .gap(px(SPACE[1]));
-        buttons = buttons.child(
-            button(
-                "update-close",
-                if outcome.is_some() {
-                    t::cluster::add_finish()
-                } else {
-                    t::cluster::add_close()
-                },
-                ButtonKind::Ghost,
-                PartState::Rest,
-                a,
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.close_update(cx))),
-        );
+        let close = close_button("update-close", a, cx, |this: &mut Self, _, cx| {
+            this.close_update(cx)
+        });
         buttons = buttons.child(
             button(
                 "update-run",
@@ -532,11 +522,9 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
-                        .child(label(
-                            t::cluster::update_title(),
-                            TypeRole::Heading,
-                            Ink::Text,
-                            a,
+                        .child(card_title(
+                            label(t::cluster::update_title(), TypeRole::Heading, Ink::Text, a),
+                            close,
                         ))
                         .child(
                             div()

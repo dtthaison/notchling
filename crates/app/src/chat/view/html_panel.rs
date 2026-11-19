@@ -3,7 +3,7 @@ use std::path::Path;
 use gpui::{div, prelude::*, px, Context, Div, Window};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::icon_button;
-use notchling_kit::{Appearance, Icon, IconSize};
+use notchling_kit::{Appearance, Icon};
 
 use super::page_panel::{home, FileState};
 use super::ChatView;
@@ -20,7 +20,6 @@ pub(super) fn looks(html: &HtmlView, a: Appearance, cx: &mut Context<ChatView>) 
             icon_button(
                 id,
                 shape,
-                IconSize::Button.points(),
                 if on {
                     ButtonKind::Secondary
                 } else {

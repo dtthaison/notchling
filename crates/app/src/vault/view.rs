@@ -10,7 +10,7 @@ use notchling_engine::vault::entry::VaultEntry;
 use notchling_engine::vault::expiry::today_local;
 use notchling_engine::vault::url::renew_url;
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
-use notchling_kit::part::{ButtonKind, PartState};
+use notchling_kit::part::ButtonKind;
 use notchling_kit::ui::{button, label, scrollable, window_appearance, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
@@ -27,7 +27,8 @@ use crate::cluster::model::VaultNode;
 use crate::cluster::secrets::{store_for, target, Target};
 use crate::cluster::secrets_view::vault_tabs;
 use crate::mac::gate;
-use crate::sheets::view::{sheet_header, Dismiss};
+use crate::sheets::header::sheet_header_closing;
+use crate::sheets::view::Dismiss;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::{Switch, Switches};
 
@@ -477,7 +478,7 @@ impl Render for VaultSheetView {
             }
         };
         let l = list(&snapshot.entries, &switches, today, None);
-        let mut end = div().flex().items_center().gap(px(8.0));
+        let mut end: Vec<AnyElement> = Vec::new();
         if self.form.is_none() {
             if let Some(add) = l.add {
                 let b = button(
@@ -487,22 +488,16 @@ impl Render for VaultSheetView {
                     gate::state(add),
                     a,
                 );
-                end = end.child(gate::tip(b, add, a).when(add.enabled, |b| {
-                    b.on_click(
-                        cx.listener(|this, _, window, cx| this.open_form(Form::add(), window, cx)),
-                    )
-                }));
+                end.push(
+                    gate::tip(b, add, a)
+                        .when(add.enabled, |b| {
+                            b.on_click(cx.listener(|this, _, window, cx| {
+                                this.open_form(Form::add(), window, cx)
+                            }))
+                        })
+                        .into_any_element(),
+                );
             }
-            end = end.child(
-                button(
-                    "vault-done",
-                    "Done",
-                    ButtonKind::Secondary,
-                    PartState::Rest,
-                    a,
-                )
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss))),
-            );
         }
         let alert = self.removing.as_ref().map(|name| {
             let (title, message) = remove_alert(name);
@@ -539,11 +534,19 @@ impl Render for VaultSheetView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(
+            .child(sheet_header_closing(
                 Icon::Permission,
                 title,
-                end.id("vault-header-end"),
+                end,
                 a,
+                cx,
+                |this, _, cx| {
+                    if this.form.is_some() {
+                        this.pending_form_event(FormEvent::Cancel, cx);
+                    } else {
+                        cx.emit(Dismiss);
+                    }
+                },
             ))
             .children(tabs.filter(|_| self.form.is_none()))
             .child(body)

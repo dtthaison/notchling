@@ -10,7 +10,7 @@ use notchling_kit::metric::RADIUS_MD;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{hsla, icon_button, scrollable, status_pill, KitPart, KitStyled};
-use notchling_kit::{Color, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Color, Icon, Ink, TypeRole};
 use notchling_locale as t;
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -531,7 +531,6 @@ impl NotchView {
                 icon_button(
                     "notch-back",
                     Icon::ChevronLeft,
-                    IconSize::Button.points(),
                     ButtonKind::Ghost,
                     PartState::Rest,
                     A,
@@ -556,7 +555,6 @@ impl NotchView {
                 icon_button(
                     "notch-close",
                     Icon::Close,
-                    IconSize::Button.points(),
                     ButtonKind::Ghost,
                     PartState::Rest,
                     A,

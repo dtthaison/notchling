@@ -9,11 +9,13 @@ use notchling_kit::ui::{
     avatar, button, card, hsla, icon, icon_button, label, menu_panel, spinner as kit_spinner,
     KitStyled, MenuItem, MONO_FONT,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::flows::{AddPanel, Alert};
 use super::limits::{Fill, LimitGroup, LimitLine, Meter};
 use super::model::{AccountRow, RowContent};
+use notchling_locale as t;
+
 use crate::mac::gate;
 
 pub type Handler<V, E> = Rc<dyn Fn(&mut V, E, &mut Context<V>)>;
@@ -177,7 +179,6 @@ pub fn account_row<V: 'static>(
             icon_button(
                 SharedString::from(format!("menu-{key}")),
                 Icon::More,
-                IconSize::Button.points(),
                 if menu_open {
                     ButtonKind::Secondary
                 } else {
@@ -282,6 +283,21 @@ pub fn add_panel<V: 'static>(
             a,
         )
         .on_click(cx.listener(move |this, _, _, cx| handler(this, event.clone(), cx)))
+    };
+    let dismiss = |id: &str, cx: &mut Context<V>| {
+        let handler = on.clone();
+        gate::tip_text(
+            icon_button(
+                SharedString::from(format!("add-{id}")),
+                Icon::Close,
+                ButtonKind::Ghost,
+                PartState::Rest,
+                a,
+            ),
+            SharedString::from(t::chat::sheet_close()),
+            a,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| handler(this, AddEvent::Dismiss, cx)))
     };
     let base = div()
         .flex_shrink_0()
@@ -399,13 +415,7 @@ pub fn add_panel<V: 'static>(
                     AddEvent::Add,
                     cx,
                 ))
-                .child(act(
-                    "done",
-                    "Done",
-                    ButtonKind::Ghost,
-                    AddEvent::Dismiss,
-                    cx,
-                )),
+                .child(dismiss("done", cx)),
         ),
         AddPanel::Failed { message } => base.child(
             div()
@@ -430,13 +440,7 @@ pub fn add_panel<V: 'static>(
                     AddEvent::Add,
                     cx,
                 ))
-                .child(act(
-                    "dismiss",
-                    "Cancel",
-                    ButtonKind::Ghost,
-                    AddEvent::Dismiss,
-                    cx,
-                )),
+                .child(dismiss("dismiss", cx)),
         ),
     }
 }

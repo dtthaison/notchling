@@ -2,7 +2,7 @@ use gpui::{deferred, div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_SM, SPACE};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{card, hsla, icon, icon_button, label, menu_panel, KitStyled, MenuItem};
-use notchling_kit::{org_color, Appearance, Color, Icon, IconSize, Ink, TypeRole, ORG_COLORS};
+use notchling_kit::{org_color, Appearance, Color, Icon, Ink, TypeRole, ORG_COLORS};
 use notchling_locale as t;
 
 use super::model::{colour_name, FolderEdit, Open, Row};
@@ -42,7 +42,6 @@ impl OrganizationsView {
         let more = icon_button(
             SharedString::from(format!("org-more-{id}")),
             Icon::More,
-            IconSize::Button.points(),
             ButtonKind::Ghost,
             PartState::Rest,
             a,
@@ -313,7 +312,6 @@ impl OrganizationsView {
                         icon_button(
                             SharedString::from(format!("org-folder-remove-{i}")),
                             Icon::Close,
-                            IconSize::Button.points(),
                             ButtonKind::Ghost,
                             PartState::Rest,
                             a,

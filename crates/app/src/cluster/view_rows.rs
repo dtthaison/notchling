@@ -5,7 +5,7 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, card, icon, icon_button, label, menu_panel, menu_rule, KitPart, KitStyled, MenuItem,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::model::{ClusterModel, NodeRow};
@@ -231,7 +231,6 @@ impl ClusterSheetView {
             let more = icon_button(
                 SharedString::from(format!("node-more-{id}")),
                 Icon::More,
-                IconSize::Button.points(),
                 if open {
                     ButtonKind::Secondary
                 } else {

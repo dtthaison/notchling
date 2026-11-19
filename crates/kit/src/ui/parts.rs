@@ -9,9 +9,10 @@ use crate::labels::{
     badge_place, button_state, Anchor, Corner, Labels, BADGE_HEIGHT, BADGE_PADDING, BADGE_TEXT,
     OUTLINE_ALPHA, OUTLINE_RADIUS, OUTLINE_WIDTH,
 };
+use crate::metric::ICON_BUTTON;
 use crate::part::ButtonKind;
 use crate::render_map::{label_inks, Region};
-use crate::{Appearance, Icon, Ink};
+use crate::{Appearance, Icon, IconSize, Ink};
 
 impl Global for Labels {}
 
@@ -66,11 +67,13 @@ pub fn parts_button(id: impl Into<ElementId>, appearance: Appearance, cx: &App) 
     let ink = if on { Ink::Guide } else { Ink::TextMuted };
     button_with(
         id,
-        icon(Icon::Unsure, 14.0, ink, appearance),
+        icon(Icon::Unsure, IconSize::Button.points(), ink, appearance),
         ButtonKind::Ghost,
         button_state(on),
         appearance,
     )
+    .size(px(ICON_BUTTON))
+    .px(px(0.0))
 }
 
 fn badge(name: &str, corner: Corner, inside: bool, appearance: Appearance) -> Div {
