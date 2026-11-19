@@ -1,8 +1,11 @@
 use notchling_locale as t;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, Div, FontWeight, SharedString, Stateful};
-use notchling_engine::transcript::model::{DiffKind, DiffLine, ToolKind};
+use notchling_engine::transcript::model::{DiffKind, DiffLine, ToolImage, ToolKind};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -12,6 +15,7 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::conversation::chevron;
 use super::conversation_view::{ConversationInput, ConversationState, ConversationView};
 use super::markdown::{self, Sel};
+use crate::chat::browser_rows::BrowserRow;
 use crate::chat::rows::ToolRow;
 use crate::chat::steps::{self, Detail};
 
@@ -138,6 +142,120 @@ fn diff_view(
         )
 }
 
+const SHOT_HEIGHT: f32 = 120.0;
+const DECODED_KEEP: usize = 24;
+
+type Decoded = (Arc<gpui::Image>, (u32, u32));
+
+thread_local! {
+    static DECODED: RefCell<HashMap<String, Decoded>> = Default::default();
+}
+
+fn image_format(media_type: &str) -> gpui::ImageFormat {
+    match media_type {
+        "image/jpeg" | "image/jpg" => gpui::ImageFormat::Jpeg,
+        "image/webp" => gpui::ImageFormat::Webp,
+        "image/gif" => gpui::ImageFormat::Gif,
+        _ => gpui::ImageFormat::Png,
+    }
+}
+
+fn decoded(key: &str, image: &ToolImage) -> Option<Decoded> {
+    if let Some(known) = DECODED.with(|d| d.borrow().get(key).cloned()) {
+        return Some(known);
+    }
+    let bytes = image.bytes()?;
+    let head = &bytes[..bytes.len().min(64 * 1024)];
+    let shape = crate::chat::image_size::size(head).unwrap_or((4, 3));
+    let made = (
+        Arc::new(gpui::Image::from_bytes(
+            image_format(&image.media_type),
+            bytes,
+        )),
+        shape,
+    );
+    DECODED.with(|d| {
+        let mut d = d.borrow_mut();
+        if d.len() >= DECODED_KEEP {
+            d.clear();
+        }
+        d.insert(key.to_owned(), made.clone());
+    });
+    Some(made)
+}
+
+fn shot(key: &str, image: &ToolImage, a: Appearance) -> Option<Div> {
+    let (source, (w, h)) = decoded(key, image)?;
+    let width = (SHOT_HEIGHT * w as f32 / h.max(1) as f32).clamp(60.0, 320.0);
+    Some(
+        div()
+            .w(px(width))
+            .h(px(SHOT_HEIGHT))
+            .rounded(px(RADIUS_MD))
+            .border(px(1.0))
+            .border_color(hsla(Ink::Hairline.color(a)))
+            .overflow_hidden()
+            .child(
+                gpui::img(source)
+                    .size_full()
+                    .object_fit(gpui::ObjectFit::Cover),
+            ),
+    )
+}
+
+fn shots_view(id: &str, browser: &BrowserRow, a: Appearance) -> Option<Div> {
+    if browser.shots.is_empty() && browser.missing == 0 {
+        return None;
+    }
+    Some(
+        div()
+            .pl(px(24.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .when(!browser.shots.is_empty(), |d| {
+                d.child(
+                    div().flex().flex_wrap().gap(px(6.0)).children(
+                        browser
+                            .shots
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(n, image)| shot(&format!("{id}-{n}"), image, a)),
+                    ),
+                )
+            })
+            .when(browser.missing > 0, |d| {
+                d.child(label(
+                    t::chat::browser_shot_missing(),
+                    TypeRole::Meta,
+                    Ink::TextFaint,
+                    a,
+                ))
+            }),
+    )
+}
+
+fn browser_detail(browser: &BrowserRow, a: Appearance) -> Vec<Div> {
+    let mut parts = Vec::new();
+    if !browser.steps.is_empty() {
+        parts.push(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .children(browser.steps.iter().map(|title| {
+                    label(title, TypeRole::Meta, Ink::TextMuted, a)
+                        .min_w(px(0.0))
+                        .elide()
+                })),
+        );
+    }
+    if let Some(fault) = &browser.fault {
+        parts.push(div().child(label(&fault.hint, TypeRole::Meta, Ink::TextFaint, a)));
+    }
+    parts
+}
+
 fn step_detail(
     step: &ToolRow,
     reveal_ok: bool,
@@ -149,6 +267,11 @@ fn step_detail(
     match steps::detail(step) {
         Detail::None => return None,
         Detail::Diff => detail = detail.child(diff_view(step, reveal_ok, a, cx)),
+        Detail::Browser => {
+            if let Some(browser) = &step.browser {
+                detail = detail.children(browser_detail(browser, a));
+            }
+        }
         Detail::Text { input_title, .. } => {
             if let (Some(title), Some(text)) = (input_title, steps::input_text(step)) {
                 detail = detail.child(markdown::mono_box(
@@ -265,6 +388,11 @@ fn step_row(
         .flex_col()
         .gap(px(6.0))
         .child(line)
+        .children(
+            step.browser
+                .as_ref()
+                .and_then(|b| shots_view(&step.id, b, a)),
+        )
         .when(open, |d| {
             d.children(step_detail(step, input.can_reveal, sel, a, cx))
         })

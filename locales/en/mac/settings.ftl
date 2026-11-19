@@ -169,6 +169,13 @@ settings-answer-from-notch = Answer prompts from the notch
 # Row in the Claude Code section.
 settings-keep-pages = Keep local copies of artifacts
 
+# Row in Settings > Agents > Claude Code. It starts new sessions with Claude in Chrome turned on, so they can drive the user's own Chrome.
+settings-claude-use-chrome = Use { -brand-chrome }
+# The line under the Use Chrome row.
+settings-claude-use-chrome-note = New sessions can use your { -brand-chrome } and its sign-ins through the Claude in Chrome extension. The extension asks for permission site by site.
+# Title of the section holding the Use Chrome row in Settings > Agents > Claude Code.
+settings-chrome-title = Browser
+
 # Row in the account limit section: what to do for Claude Code. The title is the tool's name.
 settings-limit-mode = { -brand-claude-code }
 

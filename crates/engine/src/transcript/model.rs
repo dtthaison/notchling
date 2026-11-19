@@ -56,7 +56,77 @@ pub enum ToolKind {
     Task,
     Ask,
     Skill,
+    Browser,
     Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserVerb {
+    Open,
+    NewTab,
+    CloseTab,
+    ListTabs,
+    Click,
+    Type,
+    Key,
+    Scroll,
+    Hover,
+    Drag,
+    Screenshot,
+    Zoom,
+    Wait,
+    ReadPage,
+    Find,
+    ReadText,
+    Console,
+    Network,
+    Script,
+    FillForm,
+    Upload,
+    Resize,
+    Switch,
+    Shortcut,
+    Recording,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserStep {
+    pub verb: BrowserVerb,
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub count: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserFault {
+    NotConnected,
+    NeedsPermission,
+    Denied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolImage {
+    pub media_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BrowserCall {
+    pub steps: Vec<BrowserStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fault: Option<BrowserFault>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ToolImage>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub shots: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +140,8 @@ pub struct ToolCall {
     pub is_error: bool,
     pub diff: Vec<DiffLine>,
     pub finished: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<Box<BrowserCall>>,
 }
 
 impl ToolCall {
@@ -84,7 +156,28 @@ impl ToolCall {
             is_error: false,
             diff: Vec::new(),
             finished: false,
+            browser: None,
         }
+    }
+
+    pub fn steps(&self) -> &[BrowserStep] {
+        self.browser.as_deref().map_or(&[], |b| &b.steps)
+    }
+
+    pub fn fault(&self) -> Option<BrowserFault> {
+        self.browser.as_deref().and_then(|b| b.fault)
+    }
+
+    pub fn images(&self) -> &[ToolImage] {
+        self.browser.as_deref().map_or(&[], |b| &b.images)
+    }
+
+    pub fn shots(&self) -> u32 {
+        self.browser.as_deref().map_or(0, |b| b.shots)
+    }
+
+    pub fn browser_mut(&mut self) -> &mut BrowserCall {
+        self.browser.get_or_insert_with(Default::default)
     }
 
     pub fn added(&self) -> usize {

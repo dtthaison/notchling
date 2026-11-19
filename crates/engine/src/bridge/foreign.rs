@@ -280,6 +280,7 @@ pub fn tool_summary(calls: &[ToolCall]) -> String {
             ToolKind::Task => "updated tasks".into(),
             ToolKind::Ask => "asked you".into(),
             ToolKind::Skill => format!("used {}", n(total, "skill", "skills")),
+            ToolKind::Browser => "used Chrome".into(),
             ToolKind::Other => format!("used {}", n(total, "tool", "tools")),
         })
         .collect();

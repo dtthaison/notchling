@@ -25,6 +25,8 @@ pub mod models_rows;
 mod models_rows_tests;
 pub mod new_session;
 #[cfg(test)]
+mod new_session_chrome_tests;
+#[cfg(test)]
 mod new_session_run_on_tests;
 pub mod renders;
 pub mod run_on;

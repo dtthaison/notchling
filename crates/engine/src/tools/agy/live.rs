@@ -467,7 +467,7 @@ impl Handler for Wire {
                 },
             );
         }
-        runner.emit(&live, Change::PermissionPending(permission));
+        runner.emit(&live, Change::PermissionPending(Box::new(permission)));
     }
 
     fn exit(&self, message: Option<String>) {

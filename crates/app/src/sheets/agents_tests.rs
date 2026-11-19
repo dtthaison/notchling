@@ -53,7 +53,7 @@ fn the_page_and_tool_lists_keep_their_order() {
     assert_eq!(Tool::ALL, [Tool::ClaudeCode]);
     assert_eq!(
         Tool::ClaudeCode.sections(),
-        [Section::Client, Section::Hooks]
+        [Section::Client, Section::Chrome, Section::Hooks]
     );
     assert_eq!(Page::Agents.title(), "Agents");
     assert_eq!(Page::Skills.title(), "Skills & Models");

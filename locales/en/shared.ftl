@@ -6,6 +6,7 @@
 -brand-claude-code = Claude Code
 -brand-codex = Codex
 -brand-antigravity = Antigravity
+-brand-chrome = Chrome
 
 ## Language
 

@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod bounded;
+pub mod browser;
 pub mod chat;
 pub mod codex;
 pub mod continued;

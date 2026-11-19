@@ -4,6 +4,7 @@ use notchling_engine::transcript::model::{
 use notchling_kit::Icon;
 use notchling_locale as t;
 
+use super::browser_rows::{self, BrowserRow};
 use super::format::{duration, model_name};
 use super::outbox::{Bubble, Status};
 
@@ -61,6 +62,7 @@ pub struct ToolRow {
     pub removed: usize,
     pub is_error: bool,
     pub finished: bool,
+    pub browser: Option<BrowserRow>,
 }
 
 pub fn tool_icon(kind: ToolKind) -> Icon {
@@ -68,7 +70,7 @@ pub fn tool_icon(kind: ToolKind) -> Icon {
         ToolKind::Shell => Icon::Terminal,
         ToolKind::Read => Icon::File,
         ToolKind::Search => Icon::Search,
-        ToolKind::Web => Icon::Web,
+        ToolKind::Web | ToolKind::Browser => Icon::Web,
         ToolKind::Edit => Icon::Edit,
         ToolKind::Write => Icon::Write,
         ToolKind::Other => Icon::Plugin,
@@ -158,11 +160,16 @@ pub fn cut_output(text: &str) -> Output {
 }
 
 fn tool_row(call: &ToolCall) -> ToolRow {
+    let browser = (call.kind == ToolKind::Browser).then(|| browser_rows::row(call));
+    let title = match &browser {
+        Some(b) => browser_rows::title(call, b.fault.as_ref()),
+        None => call.title.clone(),
+    };
     ToolRow {
         id: call.id.clone(),
         kind: call.kind,
         icon: tool_icon(call.kind),
-        title: call.title.clone(),
+        title,
         input: call.input.clone(),
         output: call
             .output
@@ -181,6 +188,7 @@ fn tool_row(call: &ToolCall) -> ToolRow {
         removed: call.removed(),
         is_error: call.is_error,
         finished: call.finished,
+        browser,
     }
 }
 

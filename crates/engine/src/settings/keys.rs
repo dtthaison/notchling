@@ -189,6 +189,8 @@ pub const KEYS: &[KeySpec] = &[
         .ask("Answer prompts from the notch", "Answer questions and permission prompts from the notch", "it changes where permission prompts are answered"),
     key("keepPages", K::Bool, D::Bool(true), true, "Keep local copies of published artifacts (the page hook)")
         .ask("Keep local copies of artifacts", "Keep a local copy of every page published with the Artifact tool", "it changes what Claude Code's hook does on every publish"),
+    key("claudeUseChrome", K::Bool, D::Bool(false), false, "Start Claude Code sessions with Claude in Chrome turned on (`--chrome`); New Session's Use Chrome starts from it")
+        .ask("Use Chrome", "Start new Claude Code sessions with Claude in Chrome turned on, so they can use your Chrome and its sign-ins", "it lets a session drive the user's real Chrome with their sign-ins"),
     key("showPet", K::Bool, D::Bool(true), true, "The animated pet in the notch")
         .free("Animate pet", "Show the animated pet in the notch", "a display preference"),
     key("replyFromNotch", K::Bool, D::Bool(true), true, "A reply box in the notch")

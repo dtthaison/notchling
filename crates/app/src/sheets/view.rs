@@ -19,6 +19,7 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::new_session::{folder_title, parent_line, trust_text, NewSession, Plan, Section, Stage};
 use super::run_on_view::{code_column, run_on_column, tool_column};
+use super::settings_view::switch;
 use crate::accounts::store::Accounts;
 use crate::acting::{Acting, Control};
 use crate::actions::Actions;
@@ -528,6 +529,27 @@ impl NewSessionView {
                     .busy()
                     .then(|| spinner("start-spin", SPINNER_SMALL, Ink::Working, a)),
             )
+            .children(self.model.chrome_offered().then(|| {
+                div()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(label(
+                        t::chat::sheet_use_chrome(),
+                        TypeRole::Label,
+                        Ink::Text,
+                        a,
+                    ))
+                    .child(
+                        switch("new-session-chrome".into(), self.model.chrome, a).on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.model.toggle_chrome();
+                                cx.notify();
+                            }),
+                        ),
+                    )
+            }))
             .child(line)
             .child(start)
     }

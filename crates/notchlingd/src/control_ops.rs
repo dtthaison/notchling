@@ -248,15 +248,23 @@ fn flags_arg(args: &Value, catalog: &CatalogService) -> Result<Vec<String>, ApiE
             .ok_or_else(|| bad("flags is a list of strings"))?,
         Some(_) => return Err(bad("flags is a list of strings")),
     };
-    match list.as_slice() {
-        [] => Ok(list),
-        [flag, model] if flag == "--model" && catalog.is_allowed(Tool::Claude, model) => Ok(list),
-        _ => Err(bad(format!(
-            "flags may only be --model with one of {}",
-            catalog.allowed(Tool::Claude).join(", ")
-        ))),
+    let (model, rest) = match list.as_slice() {
+        [flag, model, rest @ ..] if flag == "--model" => (Some(model), rest),
+        rest => (None, rest),
+    };
+    let model_ok = model.is_none_or(|m| catalog.is_allowed(Tool::Claude, m));
+    let rest_ok =
+        matches!(rest, [] | [_]) && rest.iter().all(|f| CHROME_FLAGS.contains(&f.as_str()));
+    if model_ok && rest_ok {
+        return Ok(list);
     }
+    Err(bad(format!(
+        "flags may only be --model with one of {}, then --chrome or --no-chrome",
+        catalog.allowed(Tool::Claude).join(", ")
+    )))
 }
+
+const CHROME_FLAGS: [&str; 2] = ["--chrome", "--no-chrome"];
 
 fn folder_arg(args: &Value) -> Result<&str, ApiError> {
     let folder = text_arg(args, "folder")?;
