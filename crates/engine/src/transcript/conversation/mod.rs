@@ -16,7 +16,7 @@ pub use tools::{diff_lines, make_call, pretty, result_text};
 pub use user::{model_id_in_confirmation, user_item};
 
 use super::model::Conversation;
-use super::tail::{Cursors, LineParser, LONG_LINE_SCAN};
+use super::tail::{Cursors, LineParser, Spot, LONG_LINE_SCAN};
 use std::sync::{Arc, OnceLock};
 
 pub struct SubagentParser(Parser);
@@ -32,8 +32,8 @@ impl LineParser for SubagentParser {
         self.0.consume(line);
     }
 
-    fn consume_oversized(&mut self, head: &[u8], len: u64) {
-        self.0.consume_oversized(head, len);
+    fn consume_oversized(&mut self, head: &[u8], len: u64, spot: Option<Spot<'_>>) {
+        self.0.consume_oversized(head, len, spot);
     }
 }
 

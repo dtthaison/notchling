@@ -6,7 +6,7 @@ const BLOCK: usize = 1 << 20;
 
 pub enum Line<'a> {
     Whole(&'a [u8]),
-    Oversized { head: &'a [u8], len: u64 },
+    Oversized { head: &'a [u8], len: u64, at: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +64,7 @@ pub fn scan_lines(
     let mut skipping = skip_first_line;
     let mut scanned = Scanned { span: 0, parsed: 0 };
     let mut at = 0u64;
+    let mut line_at = 0u64;
     while remaining > 0 {
         let want = remaining.min(buf.len() as u64) as usize;
         let n = file.read(&mut buf[..want])?;
@@ -81,6 +82,8 @@ pub fn scan_lines(
             let segment = &block[from..from + rel];
             from += rel + 1;
             scanned.span = at + from as u64;
+            let this_at = line_at;
+            line_at = scanned.span;
             if skipping {
                 skipping = false;
             } else if pending.len == 0 && segment.is_empty() {
@@ -93,6 +96,7 @@ pub fn scan_lines(
                     each(Line::Oversized {
                         head: &pending.line,
                         len: pending.len,
+                        at: start + this_at,
                     });
                 } else {
                     scanned.parsed += pending.len + 1;
@@ -135,7 +139,7 @@ mod tests {
             |line| {
                 got.push(match line {
                     Line::Whole(l) => Got::Whole(String::from_utf8_lossy(l).into_owned()),
-                    Line::Oversized { head, len } => {
+                    Line::Oversized { head, len, .. } => {
                         Got::Big(String::from_utf8_lossy(head).into_owned(), len)
                     }
                 })

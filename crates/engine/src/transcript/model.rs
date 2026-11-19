@@ -117,6 +117,13 @@ pub struct ToolImage {
     pub data: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShotSpot {
+    pub path: String,
+    pub at: u64,
+    pub index: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BrowserCall {
@@ -125,6 +132,8 @@ pub struct BrowserCall {
     pub fault: Option<BrowserFault>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ToolImage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub spots: Vec<ShotSpot>,
     #[serde(skip_serializing_if = "is_zero")]
     pub shots: u32,
 }
@@ -170,6 +179,10 @@ impl ToolCall {
 
     pub fn images(&self) -> &[ToolImage] {
         self.browser.as_deref().map_or(&[], |b| &b.images)
+    }
+
+    pub fn spots(&self) -> &[ShotSpot] {
+        self.browser.as_deref().map_or(&[], |b| &b.spots)
     }
 
     pub fn shots(&self) -> u32 {

@@ -107,6 +107,7 @@ pub fn detail(step: &ToolRow) -> Detail {
     if step.kind == ToolKind::Browser {
         return match &step.browser {
             Some(b) if b.fault.is_some() || !b.steps.is_empty() => Detail::Browser,
+            _ if step.is_error && step.output.is_some() => Detail::Browser,
             _ => Detail::None,
         };
     }
@@ -140,21 +141,25 @@ pub fn input_text(step: &ToolRow) -> Option<String> {
     }
 }
 
+pub fn output_text_of(step: &ToolRow) -> Option<String> {
+    step.output.as_ref().map(|output| {
+        if output.more > 0 {
+            format!(
+                "{}\n{}",
+                output.text,
+                t::chat::output_more(&output.more.to_string())
+            )
+        } else {
+            output.text.clone()
+        }
+    })
+}
+
 pub fn output_text(step: &ToolRow) -> Option<String> {
     match detail(step) {
         Detail::Text {
             has_output: true, ..
-        } => step.output.as_ref().map(|output| {
-            if output.more > 0 {
-                format!(
-                    "{}\n{}",
-                    output.text,
-                    t::chat::output_more(&output.more.to_string())
-                )
-            } else {
-                output.text.clone()
-            }
-        }),
+        } => output_text_of(step),
         _ => None,
     }
 }

@@ -1,5 +1,5 @@
 use notchling_engine::transcript::model::{
-    BrowserFault, BrowserStep, BrowserVerb, ToolCall, ToolImage,
+    BrowserFault, BrowserStep, BrowserVerb, ShotSpot, ToolCall, ToolImage,
 };
 use notchling_locale as t;
 
@@ -14,6 +14,7 @@ pub struct BrowserRow {
     pub steps: Vec<String>,
     pub fault: Option<Fault>,
     pub shots: Vec<ToolImage>,
+    pub spots: Vec<ShotSpot>,
     pub missing: usize,
 }
 
@@ -102,11 +103,13 @@ pub fn row(call: &ToolCall) -> BrowserRow {
     };
     let missing = usize::try_from(call.shots())
         .unwrap_or(usize::MAX)
-        .saturating_sub(call.images().len());
+        .saturating_sub(call.images().len())
+        .saturating_sub(call.spots().len());
     BrowserRow {
         steps,
         fault,
         shots: call.images().to_vec(),
+        spots: call.spots().to_vec(),
         missing,
     }
 }

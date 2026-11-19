@@ -1,3 +1,4 @@
+use crate::transcript::browser;
 use crate::transcript::text::{between, first_line, prefix_chars};
 use crate::transcript::util::str_of;
 use serde_json::{Map, Value};
@@ -106,6 +107,9 @@ fn rows(text: &str, kind: DiffRowKind, limit: usize) -> Vec<DiffRow> {
 }
 
 pub fn step(id: &str, name: &str, input: &Map<String, Value>) -> ToolStep {
+    if browser::is_browser(name) {
+        return ToolStep::new(id, name, browser::plain_summary(name, input));
+    }
     let get = |k: &str| input.get(k).and_then(Value::as_str);
     let file = get("file_path")
         .or_else(|| get("notebook_path"))

@@ -4,6 +4,7 @@ const ITEM_BYTES: usize = 64 * 1024;
 const TEXT_CHARS: usize = 8 * 1024;
 const OUTPUT_CHARS: usize = 16 * 1024;
 const DIFF_LINES: usize = 200;
+const BROWSER_STEPS: usize = 60;
 
 impl Conversation {
     pub fn bounded(mut self, max_bytes: usize) -> (Conversation, usize) {
@@ -60,6 +61,11 @@ fn shrink_call(call: &mut ToolCall) {
     cut(&mut call.input, TEXT_CHARS);
     if let Some(output) = &mut call.output {
         cut(output, OUTPUT_CHARS);
+    }
+    if let Some(browser) = call.browser.as_deref_mut() {
+        browser.images = Vec::new();
+        browser.spots = Vec::new();
+        browser.steps.truncate(BROWSER_STEPS);
     }
     if call.diff.len() > DIFF_LINES {
         let left = call.diff.len() - DIFF_LINES;
@@ -156,6 +162,34 @@ mod tests {
         };
         assert_eq!(calls[0].diff.last().unwrap().kind, DiffKind::Hunk);
         assert!(calls[0].input.ends_with('…'));
+    }
+
+    #[test]
+    fn a_big_screenshot_is_dropped_when_an_item_is_shrunk() {
+        use crate::transcript::model::ToolImage;
+        let mut c = talk(2, 100);
+        let mut call = ToolCall::new(
+            "t",
+            "shot",
+            ToolKind::Browser,
+            "Used Chrome".into(),
+            "".into(),
+        );
+        let state = call.browser_mut();
+        state.shots = 1;
+        state.images = vec![ToolImage {
+            media_type: "image/png".into(),
+            data: "A".repeat(300_000),
+        }];
+        c.items.push(item(2, ItemKind::Tools(vec![call])));
+        let (kept, omitted) = c.bounded(100 * 1024);
+        assert_eq!(omitted, 0);
+        assert!(json_len(&kept) <= 100 * 1024, "{}", json_len(&kept));
+        let ItemKind::Tools(calls) = &kept.items.last().unwrap().kind else {
+            panic!("a tool item");
+        };
+        assert!(calls[0].images().is_empty());
+        assert_eq!(calls[0].shots(), 1);
     }
 
     #[test]

@@ -1,11 +1,12 @@
 use notchling_locale as t;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, Div, FontWeight, SharedString, Stateful};
-use notchling_engine::transcript::model::{DiffKind, DiffLine, ToolImage, ToolKind};
+use notchling_engine::transcript::browser_shot;
+use notchling_engine::transcript::model::{DiffKind, DiffLine, ShotSpot, ToolImage, ToolKind};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -147,8 +148,46 @@ const DECODED_KEEP: usize = 24;
 
 type Decoded = (Arc<gpui::Image>, (u32, u32));
 
+#[derive(Clone)]
+enum Slot {
+    Loading,
+    Ready(Decoded),
+    Failed,
+}
+
+#[derive(Default)]
+struct Cache {
+    slots: HashMap<String, Slot>,
+    order: VecDeque<String>,
+}
+
+impl Cache {
+    fn get(&mut self, key: &str) -> Option<Slot> {
+        let slot = self.slots.get(key).cloned()?;
+        if let Some(at) = self.order.iter().position(|k| k == key) {
+            if let Some(k) = self.order.remove(at) {
+                self.order.push_back(k);
+            }
+        }
+        Some(slot)
+    }
+
+    fn put(&mut self, key: String, slot: Slot) {
+        if self.slots.insert(key.clone(), slot).is_some() {
+            self.order.retain(|k| *k != key);
+        }
+        self.order.push_back(key);
+        while self.slots.len() > DECODED_KEEP {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.slots.remove(&oldest);
+        }
+    }
+}
+
 thread_local! {
-    static DECODED: RefCell<HashMap<String, Decoded>> = Default::default();
+    static DECODED: RefCell<Cache> = Default::default();
 }
 
 fn image_format(media_type: &str) -> gpui::ImageFormat {
@@ -160,51 +199,106 @@ fn image_format(media_type: &str) -> gpui::ImageFormat {
     }
 }
 
-fn decoded(key: &str, image: &ToolImage) -> Option<Decoded> {
-    if let Some(known) = DECODED.with(|d| d.borrow().get(key).cloned()) {
-        return Some(known);
-    }
-    let bytes = image.bytes()?;
+fn made(format: gpui::ImageFormat, bytes: Vec<u8>) -> Decoded {
     let head = &bytes[..bytes.len().min(64 * 1024)];
     let shape = crate::chat::image_size::size(head).unwrap_or((4, 3));
-    let made = (
-        Arc::new(gpui::Image::from_bytes(
-            image_format(&image.media_type),
-            bytes,
-        )),
-        shape,
-    );
-    DECODED.with(|d| {
-        let mut d = d.borrow_mut();
-        if d.len() >= DECODED_KEEP {
-            d.clear();
-        }
-        d.insert(key.to_owned(), made.clone());
-    });
-    Some(made)
+    (Arc::new(gpui::Image::from_bytes(format, bytes)), shape)
 }
 
-fn shot(key: &str, image: &ToolImage, a: Appearance) -> Option<Div> {
-    let (source, (w, h)) = decoded(key, image)?;
-    let width = (SHOT_HEIGHT * w as f32 / h.max(1) as f32).clamp(60.0, 320.0);
-    Some(
-        div()
-            .w(px(width))
-            .h(px(SHOT_HEIGHT))
-            .rounded(px(RADIUS_MD))
-            .border(px(1.0))
-            .border_color(hsla(Ink::Hairline.color(a)))
-            .overflow_hidden()
-            .child(
-                gpui::img(source)
-                    .size_full()
-                    .object_fit(gpui::ObjectFit::Cover),
-            ),
-    )
+fn memory_key(id: &str, n: usize, image: &ToolImage) -> String {
+    format!("{id}-{n}-{}", image.data.len())
+}
+
+fn spot_key(spot: &ShotSpot) -> String {
+    format!("{}@{}#{}", spot.path, spot.at, spot.index)
+}
+
+fn slot_of(key: &str, image: &ToolImage) -> Slot {
+    if let Some(known) = DECODED.with(|d| d.borrow_mut().get(key)) {
+        return known;
+    }
+    let slot = image
+        .bytes()
+        .map(|bytes| Slot::Ready(made(image_format(&image.media_type), bytes)))
+        .unwrap_or(Slot::Failed);
+    DECODED.with(|d| d.borrow_mut().put(key.to_owned(), slot.clone()));
+    slot
+}
+
+fn start_loads(step: &ToolRow, cx: &mut Context<ConversationView>) {
+    let Some(browser) = &step.browser else {
+        return;
+    };
+    for spot in &browser.spots {
+        let key = spot_key(spot);
+        let known = DECODED.with(|d| d.borrow_mut().get(&key).is_some());
+        if known {
+            continue;
+        }
+        DECODED.with(|d| d.borrow_mut().put(key.clone(), Slot::Loading));
+        let spot = spot.clone();
+        let id = step.id.clone();
+        cx.spawn(async move |this, cx| {
+            let thumb = cx
+                .background_executor()
+                .spawn(async move { browser_shot::thumbnail(&spot, &id) })
+                .await;
+            this.update(cx, |_, cx| {
+                let slot = thumb
+                    .map(|bytes| Slot::Ready(made(gpui::ImageFormat::Jpeg, bytes)))
+                    .unwrap_or(Slot::Failed);
+                DECODED.with(|d| d.borrow_mut().put(key, slot));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+}
+
+fn thumb_frame(width: f32, a: Appearance) -> Div {
+    div()
+        .w(px(width))
+        .h(px(SHOT_HEIGHT))
+        .rounded(px(RADIUS_MD))
+        .border(px(1.0))
+        .border_color(hsla(Ink::Hairline.color(a)))
+        .overflow_hidden()
+}
+
+fn shot(slot: &Slot, a: Appearance) -> Option<Div> {
+    match slot {
+        Slot::Ready((source, (w, h))) => {
+            let width = (SHOT_HEIGHT * *w as f32 / (*h).max(1) as f32).clamp(60.0, 320.0);
+            Some(
+                thumb_frame(width, a).child(
+                    gpui::img(source.clone())
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Cover),
+                ),
+            )
+        }
+        Slot::Loading => Some(thumb_frame(160.0, a).fill(Ink::Hairline, a)),
+        Slot::Failed => None,
+    }
 }
 
 fn shots_view(id: &str, browser: &BrowserRow, a: Appearance) -> Option<Div> {
-    if browser.shots.is_empty() && browser.missing == 0 {
+    let mut slots: Vec<Slot> = browser
+        .shots
+        .iter()
+        .enumerate()
+        .map(|(n, image)| slot_of(&memory_key(id, n, image), image))
+        .collect();
+    slots.extend(browser.spots.iter().map(|spot| {
+        DECODED
+            .with(|d| d.borrow_mut().get(&spot_key(spot)))
+            .unwrap_or(Slot::Loading)
+    }));
+    let failed = slots.iter().filter(|s| matches!(s, Slot::Failed)).count();
+    let missing = browser.missing + failed;
+    let frames: Vec<Div> = slots.iter().filter_map(|slot| shot(slot, a)).collect();
+    if frames.is_empty() && missing == 0 {
         return None;
     }
     Some(
@@ -213,18 +307,10 @@ fn shots_view(id: &str, browser: &BrowserRow, a: Appearance) -> Option<Div> {
             .flex()
             .flex_col()
             .gap(px(4.0))
-            .when(!browser.shots.is_empty(), |d| {
-                d.child(
-                    div().flex().flex_wrap().gap(px(6.0)).children(
-                        browser
-                            .shots
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(n, image)| shot(&format!("{id}-{n}"), image, a)),
-                    ),
-                )
+            .when(!frames.is_empty(), |d| {
+                d.child(div().flex().flex_wrap().gap(px(6.0)).children(frames))
             })
-            .when(browser.missing > 0, |d| {
+            .when(missing > 0, |d| {
                 d.child(label(
                     t::chat::browser_shot_missing(),
                     TypeRole::Meta,
@@ -271,6 +357,18 @@ fn step_detail(
             if let Some(browser) = &step.browser {
                 detail = detail.children(browser_detail(browser, a));
             }
+            if step.is_error && step.browser.as_ref().is_none_or(|b| b.fault.is_none()) {
+                if let Some(text) = steps::output_text_of(step) {
+                    detail = detail.child(markdown::mono_box(
+                        &format!("{}-out", step.id),
+                        sel,
+                        t::chat::error(),
+                        &text,
+                        true,
+                        a,
+                    ));
+                }
+            }
         }
         Detail::Text { input_title, .. } => {
             if let (Some(title), Some(text)) = (input_title, steps::input_text(step)) {
@@ -312,6 +410,7 @@ fn step_row(
     a: Appearance,
     cx: &mut Context<ConversationView>,
 ) -> Div {
+    start_loads(step, cx);
     let has_detail = steps::detail(step) != Detail::None;
     let open = has_detail && s.is_open(&step.id);
     let running = live && !step.finished;

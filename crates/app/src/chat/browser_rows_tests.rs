@@ -117,6 +117,40 @@ fn pictures_missing_from_memory_are_counted() {
     assert_eq!(r.missing, 1);
 }
 
+#[test]
+fn a_picture_waiting_in_the_file_is_not_missing() {
+    let mut c = call(vec![step(BrowserVerb::Screenshot, "")]);
+    c.browser_mut().shots = 1;
+    c.browser_mut().spots = vec![ShotSpot {
+        path: "/x.jsonl".into(),
+        at: 10,
+        index: 0,
+    }];
+    let r = row(&c);
+    assert_eq!(r.spots.len(), 1);
+    assert_eq!(r.missing, 0);
+}
+
+#[test]
+fn an_unknown_error_opens_to_its_text() {
+    let mut c = call(vec![step(BrowserVerb::Click, "")]);
+    c.is_error = true;
+    c.output = Some("No tab with id 7".into());
+    let row = rows::row_of(&ChatItem {
+        id: "i".into(),
+        kind: ItemKind::Tools(vec![c]),
+        date: None,
+    });
+    let Row::Tools(tools) = row else {
+        panic!("not tools");
+    };
+    assert_eq!(steps::detail(&tools[0]), steps::Detail::Browser);
+    assert_eq!(
+        steps::output_text_of(&tools[0]).as_deref(),
+        Some("No tab with id 7")
+    );
+}
+
 fn fixture_rows() -> Vec<rows::ToolRow> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures/chat-chrome/claude/projects/-Users-me-work-demo/chrome-demo.jsonl");
