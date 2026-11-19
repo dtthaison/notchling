@@ -77,7 +77,8 @@ pub fn admin_refusal(m: &Machine) -> Option<&'static str> {
 }
 
 pub fn ssh_admin(m: &Machine, script: &str, as_root: bool) -> Vec<String> {
-    let user = if as_root { "root" } else { m.user.as_str() };
+    let route = m.route();
+    let user = if as_root { "root" } else { route.user.as_str() };
     let body = format!("exec </dev/null; {script}");
     let fixed = format!(
         "/usr/bin/env -i PATH={ADMIN_PATH} HOME={} /bin/sh -c {}",
@@ -89,7 +90,7 @@ pub fn ssh_admin(m: &Machine, script: &str, as_root: bool) -> Vec<String> {
     } else {
         format!("/usr/bin/sudo -S -k -p '' {fixed}")
     };
-    let mut v = ssh_head(&m.route().as_user(user));
+    let mut v = ssh_head(&route.as_user(user));
     v.push(format!("/bin/sh -c {}", quote(&remote)));
     v
 }

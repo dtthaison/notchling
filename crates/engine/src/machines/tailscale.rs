@@ -1,5 +1,5 @@
-use super::addresses::{AddressKind, MachineAddress};
-use super::forms::name_problem;
+use super::addresses::{is_tailnet, list_problems, AddressKind, MachineAddress, HOST, TAILNET};
+use super::forms::{is_host, name_problem};
 use super::registry::{Machine, MachineOs};
 use super::runner::{Call, Runner};
 use serde::{Deserialize, Deserializer};
@@ -11,11 +11,24 @@ pub const LISTING_SECS: u64 = 10;
 pub const SWITCH_SECS: u64 = 30;
 
 pub fn default_cli() -> String {
-    if std::path::Path::new(APP_CLI).is_file() {
-        APP_CLI.to_owned()
-    } else {
-        "tailscale".to_owned()
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    resolve_cli(&path, &|p| p.is_file())
+}
+
+pub fn resolve_cli(path: &std::ffi::OsStr, is_file: &dyn Fn(&std::path::Path) -> bool) -> String {
+    if is_file(std::path::Path::new(APP_CLI)) {
+        return APP_CLI.to_owned();
     }
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(path).collect();
+    for fixed in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+        dirs.push(std::path::PathBuf::from(fixed));
+    }
+    dirs.into_iter()
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join("tailscale"))
+        .find(|p| is_file(p))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| APP_CLI.to_owned())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,8 +41,7 @@ pub struct Network {
 
 impl Network {
     pub fn is(&self, tailnet: &str) -> bool {
-        let wanted = tailnet.trim();
-        self.tailnet.eq_ignore_ascii_case(wanted) || self.account.eq_ignore_ascii_case(wanted)
+        self.tailnet.eq_ignore_ascii_case(tailnet.trim())
     }
 }
 
@@ -317,11 +329,19 @@ pub fn already_added(peer: &Peer, machines: &[Machine]) -> bool {
     })
 }
 
+pub fn usable(peer: &Peer) -> bool {
+    is_host(peer.host())
+        && peer
+            .ips
+            .iter()
+            .all(|ip| ip.parse::<std::net::IpAddr>().is_ok())
+}
+
 pub fn available<'a>(status: &'a Status, machines: &[Machine]) -> Vec<&'a Peer> {
     status
         .peers
         .iter()
-        .filter(|p| !already_added(p, machines))
+        .filter(|p| usable(p) && !already_added(p, machines))
         .collect()
 }
 
@@ -424,10 +444,28 @@ pub fn import(
         if already_added(peer, existing) {
             continue;
         }
+        if !usable(peer) {
+            return Err(format!("{}: {}", peer.short(), HOST));
+        }
+        if !status.tailnet.is_empty() && !is_tailnet(&status.tailnet) {
+            return Err(TAILNET.to_owned());
+        }
         if !super::forms::is_user(&pick.user) {
             return Err(format!("{}: {}", peer.short(), super::forms::USER_PROBLEM));
         }
         let machine = machine_for(peer, &pick.user, &status.tailnet, &taken, organization);
+        if let Some(why) = list_problems(&machine.addresses, &machine.name)
+            .into_iter()
+            .chain(super::forms::machine_problems(
+                &machine.name,
+                &machine.host,
+                &machine.user,
+                &[],
+            ))
+            .next()
+        {
+            return Err(format!("{}: {why}", peer.short()));
+        }
         taken.push(machine.name.clone());
         out.push(machine);
     }

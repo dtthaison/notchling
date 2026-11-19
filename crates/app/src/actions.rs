@@ -26,6 +26,7 @@ pub struct Socket {
 pub const SESSION_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub const CODE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 pub const PROMOTE_CALL_TIMEOUT: Duration = Duration::from_secs(90);
+pub const TAILSCALE_CALL_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub fn call_timeout_for(op: &str, args: &Value) -> Duration {
     let forwarded = notchling_engine::cluster::policy::RULES
@@ -54,6 +55,8 @@ pub fn call_timeout(op: &str) -> Duration {
         CODE_CALL_TIMEOUT
     } else if op == api_ops::CLUSTER_PROMOTE {
         PROMOTE_CALL_TIMEOUT
+    } else if op == api_ops::TAILSCALE_SWITCH {
+        TAILSCALE_CALL_TIMEOUT
     } else if (op.starts_with("session.") && op != ops::SESSION_SEND)
         || op == ops::FOLDER_TRUST
         || op == ops::CLUSTER_FOLLOW

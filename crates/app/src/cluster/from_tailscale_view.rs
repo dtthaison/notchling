@@ -33,19 +33,29 @@ impl ClusterSheetView {
         };
         let model = FromTailscale::new(&parts.this.user, parts.registry.all());
         self.start_tailscale(model, Some(parts.clone()), cx);
-        let Some(tailscale) = parts.engine.router().tailscale().cloned() else {
-            return;
-        };
+        let tailscale = parts.engine.router().tailscale().cloned();
+        let feed = self.feed.clone();
         cx.spawn(async move |this, cx| {
-            let (status, networks) = cx
+            let (read, organizations) = cx
                 .background_executor()
-                .spawn(
-                    async move { (tailscale.status(), tailscale.networks().unwrap_or_default()) },
-                )
+                .spawn(async move {
+                    let read = tailscale.map(|t| (t.status(), t.networks().unwrap_or_default()));
+                    let organizations = {
+                        let request = crate::organizations::wire::list();
+                        feed.send(&super::wire::Request {
+                            op: request.op,
+                            args: request.args,
+                        })
+                    };
+                    (read, organizations)
+                })
                 .await;
             this.update(cx, |view, cx| {
                 if let Some(model) = view.tailscale.model.as_mut() {
-                    model.loaded(status, networks);
+                    if let Some((status, networks)) = read {
+                        model.loaded(status, networks);
+                    }
+                    model.set_organizations(organizations);
                 }
                 cx.notify();
             })
@@ -167,7 +177,13 @@ impl ClusterSheetView {
         if !model.can_import() {
             return;
         }
-        match import_machines(&parts, &model.status, &model.picked()) {
+        let organization = model.organization_choice();
+        match import_machines(
+            &parts,
+            &model.status,
+            &model.picked(),
+            organization.as_deref(),
+        ) {
             Ok(count) => {
                 model.imported(count);
                 model.existing = parts.registry.all();
@@ -215,12 +231,12 @@ impl ClusterSheetView {
             inner = inner.child(label(error, TypeRole::Meta, Ink::Needs, a));
         }
         if let Some(count) = model.done {
-            inner = inner.child(label(
-                &t::cluster::tailscale_imported(count as i64),
-                TypeRole::Meta,
-                Ink::TextMuted,
-                a,
-            ));
+            let text = if count == 0 {
+                t::cluster::tailscale_imported_none().to_owned()
+            } else {
+                t::cluster::tailscale_imported(count as i64)
+            };
+            inner = inner.child(label(&text, TypeRole::Meta, Ink::TextMuted, a));
         }
         let body = div()
             .id("tailscale-body")
@@ -319,6 +335,25 @@ impl ClusterSheetView {
                 Ink::TextMuted,
                 a,
             ));
+        }
+        if model.offers_organizations() {
+            inner = inner.child(
+                div().flex().child(
+                    button(
+                        "tailscale-organization",
+                        &t::cluster::tailscale_organization(&model.organization_name()),
+                        ButtonKind::Secondary,
+                        PartState::Rest,
+                        a,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(model) = this.tailscale.model.as_mut() {
+                            model.next_organization();
+                        }
+                        cx.notify();
+                    })),
+                ),
+            );
         }
         if let Some(filter) = &self.tailscale.filter {
             let focused = filter.read(cx).is_focused(window);
@@ -427,7 +462,7 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .child(label(
-                            &format!("{} · {state}", row.title),
+                            &t::cluster::tailscale_row_title(&row.title, state),
                             TypeRole::Body,
                             if row.online {
                                 Ink::Text

@@ -357,12 +357,7 @@ impl MorningActions {
             copy.extend(route.scp_options());
             copy.extend([
                 "--".to_owned(),
-                format!(
-                    "{}@{}:{}",
-                    route.user,
-                    route.host,
-                    crate::lanes::quote(&remote)
-                ),
+                format!("{}:{}", route.scp_host(), crate::lanes::quote(&remote)),
                 target.to_string_lossy().into_owned(),
             ]);
             let call = Call::secs(copy, 60);

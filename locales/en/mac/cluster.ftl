@@ -817,3 +817,11 @@ cluster-tailscale-imported = { $count ->
     [one] { $count } machine is in Machines. Check it to see how it answers.
    *[other] { $count } machines are in Machines. Check them to see how they answer.
 }
+# Shown after Import when every chosen machine was already in Machines, so none was saved.
+cluster-tailscale-imported-none = Nothing was imported: the chosen machines are already in Machines.
+# Button in Add from Tailscale that picks which Organization the imported machines belong to; $name is its name.
+cluster-tailscale-organization = Organization: { $name }
+# Name of the Organization every machine belongs to by default.
+cluster-tailscale-personal = Personal
+# Title of a machine in Add from Tailscale; $name is its name and $state is Online or Offline.
+cluster-tailscale-row-title = { $name } · { $state }

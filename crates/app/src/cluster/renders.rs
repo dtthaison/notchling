@@ -14,7 +14,7 @@ pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
 pub const STANDBY_NAME: &str = "mac-mini";
 
-pub const VIEWS: [ViewSpec; 25] = [
+pub const VIEWS: [ViewSpec; 26] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -39,6 +39,11 @@ pub const VIEWS: [ViewSpec; 25] = [
         name: "machines-sheet-tailscale",
         size: (WIDTH, 760.0),
         about: "Add from Tailscale: the machines on the active network with a filter, two chosen with their SSH users, one already in Machines hidden, and the note about the other network (made-up devices)",
+    },
+    ViewSpec {
+        name: "machines-sheet-organization",
+        size: (WIDTH, 760.0),
+        about: "Add from Tailscale with the Organization picker: the imported machines will be filed under Acme instead of Personal (made-up devices and Organizations)",
     },
     ViewSpec {
         name: "machines-sheet-network",
@@ -168,6 +173,7 @@ pub enum Shown {
     MachinesAdd,
     MachinesAddresses,
     MachinesTailscale,
+    MachinesOrganization,
     MachinesNetwork,
 }
 
@@ -178,6 +184,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "machines-sheet-add" => Some(Shown::MachinesAdd),
         "machines-sheet-addresses" => Some(Shown::MachinesAddresses),
         "machines-sheet-tailscale" => Some(Shown::MachinesTailscale),
+        "machines-sheet-organization" => Some(Shown::MachinesOrganization),
         "machines-sheet-network" => Some(Shown::MachinesNetwork),
         "cluster-empty" => Some(Shown::Empty),
         "cluster-many" => Some(Shown::Many),
@@ -631,6 +638,7 @@ pub fn model_of(which: Shown) -> ClusterModel {
         | Shown::MachinesAdd
         | Shown::MachinesAddresses
         | Shown::MachinesTailscale
+        | Shown::MachinesOrganization
         | Shown::MachinesNetwork => ClusterModel::from_status(&two_members(), ME),
         Shown::Update => ClusterModel::from_status(&updating(), ME),
         Shown::Empty => model(false),

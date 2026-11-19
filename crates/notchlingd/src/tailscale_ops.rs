@@ -32,10 +32,20 @@ impl TailscaleOps {
             .filter(|t| !t.is_empty())
             .ok_or_else(|| ApiError::bad_request("tailnet is the network to switch to"))?;
         let networks = self.tailscale.networks().map_err(ApiError::internal)?;
-        let Some(network) = networks.iter().find(|n| n.is(wanted)) else {
-            return Err(ApiError::bad_request(
-                "That isn't one of this Mac's Tailscale networks",
-            ));
+        let found: Vec<_> = networks
+            .iter()
+            .filter(|n| n.is(wanted) || n.id == wanted)
+            .collect();
+        let network = match found.as_slice() {
+            [one] => *one,
+            [] => {
+                return Err(ApiError::bad_request(
+                    "That isn't one of this Mac's Tailscale networks",
+                ))
+            }
+            _ => return Err(ApiError::bad_request(
+                "Two Tailscale networks have that name; use the id from `tailscale switch --list`",
+            )),
         };
         if network.active {
             return Ok(json!({"switched": false, "tailnet": network.tailnet}));
@@ -189,7 +199,7 @@ mod tests {
             .call(
                 &caller(Tier::App),
                 ops::TAILSCALE_SWITCH,
-                &json!({"tailnet": "work@example.com"}),
+                &json!({"tailnet": "work.example"}),
             )
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::Failed);
@@ -197,5 +207,40 @@ mod tests {
             err.message,
             "tailscale switch: switch failed: not logged in"
         );
+    }
+
+    #[test]
+    fn a_login_shared_by_two_networks_does_not_pick_one_and_an_account_is_not_a_network() {
+        let runner = Arc::new(ScriptedRunner::new());
+        runner.on(
+            |a| a.get(2).map(String::as_str) == Some("--list"),
+            CommandResult::ok(
+                "ID    Tailnet              Account\na1b2  person@example.com   person@example.com*\nc3d4  work.example         person@example.com\ne5f6  work.example         other@example.com\n",
+            ),
+        );
+        let ops = TailscaleOps::new(runner.clone(), "tailscale");
+        let app = caller(Tier::App);
+        let account = ops
+            .call(
+                &app,
+                ops::TAILSCALE_SWITCH,
+                &json!({"tailnet": "other@example.com"}),
+            )
+            .unwrap_err();
+        assert_eq!(account.code, ErrorCode::BadRequest);
+        let twice = ops
+            .call(
+                &app,
+                ops::TAILSCALE_SWITCH,
+                &json!({"tailnet": "work.example"}),
+            )
+            .unwrap_err();
+        assert_eq!(twice.code, ErrorCode::BadRequest);
+        assert!(twice.message.contains("Two Tailscale networks"));
+        let by_id = ops
+            .call(&app, ops::TAILSCALE_SWITCH, &json!({"tailnet": "e5f6"}))
+            .unwrap();
+        assert_eq!(by_id["switched"], json!(true));
+        assert!(commands(&runner).iter().any(|c| c[2] == "e5f6"));
     }
 }

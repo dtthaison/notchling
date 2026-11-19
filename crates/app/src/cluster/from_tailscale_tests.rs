@@ -119,7 +119,7 @@ fn import_saves_machines_with_tailscale_addresses_and_nothing_else() {
     model.toggle("m1.tail0a1b2.ts.net");
     model.toggle("oracle-sg.tail0a1b2.ts.net");
     model.set_user("oracle-sg.tail0a1b2.ts.net", "ubuntu");
-    let count = import_machines(&rig.parts(), &model.status, &model.picked()).unwrap();
+    let count = import_machines(&rig.parts(), &model.status, &model.picked(), None).unwrap();
     assert_eq!(count, 2);
     let m1 = rig.saved("m1").expect("saved");
     assert_eq!(m1.user, "me");
@@ -136,7 +136,7 @@ fn import_saves_machines_with_tailscale_addresses_and_nothing_else() {
     assert_eq!(oracle.user, "ubuntu");
     assert_eq!(rig.fix_calls(), 0);
     assert!(rig.world.fixed().is_empty());
-    let again = import_machines(&rig.parts(), &model.status, &model.picked()).unwrap();
+    let again = import_machines(&rig.parts(), &model.status, &model.picked(), None).unwrap();
     assert_eq!(again, 0, "a second import adds nothing");
 }
 
@@ -146,6 +146,60 @@ fn import_refuses_a_bad_user_and_changes_nothing() {
     let mut model = ready(vec![]);
     model.toggle("m1.tail0a1b2.ts.net");
     model.set_user("m1.tail0a1b2.ts.net", "Bad User");
-    assert!(import_machines(&rig.parts(), &model.status, &model.picked()).is_err());
+    assert!(import_machines(&rig.parts(), &model.status, &model.picked(), None).is_err());
     assert!(rig.saved("m1").is_none());
+}
+
+const ORGS: &str = r#"{"organizations": [
+  {"id": "personal", "name": "Personal", "personal": true},
+  {"id": "org-acme", "name": "Acme", "personal": false}
+], "colors": ["grey"]}"#;
+
+fn orgs(model: &mut FromTailscale) {
+    model.set_organizations(Ok(serde_json::from_str(ORGS).unwrap()));
+}
+
+#[test]
+fn the_picker_defaults_to_personal_and_cycles_through_organizations() {
+    let mut model = ready(vec![]);
+    assert!(!model.offers_organizations());
+    orgs(&mut model);
+    assert!(model.offers_organizations());
+    assert_eq!(model.organization_name(), "Personal");
+    assert_eq!(model.organization_choice(), None);
+    model.next_organization();
+    assert_eq!(model.organization_name(), "Acme");
+    assert_eq!(model.organization_choice().as_deref(), Some("org-acme"));
+    model.next_organization();
+    assert_eq!(model.organization_choice(), None);
+}
+
+#[test]
+fn a_failed_organization_read_leaves_personal_and_no_picker() {
+    let mut model = ready(vec![]);
+    model.set_organizations(Err("daemon is not running".into()));
+    assert!(!model.offers_organizations());
+    assert_eq!(model.organization_choice(), None);
+}
+
+#[test]
+fn import_files_the_machines_under_the_chosen_organization() {
+    let rig = Rig::new(vec![]);
+    let mut model = ready(vec![]);
+    orgs(&mut model);
+    model.next_organization();
+    model.toggle("m1.tail0a1b2.ts.net");
+    let org = model.organization_choice();
+    import_machines(&rig.parts(), &model.status, &model.picked(), org.as_deref()).unwrap();
+    assert_eq!(
+        rig.saved("m1").unwrap().organization.as_deref(),
+        Some("org-acme")
+    );
+}
+
+#[test]
+fn an_import_that_adds_nothing_says_so() {
+    let mut model = ready(vec![]);
+    model.imported(0);
+    assert_eq!(model.done, Some(0));
 }

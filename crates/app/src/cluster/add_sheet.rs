@@ -124,32 +124,28 @@ pub struct Parsed {
     pub addresses: Vec<MachineAddress>,
 }
 
-fn without_port(typed: &str) -> String {
-    let Ok(row) = split_row(typed) else {
-        return typed.to_owned();
-    };
-    if row.port.is_none() {
-        return typed.trim().to_owned();
-    }
+fn without_port(typed: &str) -> Result<String, String> {
+    let row = split_row(typed)?;
     let host = if row.host.contains(':') {
         format!("[{}]", row.host)
     } else {
         row.host
     };
-    match row.user {
+    Ok(match row.user {
         Some(user) => format!("{user}@{host}"),
         None => host,
-    }
+    })
 }
 
 pub fn derived_name(typed: &str, user: &str) -> String {
-    address::parse(&without_port(typed), user, &[])
+    without_port(typed)
+        .and_then(|typed| address::parse(&typed, user, &[]))
         .map(|at| at.name)
         .unwrap_or_default()
 }
 
 pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Parsed, String> {
-    let at = address::parse(&without_port(&draft.address), user, &[])?;
+    let at = address::parse(&without_port(&draft.address)?, user, &[])?;
     let typed = draft.name.trim();
     let name = if typed.is_empty() {
         at.name.clone()

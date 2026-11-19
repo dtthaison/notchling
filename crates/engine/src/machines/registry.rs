@@ -178,7 +178,11 @@ pub struct Machine {
     pub node: Option<NodeSettings>,
     #[serde(skip)]
     pub route: Option<Route>,
+    #[serde(skip)]
+    pub refused: Option<String>,
 }
+
+pub const REFUSED_HOST: &str = "refused.invalid";
 
 impl Machine {
     pub fn new(name: &str, host: &str, user: &str) -> Machine {
@@ -197,6 +201,7 @@ impl Machine {
             jobs: Vec::new(),
             node: None,
             route: None,
+            refused: None,
         }
     }
 
@@ -209,7 +214,30 @@ impl Machine {
     }
 
     pub fn set_addresses(&mut self, list: Vec<MachineAddress>) {
-        self.addresses = list.into_iter().map(MachineAddress::normalized).collect();
+        let mut list: Vec<MachineAddress> =
+            list.into_iter().map(MachineAddress::normalized).collect();
+        if let Some(first) = list.first().and_then(|a| a.user.clone()) {
+            if first != self.user {
+                let old = self.user.clone();
+                for address in list.iter_mut().skip(1) {
+                    if address.user.is_none() {
+                        address.user = Some(old.clone());
+                    }
+                }
+                self.user = first;
+            }
+        }
+        if let Some(first) = list.first_mut() {
+            if first.user.as_deref() == Some(self.user.as_str()) {
+                first.user = None;
+            }
+        }
+        for address in list.iter_mut().skip(1) {
+            if address.user.as_deref() == Some(self.user.as_str()) {
+                address.user = None;
+            }
+        }
+        self.addresses = list;
         self.sync_host();
     }
 
@@ -222,9 +250,14 @@ impl Machine {
     }
 
     pub fn route(&self) -> Route {
-        self.route
-            .clone()
-            .unwrap_or_else(|| Route::direct(&self.host, &self.user))
+        if self.refused.is_some() {
+            return Route::direct(REFUSED_HOST, &self.user);
+        }
+        match &self.route {
+            Some(route) => route.clone(),
+            None if self.has_addresses() => Route::direct(REFUSED_HOST, &self.user),
+            None => Route::direct(&self.host, &self.user),
+        }
     }
 
     fn sync_host(&mut self) {
@@ -261,11 +294,8 @@ impl Machine {
     }
 
     fn settle(&mut self) {
-        self.addresses = std::mem::take(&mut self.addresses)
-            .into_iter()
-            .map(MachineAddress::normalized)
-            .collect();
-        self.sync_host();
+        let list = std::mem::take(&mut self.addresses);
+        self.set_addresses(list);
         self.admin = Some(self.admin());
         if self.admin_secret.as_deref().is_some_and(str::is_empty) {
             self.admin_secret = None;

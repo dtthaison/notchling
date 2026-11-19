@@ -5,7 +5,11 @@ use notchling_engine::machines::registry::Machine;
 use notchling_engine::machines::tailscale::{
     available, import, other_networks, Network, Peer, PeerFilter, Picked, Status,
 };
+use notchling_engine::organizations::PERSONAL_ID;
 use notchling_locale as t;
+use serde_json::Value;
+
+use crate::organizations::model::OrganizationsModel;
 
 use super::add::commit;
 use super::add_parts::AddParts;
@@ -28,6 +32,8 @@ pub struct FromTailscale {
     pub existing: Vec<Machine>,
     pub error: Option<String>,
     pub done: Option<usize>,
+    pub organizations: Vec<(String, String)>,
+    pub organization: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,7 +63,55 @@ impl FromTailscale {
             existing,
             error: None,
             done: None,
+            organizations: Vec::new(),
+            organization: PERSONAL_ID.to_owned(),
         }
+    }
+
+    pub fn set_organizations(&mut self, reply: Result<Value, String>) {
+        let mut model = OrganizationsModel::default();
+        model.finish(reply);
+        self.organizations = model
+            .rows
+            .into_iter()
+            .map(|row| (row.id, row.name))
+            .collect();
+        if !self
+            .organizations
+            .iter()
+            .any(|(id, _)| *id == self.organization)
+        {
+            self.organization = PERSONAL_ID.to_owned();
+        }
+    }
+
+    pub fn organization_name(&self) -> String {
+        self.organizations
+            .iter()
+            .find(|(id, _)| *id == self.organization)
+            .map(|(_, name)| name.clone())
+            .unwrap_or_else(|| t::cluster::tailscale_personal().to_owned())
+    }
+
+    pub fn next_organization(&mut self) {
+        let at = self
+            .organizations
+            .iter()
+            .position(|(id, _)| *id == self.organization);
+        if let Some(next) = at
+            .map(|i| (i + 1) % self.organizations.len())
+            .or_else(|| (!self.organizations.is_empty()).then_some(0))
+        {
+            self.organization = self.organizations[next].0.clone();
+        }
+    }
+
+    pub fn organization_choice(&self) -> Option<String> {
+        (self.organization != PERSONAL_ID).then(|| self.organization.clone())
+    }
+
+    pub fn offers_organizations(&self) -> bool {
+        self.organizations.len() > 1
     }
 
     pub fn loaded(&mut self, status: Result<Status, String>, networks: Vec<Network>) {
@@ -217,10 +271,11 @@ pub fn import_machines(
     parts: &AddParts,
     status: &Status,
     picked: &[Picked],
+    organization: Option<&str>,
 ) -> Result<usize, String> {
     let mut count = 0;
     commit(&*parts.registry, |list| {
-        let made = import(status, picked, list, None)?;
+        let made = import(status, picked, list, organization)?;
         count = made.len();
         if made.is_empty() {
             return Ok(false);

@@ -182,14 +182,8 @@ fn hash_script(new: &str) -> String {
 }
 
 fn scp_target(m: &Machine) -> String {
-    let route = m.route();
-    let host = if route.host.contains(':') {
-        format!("[{}]", route.host)
-    } else {
-        route.host.clone()
-    };
     let relative = binary_new(m).strip_prefix("~/").unwrap_or_default();
-    format!("{}@{host}:{relative}", route.user)
+    format!("{}:{relative}", m.route().scp_host())
 }
 
 fn scp_args(from: &str, m: &Machine) -> Vec<String> {

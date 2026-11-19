@@ -102,6 +102,12 @@ fn render_machines_tailscale() {
 
 #[test]
 #[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_organization() {
+    render("machines-sheet-organization");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
 fn render_machines_network() {
     render("machines-sheet-network");
 }
@@ -125,6 +131,7 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         "machines-sheet-add",
         "machines-sheet-addresses",
         "machines-sheet-tailscale",
+        "machines-sheet-organization",
         "machines-sheet-network",
     ] {
         assert!(views::spec(name).is_some(), "{name}");

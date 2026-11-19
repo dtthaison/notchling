@@ -1,4 +1,4 @@
-use super::addresses::{AddressKind, MachineAddress, Route};
+use super::addresses::{address_problems, AddressKind, MachineAddress, Route};
 use super::registry::Machine;
 use super::runner::{Call, CommandResult, Runner};
 use super::shell::ssh_prefix;
@@ -69,6 +69,7 @@ struct Entry {
     checked: f64,
     active: Option<String>,
     print: String,
+    via: Vec<(String, String)>,
     pick: Pick,
 }
 
@@ -113,7 +114,17 @@ impl Router {
 
     pub fn forget(&self, name: &str) {
         if let Some(live) = &self.live {
-            lock(&live.cache).remove(name);
+            let mut cache = lock(&live.cache);
+            let mut gone = vec![name.to_owned()];
+            while let Some(next) = gone.pop() {
+                cache.remove(&next);
+                let dependents: Vec<String> = cache
+                    .iter()
+                    .filter(|(_, e)| e.via.iter().any(|(v, _)| *v == next))
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                gone.extend(dependents);
+            }
         }
     }
 
@@ -137,30 +148,36 @@ impl Router {
 
     pub fn routed(&self, m: &Machine) -> Machine {
         let mut out = m.clone();
-        if let Some(Pick::Reached(choice)) = self.cached(m) {
-            out.route = Some(choice.route);
+        out.route = None;
+        out.refused = None;
+        if self.live.is_none() {
+            return off_route(out);
+        }
+        if let Some(pick) = self.cached(m) {
+            apply(&mut out, pick);
         }
         out
     }
 
     pub fn reached(&self, m: &Machine, all: &[Machine]) -> Machine {
         let mut out = m.clone();
+        out.route = None;
+        out.refused = None;
         if self.live.is_none() {
-            return out;
+            return off_route(out);
         }
-        if let Pick::Reached(choice) = self.pick(m, all) {
-            if m.has_addresses() {
-                out.route = Some(choice.route);
-            }
+        if m.has_addresses() {
+            let pick = self.pick(m, all);
+            apply(&mut out, pick);
         }
         out
     }
 
     pub fn pick(&self, m: &Machine, all: &[Machine]) -> Pick {
-        self.pick_in(m, all, 0)
+        self.pick_in(m, all, &[])
     }
 
-    fn pick_in(&self, m: &Machine, all: &[Machine], depth: usize) -> Pick {
+    fn pick_in(&self, m: &Machine, all: &[Machine], trail: &[String]) -> Pick {
         let list = m.address_list();
         let Some(live) = &self.live else {
             return first_of(m, &list);
@@ -170,14 +187,13 @@ impl Router {
         }
         let now = (live.clock)();
         let print = print_of(m);
-        let needs_network = list
-            .iter()
-            .any(|a| a.kind.is_tailscale() && a.tailnet_name().is_some());
+        let needs_network = needs_network(m, all, trail);
+        let via = via_prints(m, all);
         let kept = {
             let cache = lock(&live.cache);
             cache
                 .get(&m.name)
-                .filter(|e| e.print == print && now - e.at < ttl(&e.pick))
+                .filter(|e| e.print == print && e.via == via && now - e.at < ttl(&e.pick))
                 .map(|e| (e.pick.clone(), e.checked, e.active.clone()))
         };
         if let Some((pick, checked, was)) = kept {
@@ -197,7 +213,9 @@ impl Router {
         } else {
             None
         };
-        let pick = self.choose(live, m, all, &list, active.as_ref(), depth);
+        let mut here = trail.to_vec();
+        here.push(m.name.clone());
+        let pick = self.choose(live, m, all, &list, active.as_ref(), &here);
         lock(&live.cache).insert(
             m.name.clone(),
             Entry {
@@ -205,6 +223,7 @@ impl Router {
                 checked: now,
                 active: active.map(|n| n.tailnet),
                 print,
+                via,
                 pick: pick.clone(),
             },
         );
@@ -218,7 +237,7 @@ impl Router {
         all: &[Machine],
         list: &[MachineAddress],
         active: Option<&Network>,
-        depth: usize,
+        trail: &[String],
     ) -> Pick {
         let mut skipped: Vec<String> = Vec::new();
         let mut candidates: Vec<(usize, &MachineAddress)> = Vec::new();
@@ -236,7 +255,7 @@ impl Router {
         let only_one = candidates.len() == 1 && skipped.is_empty();
         let mut refused: Option<Choice> = None;
         for (index, address) in candidates {
-            let Some(route) = self.route_for(m, address, all, depth) else {
+            let Some(route) = self.route_for(m, address, all, trail) else {
                 continue;
             };
             let choice = Choice {
@@ -244,7 +263,7 @@ impl Router {
                 address: address.clone(),
                 route,
             };
-            if only_one {
+            if only_one && address.kind != AddressKind::Jump {
                 return Pick::Reached(choice);
             }
             match probe(live, &choice.route) {
@@ -272,8 +291,11 @@ impl Router {
         m: &Machine,
         address: &MachineAddress,
         all: &[Machine],
-        depth: usize,
+        trail: &[String],
     ) -> Option<Route> {
+        if !address_problems(address, &m.name).is_empty() {
+            return None;
+        }
         let mut route = Route {
             host: address.host.clone(),
             user: m.address_user(address).to_owned(),
@@ -281,19 +303,95 @@ impl Router {
             jump: None,
         };
         if address.kind == AddressKind::Jump {
-            if depth >= JUMP_DEPTH {
+            if trail.len() > JUMP_DEPTH {
                 return None;
             }
             let via = all
                 .iter()
                 .find(|x| Some(x.name.as_str()) == address.via.as_deref())?;
-            let Pick::Reached(inner) = self.pick_in(via, all, depth + 1) else {
+            if trail.contains(&via.name) {
+                return None;
+            }
+            let Pick::Reached(inner) = self.pick_in(via, all, trail) else {
                 return None;
             };
             route.jump = Some(Box::new(inner.route));
         }
         Some(route)
     }
+}
+
+fn needs_network(m: &Machine, all: &[Machine], trail: &[String]) -> bool {
+    if trail.len() > JUMP_DEPTH {
+        return false;
+    }
+    let mut here = trail.to_vec();
+    here.push(m.name.clone());
+    m.address_list().iter().any(|a| {
+        (a.kind.is_tailscale() && a.tailnet_name().is_some())
+            || (a.kind == AddressKind::Jump
+                && all
+                    .iter()
+                    .find(|x| Some(x.name.as_str()) == a.via.as_deref())
+                    .is_some_and(|via| !here.contains(&via.name) && needs_network(via, all, &here)))
+    })
+}
+
+fn via_prints(m: &Machine, all: &[Machine]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut todo: Vec<&Machine> = vec![m];
+    while let Some(next) = todo.pop() {
+        for address in next.address_list() {
+            let Some(name) = address
+                .via
+                .as_deref()
+                .filter(|_| address.kind == AddressKind::Jump)
+            else {
+                continue;
+            };
+            if out.iter().any(|(seen, _)| seen == name) || name == m.name {
+                continue;
+            }
+            let print = all
+                .iter()
+                .find(|x| x.name == name)
+                .map(|x| {
+                    todo.push(x);
+                    print_of(x)
+                })
+                .unwrap_or_default();
+            out.push((name.to_owned(), print));
+        }
+    }
+    out.sort();
+    out
+}
+
+pub fn refusal_text(pick: &Pick) -> Option<String> {
+    match pick {
+        Pick::Reached(_) => None,
+        Pick::WrongNetwork { wanted, active } => {
+            Some(format!("On {wanted}, and this Mac is on {active}"))
+        }
+        Pick::Unreachable => Some("No address answered".to_owned()),
+    }
+}
+
+fn apply(out: &mut Machine, pick: Pick) {
+    if !out.has_addresses() {
+        return;
+    }
+    match pick {
+        Pick::Reached(choice) => out.route = Some(choice.route),
+        other => out.refused = refusal_text(&other),
+    }
+}
+
+fn off_route(mut out: Machine) -> Machine {
+    if out.has_addresses() {
+        out.route = Some(Route::direct(&out.host, &out.user));
+    }
+    out
 }
 
 fn ttl(pick: &Pick) -> f64 {

@@ -161,6 +161,8 @@ mod tests_repo_replace;
 mod tests_repo_replace_b;
 #[cfg(all(test, unix))]
 mod tests_repo_shell;
+#[cfg(test)]
+mod tests_routing;
 #[cfg(all(test, unix))]
 mod tests_runner;
 #[cfg(test)]

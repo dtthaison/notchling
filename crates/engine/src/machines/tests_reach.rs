@@ -8,30 +8,30 @@ use super::tests_engine_world::{mac, step, Setup};
 use super::tests_tailscale::SWITCH_LIST;
 use std::sync::{Arc, Mutex};
 
-const PERSON: &str = "person@example.com";
-const WORK: &str = "work.example";
+pub(super) const PERSON: &str = "person@example.com";
+pub(super) const WORK: &str = "work.example";
 
-const WORK_ACTIVE: &str = "ID    Tailnet              Account\na1b2  person@example.com   person@example.com\nc3d4  work.example         work@example.com*\n";
+pub(super) const WORK_ACTIVE: &str = "ID    Tailnet              Account\na1b2  person@example.com   person@example.com\nc3d4  work.example         work@example.com*\n";
 
-struct Rig {
-    runner: Arc<ScriptedRunner>,
-    router: Router,
-    clock: Arc<Mutex<f64>>,
-    list: Arc<Mutex<&'static str>>,
+pub(super) struct Rig {
+    pub(super) runner: Arc<ScriptedRunner>,
+    pub(super) router: Router,
+    pub(super) clock: Arc<Mutex<f64>>,
+    pub(super) list: Arc<Mutex<&'static str>>,
 }
 
-fn is_probe(r: &Recorded) -> bool {
+pub(super) fn is_probe(r: &Recorded) -> bool {
     r.argv.first().map(String::as_str) == Some("/usr/bin/ssh")
         && r.argv.last().map(String::as_str) == Some("true")
 }
 
-fn login(r: &Recorded) -> String {
+pub(super) fn login(r: &Recorded) -> String {
     let at = r.argv.iter().position(|a| a == "--").unwrap();
     r.argv[at + 1].clone()
 }
 
 impl Rig {
-    fn new(down: &[&'static str], refused: &[&'static str]) -> Rig {
+    pub(super) fn new(down: &[&'static str], refused: &[&'static str]) -> Rig {
         let runner = Arc::new(ScriptedRunner::new());
         let list = Arc::new(Mutex::new(SWITCH_LIST));
         let shown = list.clone();
@@ -76,15 +76,15 @@ impl Rig {
         }
     }
 
-    fn at(&self, secs: f64) {
+    pub(super) fn at(&self, secs: f64) {
         *self.clock.lock().unwrap() += secs;
     }
 
-    fn probes(&self) -> Vec<Recorded> {
+    pub(super) fn probes(&self) -> Vec<Recorded> {
         self.runner.calls().into_iter().filter(is_probe).collect()
     }
 
-    fn lists(&self) -> usize {
+    pub(super) fn lists(&self) -> usize {
         self.runner
             .calls()
             .iter()
@@ -93,15 +93,15 @@ impl Rig {
     }
 }
 
-fn ts(host: &str, tailnet: &str) -> MachineAddress {
+pub(super) fn ts(host: &str, tailnet: &str) -> MachineAddress {
     MachineAddress::new(AddressKind::TailscaleName, host).on_tailnet(tailnet)
 }
 
-fn lan(host: &str) -> MachineAddress {
+pub(super) fn lan(host: &str) -> MachineAddress {
     MachineAddress::new(AddressKind::Lan, host)
 }
 
-fn with(name: &str, list: Vec<MachineAddress>) -> Machine {
+pub(super) fn with(name: &str, list: Vec<MachineAddress>) -> Machine {
     let mut m = Machine::new(name, "unused", "agent");
     m.set_addresses(list);
     m
@@ -486,11 +486,13 @@ fn a_router_that_is_off_uses_the_first_address_and_runs_nothing() {
     let router = Router::off();
     let m = with("m1", vec![lan("192.168.1.20"), lan("10.0.0.9")]);
     assert_eq!(router.pick(&m, &[]).choice().unwrap().index, 0);
-    assert_eq!(router.reached(&m, &[]), m);
+    let reached = router.reached(&m, &[]);
+    assert_eq!(reached.route, Some(Route::direct("192.168.1.20", "agent")));
+    assert_eq!(reached.refused, None);
     assert!(router.tailscale().is_none());
 }
 
-fn routed_world(down: &[&str]) -> super::tests_engine_world::World {
+pub(super) fn routed_world(down: &[&str]) -> super::tests_engine_world::World {
     let mut m = mac("m1");
     m.set_addresses(vec![lan("10.0.0.5"), lan("10.0.0.6").with_port(2200)]);
     let mut setup = Setup::new(|_, _| vec![step("a")]);

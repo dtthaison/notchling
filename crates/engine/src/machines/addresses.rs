@@ -286,6 +286,14 @@ impl Route {
         out
     }
 
+    pub fn scp_host(&self) -> String {
+        if self.host.contains(':') {
+            format!("{}@[{}]", self.user, self.host)
+        } else {
+            format!("{}@{}", self.user, self.host)
+        }
+    }
+
     pub fn git_url(&self, path: &str) -> String {
         let host = if self.host.contains(':') {
             format!("[{}]", self.host)

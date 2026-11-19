@@ -61,11 +61,12 @@ pub fn route_line(machine: &Machine, pick: Option<&Pick>) -> RouteLine {
             active: active.clone(),
         },
         Some(Pick::Unreachable) => RouteLine::NoAnswer,
-        None => machine
+        None if machine.has_addresses() => machine
             .address_list()
             .first()
             .map(|a| RouteLine::Via(via_text(a)))
             .unwrap_or_default(),
+        None => RouteLine::Hidden,
     }
 }
 
@@ -81,6 +82,10 @@ pub fn routed(
                 .find(|m| m.name == row.name)
                 .map(|m| route_line(m, pick(m).as_ref()))
                 .unwrap_or_default();
+            let route = match (&row.reach, route) {
+                (Reach::Down, RouteLine::Via(_)) => RouteLine::Hidden,
+                (_, route) => route,
+            };
             NotJoined { route, ..row }
         })
         .collect()

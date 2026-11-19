@@ -297,9 +297,7 @@ impl SetupEngine {
     }
 
     pub(super) fn machine(&self, name: &str) -> Option<Machine> {
-        let all = self.current_machines();
-        let found = all.iter().find(|m| m.name == name)?;
-        Some(self.router.reached(found, &all))
+        self.current_machines().into_iter().find(|m| m.name == name)
     }
 
     pub fn overlaid(&self, m: &Machine) -> Machine {

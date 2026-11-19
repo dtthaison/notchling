@@ -39,7 +39,8 @@ fn the_network_list_reads_the_active_row() {
     assert!(list[0].active);
     assert!(!list[1].active);
     assert!(list[1].is("work.example"));
-    assert!(list[1].is("WORK@example.com"));
+    assert!(!list[1].is("work@example.com"));
+    assert!(!list[0].is("work.example"));
     assert!(!list[1].is("person@example.com"));
     assert!(parse_networks("").is_empty());
     assert!(parse_networks("ID    Tailnet    Account\n").is_empty());
@@ -318,4 +319,44 @@ fn a_failing_cli_is_reported_in_one_line() {
     );
     assert!(ts.networks().is_err());
     assert!(ts.active().is_none());
+}
+
+#[test]
+fn two_networks_on_one_login_are_told_apart_by_the_network() {
+    let list = parse_networks(
+        "ID    Tailnet              Account\na1b2  person@example.com   person@example.com*\nc3d4  work.example         person@example.com\n",
+    );
+    assert!(list[0].is("person@example.com"));
+    assert!(!list[0].is("work.example"));
+    assert!(list[1].is("work.example"));
+    assert!(!list[1].is("person@example.com"));
+}
+
+#[test]
+fn a_peer_with_an_unsafe_name_is_not_offered_or_imported() {
+    let mut s = status();
+    s.peers[0].dns = "m1,evil.tail0a1b2.ts.net".to_owned();
+    s.peers[1].dns = String::new();
+    s.peers[1].name = "-oProxyCommand=x".to_owned();
+    s.peers[1].ips = Vec::new();
+    s.peers[2].dns = String::new();
+    s.peers[2].ips = vec!["not-an-ip".to_owned()];
+    let names: Vec<&str> = available(&s, &[]).into_iter().map(Peer::short).collect();
+    assert_eq!(names, ["winbox"]);
+    let bad = Picked {
+        host: s.peers[0].host().to_owned(),
+        user: "me".to_owned(),
+    };
+    assert!(import(&s, &[bad], &[], None).is_err());
+}
+
+#[test]
+fn a_network_name_with_option_characters_is_refused_on_import() {
+    let mut s = status();
+    s.tailnet = "-oProxyCommand=x".to_owned();
+    let pick = Picked {
+        host: "m1.tail0a1b2.ts.net".to_owned(),
+        user: "me".to_owned(),
+    };
+    assert!(import(&s, &[pick], &[], None).is_err());
 }

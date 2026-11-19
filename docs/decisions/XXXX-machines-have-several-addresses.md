@@ -19,7 +19,9 @@ A machine in Machines had one `host` and one `user`, and every ssh path built it
 - It adds one new App-tier op to `docs/local-api-ops.md` and one new place that runs a command with a side effect (`tailscale switch`), on a click.
 - The Tailscale command line is found in `/Applications/Tailscale.app` or on `PATH`; its path is a parameter, and tests use recorded outputs with made-up names.
 - Only machines outside the Cluster get the address line and Edit Addresses in this change. Cluster members keep the address the cluster gives them.
-- It doesn't add API keys for listing both networks, or an organization choice in the import (the organization picker is not on this base).
+- A failed pick never falls back to the machine's `host`: a machine with addresses and no picked route gets a route that cannot connect, and the steps report the refusal text. Lookups (`machine()`, rendering) read only the cache; probes run on background tasks, the poller and the actions.
+- A Tailscale network is matched by its network name or id, never by the login account, because two networks can share one login. An address, user, port, network or jump name is validated before it reaches a command line, and a jump chain is cut at a loop or at three hops.
+- Add from Tailscale has an Organization picker; it starts on Personal because this base has no current Organization. It doesn't add API keys for listing both networks.
 
 ## Status
 

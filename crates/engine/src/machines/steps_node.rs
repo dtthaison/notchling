@@ -104,9 +104,14 @@ pub(super) fn json_from(text: &str) -> Option<Value> {
 }
 
 pub(super) fn machine_refusal(m: &Machine) -> Option<String> {
-    machine_problems(&m.name, &m.host, &m.user, &[])
+    let mut problems = machine_problems(&m.name, &m.host, &m.user, &[]);
+    if m.has_addresses() {
+        problems.extend(super::addresses::list_problems(&m.addresses, &m.name));
+    }
+    problems
         .into_iter()
         .next()
+        .or_else(|| m.refused.clone())
         .map(|why| format!("won't run on {}: {why}", m.name))
 }
 

@@ -91,3 +91,14 @@ fn a_passing_joined_step_is_not_listed() {
         2
     );
 }
+
+#[test]
+fn a_machine_without_addresses_shows_no_route_line_and_a_down_one_hides_it() {
+    use super::not_joined::{route_line, RouteLine};
+    use notchling_engine::machines::addresses::{AddressKind, MachineAddress};
+    let plain = Machine::new("m1", "m1.example", "agent");
+    assert_eq!(route_line(&plain, None), RouteLine::Hidden);
+    let mut with = Machine::new("m2", "x", "agent");
+    with.set_addresses(vec![MachineAddress::new(AddressKind::Lan, "192.168.1.20")]);
+    assert!(matches!(route_line(&with, None), RouteLine::Via(_)));
+}

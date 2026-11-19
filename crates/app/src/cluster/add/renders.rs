@@ -36,6 +36,7 @@ pub(in crate::cluster) fn adds(which: Shown) -> bool {
             | Shown::MachinesAdd
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
+            | Shown::MachinesOrganization
             | Shown::MachinesNetwork
     )
 }
@@ -114,6 +115,7 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
             | Shown::MachinesAdd
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
+            | Shown::MachinesOrganization
             | Shown::MachinesNetwork
     ) {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/machines-sheet");
@@ -288,11 +290,15 @@ impl ClusterSheetView {
             Shown::Add
             | Shown::MachinesAdd
             | Shown::MachinesAddresses
-            | Shown::MachinesTailscale => None,
+            | Shown::MachinesTailscale
+            | Shown::MachinesOrganization => None,
             Shown::AddPlan | Shown::AddRunning | Shown::AddStopped => Some("m2".to_owned()),
             _ => return,
         };
-        if which == Shown::MachinesTailscale {
+        if matches!(
+            which,
+            Shown::MachinesTailscale | Shown::MachinesOrganization
+        ) {
             let mut existing = parts.as_ref().map(|p| p.registry.all()).unwrap_or_default();
             existing.push(notchling_engine::machines::registry::Machine::new(
                 "oracle",
@@ -303,6 +309,16 @@ impl ClusterSheetView {
             model.toggle("mini-2.tail1234.ts.net");
             model.toggle("build-box.tail1234.ts.net");
             model.set_user("build-box.tail1234.ts.net", "ci");
+            if which == Shown::MachinesOrganization {
+                model.set_organizations(Ok(serde_json::json!({
+                    "organizations": [
+                        {"id": "personal", "name": "Personal", "personal": true},
+                        {"id": "org-acme", "name": "Acme", "personal": false}
+                    ],
+                    "colors": ["grey"]
+                })));
+                model.next_organization();
+            }
             self.start_tailscale(model, None, cx);
             self.tailscale_preview_users(cx);
             return;

@@ -386,3 +386,17 @@ fn the_add_form_walks_check_saved_and_stopped() {
     );
     assert_eq!(buttons(&hard), [(Button::Close, true)]);
 }
+
+#[test]
+fn a_bare_ipv6_address_and_a_bad_port_are_named_not_mangled() {
+    let v6 = parse_draft(&draft("agent@fd7a:115c::1", ""), "me", &[]).unwrap();
+    assert_eq!(v6.target, "agent@fd7a:115c::1");
+    assert_eq!(derived_name("fd7a:115c::1", "me"), "machine-1");
+    let bracketed = parse_draft(&draft("agent@[fd7a:115c::1]:2200", ""), "me", &[]).unwrap();
+    assert_eq!(bracketed.addresses[0].port, Some(2200));
+    let bad = parse_draft(&draft("agent@host:99999", ""), "me", &[]).unwrap_err();
+    assert!(bad.to_lowercase().contains("port"), "{bad}");
+    let zero = parse_draft(&draft("agent@host:0", ""), "me", &[]).unwrap_err();
+    assert!(zero.to_lowercase().contains("port"), "{zero}");
+    assert_eq!(derived_name("agent@host:99999", "me"), "");
+}
