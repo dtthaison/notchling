@@ -90,6 +90,24 @@ fn render_machines_add() {
 
 #[test]
 #[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_addresses() {
+    render("machines-sheet-addresses");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_tailscale() {
+    render("machines-sheet-tailscale");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_network() {
+    render("machines-sheet-network");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
 fn render_cluster_update() {
     render("cluster-update");
 }
@@ -105,6 +123,9 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         "cluster-update",
         "machines-sheet",
         "machines-sheet-add",
+        "machines-sheet-addresses",
+        "machines-sheet-tailscale",
+        "machines-sheet-network",
     ] {
         assert!(views::spec(name).is_some(), "{name}");
     }
@@ -113,6 +134,8 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         include_str!("../src/cluster/add_plan_view.rs"),
         include_str!("../src/cluster/not_joined_view.rs"),
         include_str!("../src/cluster/updates_view.rs"),
+        include_str!("../src/cluster/edit_addresses_view.rs"),
+        include_str!("../src/cluster/from_tailscale_view.rs"),
     ]
     .join("\n");
     for part in [
@@ -120,6 +143,8 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         "Machine Plan",
         "Not in the Cluster",
         "Update Machines",
+        "Edit Addresses Sheet",
+        "From Tailscale Sheet",
     ] {
         assert!(
             sources.contains(&format!("part(\"{part}\""))

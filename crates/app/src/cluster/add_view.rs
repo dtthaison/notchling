@@ -20,6 +20,8 @@ use super::add_sheet::{
     derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, AddPassword,
     AddView, Button, Draft,
 };
+use super::address_rows_view::{RowEditor, Rows};
+use super::addresses_form::{RowDraft, RowMeta};
 use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
@@ -40,6 +42,7 @@ const NOT_JOINED_EVERY_SECS: u64 = 5;
 pub(super) struct AddSheet {
     pub(super) address: Entity<TextEditor>,
     pub(super) name: Entity<TextEditor>,
+    pub(super) rows: Vec<RowEditor>,
     pub(super) touched: bool,
     pub(super) machine: MachineAdd,
     pub(super) flow: Option<String>,
@@ -116,9 +119,15 @@ impl AddSheet {
             .as_ref()
             .map(|p| (p.this.user.clone(), p.names()))
             .unwrap_or_default();
+        let first = RowEditor {
+            editor: address.clone(),
+            meta: RowMeta::default(),
+            _events: None,
+        };
         AddSheet {
             address,
             name,
+            rows: vec![first],
             touched: false,
             machine: MachineAdd::new(),
             joining: flow.is_some(),
@@ -141,7 +150,7 @@ fn kind_of(button: Button) -> ButtonKind {
     match button {
         Button::Add | Button::Install | Button::Done => ButtonKind::Primary,
         Button::CheckAgain => ButtonKind::Secondary,
-        Button::OpenSignIn => ButtonKind::Secondary,
+        Button::OpenSignIn | Button::FromTailscale => ButtonKind::Secondary,
         Button::Close | Button::Cancel => ButtonKind::Ghost,
     }
 }
@@ -152,6 +161,7 @@ fn title_of(button: Button) -> &'static str {
         Button::CheckAgain => t::cluster::add_check_again(),
         Button::Install => t::cluster::add_install(),
         Button::OpenSignIn => t::cluster::add_open_sign_in(),
+        Button::FromTailscale => t::cluster::tailscale_button(),
         Button::Close => t::cluster::add_close(),
         Button::Cancel => t::cluster::add_cancel(),
         Button::Done => t::cluster::add_finish(),
@@ -164,6 +174,7 @@ fn id_of(button: Button) -> &'static str {
         Button::CheckAgain => "add-check-again",
         Button::Install => "add-install",
         Button::OpenSignIn => "add-open-sign-in",
+        Button::FromTailscale => "add-from-tailscale",
         Button::Close => "add-close",
         Button::Cancel => "add-cancel",
         Button::Done => "add-done",
@@ -176,6 +187,10 @@ impl ClusterSheetView {
             return;
         }
         let parts = self.feed.add_source().parts();
+        self.via_names = parts.as_ref().map(|p| p.names()).unwrap_or_default();
+        if let Some(parts) = &parts {
+            self.load_tailnets(parts, cx);
+        }
         self.add.sheet = Some(AddSheet::new(parts, None, cx));
         cx.notify();
     }
@@ -240,10 +255,17 @@ impl ClusterSheetView {
 
     fn add_draft(&self, cx: &Context<Self>) -> Draft {
         match &self.add.sheet {
-            Some(sheet) => Draft {
-                address: sheet.address.read(cx).text().to_owned(),
-                name: sheet.name.read(cx).text().to_owned(),
-            },
+            Some(sheet) => {
+                let rows = self.rows_drafts(Rows::Add, cx);
+                let mut rest = rows.into_iter();
+                let first = rest.next().unwrap_or_default();
+                Draft {
+                    address: sheet.address.read(cx).text().to_owned(),
+                    name: sheet.name.read(cx).text().to_owned(),
+                    first: first.meta,
+                    more: rest.collect::<Vec<RowDraft>>(),
+                }
+            }
             None => Draft::default(),
         }
     }
@@ -331,6 +353,12 @@ impl ClusterSheetView {
                 if let Some(url) = target {
                     cx.open_url(&url);
                 }
+            }
+            Button::FromTailscale => {
+                self.add.sheet = None;
+                self.add.nested = None;
+                self.open_tailscale(cx);
+                return;
             }
             Button::Close => {
                 self.add.sheet = None;
@@ -655,7 +683,6 @@ impl ClusterSheetView {
             return body;
         };
         if shown.form {
-            let address_focused = sheet.address.read(cx).is_focused(window);
             let name_focused = sheet.name.read(cx).is_focused(window);
             body = body
                 .child(label(
@@ -664,13 +691,7 @@ impl ClusterSheetView {
                     Ink::TextMuted,
                     a,
                 ))
-                .child(label(
-                    t::cluster::add_address_label(),
-                    TypeRole::Label,
-                    Ink::TextFaint,
-                    a,
-                ))
-                .child(field_box(&sheet.address, address_focused, a))
+                .child(self.rows_view(Rows::Add, window, a, cx))
                 .children(
                     shown
                         .target

@@ -113,7 +113,8 @@ impl Tailscale {
     }
 
     pub fn switch(&self, id: &str) -> Result<(), String> {
-        let argv = switch_argv(&self.cli, id).ok_or_else(|| "That isn't a network id".to_owned())?;
+        let argv =
+            switch_argv(&self.cli, id).ok_or_else(|| "That isn't a network id".to_owned())?;
         let result = self.runner.run(&Call::secs(argv, SWITCH_SECS));
         if result.code == 0 {
             Ok(())
@@ -354,7 +355,7 @@ fn free_name(base: &str, taken: &[String]) -> String {
         } else {
             format!("{base}-{at}")
         };
-        if name_problem(&name).is_none() && !taken.iter().any(|t| *t == name) {
+        if name_problem(&name).is_none() && !taken.contains(&name) {
             return name;
         }
         at += 1;

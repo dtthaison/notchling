@@ -2,6 +2,7 @@ use std::fmt;
 
 use notchling_engine::accounts::Secret;
 use notchling_engine::machines::address;
+use notchling_engine::machines::addresses::MachineAddress;
 use notchling_engine::machines::engine_plan::AdminAnswer;
 use notchling_engine::machines::forms::machine_problems;
 use notchling_engine::machines::registry::MachineOs;
@@ -11,6 +12,7 @@ use notchling_locale as t;
 use super::add::{Phase, Stop};
 use super::add_plan::PlanView;
 use super::add_runs::{SignInLink, Snap};
+use super::addresses_form::{addresses_of, split_row, RowDraft, RowMeta};
 use super::machine_add::Phase as MachinePhase;
 use super::not_joined::NotJoined;
 
@@ -75,6 +77,7 @@ pub enum Button {
     CheckAgain,
     Install,
     OpenSignIn,
+    FromTailscale,
     Close,
     Cancel,
     Done,
@@ -110,22 +113,43 @@ pub fn sign_in_target(snap: &Snap) -> Option<&str> {
 pub struct Draft {
     pub address: String,
     pub name: String,
+    pub first: RowMeta,
+    pub more: Vec<RowDraft>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Parsed {
     pub target: String,
     pub name: String,
+    pub addresses: Vec<MachineAddress>,
+}
+
+fn without_port(typed: &str) -> String {
+    let Ok(row) = split_row(typed) else {
+        return typed.to_owned();
+    };
+    if row.port.is_none() {
+        return typed.trim().to_owned();
+    }
+    let host = if row.host.contains(':') {
+        format!("[{}]", row.host)
+    } else {
+        row.host
+    };
+    match row.user {
+        Some(user) => format!("{user}@{host}"),
+        None => host,
+    }
 }
 
 pub fn derived_name(typed: &str, user: &str) -> String {
-    address::parse(typed, user, &[])
+    address::parse(&without_port(typed), user, &[])
         .map(|at| at.name)
         .unwrap_or_default()
 }
 
 pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Parsed, String> {
-    let at = address::parse(&draft.address, user, &[])?;
+    let at = address::parse(&without_port(&draft.address), user, &[])?;
     let typed = draft.name.trim();
     let name = if typed.is_empty() {
         at.name.clone()
@@ -135,9 +159,29 @@ pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Par
     if let Some(first) = machine_problems(&name, &at.host, &at.user, existing).first() {
         return Err(first.clone());
     }
+    let plain = draft.more.is_empty()
+        && draft.first.is_plain()
+        && split_row(&draft.address).is_ok_and(|r| r.port.is_none());
+    let addresses = if plain {
+        Vec::new()
+    } else {
+        let mut rows = vec![RowDraft {
+            text: draft.address.clone(),
+            meta: draft.first.clone(),
+        }];
+        rows.extend(
+            draft
+                .more
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .cloned(),
+        );
+        addresses_of(&rows, &name, &at.user)?
+    };
     Ok(Parsed {
         target: format!("{}@{}", at.user, at.host),
         name,
+        addresses,
     })
 }
 
@@ -279,6 +323,7 @@ pub fn machine_view(
             }
             view.actions = vec![
                 Action::on(Button::Cancel),
+                Action::on(Button::FromTailscale),
                 Action::when(Button::Add, parsed.is_ok()),
             ];
         }

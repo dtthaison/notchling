@@ -77,7 +77,11 @@ fn a_status_with_no_peers_or_nulls_still_reads() {
 fn the_filter_matches_text_system_and_online() {
     let s = status();
     let all = |f: &PeerFilter| -> Vec<&str> {
-        s.peers.iter().filter(|p| f.matches(p)).map(Peer::short).collect()
+        s.peers
+            .iter()
+            .filter(|p| f.matches(p))
+            .map(Peer::short)
+            .collect()
     };
     assert_eq!(all(&PeerFilter::default()).len(), 4);
     let text = PeerFilter {
@@ -132,9 +136,18 @@ fn a_machine_you_already_have_is_hidden_by_name_address_or_ip() {
             .collect()
     };
     assert_eq!(shown(&[]), ["m1", "oracle-sg", "phone-12", "winbox"]);
-    assert_eq!(shown(&[by_dns.clone()]), ["oracle-sg", "phone-12", "winbox"]);
-    assert_eq!(shown(&[by_short.clone()]), ["m1", "phone-12", "winbox"]);
-    assert_eq!(shown(&[by_ip.clone()]), ["m1", "oracle-sg", "winbox"]);
+    assert_eq!(
+        shown(std::slice::from_ref(&by_dns)),
+        ["oracle-sg", "phone-12", "winbox"]
+    );
+    assert_eq!(
+        shown(std::slice::from_ref(&by_short)),
+        ["m1", "phone-12", "winbox"]
+    );
+    assert_eq!(
+        shown(std::slice::from_ref(&by_ip)),
+        ["m1", "oracle-sg", "winbox"]
+    );
     assert_eq!(shown(&[by_address]), ["m1", "oracle-sg", "phone-12"]);
     assert_eq!(shown(&[unrelated]).len(), 4);
     assert_eq!(shown(&[by_dns, by_short, by_ip]), ["winbox"]);
@@ -166,10 +179,16 @@ fn an_import_saves_names_and_ips_on_the_active_network_with_no_node() {
     assert_eq!(m1.addresses.len(), 2);
     assert_eq!(m1.addresses[0].kind, AddressKind::TailscaleName);
     assert_eq!(m1.addresses[0].host, "m1.tail0a1b2.ts.net");
-    assert_eq!(m1.addresses[0].tailnet.as_deref(), Some("person@example.com"));
+    assert_eq!(
+        m1.addresses[0].tailnet.as_deref(),
+        Some("person@example.com")
+    );
     assert_eq!(m1.addresses[1].kind, AddressKind::TailscaleIp);
     assert_eq!(m1.addresses[1].host, "100.64.0.11");
-    assert_eq!(m1.addresses[1].tailnet.as_deref(), Some("person@example.com"));
+    assert_eq!(
+        m1.addresses[1].tailnet.as_deref(),
+        Some("person@example.com")
+    );
     assert_eq!(made[1].os, Some(MachineOs::Linux));
     assert_eq!(made[1].user, "agent");
 }
@@ -214,7 +233,9 @@ fn an_import_refuses_a_bad_user_and_a_machine_that_left() {
         host: "gone.tail0a1b2.ts.net".into(),
         user: "agent".into(),
     }];
-    assert!(import(&s, &gone, &[], None).unwrap_err().contains("no longer"));
+    assert!(import(&s, &gone, &[], None)
+        .unwrap_err()
+        .contains("no longer"));
 }
 
 #[test]
@@ -237,7 +258,10 @@ fn a_name_that_cannot_be_a_machine_name_is_made_into_one() {
 fn the_cli_is_asked_read_only_and_switch_is_one_exact_command() {
     let runner = Arc::new(ScriptedRunner::new());
     runner.on(
-        |a| a.get(1).map(String::as_str) == Some("switch") && a.get(2).map(String::as_str) == Some("--list"),
+        |a| {
+            a.get(1).map(String::as_str) == Some("switch")
+                && a.get(2).map(String::as_str) == Some("--list")
+        },
         CommandResult::ok(SWITCH_LIST),
     );
     runner.on(
@@ -248,7 +272,11 @@ fn the_cli_is_asked_read_only_and_switch_is_one_exact_command() {
     assert_eq!(ts.active().unwrap().id, "a1b2");
     assert_eq!(ts.status().unwrap().peers.len(), 4);
     assert_eq!(
-        runner.calls().iter().map(|c| c.argv.clone()).collect::<Vec<_>>(),
+        runner
+            .calls()
+            .iter()
+            .map(|c| c.argv.clone())
+            .collect::<Vec<_>>(),
         vec![
             vec!["/fake/tailscale", "switch", "--list"],
             vec!["/fake/tailscale", "status", "--json"],
@@ -279,7 +307,10 @@ fn switch_takes_only_a_plain_network_id() {
 #[test]
 fn a_failing_cli_is_reported_in_one_line() {
     let runner = Arc::new(ScriptedRunner::new());
-    runner.on(|_| true, CommandResult::new(1, "", "\nfailed to connect to local tailscaled\nmore\n"));
+    runner.on(
+        |_| true,
+        CommandResult::new(1, "", "\nfailed to connect to local tailscaled\nmore\n"),
+    );
     let ts = Tailscale::new(runner, "tailscale");
     assert_eq!(
         ts.status().unwrap_err(),

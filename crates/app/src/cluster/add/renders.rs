@@ -1,12 +1,20 @@
 use notchling_engine::machines::node_updates::{UpdateRow, UpdateState};
 use notchling_engine::machines::step::{CheckResult, StepId};
 
+use notchling_engine::machines::addresses::{AddressKind, MachineAddress, Route};
+use notchling_engine::machines::reach::{Choice as Reached, Pick};
+use notchling_engine::machines::tailscale::{parse_networks, parse_status};
+
+use gpui::AppContext;
+
 use crate::cluster::add::{Phase, Stop};
 use crate::cluster::add_parts::AddParts;
 use crate::cluster::add_plan::{Choice, PlanRow, PlanView};
 use crate::cluster::add_runs::{AddRuns, Snap};
 use crate::cluster::add_source::{AddSource, Offer};
+use crate::cluster::addresses_form::RowMeta;
 use crate::cluster::feed::ClusterFeed;
+use crate::cluster::from_tailscale::FromTailscale;
 use crate::cluster::model::ClusterModel;
 use crate::cluster::renders::{Shown, RENDER_NOW};
 use crate::cluster::view::ClusterSheetView;
@@ -26,7 +34,48 @@ pub(in crate::cluster) fn adds(which: Shown) -> bool {
             | Shown::Update
             | Shown::Machines
             | Shown::MachinesAdd
+            | Shown::MachinesAddresses
+            | Shown::MachinesTailscale
+            | Shown::MachinesNetwork
     )
+}
+
+fn tailscale_pick() -> Pick {
+    let address = MachineAddress::new(AddressKind::TailscaleName, "app-1.tail1234.ts.net")
+        .on_tailnet("person@example.com");
+    Pick::Reached(Reached {
+        index: 0,
+        route: Route::direct(&address.host, "deploy"),
+        address,
+    })
+}
+
+const TAILSCALE_STATUS: &str = r#"{
+  "BackendState": "Running",
+  "Self": {"HostName": "studio-mac", "DNSName": "studio-mac.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.10"], "Online": true},
+  "CurrentTailnet": {"Name": "person@example.com", "MagicDNSSuffix": "tail1234.ts.net", "MagicDNSEnabled": true},
+  "Peer": {
+    "nodekey:aa": {"ID": "n1", "HostName": "app-1", "DNSName": "app-1.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.11"], "Online": true},
+    "nodekey:bb": {"ID": "n2", "HostName": "oracle-sg", "DNSName": "oracle-sg.tail1234.ts.net.", "OS": "linux", "UserID": 1003, "TailscaleIPs": ["100.64.0.12"], "Online": false, "Tags": ["tag:server"]},
+    "nodekey:cc": {"ID": "n3", "HostName": "mini-2", "DNSName": "mini-2.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.13"], "Online": true},
+    "nodekey:dd": {"ID": "n4", "HostName": "build-box", "DNSName": "build-box.tail1234.ts.net.", "OS": "linux", "UserID": 1002, "TailscaleIPs": ["100.64.0.14"], "Online": true}
+  },
+  "User": {
+    "1001": {"ID": 1001, "LoginName": "person@example.com", "DisplayName": "Person"},
+    "1002": {"ID": 1002, "LoginName": "friend@example.com", "DisplayName": "Friend"},
+    "1003": {"ID": 1003, "LoginName": "tagged-devices", "DisplayName": "Tagged"}
+  }
+}"#;
+
+const TAILSCALE_LIST: &str = "ID    Tailnet              Account\na1b2  person@example.com   person@example.com*\nc3d4  work.example         work@example.com\n";
+
+fn from_tailscale(existing: Vec<notchling_engine::machines::registry::Machine>) -> FromTailscale {
+    let mut model = FromTailscale::new(USER, existing);
+    model.loaded(
+        parse_status(TAILSCALE_STATUS),
+        parse_networks(TAILSCALE_LIST),
+    );
+    model
 }
 
 fn offer() -> Offer {
@@ -59,7 +108,14 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
         let source = AddSource::over(parts).with_offer(offer());
         return ClusterFeed::fixed_adding(model, source, AddRuns::fixed(Vec::new()));
     }
-    if matches!(which, Shown::Machines | Shown::MachinesAdd) {
+    if matches!(
+        which,
+        Shown::Machines
+            | Shown::MachinesAdd
+            | Shown::MachinesAddresses
+            | Shown::MachinesTailscale
+            | Shown::MachinesNetwork
+    ) {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/machines-sheet");
         let parts = AddParts::live(&Setup::for_render(Some(&dir)));
         parts.engine.show(
@@ -73,9 +129,18 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
             CheckResult::fail("Connection timed out"),
         );
         let now_s = RENDER_NOW / 1000;
-        let source = AddSource::over(parts)
+        let mut source = AddSource::over(parts)
             .with_checked("app-1", now_s - 120)
             .with_checked("build-2", now_s - 3 * 3600);
+        if which == Shown::MachinesNetwork {
+            source = source.with_pick("app-1", tailscale_pick()).with_pick(
+                "build-2",
+                Pick::WrongNetwork {
+                    wanted: "work.example".into(),
+                    active: "person@example.com".into(),
+                },
+            );
+        }
         return ClusterFeed::fixed_adding(model, source, AddRuns::fixed(Vec::new()));
     }
     let parts = AddParts::live(&Setup::for_render(None));
@@ -220,11 +285,37 @@ impl ClusterSheetView {
         }
         let parts = self.feed.add_source().parts();
         let flow = match which {
-            Shown::Add | Shown::MachinesAdd => None,
+            Shown::Add
+            | Shown::MachinesAdd
+            | Shown::MachinesAddresses
+            | Shown::MachinesTailscale => None,
             Shown::AddPlan | Shown::AddRunning | Shown::AddStopped => Some("m2".to_owned()),
             _ => return,
         };
+        if which == Shown::MachinesTailscale {
+            let mut existing = parts.as_ref().map(|p| p.registry.all()).unwrap_or_default();
+            existing.push(notchling_engine::machines::registry::Machine::new(
+                "oracle",
+                "oracle-sg.tail1234.ts.net",
+                USER,
+            ));
+            let mut model = from_tailscale(existing);
+            model.toggle("mini-2.tail1234.ts.net");
+            model.toggle("build-box.tail1234.ts.net");
+            model.set_user("build-box.tail1234.ts.net", "ci");
+            self.start_tailscale(model, None, cx);
+            self.tailscale_preview_users(cx);
+            return;
+        }
         let sheet = crate::cluster::add_view::AddSheet::new(parts, flow, cx);
+        if which == Shown::MachinesAddresses {
+            sheet.address.update(cx, |editor, cx| {
+                editor.set_text("deploy@app-3.tail1234.ts.net", cx)
+            });
+            sheet
+                .name
+                .update(cx, |editor, cx| editor.set_text("app-3", cx));
+        }
         if which == Shown::MachinesAdd {
             sheet
                 .address
@@ -243,11 +334,63 @@ impl ClusterSheetView {
                 .update(cx, |editor, cx| editor.set_text("m2", cx));
         }
         self.add.sheet = Some(sheet);
+        if which == Shown::MachinesAddresses {
+            self.preview_addresses(cx);
+        }
         self.add.tall = true;
         if which == Shown::AddPlan {
             if let Some(sheet) = self.add.sheet.as_mut() {
                 sheet.password.field().push_str("xxxxxxxxxx");
             }
+        }
+    }
+
+    fn preview_addresses(&mut self, cx: &mut gpui::Context<Self>) {
+        use crate::cluster::address_rows_view::Rows;
+        self.tailnets = vec!["person@example.com".into(), "work.example".into()];
+        self.via_names = vec!["app-1".into(), "build-2".into()];
+        let rows = [
+            ("192.168.1.20", AddressKind::Lan, None),
+            ("deploy@app-3.example.org:2222", AddressKind::Public, None),
+            ("10.0.0.7", AddressKind::Jump, Some("app-1")),
+        ];
+        let mut made = Vec::new();
+        for (text, kind, via) in rows {
+            let meta = RowMeta {
+                kind: Some(kind),
+                tailnet: None,
+                via: via.map(str::to_owned),
+            };
+            made.push(self.row_new(Rows::Add, text, meta, cx));
+        }
+        if let Some(sheet) = self.add.sheet.as_mut() {
+            if let Some(first) = sheet.rows.first_mut() {
+                first.meta = RowMeta {
+                    kind: Some(AddressKind::TailscaleName),
+                    tailnet: Some("person@example.com".into()),
+                    via: None,
+                };
+            }
+            sheet.rows.extend(made);
+        }
+    }
+
+    fn tailscale_preview_users(&mut self, cx: &mut gpui::Context<Self>) {
+        let chosen: Vec<(String, String)> = self
+            .tailscale
+            .model
+            .as_ref()
+            .map(|m| {
+                m.chosen
+                    .iter()
+                    .map(|(h, u)| (h.clone(), u.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (host, user) in chosen {
+            let editor = cx.new(|cx| notchling_kit::ui::TextEditor::new("", 1, cx).single_line());
+            editor.update(cx, |editor, cx| editor.set_text(&user, cx));
+            self.tailscale.users.insert(host, editor);
         }
     }
 }

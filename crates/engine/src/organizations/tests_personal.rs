@@ -200,7 +200,7 @@ fn an_older_v2_registry_is_read_as_it_was_and_saving_it_keeps_a_copy() {
 #[test]
 fn a_registry_of_a_later_version_is_still_refused() {
     let rig = Rig::new("org-personal-future");
-    let future = r#"{"version":4,"machines":[]}"#;
+    let future = r#"{"version":5,"machines":[]}"#;
     crate::store::put_doc(&rig.data, "machines/registry", future).unwrap();
     assert!(matches!(rig.registry.load(), RegistryState::Unreadable(_)));
     assert!(!rig.registry.save(&[]));

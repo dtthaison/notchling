@@ -17,7 +17,9 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::add_view::AddUi;
+use super::edit_addresses_view::{EditSheet, Switching};
 use super::feed::ClusterFeed;
+use super::from_tailscale_view::TailscaleUi;
 use super::install::{applied_note, plan_of, Plan};
 use super::model::ClusterModel;
 use super::move_sheet::{MoveSheet, Names};
@@ -64,6 +66,11 @@ pub struct ClusterSheetView {
     pub(super) names: Names,
     pub(super) removing: Option<String>,
     pub(super) removing_machine: Option<String>,
+    pub(super) switching: Option<Switching>,
+    pub(super) edit: Option<EditSheet>,
+    pub(super) tailscale: TailscaleUi,
+    pub(super) tailnets: Vec<String>,
+    pub(super) via_names: Vec<String>,
     pub(super) checking: BTreeSet<String>,
     pub(super) installing: Option<InstallAsk>,
     pub(super) add: AddUi,
@@ -172,6 +179,11 @@ impl ClusterSheetView {
             names: Names::new(),
             removing: None,
             removing_machine: None,
+            switching: None,
+            edit: None,
+            tailscale: TailscaleUi::default(),
+            tailnets: Vec::new(),
+            via_names: Vec::new(),
             checking: BTreeSet::new(),
             installing: None,
             add: AddUi::default(),
@@ -728,11 +740,14 @@ impl Render for ClusterSheetView {
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let alert = self.remove_alert(&model, a, cx);
         let machine_alert = self.machine_remove_alert(a, cx);
+        let switch_alert = self.switch_alert(a, cx);
         let install = self.install_alert(a, cx);
         let take_back = self.take_back_alert(&model, a, cx);
         let continuing = self.continue_alert(&model, a, cx);
         let moving = self.move_overlay(&model, a, cx);
         let adding = self.add_overlay(window, a, cx);
+        let editing_addresses = self.edit_overlay(window, a, cx);
+        let from_tailscale = self.tailscale_overlay(window, a, cx);
         let updating = self.update_overlay(window, a, cx);
         let login = self.login_overlay(a, cx);
         let vault_new = self.vault_overlay();
@@ -783,11 +798,14 @@ impl Render for ClusterSheetView {
             .children(footer)
             .children(alert)
             .children(machine_alert)
+            .children(switch_alert)
             .children(install)
             .children(take_back)
             .children(continuing)
             .children(moving)
             .children(adding)
+            .children(editing_addresses)
+            .children(from_tailscale)
             .children(updating)
             .children(login)
             .children(vault_new)

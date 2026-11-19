@@ -85,10 +85,19 @@ fn an_address_is_checked() {
         .with_port(22);
     assert!(address_problems(&ok, "m1").is_empty());
     let bad = [
-        (MachineAddress::new(AddressKind::Lan, "-oProxyCommand=x"), HOST),
+        (
+            MachineAddress::new(AddressKind::Lan, "-oProxyCommand=x"),
+            HOST,
+        ),
         (MachineAddress::new(AddressKind::Lan, "a b"), HOST),
-        (MachineAddress::new(AddressKind::Lan, "h").with_user("Root"), USER),
-        (MachineAddress::new(AddressKind::Lan, "h").with_port(0), PORT),
+        (
+            MachineAddress::new(AddressKind::Lan, "h").with_user("Root"),
+            USER,
+        ),
+        (
+            MachineAddress::new(AddressKind::Lan, "h").with_port(0),
+            PORT,
+        ),
         (
             MachineAddress::new(AddressKind::Lan, "h").on_tailnet("x"),
             TAILNET_KIND,
@@ -108,7 +117,10 @@ fn an_address_is_checked() {
         ),
     ];
     for (address, why) in bad {
-        assert!(address_problems(&address, "m1").contains(&why.to_owned()), "{address:?}");
+        assert!(
+            address_problems(&address, "m1").contains(&why.to_owned()),
+            "{address:?}"
+        );
     }
     assert_eq!(list_problems(&[], "m1"), vec![NONE.to_owned()]);
 }
@@ -253,7 +265,8 @@ fn addresses_survive_a_save_and_a_read() {
     list[0].set_addresses(vec![
         MachineAddress::new(AddressKind::TailscaleName, "m1.tail0a1b2.ts.net")
             .on_tailnet("person@example.com"),
-        MachineAddress::new(AddressKind::TailscaleIp, "100.64.0.11").on_tailnet("person@example.com"),
+        MachineAddress::new(AddressKind::TailscaleIp, "100.64.0.11")
+            .on_tailnet("person@example.com"),
         MachineAddress::new(AddressKind::Lan, "192.168.1.20")
             .with_user("pi")
             .with_port(2222),
@@ -336,7 +349,10 @@ fn an_older_build_refuses_the_file_that_holds_addresses() {
     assert!(reg.save(&[machine()]));
     let value: serde_json::Value = serde_json::from_str(&doc(&reg)).unwrap();
     let version = value["version"].as_i64().unwrap();
-    assert!(version > 3, "a build that knows versions up to 3 reads this as unsupported");
+    assert!(
+        version > 3,
+        "a build that knows versions up to 3 reads this as unsupported"
+    );
     assert!(value["machines"][0]["addresses"].is_array());
 }
 

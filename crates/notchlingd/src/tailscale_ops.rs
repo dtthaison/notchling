@@ -1,4 +1,5 @@
 use crate::op_group::OpGroup;
+use notchling_engine::machines::process::ProcessRunner;
 use notchling_engine::machines::runner::Runner;
 use notchling_engine::machines::tailscale::Tailscale;
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec, Tier};
@@ -10,6 +11,13 @@ pub struct TailscaleOps {
 }
 
 impl TailscaleOps {
+    pub fn system() -> TailscaleOps {
+        TailscaleOps::new(
+            Arc::new(ProcessRunner),
+            &notchling_engine::machines::tailscale::default_cli(),
+        )
+    }
+
     pub fn new(runner: Arc<dyn Runner>, cli: &str) -> TailscaleOps {
         TailscaleOps {
             tailscale: Tailscale::new(runner, cli),

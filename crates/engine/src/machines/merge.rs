@@ -263,7 +263,7 @@ impl MergePlan {
                     &["fetch", "--no-tags", &machine_url, &refspec],
                     FETCH_TIMEOUT,
                 )
-                .env("GIT_SSH_COMMAND", &shell::git_ssh_command(&machine)),
+                .env("GIT_SSH_COMMAND", &shell::git_ssh_command(machine)),
         );
         if fetch_branch.code != 0 {
             o.error = Some(format!(

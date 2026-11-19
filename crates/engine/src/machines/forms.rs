@@ -56,7 +56,7 @@ fn is_name(s: &str) -> bool {
         && s.chars().all(|c| lower_or_digit(c) || c == '-')
 }
 
-pub(super) fn is_host(s: &str) -> bool {
+pub fn is_host(s: &str) -> bool {
     let Some(first) = s.chars().next() else {
         return false;
     };
@@ -75,7 +75,7 @@ pub(super) fn is_host(s: &str) -> bool {
         && s.parse::<std::net::Ipv6Addr>().is_ok()
 }
 
-pub(super) fn is_user(s: &str) -> bool {
+pub fn is_user(s: &str) -> bool {
     let Some(first) = s.chars().next() else {
         return false;
     };

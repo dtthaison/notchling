@@ -467,7 +467,6 @@ cluster-add-title = Add Machine
 # Title of the sheet once a machine is chosen; $name is its name.
 cluster-add-title-named = Add { $name }
 cluster-add-intro = Type the machine's SSH address. Add looks at the machine over SSH and saves it to Machines if it answers. Nothing is installed on it and it doesn't join the cluster; Join Cluster… does that later.
-cluster-add-address-label = SSH Address
 cluster-add-address-placeholder = user@host
 # Label of the name field in the Add Machine form. Left empty, the name is the first part of the host.
 cluster-add-name-label = Name (Optional)
@@ -693,3 +692,128 @@ cluster-vault-approve-title = Allow Notchling to use { $names } for sudo on { $m
 cluster-vault-approve-note = Notchling reads this password only for the sudo step, sends it to the machine over ssh and never shows it.
 # Shown on the sheet when the chosen entry can't be saved on the machine; $error is the reason.
 cluster-vault-save-failed = Couldn't keep that entry for the machine: { $error }
+
+## Machine addresses
+
+# Heading over the list of ways to reach a machine, in Add Machine and Edit Addresses.
+cluster-address-list-label = Addresses
+# Line under that heading. Notchling tries the addresses from the first down and uses the first that answers.
+cluster-address-list-note = Notchling tries them from the top and uses the first that answers. A Tailscale address on a network this Mac isn't on is skipped.
+# Placeholder of an address field: an optional user, a host and an optional port.
+cluster-address-placeholder = [user@]host[:port]
+cluster-address-add = Add Address
+cluster-address-up = Up
+cluster-address-down = Down
+cluster-address-remove = Remove
+# Kinds of address, shown on the button that changes the kind.
+cluster-address-kind-tailscale-name = Tailscale Name
+cluster-address-kind-tailscale-ip = Tailscale IP
+cluster-address-kind-lan = LAN
+cluster-address-kind-public = Public
+cluster-address-kind-jump = Jump
+# Button on a Tailscale address that picks which Tailscale network it belongs to; any network means it is never skipped.
+cluster-address-network-any = Any Network
+# Button on a Tailscale address; $name is the network it belongs to, as Tailscale lists it.
+cluster-address-network = Network: { $name }
+# Button on a jump address when no machine is chosen yet.
+cluster-address-via-none = Choose Machine
+# Button on a jump address; $machine is the machine Notchling goes through.
+cluster-address-via = Through { $machine }
+# Error on an address; $n is its place in the list, $why what is wrong.
+cluster-address-row-n = Address { NUMBER($n) }: { $why }
+cluster-address-row-control = An address can't hold control characters
+cluster-address-row-spaces = An address can't hold spaces
+cluster-address-row-empty = Type an address
+cluster-address-row-shape = Type the address as [user@]host[:port]
+cluster-address-row-bracket = Close the IPv6 address's bracket
+cluster-address-row-port = The port is a number from 1 to 65535
+cluster-address-row-host = The host is a name or an IP address
+cluster-address-row-user = The user is lowercase letters, digits, hyphens and underscores
+
+# Line under a machine in Machines: the way it is reached now.
+cluster-machine-via-tailscale = via Tailscale
+# Same, on a named network; $network is the Tailscale network.
+cluster-machine-via-tailscale-network = via Tailscale · { $network }
+# Same, over the local network; $host is the address.
+cluster-machine-via-lan = via LAN · { $host }
+# Same, over a public address or name; $host is the address.
+cluster-machine-via-public = via { $host }
+# Same, through another machine; $machine is that machine.
+cluster-machine-via-jump = via { $machine }
+# Line under a machine whose only usable addresses are on a Tailscale network this Mac isn't on; $wanted is that network and $active the one this Mac is on.
+cluster-machine-wrong-network = On { $wanted } · this Mac is on { $active }
+# Line under a machine when none of its addresses answered.
+cluster-machine-no-address = No address answered
+# Button on that line: switches this Mac's Tailscale to the machine's network.
+cluster-machine-switch-network = Switch Network
+# Title of the question before switching; $name is the network.
+cluster-machine-switch-title = Switch Tailscale to { $name }?
+# Note in that question; $active is the network this Mac leaves.
+cluster-machine-switch-note = This Mac leaves { $active }, so its machines there drop until you switch back. Nothing else changes.
+cluster-machine-switch-confirm = Switch
+# Shown when the switch failed; $why is the reason.
+cluster-machine-switch-failed = Couldn't switch Tailscale: { $why }
+# Item in a machine's menu.
+cluster-machine-edit-addresses = Edit Addresses…
+# Title of the Edit Addresses sheet; $name is the machine.
+cluster-address-edit-title = Edit Addresses for { $name }
+cluster-address-edit-save = Save
+# Shown after Add Machine's check when the machine's addresses are on another Tailscale network; $wanted is that network, $active the one this Mac is on.
+cluster-address-add-wrong-network = The machine is on { $wanted }, and this Mac is on { $active }. Switch Network on its row once it is saved, or change the address.
+# Shown when saving addresses failed because the machine is gone; $name is the machine.
+cluster-address-edit-gone = { $name } is not in Machines any more.
+
+## From Tailscale
+
+# Button in Add Machine: lists the machines on the Tailscale network this Mac is on.
+cluster-tailscale-button = From Tailscale…
+cluster-tailscale-title = Add from Tailscale
+# Line over the list; $network is the Tailscale network this Mac is on.
+cluster-tailscale-network = Machines on { $network }
+cluster-tailscale-reading = Reading Tailscale…
+# Shown when Tailscale couldn't be read; $why is the reason.
+cluster-tailscale-failed = Couldn't read Tailscale: { $why }
+cluster-tailscale-not-running = Tailscale isn't running on this Mac.
+cluster-tailscale-filter-placeholder = Filter
+cluster-tailscale-os-any = Any System
+# Button that limits the list to machines that are on now.
+cluster-tailscale-online-only = Online Only
+cluster-tailscale-online-all = Online and Offline
+cluster-tailscale-select-all = Select All
+cluster-tailscale-select-none = Select None
+# Button at the foot of the list; $count is how many machines are chosen.
+cluster-tailscale-import = { $count ->
+    [one] Import { $count } Machine
+   *[other] Import { $count } Machines
+}
+cluster-tailscale-import-none = Import
+cluster-tailscale-online = Online
+cluster-tailscale-offline = Offline
+# Line under a machine; $os is its system, $ips its Tailscale addresses.
+cluster-tailscale-peer-line = { $os } · { $ips }
+# Line under a machine when Tailscale doesn't know its system; $ips are its Tailscale addresses.
+cluster-tailscale-peer-line-unknown = { $ips }
+# Line under a machine in the Tailscale list; $owner is the user who owns it.
+cluster-tailscale-peer-owner = Owner: { $owner }
+# Same, when the machine is tagged; $owner is the owner Tailscale shows and $tags the tags, such as tag:server.
+cluster-tailscale-peer-tagged = { $owner } · { $tags }
+# Label over the user field of a chosen machine.
+cluster-tailscale-user-label = SSH User
+# Line under the list; $count is how many machines are already in Machines and so aren't listed.
+cluster-tailscale-hidden = { $count ->
+    [one] { $count } machine is already in Machines and isn't listed.
+   *[other] { $count } machines are already in Machines and aren't listed.
+}
+# Line when no machine is left to list.
+cluster-tailscale-empty = No machine on this network is left to add.
+# Line when the filter matches nothing.
+cluster-tailscale-no-match = No machine matches.
+# Line at the foot of the list: Notchling lists only the network this Mac is on; $other are the other networks it knows.
+cluster-tailscale-other-networks = Switch Tailscale to { $other } to list its machines; API keys for listing both come later.
+# Line saying what Import does.
+cluster-tailscale-import-note = Import only saves each machine to Machines, with its Tailscale name and address. Nothing is installed on it and it doesn't join the cluster.
+# Shown after an import; $count is how many machines were saved.
+cluster-tailscale-imported = { $count ->
+    [one] { $count } machine is in Machines. Check it to see how it answers.
+   *[other] { $count } machines are in Machines. Check them to see how they answer.
+}

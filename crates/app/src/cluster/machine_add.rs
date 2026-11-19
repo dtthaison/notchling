@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use notchling_engine::machines::addresses::MachineAddress;
 use notchling_engine::machines::engine::SetupEngine;
+use notchling_engine::machines::reach::Pick;
 use notchling_engine::machines::registry::{AdminAccess, Machine, MachineOs};
 use notchling_engine::machines::step::{CheckResult, StepId};
 use notchling_locale as t;
@@ -32,6 +34,7 @@ struct Target {
     host: String,
     user: String,
     organization: Option<String>,
+    addresses: Vec<MachineAddress>,
 }
 
 #[derive(Debug)]
@@ -48,12 +51,14 @@ pub struct Probe {
     host: String,
     user: String,
     existing: Vec<String>,
+    addresses: Vec<MachineAddress>,
 }
 
 #[derive(Debug)]
 pub struct Answer {
     round: u64,
     check: DraftCheck,
+    pick: Option<Pick>,
 }
 
 impl Probe {
@@ -64,15 +69,19 @@ impl Probe {
     }
 
     pub fn run(&self, engine: &SetupEngine) -> Answer {
+        let mut draft = Machine::new(&self.name, &self.host, &self.user);
+        if !self.addresses.is_empty() {
+            draft.set_addresses(self.addresses.clone());
+        }
+        let check = MachinesModel::draft_check_of(engine, &draft, &self.existing);
+        let pick = draft
+            .has_addresses()
+            .then(|| engine.router().cached(&draft))
+            .flatten();
         Answer {
             round: self.round,
-            check: MachinesModel::draft_check(
-                engine,
-                &self.name,
-                &self.host,
-                &self.user,
-                &self.existing,
-            ),
+            check,
+            pick,
         }
     }
 }
@@ -123,6 +132,7 @@ impl MachineAdd {
             host: host.clone(),
             user: user.clone(),
             organization: organization.filter(|o| !o.trim().is_empty()),
+            addresses: parsed.addresses.clone(),
         });
         Ok(Probe {
             round: self.round,
@@ -130,6 +140,7 @@ impl MachineAdd {
             host,
             user,
             existing,
+            addresses: parsed.addresses,
         })
     }
 
@@ -141,6 +152,15 @@ impl MachineAdd {
             return false;
         };
         let check = answer.check;
+        if let Some(Pick::WrongNetwork { wanted, active }) = &answer.pick {
+            if !check.reachable {
+                self.phase = Phase::Stopped(Stop::new(
+                    t::cluster::address_add_wrong_network(wanted, active),
+                    false,
+                ));
+                return false;
+            }
+        }
         if !check.reachable {
             self.phase = Phase::Stopped(match check.lines.first() {
                 Some(line) => unreachable_stop(&target.user, &target.host, line.state.text()),
@@ -188,9 +208,31 @@ fn save(parts: &AddParts, target: &Target, check: &DraftCheck) -> Result<(), Str
             machine.set_admin(AdminAccess::RootSsh);
         }
         machine.organization = target.organization.clone();
+        if !target.addresses.is_empty() {
+            machine.set_addresses(target.addresses.clone());
+        }
         list.push(machine);
         Ok(true)
     })
+}
+
+pub fn set_addresses(
+    parts: &AddParts,
+    name: &str,
+    addresses: Vec<MachineAddress>,
+) -> Result<(), String> {
+    commit(&*parts.registry, |list| {
+        let Some(machine) = list.iter_mut().find(|m| m.name == name) else {
+            return Err(t::cluster::address_edit_gone(name));
+        };
+        if machine.addresses == addresses {
+            return Ok(false);
+        }
+        machine.set_addresses(addresses);
+        Ok(true)
+    })?;
+    parts.engine.router().forget(name);
+    Ok(())
 }
 
 pub fn remove(parts: &AddParts, model: &ClusterModel, name: &str) -> Result<(), String> {

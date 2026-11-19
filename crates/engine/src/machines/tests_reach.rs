@@ -21,7 +21,8 @@ struct Rig {
 }
 
 fn is_probe(r: &Recorded) -> bool {
-    r.argv.first().map(String::as_str) == Some("/usr/bin/ssh") && r.argv.last().map(String::as_str) == Some("true")
+    r.argv.first().map(String::as_str) == Some("/usr/bin/ssh")
+        && r.argv.last().map(String::as_str) == Some("true")
 }
 
 fn login(r: &Recorded) -> String {
@@ -38,15 +39,25 @@ impl Rig {
             |a| a.get(1).map(String::as_str) == Some("switch"),
             move |_| CommandResult::ok(&shown.lock().unwrap()),
         );
-        for host in down.iter().copied() {
+        for &host in down {
             runner.on(
-                move |a| a.last().map(String::as_str) == Some("true") && a.iter().any(|x| x.ends_with(&format!("@{host}"))),
-                CommandResult::new(255, "", &format!("ssh: connect to host {host} port 22: Operation timed out")),
+                move |a| {
+                    a.last().map(String::as_str) == Some("true")
+                        && a.iter().any(|x| x.ends_with(&format!("@{host}")))
+                },
+                CommandResult::new(
+                    255,
+                    "",
+                    &format!("ssh: connect to host {host} port 22: Operation timed out"),
+                ),
             );
         }
-        for host in refused.iter().copied() {
+        for &host in refused {
             runner.on(
-                move |a| a.last().map(String::as_str) == Some("true") && a.iter().any(|x| x.ends_with(&format!("@{host}"))),
+                move |a| {
+                    a.last().map(String::as_str) == Some("true")
+                        && a.iter().any(|x| x.ends_with(&format!("@{host}")))
+                },
                 CommandResult::new(255, "", "agent@host: Permission denied (publickey)."),
             );
         }
@@ -101,17 +112,24 @@ fn addresses_are_tried_in_order_and_the_first_that_answers_wins() {
     let rig = Rig::new(&["m1.tail"], &[]);
     let m = with(
         "m1",
-        vec![ts("m1.tail", PERSON), lan("192.168.1.20").with_port(2222), lan("10.0.0.9")],
+        vec![
+            ts("m1.tail", PERSON),
+            lan("192.168.1.20").with_port(2222),
+            lan("10.0.0.9"),
+        ],
     );
-    let pick = rig.router.pick(&m, &[m.clone()]);
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
     let choice = pick.choice().unwrap();
     assert_eq!(choice.index, 1);
-    assert_eq!(choice.route, Route {
-        host: "192.168.1.20".into(),
-        user: "agent".into(),
-        port: Some(2222),
-        jump: None,
-    });
+    assert_eq!(
+        choice.route,
+        Route {
+            host: "192.168.1.20".into(),
+            user: "agent".into(),
+            port: Some(2222),
+            jump: None,
+        }
+    );
     let probes = rig.probes();
     assert_eq!(probes.len(), 2);
     assert_eq!(login(&probes[0]), "agent@m1.tail");
@@ -138,9 +156,13 @@ fn an_address_on_a_network_that_is_not_active_is_skipped_without_a_try() {
     let rig = Rig::new(&[], &[]);
     let m = with(
         "m1",
-        vec![ts("m1.work.tail", WORK), ts("m1.tail", PERSON), lan("192.168.1.20")],
+        vec![
+            ts("m1.work.tail", WORK),
+            ts("m1.tail", PERSON),
+            lan("192.168.1.20"),
+        ],
     );
-    let pick = rig.router.pick(&m, &[m.clone()]);
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
     assert_eq!(pick.choice().unwrap().index, 1);
     let tried: Vec<String> = rig.probes().iter().map(login).collect();
     assert_eq!(tried, ["agent@m1.tail"]);
@@ -156,14 +178,21 @@ fn a_tailscale_address_with_no_network_named_is_never_skipped() {
             lan("192.168.1.20"),
         ],
     );
-    assert_eq!(rig.router.pick(&m, &[m.clone()]).choice().unwrap().index, 0);
+    assert_eq!(
+        rig.router
+            .pick(&m, std::slice::from_ref(&m))
+            .choice()
+            .unwrap()
+            .index,
+        0
+    );
 }
 
 #[test]
 fn only_addresses_on_another_network_say_so() {
     let rig = Rig::new(&[], &[]);
     let m = with("m1", vec![ts("m1.work.tail", WORK), ts("100.64.1.2", WORK)]);
-    let pick = rig.router.pick(&m, &[m.clone()]);
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
     assert_eq!(
         pick,
         Pick::WrongNetwork {
@@ -177,13 +206,20 @@ fn only_addresses_on_another_network_say_so() {
 #[test]
 fn a_dead_address_beside_one_on_another_network_is_still_the_wrong_network() {
     let rig = Rig::new(&["192.168.1.20"], &[]);
-    let m = with("m1", vec![ts("m1.work.tail", WORK), lan("192.168.1.20"), lan("10.0.0.9")]);
+    let m = with(
+        "m1",
+        vec![
+            ts("m1.work.tail", WORK),
+            lan("192.168.1.20"),
+            lan("10.0.0.9"),
+        ],
+    );
     rig.runner.on(
         |a| a.iter().any(|x| x.ends_with("@10.0.0.9")),
         CommandResult::new(255, "", "ssh: connect to host 10.0.0.9: No route to host"),
     );
     assert_eq!(
-        rig.router.pick(&m, &[m.clone()]),
+        rig.router.pick(&m, std::slice::from_ref(&m)),
         Pick::WrongNetwork {
             wanted: WORK.into(),
             active: PERSON.into()
@@ -196,21 +232,34 @@ fn nothing_answering_with_nothing_skipped_is_unreachable() {
     let rig = Rig::new(&["192.168.1.20", "203.0.113.5"], &[]);
     let m = with(
         "m1",
-        vec![lan("192.168.1.20"), MachineAddress::new(AddressKind::Public, "203.0.113.5")],
+        vec![
+            lan("192.168.1.20"),
+            MachineAddress::new(AddressKind::Public, "203.0.113.5"),
+        ],
     );
-    assert_eq!(rig.router.pick(&m, &[m.clone()]), Pick::Unreachable);
+    assert_eq!(
+        rig.router.pick(&m, std::slice::from_ref(&m)),
+        Pick::Unreachable
+    );
 }
 
 #[test]
 fn a_machine_that_refuses_us_beats_one_that_does_not_answer_but_not_one_that_works() {
     let rig = Rig::new(&["10.0.0.9"], &["192.168.1.20"]);
-    let m = with("m1", vec![lan("10.0.0.9"), lan("192.168.1.20"), lan("172.16.0.4")]);
-    let pick = rig.router.pick(&m, &[m.clone()]);
+    let m = with(
+        "m1",
+        vec![lan("10.0.0.9"), lan("192.168.1.20"), lan("172.16.0.4")],
+    );
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
     assert_eq!(pick.choice().unwrap().index, 2);
     rig.router.forget_all();
     let only_refused = with("m1", vec![lan("10.0.0.9"), lan("192.168.1.20")]);
     assert_eq!(
-        rig.router.pick(&only_refused, &[only_refused.clone()]).choice().unwrap().index,
+        rig.router
+            .pick(&only_refused, std::slice::from_ref(&only_refused))
+            .choice()
+            .unwrap()
+            .index,
         1
     );
 }
@@ -248,10 +297,10 @@ fn a_failure_is_kept_only_a_short_while() {
 fn editing_the_addresses_throws_the_kept_winner_away() {
     let rig = Rig::new(&[], &[]);
     let m = with("m1", vec![lan("192.168.1.20"), lan("10.0.0.9")]);
-    rig.router.pick(&m, &[m.clone()]);
+    rig.router.pick(&m, std::slice::from_ref(&m));
     let edited = with("m1", vec![lan("10.0.0.9"), lan("192.168.1.20")]);
     assert_eq!(rig.router.cached(&edited), None);
-    let pick = rig.router.pick(&edited, &[edited.clone()]);
+    let pick = rig.router.pick(&edited, std::slice::from_ref(&edited));
     assert_eq!(pick.choice().unwrap().route.host, "10.0.0.9");
 }
 
@@ -264,7 +313,11 @@ fn switching_the_network_makes_the_kept_winner_stale_after_a_moment() {
     let lists = rig.lists();
     *rig.list.lock().unwrap() = WORK_ACTIVE;
     rig.at(2.0);
-    assert_eq!(rig.router.pick(&m, &all).choice().unwrap().index, 0, "not rechecked yet");
+    assert_eq!(
+        rig.router.pick(&m, &all).choice().unwrap().index,
+        0,
+        "not rechecked yet"
+    );
     assert_eq!(rig.lists(), lists);
     rig.at(RECHECK_NETWORK_SECS);
     let pick = rig.router.pick(&m, &all);
@@ -276,7 +329,7 @@ fn switching_the_network_makes_the_kept_winner_stale_after_a_moment() {
 fn a_single_usable_address_is_taken_without_a_try() {
     let rig = Rig::new(&[], &[]);
     let m = with("m1", vec![lan("192.168.1.20")]);
-    let pick = rig.router.pick(&m, &[m.clone()]);
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
     assert_eq!(pick.choice().unwrap().index, 0);
     assert!(rig.probes().is_empty());
 }
@@ -285,17 +338,23 @@ fn a_single_usable_address_is_taken_without_a_try() {
 fn a_machine_with_no_addresses_costs_no_call_at_all() {
     let rig = Rig::new(&[], &[]);
     let m = Machine::new("m1", "m1.tail", "agent");
-    let pick = rig.router.pick(&m, &[m.clone()]);
-    assert_eq!(pick.choice().unwrap().route, Route::direct("m1.tail", "agent"));
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
+    assert_eq!(
+        pick.choice().unwrap().route,
+        Route::direct("m1.tail", "agent")
+    );
     assert!(rig.runner.calls().is_empty());
     assert_eq!(rig.router.routed(&m), m);
-    assert_eq!(rig.router.reached(&m, &[m.clone()]), m);
+    assert_eq!(rig.router.reached(&m, std::slice::from_ref(&m)), m);
 }
 
 #[test]
 fn a_jump_goes_through_the_other_machines_picked_address() {
     let rig = Rig::new(&["m1.tail"], &[]);
-    let gateway = with("m1", vec![ts("m1.tail", PERSON), lan("192.168.1.20").with_port(2222)]);
+    let gateway = with(
+        "m1",
+        vec![ts("m1.tail", PERSON), lan("192.168.1.20").with_port(2222)],
+    );
     let behind = with(
         "m2",
         vec![
@@ -304,8 +363,14 @@ fn a_jump_goes_through_the_other_machines_picked_address() {
         ],
     );
     rig.runner.on(
-        |a| a.last().map(String::as_str) == Some("true") && a.iter().any(|x| x == "agent@10.0.0.50"),
-        CommandResult::new(255, "", "ssh: connect to host 10.0.0.50: Operation timed out"),
+        |a| {
+            a.last().map(String::as_str) == Some("true") && a.iter().any(|x| x == "agent@10.0.0.50")
+        },
+        CommandResult::new(
+            255,
+            "",
+            "ssh: connect to host 10.0.0.50: Operation timed out",
+        ),
     );
     let all = [gateway.clone(), behind.clone()];
     let pick = rig.router.pick(&behind, &all);
@@ -369,9 +434,16 @@ fn a_jump_through_a_machine_that_cannot_be_reached_is_not_an_address() {
     );
     rig.runner.on(
         |a| a.iter().any(|x| x == "agent@10.0.0.51"),
-        CommandResult::new(255, "", "ssh: connect to host 10.0.0.51: Operation timed out"),
+        CommandResult::new(
+            255,
+            "",
+            "ssh: connect to host 10.0.0.51: Operation timed out",
+        ),
     );
-    assert_eq!(rig.router.pick(&alone, &[alone.clone()]), Pick::Unreachable);
+    assert_eq!(
+        rig.router.pick(&alone, std::slice::from_ref(&alone)),
+        Pick::Unreachable
+    );
 }
 
 #[test]
@@ -379,13 +451,22 @@ fn two_machines_that_jump_through_each_other_end() {
     let rig = Rig::new(&["10.0.0.1", "10.0.0.2"], &[]);
     let a = with(
         "a",
-        vec![lan("10.0.0.1"), MachineAddress::new(AddressKind::Jump, "10.9.0.1").through("b")],
+        vec![
+            lan("10.0.0.1"),
+            MachineAddress::new(AddressKind::Jump, "10.9.0.1").through("b"),
+        ],
     );
     let b = with(
         "b",
-        vec![lan("10.0.0.2"), MachineAddress::new(AddressKind::Jump, "10.9.0.2").through("a")],
+        vec![
+            lan("10.0.0.2"),
+            MachineAddress::new(AddressKind::Jump, "10.9.0.2").through("a"),
+        ],
     );
-    assert_eq!(rig.router.pick(&a, &[a.clone(), b.clone()]), Pick::Unreachable);
+    assert_eq!(
+        rig.router.pick(&a, &[a.clone(), b.clone()]),
+        Pick::Unreachable
+    );
 }
 
 #[test]
@@ -394,12 +475,9 @@ fn the_cache_only_view_never_runs_a_command() {
     let m = with("m1", vec![lan("192.168.1.20"), lan("10.0.0.9")]);
     assert_eq!(rig.router.routed(&m).route, None);
     assert!(rig.runner.calls().is_empty());
-    rig.router.pick(&m, &[m.clone()]);
+    rig.router.pick(&m, std::slice::from_ref(&m));
     let calls = rig.runner.calls().len();
-    assert_eq!(
-        rig.router.routed(&m).route.unwrap().host,
-        "192.168.1.20"
-    );
+    assert_eq!(rig.router.routed(&m).route.unwrap().host, "192.168.1.20");
     assert_eq!(rig.runner.calls().len(), calls);
 }
 
@@ -421,7 +499,10 @@ fn routed_world(down: &[&str]) -> super::tests_engine_world::World {
     for host in down {
         let host = host.to_string();
         setup.runner.on(
-            move |a| a.last().map(String::as_str) == Some("true") && a.iter().any(|x| x.ends_with(&format!("@{host}"))),
+            move |a| {
+                a.last().map(String::as_str) == Some("true")
+                    && a.iter().any(|x| x.ends_with(&format!("@{host}")))
+            },
             CommandResult::new(255, "", "ssh: connect to host: Operation timed out"),
         );
     }
@@ -433,7 +514,14 @@ fn a_check_runs_over_the_address_that_answered() {
     let w = routed_world(&["10.0.0.5"]);
     w.refresh("m1", false);
     let calls = w.runner.calls();
-    let batch = calls.iter().find(|c| c.argv.last().is_some_and(|s| s.contains("out=$( /bin/sh -c "))).unwrap();
+    let batch = calls
+        .iter()
+        .find(|c| {
+            c.argv
+                .last()
+                .is_some_and(|s| s.contains("out=$( /bin/sh -c "))
+        })
+        .unwrap();
     assert_eq!(batch.argv[5..9], ["-p", "2200", "--", "worker@10.0.0.6"]);
     let tried: Vec<String> = calls.iter().filter(|c| is_probe(c)).map(login).collect();
     assert_eq!(tried, ["worker@10.0.0.5", "worker@10.0.0.6"]);

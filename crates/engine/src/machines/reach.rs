@@ -131,7 +131,8 @@ impl Router {
         let now = (live.clock)();
         let cache = lock(&live.cache);
         let entry = cache.get(&m.name)?;
-        (entry.print == print_of(m) && now - entry.at < ttl(&entry.pick)).then(|| entry.pick.clone())
+        (entry.print == print_of(m) && now - entry.at < ttl(&entry.pick))
+            .then(|| entry.pick.clone())
     }
 
     pub fn routed(&self, m: &Machine) -> Machine {
@@ -283,7 +284,9 @@ impl Router {
             if depth >= JUMP_DEPTH {
                 return None;
             }
-            let via = all.iter().find(|x| Some(x.name.as_str()) == address.via.as_deref())?;
+            let via = all
+                .iter()
+                .find(|x| Some(x.name.as_str()) == address.via.as_deref())?;
             let Pick::Reached(inner) = self.pick_in(via, all, depth + 1) else {
                 return None;
             };
