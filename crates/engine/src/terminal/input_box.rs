@@ -312,6 +312,10 @@ pub fn holds_message(typed: &str, text: &str) -> bool {
     !letters(text).is_empty() && !letters(typed).is_empty() && input.fill(text) == Fill::Whole
 }
 
+pub fn shown_as_chips(text: &str, shown: &str) -> bool {
+    shown.contains("[Image #") && Message::of(text).pictures() > 0 && holds_message(shown, text)
+}
+
 pub fn typed_text(lines: &[String], cursor: Option<(usize, usize)>) -> Option<String> {
     let input = read(lines, cursor).filter(|input| !input.empty)?;
     let text = input.typed();

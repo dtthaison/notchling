@@ -173,7 +173,9 @@ fn shown_by_transcript(row: &OutboxRow, conversation: &Conversation) -> bool {
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
     let held = rows.iter().find(|r| r.state == State::InQueue)?;
     let wanted = squeeze(&held.text);
-    queued.iter().position(|entry| squeeze(entry) == wanted)
+    queued
+        .iter()
+        .position(|entry| squeeze(entry) == wanted || input_box::shown_as_chips(&held.text, entry))
 }
 
 pub fn unbubbled(outgoing: Vec<String>, bubbles: &[Bubble]) -> Vec<String> {

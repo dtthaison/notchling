@@ -1,3 +1,4 @@
+use notchling_engine::terminal::input_box;
 use notchling_engine::transcript::model::{Conversation, ItemKind};
 
 pub const GRACE_MS: i64 = 30_000;
@@ -48,26 +49,30 @@ impl Outgoing {
 }
 
 pub fn dated_since(text: &str, since_ms: f64, conversation: &Conversation) -> bool {
-    let text = comparable(text);
+    let wanted = comparable(text);
     conversation.items.iter().any(|item| {
-        matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text)
+        matches!(&item.kind, ItemKind::User { text: t, .. } if is_copy(text, &wanted, t))
             && item.date.is_some_and(|d| d * 1000.0 >= since_ms)
     })
 }
 
+fn is_copy(sent: &str, wanted: &str, turn: &str) -> bool {
+    comparable(turn) == wanted || input_box::shown_as_chips(sent, turn)
+}
+
 fn copies(text: &str, conversation: &Conversation) -> usize {
-    let text = comparable(text);
+    let wanted = comparable(text);
     let sent = conversation
         .items
         .iter()
         .filter(
-            |item| matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text),
+            |item| matches!(&item.kind, ItemKind::User { text: t, .. } if is_copy(text, &wanted, t)),
         )
         .count();
     let queued = conversation
         .queued
         .iter()
-        .filter(|t| comparable(t) == text)
+        .filter(|t| is_copy(text, &wanted, t))
         .count();
     sent + queued
 }
