@@ -145,8 +145,10 @@ fn the_wait_line_follows_the_feature_not_the_text() {
         .and_then(|a| a.after.clone())
         .expect("text");
     assert!(!text.contains("notchling wait"));
-    let mut on = Options::default();
-    on.features = Features { wait: true };
+    let on = Options {
+        features: Features { wait: true },
+        ..Options::default()
+    };
     let text = planned(&rig, &on)
         .get(ID_RULE)
         .and_then(|a| a.after.clone())

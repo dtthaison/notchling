@@ -151,7 +151,7 @@ pub fn claude_keys(
         }
         let ours = match (&now, before_rec) {
             (None, _) | (_, None) => true,
-            (Some(v), Some(rec)) => v.to_string() == rec.after,
+            (Some(v), Some(rec)) => *v == rec.after,
         };
         if !ours {
             plan.skipped.push(Skipped {

@@ -28,6 +28,7 @@ fn gate(mut a: Action, opts: &Options) -> Action {
     a
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn file_action(
     env: &Env,
     opts: &Options,

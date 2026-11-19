@@ -164,7 +164,7 @@ fn plan_text(plan: &Value, out: &mut String) {
     for line in plan["report"].as_array().into_iter().flatten() {
         out.push_str(&format!(
             "line {:>3}  {:<12} {}\n",
-            line["line"],
+            line["line"].as_u64().unwrap_or(0),
             text(line, "fate"),
             text(line, "text")
         ));

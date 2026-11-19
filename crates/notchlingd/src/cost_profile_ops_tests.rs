@@ -5,6 +5,7 @@ use notchling_engine::catalog::Catalog;
 use notchling_engine::cost_profile::keys::Probe;
 use notchling_engine::cost_profile::Service;
 use notchling_engine::install::ToolRoots;
+use notchling_engine::settings::Settings;
 use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::fs;
@@ -164,14 +165,18 @@ fn set_checks_every_part_and_persists_the_profile() {
     let again = call(&r, Tier::Agent, ops::COST_PROFILE_GET, json!({})).unwrap();
     assert_eq!(again["profile"]["preset"], "saver");
     assert!(again["profile"].get("guards").is_none());
-    let file: Value =
-        serde_json::from_str(&fs::read_to_string(r.dir.join("data/settings.json")).unwrap())
-            .unwrap();
-    assert_eq!(file["costPreset"], "saver");
-    assert_eq!(file["costClaude"], true);
-    assert_eq!(file["costAgy"], false);
-    assert_eq!(file["costPicks"], "code.claude=opus medium");
-    assert_eq!(file["costProfileApp"]["guards"]["poll"], "block");
+    let store = Settings::open(&r.dir.join("data/settings.json")).unwrap();
+    assert_eq!(store.get_str("costPreset").as_deref(), Some("saver"));
+    assert_eq!(store.get_bool("costClaude"), Some(true));
+    assert_eq!(store.get_bool("costAgy"), Some(false));
+    assert_eq!(
+        store.get_str("costPicks").as_deref(),
+        Some("code.claude=opus medium")
+    );
+    assert_eq!(
+        store.get("costProfileApp").unwrap()["guards"]["poll"],
+        "block"
+    );
     let reset = set(json!({"reset": true, "preset": "quality"})).unwrap();
     assert_eq!(reset["profile"]["custom"], false);
 }

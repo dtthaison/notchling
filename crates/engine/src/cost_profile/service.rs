@@ -110,7 +110,7 @@ impl Service {
     }
 
     pub fn check(&self) -> Vec<Row> {
-        self.with_env(|env, profile| check(env, profile))
+        self.with_env(check)
     }
 
     pub fn resolve(&self, id: &str, choice: Choice, stamp: u64) -> Result<Resolved, String> {
