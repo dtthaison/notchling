@@ -1,3 +1,5 @@
+use crate::transcript::stored::as_stored;
+
 pub const RULE: char = '─';
 pub const RULE_MIN: usize = 16;
 pub const HOME_COL: usize = 2;
@@ -25,11 +27,17 @@ pub struct Input {
 }
 
 fn squeezed(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
+    as_stored(text)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
 }
 
 fn letters(text: &str) -> String {
-    text.chars().filter(|c| c.is_alphanumeric()).collect()
+    as_stored(text)
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }
 
 fn strip_chips(text: &str) -> (String, usize) {
@@ -341,11 +349,12 @@ impl Pictured {
     }
 
     pub fn is_shown_as(&self, shown: &str, images: Option<usize>) -> bool {
+        let shown = as_stored(shown);
         let bare = shown.trim().is_empty();
         if !bare && !shown.contains("[Image #") {
             return false;
         }
-        let (rest, chips) = strip_chips(&squeezed(shown));
+        let (rest, chips) = strip_chips(&squeezed(&shown));
         let pictures = self.0.pictures();
         let chips = match (chips, images) {
             (0, Some(n)) if bare && n >= pictures => pictures,

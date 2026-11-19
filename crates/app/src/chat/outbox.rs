@@ -4,6 +4,7 @@ use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
 use notchling_engine::sessions::Agent;
 use notchling_engine::terminal::input_box;
 use notchling_engine::transcript::model::Conversation;
+use notchling_engine::transcript::stored::squeezed as squeeze;
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
@@ -103,10 +104,6 @@ pub struct Bubble {
     pub text: String,
     pub status: Status,
     pub buttons: Vec<Button>,
-}
-
-fn squeeze(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn bubble(row: &OutboxRow) -> Bubble {

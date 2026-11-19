@@ -59,11 +59,7 @@ fn write(lines: &[String]) -> (TempDir, String) {
 }
 
 fn taken_as(stored: &str, message: &Message, images: usize) -> Option<Seen> {
-    let (_dir, path) = write(&[
-        enqueue(stored, 45),
-        dequeue(52),
-        user(stored, images, 52),
-    ]);
+    let (_dir, path) = write(&[enqueue(stored, 45), dequeue(52), user(stored, images, 52)]);
     count_since(&path, message, since(42))
 }
 
@@ -101,9 +97,9 @@ fn a_message_with_no_picture_and_zero_width_spaces_is_taken() {
 
 #[test]
 fn a_byte_order_mark_and_a_word_joiner_do_not_stop_the_match() {
-    let sent = format!("\u{feff}carry the\u{2060} blue lantern");
+    let sent = "\u{feff}carry the\u{2060} blue lantern";
     assert_eq!(
-        taken_as("carry the blue lantern", &plain(&sent), 0),
+        taken_as("carry the blue lantern", &plain(sent), 0),
         seen(1, 1)
     );
 }
@@ -111,11 +107,39 @@ fn a_byte_order_mark_and_a_word_joiner_do_not_stop_the_match() {
 #[test]
 fn every_character_claude_code_drops_is_ignored() {
     let dropped = [
-        '\u{00ad}', '\u{034f}', '\u{061c}', '\u{115f}', '\u{1160}', '\u{17b4}', '\u{180b}',
-        '\u{180e}', '\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{202a}',
-        '\u{202e}', '\u{2060}', '\u{2062}', '\u{2066}', '\u{2069}', '\u{206f}', '\u{3164}',
-        '\u{fe00}', '\u{fe0f}', '\u{feff}', '\u{ffa0}', '\u{fff9}', '\u{e0001}', '\u{e0041}',
-        '\u{e0100}', '\u{07}', '\u{1b}', '\u{7f}', '\u{9f}',
+        '\u{00ad}',
+        '\u{034f}',
+        '\u{061c}',
+        '\u{115f}',
+        '\u{1160}',
+        '\u{17b4}',
+        '\u{180b}',
+        '\u{180e}',
+        '\u{200b}',
+        '\u{200c}',
+        '\u{200d}',
+        '\u{200e}',
+        '\u{200f}',
+        '\u{202a}',
+        '\u{202e}',
+        '\u{2060}',
+        '\u{2062}',
+        '\u{2066}',
+        '\u{2069}',
+        '\u{206f}',
+        '\u{3164}',
+        '\u{fe00}',
+        '\u{fe0f}',
+        '\u{feff}',
+        '\u{ffa0}',
+        '\u{fff9}',
+        '\u{e0001}',
+        '\u{e0041}',
+        '\u{e0100}',
+        '\u{07}',
+        '\u{1b}',
+        '\u{7f}',
+        '\u{9f}',
     ];
     let missed: Vec<String> = dropped
         .iter()
@@ -177,7 +201,10 @@ fn a_waiting_entry_is_listed_for_its_message_through_zero_width_spaces() {
     let sent = words().join(&ZWSP.to_string());
     let (_dir, path) = write(&[enqueue(&words().concat(), 45)]);
     assert_eq!(queue_lists(&path, &plain(&sent)), Some(true));
-    assert_eq!(queue_lists(&path, &plain("carry the blue lamp")), Some(false));
+    assert_eq!(
+        queue_lists(&path, &plain("carry the blue lamp")),
+        Some(false)
+    );
 }
 
 #[test]

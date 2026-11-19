@@ -16,9 +16,7 @@ pub struct Seen {
     pub taken: usize,
 }
 
-pub(super) fn squeezed(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
+pub(super) use super::stored::squeezed;
 
 pub(super) fn said(obj: &Value) -> String {
     match obj.pointer("/message/content") {
@@ -398,8 +396,8 @@ mod count_tests;
 #[path = "sent_human_tests.rs"]
 mod human_tests;
 #[cfg(test)]
-#[path = "sent_tests.rs"]
-mod tests;
-#[cfg(test)]
 #[path = "sent_invisible_tests.rs"]
 mod invisible_tests;
+#[cfg(test)]
+#[path = "sent_tests.rs"]
+mod tests;

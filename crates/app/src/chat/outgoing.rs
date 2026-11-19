@@ -1,5 +1,6 @@
 use notchling_engine::terminal::input_box::Pictured;
 use notchling_engine::transcript::model::{Conversation, ItemKind};
+use notchling_engine::transcript::stored::squeezed;
 
 pub const GRACE_MS: i64 = 30_000;
 const CLOCK_SLACK_MS: f64 = 2_000.0;
@@ -123,10 +124,10 @@ fn copies(text: &str, conversation: &Conversation) -> usize {
 }
 
 fn comparable(text: &str) -> String {
-    let text = text.trim();
+    let text = squeezed(text);
     match text.strip_prefix('!') {
         Some(command) => format!("!{}", command.trim_start()),
-        None => text.to_owned(),
+        None => text,
     }
 }
 

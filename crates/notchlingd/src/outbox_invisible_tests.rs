@@ -22,10 +22,8 @@ struct Folder(PathBuf);
 impl Folder {
     fn new() -> Folder {
         let n = FOLDERS.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "nl-outbox-invisible-{}-{n}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("nl-outbox-invisible-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("drops one")).unwrap();
         Folder(dir)
@@ -201,7 +199,7 @@ impl Env {
 
     fn the_turn(&self, stored: &str, at_ms: i64) -> Vec<String> {
         vec![
-            enqueue(at_ms - 7_000, stored),
+            enqueue(at_ms - 1_000, stored),
             dequeue(at_ms),
             turn(at_ms, stored, 1),
         ]
@@ -226,9 +224,9 @@ impl Env {
 fn a_picture_message_with_zero_width_spaces_is_sent_when_the_transcript_shows_its_turn() {
     let e = env();
     let row = e.r.send("job-idle", &e.picture_message());
-    e.turn_at(10_000, &e.stored());
+    e.turn_at(3_000, &e.stored());
     e.postmen.postman(IDLE).pass(e.r.at(T0));
-    assert_eq!(e.state(&row.id), None, "Claude Code took it at 10 s");
+    assert_eq!(e.state(&row.id), None, "Claude Code took it at 3 s");
     let gone = e.r.room.named("outbox.removed");
     assert_eq!(gone.last().unwrap()["why"], "sent");
     assert_eq!(e.r.returns(), 1);
@@ -258,12 +256,15 @@ fn the_next_message_goes_once_the_one_before_it_is_found() {
     let e = env();
     let first = e.r.send("job-idle", &e.picture_message());
     let second = e.r.send("job-idle", "and then the next one");
-    e.turn_at(10_000, &e.stored());
+    e.turn_at(3_000, &e.stored());
     e.postmen.postman(IDLE).pass(e.r.at(T0));
     assert_eq!(e.state(&first.id), None);
     assert_eq!(e.r.returns(), 2, "the second was typed behind the first");
     assert!(e.r.typed().contains("and then the next one"));
-    assert!(e.r.row(&second.id).is_some_and(|r| r.state != State::Queued));
+    assert!(e
+        .r
+        .row(&second.id)
+        .is_some_and(|r| r.state != State::Queued));
 }
 
 #[test]
@@ -272,7 +273,7 @@ fn a_turn_with_other_visible_words_leaves_the_row_unsure_and_the_next_one_waitin
     let first = e.r.send("job-idle", &e.picture_message());
     let second = e.r.send("job-idle", "and then the next one");
     let other_words = format!("[Image #2]why this lamp \n{}", "carry the blue lamp");
-    e.turn_at(10_000, &other_words);
+    e.turn_at(3_000, &other_words);
     let mut postman = e.postmen.postman(IDLE);
     postman.pass(e.r.at(T0));
     postman.pass(e.r.at(T0 + 45_000));
@@ -281,7 +282,11 @@ fn a_turn_with_other_visible_words_leaves_the_row_unsure_and_the_next_one_waitin
         Some((State::Unsure, Some(Why::NotFound)))
     );
     assert_eq!(e.state(&second.id), Some((State::Queued, None)));
-    assert_eq!(e.r.returns(), 1, "an unsure head holds the session's mailbox");
+    assert_eq!(
+        e.r.returns(),
+        1,
+        "an unsure head holds the session's mailbox"
+    );
     assert!(matches!(postman.pass(e.r.at(T0 + 700_000)), Next::Done));
     assert_eq!(e.state(&second.id), Some((State::Queued, None)));
 }
@@ -344,7 +349,10 @@ fn a_sending_row_with_zero_width_spaces_is_found_at_daemon_start_and_not_left_un
     append(&transcript, &absorbed(3_000, &stored));
     ops.load(T0 + 60_000);
     assert_eq!(
-        ops.store().get(&row.id).unwrap().map(|row| (row.state, row.why)),
+        ops.store()
+            .get(&row.id)
+            .unwrap()
+            .map(|row| (row.state, row.why)),
         None,
         "Claude Code took the message before the daemon stopped: Sent, not May already be in"
     );
@@ -356,7 +364,7 @@ fn the_same_picture_message_without_invisible_characters_is_sent_the_same_way() 
     let text = e.picture_message().replace(ZWSP, " ");
     let row = e.r.send("job-idle", &text);
     let stored = e.stored().replace(&WORDS.concat(), &WORDS.join(" "));
-    e.turn_at(10_000, &stored);
+    e.turn_at(3_000, &stored);
     e.postmen.postman(IDLE).pass(e.r.at(T0));
     assert_eq!(e.state(&row.id), None);
     let gone = e.r.room.named("outbox.removed");

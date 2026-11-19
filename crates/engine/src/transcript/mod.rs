@@ -16,6 +16,7 @@ pub mod scan;
 pub mod sent;
 pub mod shells;
 pub mod snapshot;
+pub mod stored;
 pub mod strict;
 pub mod subagents;
 pub mod tail;

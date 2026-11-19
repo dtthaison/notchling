@@ -146,7 +146,10 @@ fn a_maybe_sent_row_with_zero_width_spaces_has_no_bubble_once_the_transcript_sho
 #[test]
 fn a_typed_message_arrives_whatever_invisible_characters_claude_code_dropped() {
     assert!(arrived(&joined(), "carrythebluelanternacrossthebridge"));
-    assert!(arrived("\u{feff}carry the\u{2060} lantern", "carry the lantern"));
+    assert!(arrived(
+        "\u{feff}carry the\u{2060} lantern",
+        "carry the lantern"
+    ));
 }
 
 #[test]
@@ -168,10 +171,7 @@ fn a_queued_copy_in_claude_codes_queue_hides_the_in_queue_row() {
 #[test]
 fn text_that_differs_in_a_visible_character_still_does_not_arrive() {
     assert!(!arrived(&joined(), "carrythebluelampacrossthebridge"));
-    assert!(!arrived(
-        "carry the lantern",
-        "carrythelantern"
-    ));
+    assert!(!arrived("carry the lantern", "carrythelantern"));
     assert!(!arrived("carry\u{2800}lantern", "carrylantern"));
     assert!(!settled(&joined(), "carrythebluelampacrossthebridge", 0));
     assert!(!unsure_hidden(
