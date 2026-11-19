@@ -1,11 +1,15 @@
-### The cluster: the Cluster button at the foot of the Sidebar, the cluster sheet with one row per node, and the node names on remote sessions in the Sidebar.
+### Machines: the Machines button at the foot of the Sidebar, the Machines sheet (the cluster, its members and the machines that aren't in it), and the node names on remote sessions in the Sidebar.
 
 ## Button and sheet
 
-# Tooltip of the cluster button at the foot of the Sidebar.
-cluster-tip = Machines in the cluster
-# Title of the cluster sheet and name of the footer button.
-cluster-title = Cluster
+# Tooltip of the Machines button at the foot of the Sidebar.
+cluster-tip = Machines
+# Title of the Machines sheet and name of the footer button.
+cluster-title = Machines
+# Heading of the part of the Machines sheet that shows the cluster itself: its name, its state and Turn On.
+cluster-section-cluster = Cluster
+# Heading above the machines that are members of the cluster.
+cluster-section-members = In the Cluster
 cluster-done = Done
 # Shown on the sheet when the app has no connection to the daemon.
 cluster-detached = The daemon isn't running, so the cluster can't be read.
@@ -53,11 +57,12 @@ cluster-more = More
 cluster-can-be-master = Can Be Master
 cluster-acting-on = Turn Acting On
 cluster-acting-off = Turn Acting Off
-cluster-remove = Remove…
-cluster-remove-title = Remove This Node?
+# Menu item of a member; it takes the machine out of the cluster only. The machine stays in Machines.
+cluster-remove = Leave Cluster…
+cluster-remove-title = Leave the Cluster?
 # Confirmation text; $name is the node's name.
-cluster-remove-note = { $name } leaves the cluster and its sessions leave every list. It can join again with a new token.
-cluster-remove-confirm = Remove
+cluster-remove-note = { $name } leaves the cluster and its sessions leave every list. It stays in Machines and can join again with a new token.
+cluster-remove-confirm = Leave
 
 ## Readiness and sets
 
@@ -433,11 +438,11 @@ cluster-add-run-failed = { $step }: { $why }
 cluster-add-step-not-done = { $step } still isn't done: { $why }
 # Reason when the machine never showed up in the cluster after the join; $name is its name.
 cluster-add-join-timeout = { $name } didn't show up in the cluster in time. Look at the primary's Inbox, then Check Again.
-# Line on the Cluster sheet while a run goes on; $name is the machine, $step the step number, $of how many steps there are.
+# Line on the Machines sheet while a run goes on; $name is the machine, $step the step number, $of how many steps there are.
 cluster-add-running = Adding { $name }… (step { NUMBER($step) } of { NUMBER($of) })
-# Line on the Cluster sheet while a run waits for the machine to appear.
+# Line on the Machines sheet while a run waits for the machine to appear.
 cluster-add-joining = Waiting for { $name } to join…
-# Line on the Cluster sheet when a run is done; $name is the machine.
+# Line on the Machines sheet when a run is done; $name is the machine.
 cluster-add-done = { $name } is in the cluster.
 # Why a step is in the plan, one line each.
 cluster-add-why-worker-user = Notchling shouldn't run as root.
@@ -456,18 +461,22 @@ cluster-add-no-machine = Machines has no machine named { $name }.
 
 ## Add Machine sheet
 
-# Button in the cluster sheet's header that opens the Add Machine sheet.
+# Button at the foot of the Machines sheet that opens the Add Machine sheet.
 cluster-add-machine = Add Machine…
 cluster-add-title = Add Machine
 # Title of the sheet once a machine is chosen; $name is its name.
 cluster-add-title-named = Add { $name }
-cluster-add-intro = Type the machine's SSH address. Check only reads from the machine; nothing is installed until you press Install and Join.
+cluster-add-intro = Type the machine's SSH address. Add looks at the machine over SSH and saves it to Machines if it answers. Nothing is installed on it and it doesn't join the cluster; Join Cluster… does that later.
 cluster-add-address-label = SSH Address
 cluster-add-address-placeholder = user@host
-cluster-add-name-label = Name
+# Label of the name field in the Add Machine form. Left empty, the name is the first part of the host.
+cluster-add-name-label = Name (Optional)
 # Line under the address field; $target is user@host as it will be used.
 cluster-add-connects-as = Connects as { $target }
-cluster-add-check = Check
+# Button of the Add Machine form: it checks the machine over SSH, then saves it.
+cluster-add-save = Add
+# Line when a machine was saved; $name is its name.
+cluster-add-saved = { $name } is in Machines. It isn't in the cluster yet: use Join Cluster… on it when you want that.
 cluster-add-check-again = Check Again
 cluster-add-cancel = Cancel
 cluster-add-close = Close
@@ -496,13 +505,13 @@ cluster-add-acting-label = Let it run sessions and jobs
 cluster-add-choices-label = After it joins
 # Line over steps you do yourself once the machine has joined; the join doesn't wait for them.
 cluster-add-after-note = These don't stop the join. Do them yourself once it is in.
-cluster-add-running-note = You can close this. The run goes on, and the Cluster sheet shows it.
+cluster-add-running-note = You can close this. The run goes on, and the Machines sheet shows it.
 cluster-add-log-label = What it did
-# Row on the cluster sheet while a plan waits for Install and Join; $name is the machine.
+# Row on the Machines sheet while a plan waits for Install and Join; $name is the machine.
 cluster-add-row-waiting = { $name } is ready to add.
-# Row on the cluster sheet while the machine is read; $name is the machine.
+# Row on the Machines sheet while the machine is read; $name is the machine.
 cluster-add-row-checking = Checking { $name }…
-# Row on the cluster sheet when a run stopped; $name is the machine, $why the reason.
+# Row on the Machines sheet when a run stopped; $name is the machine, $why the reason.
 cluster-add-row-stopped = Adding { $name } stopped: { $why }
 cluster-add-row-show = Show
 cluster-add-row-dismiss = Dismiss
@@ -518,10 +527,29 @@ cluster-not-joined-join = Join Cluster…
 cluster-not-joined-line = { $target } · { $os }
 # Under a machine in that section when its system isn't known yet; $target is user@host.
 cluster-not-joined-line-unknown = { $target }
+# Under a machine in that section: what the last check found. Reads like "Reachable".
+cluster-machine-reach-up = Reachable
+cluster-machine-reach-down = Not reachable
+cluster-machine-reach-unsure = Can't tell if it is reachable
+cluster-machine-reach-none = Not checked yet
+# Under a machine in that section; $reach is what the check found, such as Reachable, and $age how long ago, such as 5 minutes ago.
+cluster-machine-checked = { $reach } · Checked { $age }
+# Button on a machine in that section: asks the machine again over SSH.
+cluster-machine-check = Check
+# Shown on a machine's line while its check runs.
+cluster-machine-checking = Checking…
+# Menu item of a machine that isn't in the cluster; it takes the machine out of Machines.
+cluster-machine-remove = Remove from Machines…
+cluster-machine-remove-title = Remove from Machines?
+# Confirmation text; $name is the machine's name.
+cluster-machine-remove-note = { $name } leaves Machines with its settings. Nothing is changed on the machine itself.
+cluster-machine-remove-confirm = Remove
+# Refusal when a machine that is in the cluster is picked for removal from Machines; $name is the machine's name.
+cluster-machine-remove-member = { $name } is in the cluster. Choose Leave Cluster… on it first.
 
 ## Update Machines
 
-# Line in the Cluster sheet when members run another Notchling build than this Mac; $count is how many, $names their names.
+# Line in the Machines sheet when members run another Notchling build than this Mac; $count is how many, $names their names.
 cluster-update-banner = { $count ->
     [one] { $count } machine runs another Notchling build: { $names }
    *[other] { $count } machines run another Notchling build: { $names }
@@ -552,7 +580,7 @@ cluster-update-continue = Continue
 cluster-update-password-for = Admin password for { $step }
 cluster-update-password-placeholder = Admin password
 # Second sentence of the update line in the Machines window.
-cluster-update-from-cluster = Update them from the Cluster sheet in Notchling.
+cluster-update-from-cluster = Update them from the Machines sheet in Notchling.
 
 ## Update Tools
 

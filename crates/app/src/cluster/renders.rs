@@ -14,11 +14,21 @@ pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
 pub const STANDBY_NAME: &str = "mac-mini";
 
-pub const VIEWS: [ViewSpec; 20] = [
+pub const VIEWS: [ViewSpec; 22] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
         about: "the cluster sheet: this Mac as Primary, a Standby online, a Worker offline with a version warning (made-up data)",
+    },
+    ViewSpec {
+        name: "machines-sheet",
+        size: (WIDTH, 760.0),
+        about: "the Machines sheet: the Cluster section, two members, two machines that aren't in the cluster with Check, Join Cluster and a menu, and Add Machine (made-up hosts)",
+    },
+    ViewSpec {
+        name: "machines-sheet-add",
+        size: (WIDTH, 760.0),
+        about: "the Add Machine form over the Machines sheet: user@host typed, the name filled from the host (made-up hosts)",
     },
     ViewSpec {
         name: "cluster-empty",
@@ -139,11 +149,15 @@ pub enum Shown {
     AddStopped,
     NotJoined,
     Update,
+    Machines,
+    MachinesAdd,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
     match name {
         "cluster" => Some(Shown::Full),
+        "machines-sheet" => Some(Shown::Machines),
+        "machines-sheet-add" => Some(Shown::MachinesAdd),
         "cluster-empty" => Some(Shown::Empty),
         "cluster-many" => Some(Shown::Many),
         "cluster-menu" => Some(Shown::Menu),
@@ -582,8 +596,17 @@ pub fn updating() -> Value {
     status
 }
 
+pub fn two_members() -> Value {
+    let mut status = status();
+    if let Some(members) = status["members"].as_array_mut() {
+        members.retain(|m| m["id"] != WORKER);
+    }
+    status
+}
+
 pub fn model_of(which: Shown) -> ClusterModel {
     match which {
+        Shown::Machines | Shown::MachinesAdd => ClusterModel::from_status(&two_members(), ME),
         Shown::Update => ClusterModel::from_status(&updating(), ME),
         Shown::Empty => model(false),
         Shown::Many => ClusterModel::from_status(&many(), ME),

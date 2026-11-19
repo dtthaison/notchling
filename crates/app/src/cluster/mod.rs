@@ -12,6 +12,7 @@ pub mod add_source;
 mod add_view;
 pub mod feed;
 pub mod install;
+pub mod machine_add;
 pub mod model;
 pub mod move_sheet;
 #[cfg(target_os = "macos")]
@@ -62,6 +63,8 @@ mod feed_tests;
 mod install_tests;
 #[cfg(test)]
 mod login_own_tests;
+#[cfg(test)]
+mod machine_add_tests;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]

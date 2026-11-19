@@ -416,7 +416,7 @@ fn no_invite_and_no_token_says_to_use_the_app() {
     assert!(!out.ok);
     assert!(out.message.contains(NOT_APP), "{}", out.message);
     assert!(out.message.contains("Join Cluster"), "{}", out.message);
-    assert!(out.message.contains("Cluster sheet"), "{}", out.message);
+    assert!(out.message.contains("Machines sheet"), "{}", out.message);
     assert!(!out.message.contains("nlj1."), "{}", out.message);
     assert!(join_calls(&rig).is_empty());
 }

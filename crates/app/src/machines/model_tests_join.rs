@@ -50,7 +50,7 @@ fn the_card_says_where_to_join() {
     let m1 = model.machine("m1").unwrap();
     assert_eq!(
         model.join_line(&m1),
-        Some("Join it from the Cluster sheet in Notchling"),
+        Some("Join it from the Machines sheet in Notchling"),
     );
 
     model.engine().show(

@@ -6,7 +6,7 @@ use notchling_engine::machines::step::{ClusterTokens, StepId};
 
 use super::model::MachinesModel;
 
-pub const JOIN_LINE: &str = "Join it from the Cluster sheet in Notchling";
+pub const JOIN_LINE: &str = "Join it from the Machines sheet in Notchling";
 
 pub struct ClusterAsk {
     tokens: Arc<dyn ClusterTokens>,

@@ -78,6 +78,18 @@ fn render_cluster_not_joined() {
 
 #[test]
 #[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines() {
+    render("machines-sheet");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_add() {
+    render("machines-sheet-add");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
 fn render_cluster_update() {
     render("cluster-update");
 }
@@ -91,6 +103,8 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         "cluster-add-stopped",
         "cluster-not-joined",
         "cluster-update",
+        "machines-sheet",
+        "machines-sheet-add",
     ] {
         assert!(views::spec(name).is_some(), "{name}");
     }

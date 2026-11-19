@@ -1,7 +1,29 @@
 use notchling_engine::machines::registry::{Machine, MachineOs};
 use notchling_engine::machines::step::{CheckResult, StepId};
+use notchling_locale as t;
 
 use super::model::ClusterModel;
+use super::replication::ago;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reach {
+    #[default]
+    Unchecked,
+    Up,
+    Down,
+    Unsure,
+}
+
+impl Reach {
+    pub fn of(result: Option<&CheckResult>) -> Reach {
+        match result {
+            None => Reach::Unchecked,
+            Some(r) if r.state.is_pass() => Reach::Up,
+            Some(r) if r.state.is_fail() => Reach::Down,
+            Some(_) => Reach::Unsure,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NotJoined {
@@ -10,6 +32,8 @@ pub struct NotJoined {
     pub user: String,
     pub os: Option<MachineOs>,
     pub node_on: bool,
+    pub reach: Reach,
+    pub checked_s: Option<i64>,
 }
 
 pub fn not_joined(
@@ -37,8 +61,40 @@ pub fn not_joined(
             user: m.user.clone(),
             os: m.os,
             node_on: m.node.is_some(),
+            reach: Reach::Unchecked,
+            checked_s: None,
         })
         .collect()
+}
+
+pub fn annotated(
+    list: Vec<NotJoined>,
+    reach: &dyn Fn(&str) -> Option<CheckResult>,
+    checked: &dyn Fn(&str) -> Option<i64>,
+) -> Vec<NotJoined> {
+    list.into_iter()
+        .map(|m| NotJoined {
+            reach: Reach::of(reach(&m.name).as_ref()),
+            checked_s: checked(&m.name),
+            ..m
+        })
+        .collect()
+}
+
+pub fn checked_line(machine: &NotJoined, now_s: i64) -> String {
+    let reach = match machine.reach {
+        Reach::Unchecked => return t::cluster::machine_reach_none().to_owned(),
+        Reach::Up => t::cluster::machine_reach_up(),
+        Reach::Down => t::cluster::machine_reach_down(),
+        Reach::Unsure => t::cluster::machine_reach_unsure(),
+    };
+    match machine.checked_s {
+        Some(at) => {
+            let age = u64::try_from((now_s - at).max(0)).unwrap_or(0);
+            t::cluster::machine_checked(reach, &ago(age))
+        }
+        None => reach.to_owned(),
+    }
 }
 
 pub fn joined_result(

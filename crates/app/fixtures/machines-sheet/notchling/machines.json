@@ -1,0 +1,23 @@
+{
+  "machines": [
+    {
+      "admin": "sudo",
+      "claudeSecret": "claude-worker",
+      "fileVault": true,
+      "host": "app-1.example",
+      "name": "app-1",
+      "os": "macos",
+      "user": "deploy"
+    },
+    {
+      "admin": "root-ssh",
+      "claudeSecret": "claude-worker",
+      "fileVault": false,
+      "host": "build-2.example",
+      "name": "build-2",
+      "os": "linux",
+      "user": "ci"
+    }
+  ],
+  "version": 3
+}

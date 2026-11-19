@@ -63,6 +63,8 @@ pub struct ClusterSheetView {
     pub(super) now: Option<i64>,
     pub(super) names: Names,
     pub(super) removing: Option<String>,
+    pub(super) removing_machine: Option<String>,
+    pub(super) checking: BTreeSet<String>,
     pub(super) installing: Option<InstallAsk>,
     pub(super) add: AddUi,
     pub(super) update: UpdateUi,
@@ -169,6 +171,8 @@ impl ClusterSheetView {
             now: None,
             names: Names::new(),
             removing: None,
+            removing_machine: None,
+            checking: BTreeSet::new(),
             installing: None,
             add: AddUi::default(),
             update: UpdateUi::new(updates),
@@ -488,15 +492,40 @@ impl ClusterSheetView {
                 .on_click(cx.listener(|this, _, _, cx| this.copy_token(cx))),
             );
         }
-        if model.cluster_name().is_some() && !model.can_turn_on() {
-            row = row.child(self.add_machine_button(a, cx));
-        }
         div()
             .flex()
             .flex_col()
             .gap(px(SPACE[0]))
+            .child(self.section_label(t::cluster::section_cluster(), a))
             .child(row)
             .children(hint.map(|hint| label(hint, TypeRole::Meta, Ink::TextMuted, a)))
+    }
+
+    fn section_label(&self, text: &str, a: Appearance) -> Div {
+        div().child(label(text, TypeRole::Label, Ink::TextFaint, a))
+    }
+
+    fn members_block(
+        &mut self,
+        model: &ClusterModel,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let tools = self.tool_view(model);
+        let rows = tools.rows(model);
+        let mut block = div().flex().flex_col().gap(px(SPACE[1]));
+        if !rows.is_empty() {
+            block = block.child(self.section_label(t::cluster::section_members(), a));
+        }
+        for row in rows {
+            block = block.child(self.node_row(&row, &tools, a, cx));
+        }
+        block
+    }
+
+    fn add_row(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
+        self.feed.add_source().parts()?;
+        Some(div().flex().child(self.add_machine_button(a, cx)))
     }
 
     fn state(&self) -> PartState {
@@ -623,13 +652,26 @@ impl Render for ClusterSheetView {
             .flex()
             .flex_col()
             .gap(px(SPACE[1] + SPACE[0] / 2.0));
+        let section = |this: &Self, text: Div| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(SPACE[0]))
+                .child(this.section_label(t::cluster::section_cluster(), a))
+                .child(text)
+        };
+        let mut machines = false;
         if !self.feed.is_live() && !model.is_loaded() {
-            body = body.child(label(
-                t::cluster::detached(),
-                TypeRole::Body,
-                Ink::TextMuted,
-                a,
+            body = body.child(section(
+                self,
+                div().child(label(
+                    t::cluster::detached(),
+                    TypeRole::Body,
+                    Ink::TextMuted,
+                    a,
+                )),
             ));
+            machines = true;
         } else if !model.is_loaded() {
             body = body.child(label(
                 t::cluster::loading(),
@@ -645,8 +687,10 @@ impl Render for ClusterSheetView {
             let name_focused = self.name.read(cx).is_focused(window);
             let token_focused = self.token.read(cx).is_focused(window);
             body = body
+                .child(self.section_label(t::cluster::section_cluster(), a))
                 .child(self.create_form(name_focused, a, cx))
                 .child(self.join_form(token_focused, a, cx));
+            machines = true;
         } else {
             body = body.child(self.connection(&model, a, cx));
             body = body.children(self.move_running_line(&model, a, cx));
@@ -654,12 +698,14 @@ impl Render for ClusterSheetView {
             body = body.children(self.add_rows(a, cx));
             body = body.children(self.update_banner_row(&model, a, cx));
             body = body.children(self.waiting_block(&model, a, cx));
-            let tools = self.tool_view(&model);
-            for row in tools.rows(&model) {
-                body = body.child(self.node_row(&row, &tools, a, cx));
-            }
+            body = body.child(self.members_block(&model, a, cx));
+            machines = true;
+        }
+        if machines {
             body = body.children(self.not_joined_block(&model, a, cx));
-            body = body.children(self.copies_block(&model, a, cx));
+            if model.accepts_machines() {
+                body = body.children(self.copies_block(&model, a, cx));
+            }
         }
         if let Some((text, error)) = &self.note {
             body = body.child(label(
@@ -668,6 +714,9 @@ impl Render for ClusterSheetView {
                 if *error { Ink::Needs } else { Ink::TextMuted },
                 a,
             ));
+        }
+        if machines {
+            body = body.children(self.add_row(a, cx));
         }
         let done = button(
             "cluster-done",
@@ -678,6 +727,7 @@ impl Render for ClusterSheetView {
         )
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         let alert = self.remove_alert(&model, a, cx);
+        let machine_alert = self.machine_remove_alert(a, cx);
         let install = self.install_alert(a, cx);
         let take_back = self.take_back_alert(&model, a, cx);
         let continuing = self.continue_alert(&model, a, cx);
@@ -732,6 +782,7 @@ impl Render for ClusterSheetView {
             .child(content)
             .children(footer)
             .children(alert)
+            .children(machine_alert)
             .children(install)
             .children(take_back)
             .children(continuing)

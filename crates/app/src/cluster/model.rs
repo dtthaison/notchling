@@ -642,6 +642,10 @@ impl ClusterModel {
         self.can_create()
     }
 
+    pub fn accepts_machines(&self) -> bool {
+        self.loaded && self.cluster.is_some()
+    }
+
     pub fn is_joining(&self) -> bool {
         self.joining.is_some()
     }

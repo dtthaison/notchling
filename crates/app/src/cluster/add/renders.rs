@@ -1,5 +1,5 @@
 use notchling_engine::machines::node_updates::{UpdateRow, UpdateState};
-use notchling_engine::machines::step::StepId;
+use notchling_engine::machines::step::{CheckResult, StepId};
 
 use crate::cluster::add::{Phase, Stop};
 use crate::cluster::add_parts::AddParts;
@@ -8,7 +8,7 @@ use crate::cluster::add_runs::{AddRuns, Snap};
 use crate::cluster::add_source::{AddSource, Offer};
 use crate::cluster::feed::ClusterFeed;
 use crate::cluster::model::ClusterModel;
-use crate::cluster::renders::Shown;
+use crate::cluster::renders::{Shown, RENDER_NOW};
 use crate::cluster::view::ClusterSheetView;
 use crate::machines::data::Setup;
 
@@ -24,6 +24,8 @@ pub(in crate::cluster) fn adds(which: Shown) -> bool {
             | Shown::NotJoined
             | Shown::AddStopped
             | Shown::Update
+            | Shown::Machines
+            | Shown::MachinesAdd
     )
 }
 
@@ -55,6 +57,25 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/machines-node");
         let parts = AddParts::live(&Setup::for_render(Some(&dir)));
         let source = AddSource::over(parts).with_offer(offer());
+        return ClusterFeed::fixed_adding(model, source, AddRuns::fixed(Vec::new()));
+    }
+    if matches!(which, Shown::Machines | Shown::MachinesAdd) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/machines-sheet");
+        let parts = AddParts::live(&Setup::for_render(Some(&dir)));
+        parts.engine.show(
+            "app-1",
+            StepId::REACHABLE,
+            CheckResult::pass("answers over SSH"),
+        );
+        parts.engine.show(
+            "build-2",
+            StepId::REACHABLE,
+            CheckResult::fail("Connection timed out"),
+        );
+        let now_s = RENDER_NOW / 1000;
+        let source = AddSource::over(parts)
+            .with_checked("app-1", now_s - 120)
+            .with_checked("build-2", now_s - 3 * 3600);
         return ClusterFeed::fixed_adding(model, source, AddRuns::fixed(Vec::new()));
     }
     let parts = AddParts::live(&Setup::for_render(None));
@@ -199,11 +220,19 @@ impl ClusterSheetView {
         }
         let parts = self.feed.add_source().parts();
         let flow = match which {
-            Shown::Add => None,
+            Shown::Add | Shown::MachinesAdd => None,
             Shown::AddPlan | Shown::AddRunning | Shown::AddStopped => Some("m2".to_owned()),
             _ => return,
         };
         let sheet = crate::cluster::add_view::AddSheet::new(parts, flow, cx);
+        if which == Shown::MachinesAdd {
+            sheet
+                .address
+                .update(cx, |editor, cx| editor.set_text("deploy@app-3.example", cx));
+            sheet
+                .name
+                .update(cx, |editor, cx| editor.set_text("app-3", cx));
+        }
         if which == Shown::Add {
             let typed = format!("{USER}@{HOST}");
             sheet

@@ -283,7 +283,7 @@ fn join_display() -> String {
     )
 }
 
-const ASK_APP: &str = "Use Add Machine or Join Cluster in the app's Cluster sheet.";
+const ASK_APP: &str = "Use Add Machine or Join Cluster in the app's Machines sheet.";
 
 fn is_me(text: &str) -> bool {
     text.len() == 16
