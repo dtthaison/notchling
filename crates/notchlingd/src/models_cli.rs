@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub const USAGE: &str = "Usage: notchling models [check] [--json]\n       notchling models update [--json] [--no-skills]";
+pub const USAGE: &str = "Usage: notchling models [check] [--json]\n       notchling models update [--json] [--no-skills] [--force]";
 
 pub const DONE: i32 = 0;
 pub const REFUSED: i32 = 1;
@@ -17,6 +17,7 @@ pub struct Args {
     pub update: bool,
     pub json: bool,
     pub skills: bool,
+    pub force: bool,
     pub socket: Option<PathBuf>,
 }
 
@@ -25,6 +26,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         update: false,
         json: false,
         skills: true,
+        force: false,
         socket: None,
     };
     let mut words: Vec<&str> = Vec::new();
@@ -33,6 +35,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--no-skills" => parsed.skills = false,
+            "--force" => parsed.force = true,
             "--socket" => match rest.next() {
                 Some(path) if !path.is_empty() => parsed.socket = Some(PathBuf::from(path)),
                 _ => return Err(format!("--socket needs a value.\n{USAGE}")),
@@ -56,7 +59,11 @@ pub fn request(args: &Args) -> (&'static str, Value) {
     } else {
         ops::MODELS_CHECK
     };
-    (op, json!({ "skills": args.skills }))
+    let mut body = json!({ "skills": args.skills });
+    if args.force {
+        body["force"] = json!(true);
+    }
+    (op, body)
 }
 
 pub fn code_of(e: &ClientError) -> i32 {

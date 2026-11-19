@@ -171,7 +171,11 @@ pub fn resolve(
     roles: &ToolRoles,
     live: &Live,
 ) -> (Option<String>, Option<String>) {
-    let here = |m: &str| live.models.iter().any(|x| x == m);
+    let here = |m: &str| {
+        live.models
+            .iter()
+            .any(|x| x == m || agy_pick::is_single_level_of(x, m))
+    };
     let excluded = |m: &str| roles.excluded(m, effort, role);
     let usable = |m: &str| here(m) && !excluded(m);
     let hint = live

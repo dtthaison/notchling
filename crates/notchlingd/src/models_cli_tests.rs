@@ -55,3 +55,12 @@ fn exit_codes_and_messages_follow_the_other_commands() {
     assert!(message_of(api(ErrorCode::UnknownOp, "x")).contains("no models command yet"));
     assert_eq!(message_of(api(ErrorCode::Failed, "boom")), "boom");
 }
+
+#[test]
+fn force_is_sent_only_when_asked_for() {
+    let plain = parse(&words(&["update"])).unwrap();
+    assert_eq!(request(&plain).1, json!({"skills": true}));
+    let forced = parse(&words(&["update", "--force"])).unwrap();
+    assert!(forced.force);
+    assert_eq!(request(&forced).1, json!({"skills": true, "force": true}));
+}

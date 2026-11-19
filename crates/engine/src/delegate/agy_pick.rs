@@ -9,6 +9,24 @@ pub struct Listed {
     pub whole: String,
 }
 
+impl Listed {
+    pub fn key(&self) -> &str {
+        if self.levels.len() == 1 {
+            &self.whole
+        } else {
+            &self.model
+        }
+    }
+
+    pub fn offered_levels(&self) -> &[String] {
+        if self.levels.len() == 1 {
+            &[]
+        } else {
+            &self.levels
+        }
+    }
+}
+
 pub fn accepted(model: &str, effort: Option<&str>, offered: &[String]) -> bool {
     pick(Some(model), effort, offered)
         .0
@@ -66,7 +84,7 @@ pub fn entries(listing: &str) -> Vec<Listed> {
             continue;
         };
         let label = fields.find(|f| !f.is_empty()).map(str::trim);
-        if id.contains(' ') || NOT_OFFERED.iter().any(|w| id.ends_with(&format!("-{w}"))) {
+        if !id_shaped(id) || NOT_OFFERED.iter().any(|w| id.ends_with(&format!("-{w}"))) {
             continue;
         }
         let mut model = id.to_string();
@@ -105,6 +123,22 @@ pub fn entries(listing: &str) -> Vec<Listed> {
             .sort_by_key(|l| LEVELS.iter().position(|x| x == l));
     }
     out
+}
+
+pub fn is_single_level_of(listed: &str, stem: &str) -> bool {
+    listed
+        .strip_prefix(stem)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|level| LEVELS.contains(&level))
+}
+
+pub fn id_shaped(id: &str) -> bool {
+    let mut chars = id.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
 fn strip_level_word(label: &str) -> &str {
@@ -231,5 +265,35 @@ mod tests {
         );
         assert!(offers("gemini-pro-orchestrator-neon", "xhigh", &groups));
         assert!(offers("unknown", "xhigh", &groups));
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    #[test]
+    fn only_id_shaped_lines_are_models() {
+        let listing = "Unauthorized\nError: not signed in\nFetching available models...\n<html>\n-bad\ngemini-4-argon-high\tA\ngemini-4-argon-medium\tA\ngpt-oss-120b-medium\tG\n";
+        let ids: Vec<String> = entries(listing).into_iter().map(|e| e.model).collect();
+        assert_eq!(ids, ["gemini-4-argon", "gpt-oss-120b"]);
+        assert!(id_shaped("gemini-3.8-flash"));
+        assert!(id_shaped("a_b"));
+        assert!(!id_shaped(""));
+        assert!(!id_shaped("Gemini"));
+        assert!(!id_shaped("-x"));
+        assert!(!id_shaped("a b"));
+    }
+
+    #[test]
+    fn a_single_level_model_is_keyed_by_the_one_id_agy_acp_offers() {
+        let listing = "gpt-oss-120b-medium\tG\ngemini-4-argon-medium\tM\ngemini-4-argon-high\tH\n";
+        let listed = entries(listing);
+        let keys: Vec<&str> = listed.iter().map(Listed::key).collect();
+        assert_eq!(keys, ["gpt-oss-120b-medium", "gemini-4-argon"]);
+        assert!(listed[0].offered_levels().is_empty());
+        assert_eq!(listed[1].offered_levels(), ["medium", "high"]);
+        assert!(is_single_level_of("gpt-oss-120b-medium", "gpt-oss-120b"));
+        assert!(!is_single_level_of("gemini-4-argon-pro", "gemini-4-argon"));
     }
 }

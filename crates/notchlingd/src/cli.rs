@@ -108,7 +108,7 @@ pub fn usage() -> &'static str {
      \u{20}                                           the same on another machine of your cluster (read-only)\n  \
      notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers, with what each is for\n  \
      notchling delegate-models --for <role>  the tool, model and effort for review, review-final, review-secrets or spec-check\n  \
-     notchling models [check|update] [--json]  read each tool's models and efforts; update writes Notchling's copy and skills\n  \
+     notchling models [check|update] [--json]  read each tool's models and efforts; update writes Notchling's copy (--force accepts a list that shrank)\n  \
      notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
      notchling secret <name>[,<name>…] -- <command> [args…]\n  \
      \u{20}                                           run a command with secrets, its output hidden\n  \

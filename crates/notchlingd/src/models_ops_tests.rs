@@ -8,7 +8,7 @@ use notchling_engine::accounts::fake::PanicHttp;
 use notchling_engine::catalog::live_cache::LiveCache;
 use notchling_engine::catalog::roles::Roles;
 use notchling_engine::catalog::{Catalog, LiveModel, Tool};
-use notchling_local_api::{ops, ErrorCode, OpSpec};
+use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -105,6 +105,21 @@ fn rig(tag: &str, install_on: bool) -> Rig {
 
 fn call(rig: &Rig, op: &str, args: Value) -> Value {
     rig.models.call(&app(), op, &args).unwrap()
+}
+
+fn agent() -> Caller {
+    Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Cli,
+        peer: None,
+        pid: None,
+    }
+}
+
+fn age(path: &std::path::Path, secs: u64) {
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs))
+        .unwrap();
 }
 
 fn part<'a>(report: &'a Value, tool: &str) -> &'a Value {
@@ -204,7 +219,7 @@ fn a_check_reports_the_difference_and_writes_nothing() {
 #[test]
 fn an_update_writes_the_lists_so_xhigh_is_offered_only_where_listed() {
     let rig = rig("update", true);
-    std::thread::sleep(std::time::Duration::from_millis(30));
+    age(&rig.tmp.path("codex/models_cache.json"), 3_600);
     let report = call(&rig, ops::MODELS_UPDATE, json!({}));
     assert_eq!(report["applied"], true);
     assert_eq!(part(&report, "antigravity")["written"], true);
@@ -342,4 +357,224 @@ fn the_tools_are_only_asked_for_their_listings() {
     call(&rig, ops::MODELS_UPDATE, json!({}));
     let calls = rig.tools.calls.lock().unwrap().clone();
     assert_eq!(calls, ["/fake/codex debug models", "/fake/agy models"]);
+}
+
+#[test]
+fn an_agent_caller_never_rewrites_skills_but_a_check_says_what_would_change() {
+    let rig = rig("agent-skills", true);
+    let report = rig
+        .models
+        .call(&agent(), ops::MODELS_UPDATE, &json!({}))
+        .unwrap();
+    assert_eq!(
+        strings(&report["skills"]),
+        ["skills not rewritten (needs the app)"]
+    );
+    assert!(skill_text(&rig, ".claude", "notchling-models").is_none());
+    assert!(skill_text(&rig, ".claude", "notchling-delegate").is_none());
+    assert_eq!(
+        part(&report, "antigravity")["written"],
+        true,
+        "the lists are still written"
+    );
+
+    let check = rig
+        .models
+        .call(&agent(), ops::MODELS_CHECK, &json!({}))
+        .unwrap();
+    assert!(strings(&check["skills"]).contains(&"notchling-models (claude): would write"));
+}
+
+fn five_agy_models(rig: &Rig) {
+    let models: Vec<LiveModel> = ["m-a", "m-b", "m-c", "m-d", "m-e"]
+        .iter()
+        .map(|id| LiveModel {
+            id: (*id).into(),
+            ..LiveModel::default()
+        })
+        .collect();
+    rig.catalog.store_live(Tool::Antigravity, &models);
+}
+
+#[test]
+fn a_listing_that_drops_most_of_the_old_list_is_refused_unless_forced() {
+    let rig = rig("shrink", true);
+    five_agy_models(&rig);
+    *rig.tools.agy.lock().unwrap() = Some("gemini-4-neon-high\tN\n".into());
+    let report = call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+    let agy = part(&report, "antigravity");
+    assert_eq!(agy["read"], false);
+    assert!(agy["note"].as_str().unwrap().contains("--force"));
+    assert_eq!(agy["written"], false);
+    assert_eq!(rig.catalog.live_models(Tool::Antigravity).len(), 5);
+
+    let forced = call(
+        &rig,
+        ops::MODELS_UPDATE,
+        json!({"skills": false, "force": true}),
+    );
+    assert_eq!(part(&forced, "antigravity")["read"], true);
+    assert_eq!(rig.catalog.live_models(Tool::Antigravity).len(), 1);
+    assert!(rig
+        .models
+        .call(&app(), ops::MODELS_CHECK, &json!({"force": 3}))
+        .is_err());
+}
+
+#[test]
+fn a_stray_line_is_not_a_model_and_cannot_replace_the_cache() {
+    let rig = rig("stray", true);
+    for text in [
+        "Unauthorized\n",
+        "Error: please log in\n",
+        "not signed in\n",
+    ] {
+        *rig.tools.agy.lock().unwrap() = Some(text.into());
+        let report = call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+        let agy = part(&report, "antigravity");
+        assert_eq!(agy["read"], false, "{text}");
+        assert!(
+            agy["note"].as_str().unwrap().contains("no models"),
+            "{text}"
+        );
+        assert_eq!(rig.catalog.live_models(Tool::Antigravity), old_agy());
+    }
+}
+
+#[test]
+fn codex_is_not_asked_while_a_codex_session_is_live() {
+    let mut rig = rig("busy", true);
+    let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flag = busy.clone();
+    rig.models = ModelsOps::new(rig.catalog.clone(), None, rig.tools.sources()).with_codex_busy(
+        Arc::new(move || flag.load(std::sync::atomic::Ordering::SeqCst)),
+    );
+    let report = call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+    let codex = part(&report, "codex");
+    assert_eq!(codex["read"], false);
+    assert!(codex["note"]
+        .as_str()
+        .unwrap()
+        .contains("Codex session is running"));
+    assert!(!rig.tmp.path("state/codex-models.json").exists());
+    let calls = rig.tools.calls.lock().unwrap().clone();
+    assert_eq!(calls, ["/fake/agy models"], "codex was never run");
+
+    busy.store(false, std::sync::atomic::Ordering::SeqCst);
+    let report = call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+    assert_eq!(part(&report, "codex")["read"], true);
+}
+
+#[test]
+fn the_tools_are_found_again_on_every_update() {
+    let rig = rig("discover", true);
+    let found = Arc::new(Mutex::new(0usize));
+    let (count, sources) = (found.clone(), rig.tools.sources());
+    let models = ModelsOps::new(
+        rig.catalog.clone(),
+        None,
+        Sources {
+            codex: None,
+            agy: None,
+            capture: Arc::new(|_, _| None),
+        },
+    )
+    .with_discovery(Arc::new(move || {
+        *count.lock().unwrap() += 1;
+        sources.clone()
+    }));
+    models
+        .call(&app(), ops::MODELS_CHECK, &json!({"skills": false}))
+        .unwrap();
+    let report = models
+        .call(&app(), ops::MODELS_CHECK, &json!({"skills": false}))
+        .unwrap();
+    assert_eq!(*found.lock().unwrap(), 2);
+    assert_eq!(part(&report, "antigravity")["read"], true);
+}
+
+#[test]
+fn the_first_read_of_a_list_says_so_instead_of_calling_everything_new() {
+    let rig = rig("first", true);
+    let fresh = TempDir::new("first-live");
+    let catalog = Arc::new(
+        CatalogService::new(
+            Catalog::built_in(),
+            LiveCache::new(fresh.path("state/live-models.json")),
+            rig.tmp.path("codex"),
+            None,
+            Arc::new(PanicHttp),
+        )
+        .with_codex_snapshot(fresh.path("state/codex-models.json")),
+    );
+    let models = ModelsOps::new(catalog.clone(), None, rig.tools.sources());
+    let report = models
+        .call(&app(), ops::MODELS_UPDATE, &json!({"skills": false}))
+        .unwrap();
+    let agy = part(&report, "antigravity");
+    assert_eq!(agy["first"], true);
+    assert_eq!(agy["added"], json!([]));
+    assert_eq!(agy["written"], true);
+    assert_eq!(catalog.live_models(Tool::Antigravity).len(), 4);
+    let text = report["text"].as_str().unwrap();
+    assert!(
+        text.contains("first read: nothing to compare with"),
+        "{text}"
+    );
+    assert_eq!(report["changed"], true, "codex differs from the old cache");
+    let second = models
+        .call(&app(), ops::MODELS_UPDATE, &json!({"skills": false}))
+        .unwrap();
+    assert_eq!(part(&second, "antigravity")["first"], false);
+}
+
+#[test]
+fn a_changed_codex_upgrade_hint_is_written_though_no_model_changed() {
+    let rig = rig("hints", true);
+    age(&rig.tmp.path("codex/models_cache.json"), 3_600);
+    call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+    let plain = std::fs::read_to_string(rig.tmp.path("state/codex-models.json")).unwrap();
+    assert!(!plain.contains("upgrade"));
+    *rig.tools.codex.lock().unwrap() = Some(NEW_CODEX.replace(
+        r#"{"slug":"gpt-6-astra","#,
+        r#"{"slug":"gpt-6-astra","upgrade":{"model":"gpt-6.2-astra"},"#,
+    ));
+    let report = call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+    let codex = part(&report, "codex");
+    assert_eq!(codex["written"], true);
+    assert_eq!(codex["added"], json!([]));
+    let kept = std::fs::read_to_string(rig.tmp.path("state/codex-models.json")).unwrap();
+    assert!(kept.contains("gpt-6.2-astra") && kept.contains("upgrade"));
+    let again = call(&rig, ops::MODELS_UPDATE, json!({"skills": false}));
+    assert_eq!(part(&again, "codex")["written"], false);
+}
+
+#[test]
+fn the_claude_path_uses_the_fake_token_at_anthropics_host_and_refuses_an_empty_list() {
+    let (service, http, _keep) = crate::catalog_ops_tests::claude_catalog(
+        "models-claude",
+        r#"{"data":[{"id":"claude-test-1","display_name":"Test One"}]}"#,
+    );
+    let rig = rig("claude", true);
+    let models = ModelsOps::new(service.clone(), None, rig.tools.sources());
+    let report = models
+        .call(&app(), ops::MODELS_UPDATE, &json!({"skills": false}))
+        .unwrap();
+    let claude = part(&report, "claude");
+    assert_eq!(claude["read"], true);
+    assert_eq!(claude["first"], true);
+    assert_eq!(claude["written"], true);
+    assert_eq!(service.live_models(Tool::Claude)[0].id, "claude-test-1");
+    for (url, token) in http.seen() {
+        if url.contains("/v1/models") {
+            assert!(url.starts_with("https://api.anthropic.com/"), "{url}");
+            assert!(token.is_some());
+        }
+    }
+    let again = models
+        .call(&app(), ops::MODELS_CHECK, &json!({"skills": false}))
+        .unwrap();
+    let note = part(&again, "claude")["note"].as_str().unwrap().to_string();
+    assert!(note.contains("less than a minute"), "{note}");
+    assert_eq!(service.live_models(Tool::Claude)[0].id, "claude-test-1");
 }

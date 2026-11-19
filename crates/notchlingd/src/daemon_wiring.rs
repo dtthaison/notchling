@@ -798,6 +798,7 @@ impl Wired {
             layout,
             catalog.clone(),
             install.clone(),
+            crate::models_ops::codex_session_live(every.clone()),
         ));
         Wired {
             acting,

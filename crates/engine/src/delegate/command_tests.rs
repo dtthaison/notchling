@@ -568,3 +568,91 @@ fn delegate_models_shows_xhigh_only_for_the_models_that_list_it() {
         serde_json::json!(["low", "high", "xhigh"])
     );
 }
+
+mod said_out {
+    use super::*;
+    use crate::delegate::quota::{self, Source};
+
+    const NOW: f64 = 1_794_400_000.0;
+    const LINE: &str = "\u{26a0} Individual quota reached. Please upgrade your subscription\u{2026} Resets in 134h28m59s";
+
+    fn clock() -> f64 {
+        NOW
+    }
+
+    fn quota_agent() -> crate::tools::acp::fake::Responder {
+        Arc::new(|m: &Value, h: &crate::tools::acp::fake::FakeHandle| {
+            let id = m["id"].clone();
+            let reply =
+                |result: Value| h.push(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+            let config = json!([
+                {"id": "model", "name": "Model", "type": "select", "currentValue": "gemini-4-hydrogen",
+                 "options": [{"value": "gemini-4-hydrogen", "name": "H"}]},
+                {"id": "thought_level", "name": "Thinking", "type": "select", "currentValue": "medium",
+                 "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+            ]);
+            match m.get("method").and_then(Value::as_str) {
+                Some("initialize") => reply(json!({})),
+                Some("session/new") => reply(json!({"sessionId": "s1", "configOptions": config})),
+                Some("session/set_config_option") => reply(json!({})),
+                Some("session/prompt") => {
+                    h.push(
+                        &json!({"jsonrpc": "2.0", "method": "session/update", "params": {"update":
+                        {"sessionUpdate": "agent_message_chunk", "content": {"text": LINE}}}}),
+                    );
+                    reply(json!({"stopReason": "end_turn"}));
+                }
+                _ => {}
+            }
+        })
+    }
+
+    #[test]
+    fn an_antigravity_quota_line_fails_the_job_and_marks_the_pool_used_up() {
+        let mut rig = rig(AcpFake::with_responder(quota_agent()));
+        rig.deps.quota = Some(Source {
+            dir: rig.root.join("quota"),
+            clock,
+        });
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-hydrogen", "--", "review", "it"],
+            None,
+        );
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.out.contains("failed in "), "{}", ran.out);
+        assert!(
+            ran.out.contains(
+                "Error: gemini-4-hydrogen can't run now. Gemini Models: individual quota used up, resets in 5d 14h."
+            ),
+            "{}",
+            ran.out
+        );
+        assert!(!ran.out.contains(": done"), "{}", ran.out);
+        let saved = quota::load(&rig.root.join("quota"), Tool::Agy).expect("the pool is marked");
+        assert!(matches!(
+            quota::verdict(Some(&saved), Tool::Agy, "gemini-4-hydrogen", NOW),
+            quota::Verdict::Out(_)
+        ));
+
+        let again = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-hydrogen", "--", "review", "it"],
+            None,
+        );
+        assert_eq!(again.code, 1);
+        assert_eq!(
+            rig.agy.spawned().len(),
+            1,
+            "the second call never started agy"
+        );
+    }
+
+    #[test]
+    fn json_and_a_run_without_a_quota_folder_still_fail() {
+        let rig = rig(AcpFake::with_responder(quota_agent()));
+        let ran = delegate(&rig, &["agy", "--json", "--", "review", "it"], None);
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.out.contains("can't run now"), "{}", ran.out);
+    }
+}

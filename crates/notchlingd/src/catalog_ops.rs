@@ -23,6 +23,8 @@ pub const RETRY_SECS: f64 = 900.0;
 
 pub const REFUSED_RETRY_SECS: f64 = 86_400.0;
 
+pub const MANUAL_MIN_SECS: f64 = 60.0;
+
 pub type Spawner = Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -59,6 +61,7 @@ struct Inner {
     fetching: AtomicBool,
     last_try: Mutex<Option<f64>>,
     refused: Mutex<Option<(f64, [u8; 32])>>,
+    last_manual: Mutex<Option<f64>>,
     log: Box<dyn Fn(&str) + Send + Sync>,
     logged: AtomicBool,
 }
@@ -84,22 +87,10 @@ impl Inner {
         let Ok(Some(token)) = store.live_token() else {
             return;
         };
-        let fingerprint = claude_live::token_fingerprint(&token);
-        let now = (self.now)();
-        {
-            let refused = lock(&self.refused);
-            if refused.is_some_and(|(at, seen)| {
-                seen == fingerprint && now >= at && now - at < REFUSED_RETRY_SECS
-            }) {
-                return;
-            }
+        if self.refused_now(&token) {
+            return;
         }
-        let answer = claude_live::fetch(&*self.http, &token);
-        *lock(&self.refused) = match &answer {
-            Err(why) if why.refused() => Some((now, fingerprint)),
-            _ => None,
-        };
-        match answer {
+        match self.ask_claude(&token) {
             Ok(models) => {
                 self.cache.put(Tool::Claude, (self.now)(), &models);
                 self.announce(Tool::Claude);
@@ -107,11 +98,38 @@ impl Inner {
             Err(why) => {
                 if !self.logged.swap(true, Ordering::SeqCst) {
                     (self.log)(&format!(
-                        "notchling: Claude's model list wasn't read ({why}); the pickers show \
-                         the cached list, Claude Code's own or the data file's"
+                        "notchling: Claude's model list wasn't read ({why}); the pickers keep \
+                         the list they have: the last one read, else Claude Code's own, else \
+                         the data file's"
                     ));
                 }
             }
+        }
+    }
+
+    fn refused_now(&self, token: &notchling_engine::accounts::Secret) -> bool {
+        let fingerprint = claude_live::token_fingerprint(token);
+        let now = (self.now)();
+        lock(&self.refused).is_some_and(|(at, seen)| {
+            seen == fingerprint && now >= at && now - at < REFUSED_RETRY_SECS
+        })
+    }
+
+    fn ask_claude(
+        &self,
+        token: &notchling_engine::accounts::Secret,
+    ) -> Result<Vec<LiveModel>, String> {
+        let fingerprint = claude_live::token_fingerprint(token);
+        let now = (self.now)();
+        let answer = claude_live::fetch(&*self.http, token);
+        *lock(&self.refused) = match &answer {
+            Err(why) if why.refused() => Some((now, fingerprint)),
+            _ => None,
+        };
+        match answer {
+            Ok(models) if models.is_empty() => Err("Anthropic listed no models".into()),
+            Ok(models) => Ok(models),
+            Err(why) => Err(why.to_string()),
         }
     }
 }
@@ -182,6 +200,7 @@ impl CatalogService {
                 fetching: AtomicBool::new(false),
                 last_try: Mutex::new(None),
                 refused: Mutex::new(None),
+                last_manual: Mutex::new(None),
                 log: Box::new(|line| eprintln!("{line}")),
                 logged: AtomicBool::new(false),
             }),
@@ -272,7 +291,19 @@ impl CatalogService {
             .live_token()
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "no Claude Code login is live".to_string())?;
-        claude_live::fetch(&*self.inner.http, &token).map_err(|e| e.to_string())
+        let inner = &self.inner;
+        if inner.refused_now(&token) {
+            return Err("Anthropic refused this login a short while ago; it isn't asked again until tomorrow".into());
+        }
+        let now = (inner.now)();
+        {
+            let mut last = lock(&inner.last_manual);
+            if last.is_some_and(|at| now >= at && now - at < MANUAL_MIN_SECS) {
+                return Err("Anthropic was asked less than a minute ago".into());
+            }
+            *last = Some(now);
+        }
+        inner.ask_claude(&token)
     }
 
     pub fn with_override_file(mut self, file: PathBuf) -> CatalogService {

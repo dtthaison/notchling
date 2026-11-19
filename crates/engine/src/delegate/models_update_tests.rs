@@ -213,6 +213,7 @@ fn the_report_lists_changes_prices_suggestions_and_says_when_nothing_was_written
                 },
                 unpriced: vec!["gemini-4-neon".into()],
                 written: false,
+                first: false,
             },
             ToolReport {
                 tool: "codex".into(),
@@ -269,4 +270,48 @@ fn the_report_lists_changes_prices_suggestions_and_says_when_nothing_was_written
     assert!(text.contains("Role picks: all still current."));
     assert!(!text.contains("This was a check"));
     assert!(!text.contains("Prices:"));
+}
+
+#[test]
+fn a_list_that_lost_most_of_the_old_one_is_shrunk_and_a_small_change_is_not() {
+    let live = |ids: &[&str]| -> Vec<LiveModel> {
+        ids.iter()
+            .map(|id| LiveModel {
+                id: (*id).into(),
+                ..LiveModel::default()
+            })
+            .collect()
+    };
+    let before = live(&["a", "b", "c", "d"]);
+    assert!(shrunk(&before, &live(&["a"])));
+    assert!(shrunk(&before, &live(&["x", "y", "z", "a"])));
+    assert!(!shrunk(&before, &live(&["a", "b", "x"])));
+    assert!(
+        !shrunk(&live(&["a", "b"]), &live(&["z"])),
+        "a tiny list may change wholly"
+    );
+    assert!(!shrunk(&[], &live(&["a"])));
+}
+
+#[test]
+fn a_first_read_prints_no_diff_and_says_so() {
+    let report = Report {
+        applied: true,
+        tools: vec![ToolReport {
+            tool: "claude".into(),
+            source: "Anthropic's model list".into(),
+            read: true,
+            total: 4,
+            first: true,
+            ..ToolReport::default()
+        }],
+        ..Report::default()
+    };
+    let text = report.render();
+    assert!(
+        text.contains("first read: nothing to compare with"),
+        "{text}"
+    );
+    assert!(!text.contains("no change"));
+    assert_eq!(report.to_json()["tools"][0]["first"], true);
 }

@@ -55,33 +55,98 @@ pub fn deps(folders: &Folders, stop: Arc<AtomicBool>) -> Deps {
     }
 }
 
+pub const CAPTURE_LIMIT: usize = 4 * 1024 * 1024;
+
+const CAPTURE_GRACE: Duration = Duration::from_secs(2);
+
+fn kill_group(pid: u32) {
+    unsafe {
+        libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+    }
+}
+
 pub fn capture(program: &Path, args: &[&str], timeout: Duration) -> Option<String> {
+    use std::os::unix::process::CommandExt;
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .process_group(0)
         .spawn()
         .ok()?;
+    let pid = child.id();
     let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut data = Vec::new();
-        let _ = stdout.read_to_end(&mut data);
-        data
-    });
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = stdout.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                break;
             }
         }
-    };
-    let data = reader.join().ok()?;
+    });
+    let deadline = Instant::now() + timeout;
+    let mut data: Vec<u8> = Vec::new();
+    let mut over = false;
+    let mut status = None;
+    let mut closed = false;
+    let mut grace_until = None;
+    loop {
+        loop {
+            match rx.try_recv() {
+                Ok(chunk) => {
+                    if data.len() + chunk.len() > CAPTURE_LIMIT {
+                        over = true;
+                    } else {
+                        data.extend_from_slice(&chunk);
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    closed = true;
+                    break;
+                }
+            }
+        }
+        if over {
+            kill_group(pid);
+            let _ = child.wait();
+            return None;
+        }
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(Some(done)) => {
+                    status = Some(done);
+                    grace_until = Some(Instant::now() + CAPTURE_GRACE);
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    kill_group(pid);
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        if status.is_some() && closed {
+            break;
+        }
+        let now = Instant::now();
+        let out_of_time = match grace_until {
+            Some(until) => now >= until,
+            None => now >= deadline,
+        };
+        if out_of_time {
+            kill_group(pid);
+            if status.is_none() {
+                let _ = child.wait();
+                return None;
+            }
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    kill_group(pid);
     status
         .filter(|s| s.success())
         .map(|_| String::from_utf8_lossy(&data).into_owned())
@@ -119,6 +184,54 @@ mod tests {
             None
         );
         assert!(began.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_grandchild_holding_stdout_does_not_hang_the_read() {
+        let began = Instant::now();
+        let out = capture(
+            Path::new("/bin/sh"),
+            &["-c", "echo listed; (sleep 30 &) ; exit 0"],
+            Duration::from_secs(20),
+        );
+        assert_eq!(out.as_deref(), Some("listed\n"));
+        assert!(
+            began.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            began.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_program_that_never_ends_is_killed_with_its_children() {
+        let began = Instant::now();
+        let out = capture(
+            Path::new("/bin/sh"),
+            &["-c", "sleep 30 & sleep 30"],
+            Duration::from_millis(300),
+        );
+        assert_eq!(out, None);
+        assert!(
+            began.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            began.elapsed()
+        );
+    }
+
+    #[test]
+    fn more_than_the_cap_gives_nothing() {
+        let began = Instant::now();
+        let out = capture(
+            Path::new("/bin/sh"),
+            &["-c", "yes aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+            Duration::from_secs(20),
+        );
+        assert_eq!(out, None);
+        assert!(
+            began.elapsed() < Duration::from_secs(15),
+            "{:?}",
+            began.elapsed()
+        );
     }
 
     #[test]

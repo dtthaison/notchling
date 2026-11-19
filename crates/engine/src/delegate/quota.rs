@@ -197,6 +197,114 @@ pub fn refusal(tool: Tool, model: Option<&str>, out: &Out, now: f64) -> String {
     )
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Detected {
+    pub label: String,
+    pub resets_in: Option<f64>,
+}
+
+const SAID_OUT: [&str; 4] = [
+    "quota reached",
+    "quota exceeded",
+    "out of quota",
+    "quota has been reached",
+];
+
+const MAX_SAID: usize = 1500;
+
+fn parse_wait(after: &str) -> Option<f64> {
+    let mut secs = 0.0;
+    let mut any = false;
+    let mut rest = after.trim_start();
+    loop {
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            break;
+        }
+        let tail = &rest[digits.len()..];
+        let Some(unit) = tail.chars().next() else {
+            break;
+        };
+        let per = match unit {
+            'd' => 86_400.0,
+            'h' => 3_600.0,
+            'm' => 60.0,
+            's' => 1.0,
+            _ => break,
+        };
+        secs += digits.parse::<f64>().ok()? * per;
+        any = true;
+        rest = tail[unit.len_utf8()..].trim_start();
+    }
+    any.then_some(secs)
+}
+
+pub fn detect(text: &str) -> Option<Detected> {
+    if text.len() > MAX_SAID {
+        return None;
+    }
+    text.lines().find_map(|line| {
+        let lower = line.to_lowercase();
+        let said = SAID_OUT.iter().any(|w| lower.contains(w))
+            || (lower.contains("quota") && lower.contains("upgrade your subscription"));
+        if !said {
+            return None;
+        }
+        let at = lower.find("quota")?;
+        let label = lower[..at]
+            .split(|c: char| !c.is_alphabetic())
+            .rfind(|w| !w.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| "usage".into());
+        let resets_in = lower
+            .find("resets in ")
+            .and_then(|i| parse_wait(&lower[i + "resets in ".len()..]));
+        Some(Detected { label, resets_in })
+    })
+}
+
+pub fn out_of(tool: Tool, model: Option<&str>, found: &Detected, now: f64) -> Out {
+    Out {
+        pool: model
+            .and_then(|m| pool_name(tool, m))
+            .unwrap_or(tool.title())
+            .to_string(),
+        what: what_of(&found.label),
+        resets_at: found.resets_in.map(|secs| now + secs),
+    }
+}
+
+pub fn mark_out(source: &Source, tool: Tool, model: Option<&str>, found: &Detected) {
+    let Some(pool) = model.and_then(|m| pool_name(tool, m)) else {
+        return;
+    };
+    let now = source.now();
+    let window = Window {
+        label: found.label.clone(),
+        percent: 100.0,
+        resets_at: found.resets_in.map(|secs| now + secs),
+    };
+    let mut quota = source.load(tool).unwrap_or(Quota {
+        fetched: now,
+        signed_in: true,
+        reached: None,
+        pools: Vec::new(),
+    });
+    quota.fetched = now;
+    quota.signed_in = true;
+    match quota.pools.iter_mut().find(|p| p.name == pool) {
+        Some(existing) => {
+            existing.windows.retain(|w| w.label != window.label);
+            existing.windows.push(window);
+        }
+        None => quota.pools.push(Pool {
+            name: pool.to_string(),
+            windows: vec![window],
+        }),
+    }
+    save(&source.dir, provider_of(tool), &quota);
+}
+
 pub fn file_of(dir: &Path, provider: &str) -> PathBuf {
     dir.join(format!("{FILE_PREFIX}{provider}.json"))
 }

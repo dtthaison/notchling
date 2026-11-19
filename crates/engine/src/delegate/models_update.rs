@@ -26,13 +26,8 @@ pub fn agy_live(listing: &str, before: &[LiveModel]) -> Vec<LiveModel> {
     agy_pick::entries(listing)
         .into_iter()
         .map(|e| {
-            let whole = e.levels.len() == 1;
-            let id = if whole {
-                e.whole.clone()
-            } else {
-                e.model.clone()
-            };
-            let efforts = if whole { Vec::new() } else { e.levels.clone() };
+            let id = e.key().to_string();
+            let efforts = e.offered_levels().to_vec();
             let default_effort = before
                 .iter()
                 .find(|b| b.id == id)
@@ -241,6 +236,17 @@ pub struct ToolReport {
     pub diff: Diff,
     pub unpriced: Vec<String>,
     pub written: bool,
+    pub first: bool,
+}
+
+pub fn shrunk(before: &[LiveModel], after: &[LiveModel]) -> bool {
+    before.len() >= 3
+        && after
+            .iter()
+            .filter(|m| before.iter().any(|b| b.id == m.id))
+            .count()
+            * 2
+            < before.len()
 }
 
 impl ToolReport {
@@ -266,6 +272,7 @@ impl ToolReport {
             })).collect::<Vec<_>>(),
             "unpriced": self.unpriced,
             "written": self.written,
+            "first": self.first,
         })
     }
 }
@@ -311,7 +318,9 @@ impl Report {
             if let Some(note) = &t.note {
                 lines.push(format!("  note: {note}"));
             }
-            if t.read && t.diff.is_empty() {
+            if t.first {
+                lines.push("  first read: nothing to compare with".into());
+            } else if t.read && t.diff.is_empty() {
                 lines.push("  no change".into());
             }
             if !t.diff.added.is_empty() {
@@ -373,11 +382,14 @@ pub fn codex_live_state(codex_home: &Path, raw: Option<&[u8]>) -> Live {
 pub fn agy_live_state(listing: Option<&str>, cached: &[LiveModel]) -> Live {
     match listing {
         Some(listing) => {
-            let listed = agy_pick::models(listing);
+            let listed = agy_pick::entries(listing);
             Live {
-                models: listed.iter().map(|(m, _)| m.clone()).collect(),
+                models: listed.iter().map(|e| e.key().to_string()).collect(),
                 hints: Vec::new(),
-                efforts: listed,
+                efforts: listed
+                    .iter()
+                    .map(|e| (e.model.clone(), e.levels.clone()))
+                    .collect(),
             }
         }
         None => Live {

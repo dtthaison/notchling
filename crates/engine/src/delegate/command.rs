@@ -72,6 +72,11 @@ pub fn run(
             agy_run::run(&options, &deps, err)
         }
     };
+    if outcome.error.is_none() && !outcome.timed_out {
+        if let Some(message) = said_out(&options, &outcome, &deps) {
+            outcome.error = Some(message);
+        }
+    }
     if let (Some(dir), false) = (&options.out, outcome.media.is_empty()) {
         let files: Vec<PathBuf> = outcome.media.iter().map(PathBuf::from).collect();
         match media::copy_to(&files, Path::new(dir)) {
@@ -108,6 +113,17 @@ fn quota_refusal(options: &options::Options, deps: &Deps) -> Option<String> {
         )),
         Verdict::Room | Verdict::SignedOut => None,
     }
+}
+
+fn said_out(options: &options::Options, outcome: &Outcome, deps: &Deps) -> Option<String> {
+    let found = quota::detect(&outcome.reply)?;
+    let now = deps.quota.as_ref().map_or_else(now_secs, |s| s.now());
+    let model = options.model.as_deref().or(outcome.model.as_deref());
+    let out = quota::out_of(options.tool, model, &found, now);
+    if let Some(source) = &deps.quota {
+        quota::mark_out(source, options.tool, model, &found);
+    }
+    Some(quota::refusal(options.tool, model, &out, now))
 }
 
 fn trust_folder(folder: &str, deps: &Deps, err: &mut dyn Write) {

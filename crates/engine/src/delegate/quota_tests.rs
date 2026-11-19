@@ -196,3 +196,55 @@ fn the_refusal_names_the_pool_and_the_reset() {
     );
     assert!(text.contains("delegate-models --for"), "{text}");
 }
+
+const QUOTA_LINE: &str = "\u{26a0} Individual quota reached. Please upgrade your subscription\u{2026} Resets in 134h28m59s";
+
+#[test]
+fn the_quota_line_antigravity_prints_is_detected_with_its_wait() {
+    let found = detect(QUOTA_LINE).unwrap();
+    assert_eq!(found.label, "individual");
+    assert_eq!(found.resets_in, Some(134.0 * 3600.0 + 28.0 * 60.0 + 59.0));
+    let no_wait = detect("Quota exceeded for this model.").unwrap();
+    assert_eq!(no_wait.resets_in, None);
+    assert_eq!(parse_wait("2d 3h"), Some(2.0 * 86_400.0 + 3.0 * 3_600.0));
+    assert_eq!(parse_wait("soon"), None);
+}
+
+#[test]
+fn an_ordinary_reply_is_never_a_quota_message() {
+    assert_eq!(detect("Looks fine. No issues found."), None);
+    assert_eq!(detect(""), None);
+    let long = format!("{QUOTA_LINE}\n{}", "a review ".repeat(300));
+    assert_eq!(detect(&long), None, "a real review that quotes the line");
+}
+
+#[test]
+fn a_said_out_pool_is_marked_so_the_next_check_refuses_it() {
+    let dir = crate::delegate::test_support::scratch("quota-mark");
+    let source = Source {
+        dir: dir.clone(),
+        clock: || NOW,
+    };
+    let found = detect(QUOTA_LINE).unwrap();
+    mark_out(&source, Tool::Agy, Some("gemini-4-hydrogen"), &found);
+    let q = source.load(Tool::Agy).unwrap();
+    match verdict(Some(&q), Tool::Agy, "gemini-4-hydrogen", NOW) {
+        Verdict::Out(o) => {
+            assert_eq!(o.pool, "Gemini Models");
+            assert_eq!(o.reason(NOW), "individual quota used up, resets in 5d 14h");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        verdict(Some(&q), Tool::Agy, "gemini-4-argon", NOW),
+        Verdict::Room,
+        "another pool is not touched"
+    );
+    mark_out(&source, Tool::Agy, None, &found);
+    assert_eq!(
+        source.load(Tool::Agy).unwrap(),
+        q,
+        "no model, no pool to mark"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
