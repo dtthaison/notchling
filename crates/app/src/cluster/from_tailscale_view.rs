@@ -207,7 +207,9 @@ impl ClusterSheetView {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let model = self.tailscale.model.as_ref()?;
+        let mut head = div().flex().flex_none().flex_col().gap(px(SPACE[1]));
         let mut inner = div().flex().flex_col().gap(px(SPACE[1]));
+        let mut foot = div().flex().flex_none().flex_col().gap(px(SPACE[1]));
         match &model.read {
             Read::Reading => {
                 inner = inner.child(label(
@@ -225,10 +227,18 @@ impl ClusterSheetView {
                     a,
                 ));
             }
-            Read::Ready => inner = self.tailscale_list(inner, model, window, a, cx),
+            Read::Ready => {
+                (head, inner) = self.tailscale_list(head, inner, model, window, a, cx);
+                foot = foot.child(label(
+                    t::cluster::tailscale_import_note(),
+                    TypeRole::Meta,
+                    Ink::TextMuted,
+                    a,
+                ));
+            }
         }
         if let Some(error) = &model.error {
-            inner = inner.child(label(error, TypeRole::Meta, Ink::Needs, a));
+            foot = foot.child(label(error, TypeRole::Meta, Ink::Needs, a));
         }
         if let Some(count) = model.done {
             let text = if count == 0 {
@@ -236,7 +246,7 @@ impl ClusterSheetView {
             } else {
                 t::cluster::tailscale_imported(count as i64)
             };
-            inner = inner.child(label(&text, TypeRole::Meta, Ink::TextMuted, a));
+            foot = foot.child(label(&text, TypeRole::Meta, Ink::TextMuted, a));
         }
         let body = div()
             .id("tailscale-body")
@@ -303,7 +313,9 @@ impl ClusterSheetView {
                             Ink::Text,
                             a,
                         ))
+                        .child(head)
                         .child(body)
+                        .child(foot)
                         .child(buttons)
                         .part_at("From Tailscale Sheet", Corner::TopTrailing, a, cx),
                 ),
@@ -312,24 +324,25 @@ impl ClusterSheetView {
 
     fn tailscale_list(
         &self,
+        mut head: Div,
         mut inner: Div,
         model: &FromTailscale,
         window: &Window,
         a: Appearance,
         cx: &mut Context<Self>,
-    ) -> Div {
-        inner = inner.child(label(
+    ) -> (Div, Div) {
+        head = head.child(label(
             &t::cluster::tailscale_network(&model.network_name()),
             TypeRole::Label,
             Ink::Text,
             a,
         ));
         if let Some(note) = model.other_networks_note() {
-            inner = inner.child(label(&note, TypeRole::Meta, Ink::TextMuted, a));
+            head = head.child(label(&note, TypeRole::Meta, Ink::TextMuted, a));
         }
         let hidden = model.hidden_count();
         if hidden > 0 {
-            inner = inner.child(label(
+            head = head.child(label(
                 &t::cluster::tailscale_hidden(hidden as i64),
                 TypeRole::Meta,
                 Ink::TextMuted,
@@ -337,7 +350,7 @@ impl ClusterSheetView {
             ));
         }
         if model.offers_organizations() {
-            inner = inner.child(
+            head = head.child(
                 div().flex().child(
                     button(
                         "tailscale-organization",
@@ -357,7 +370,7 @@ impl ClusterSheetView {
         }
         if let Some(filter) = &self.tailscale.filter {
             let focused = filter.read(cx).is_focused(window);
-            inner = inner.child(field_box(filter, focused, a));
+            head = head.child(field_box(filter, focused, a));
         }
         let os_title = model
             .filter
@@ -374,7 +387,7 @@ impl ClusterSheetView {
         } else {
             t::cluster::tailscale_select_all()
         };
-        inner = inner.child(
+        head = head.child(
             div()
                 .flex()
                 .items_center()
@@ -495,11 +508,6 @@ impl ClusterSheetView {
             }
             inner = inner.child(line);
         }
-        inner.child(label(
-            t::cluster::tailscale_import_note(),
-            TypeRole::Meta,
-            Ink::TextMuted,
-            a,
-        ))
+        (head, inner)
     }
 }

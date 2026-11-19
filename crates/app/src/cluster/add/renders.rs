@@ -59,7 +59,12 @@ const TAILSCALE_STATUS: &str = r#"{
     "nodekey:aa": {"ID": "n1", "HostName": "app-1", "DNSName": "app-1.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.11"], "Online": true},
     "nodekey:bb": {"ID": "n2", "HostName": "oracle-sg", "DNSName": "oracle-sg.tail1234.ts.net.", "OS": "linux", "UserID": 1003, "TailscaleIPs": ["100.64.0.12"], "Online": false, "Tags": ["tag:server"]},
     "nodekey:cc": {"ID": "n3", "HostName": "mini-2", "DNSName": "mini-2.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.13"], "Online": true},
-    "nodekey:dd": {"ID": "n4", "HostName": "build-box", "DNSName": "build-box.tail1234.ts.net.", "OS": "linux", "UserID": 1002, "TailscaleIPs": ["100.64.0.14"], "Online": true}
+    "nodekey:dd": {"ID": "n4", "HostName": "build-box", "DNSName": "build-box.tail1234.ts.net.", "OS": "linux", "UserID": 1002, "TailscaleIPs": ["100.64.0.14"], "Online": true},
+    "nodekey:e0": {"ID": "n5", "HostName": "edge-3", "DNSName": "edge-3.tail1234.ts.net.", "OS": "linux", "UserID": 1001, "TailscaleIPs": ["100.64.0.15"], "Online": true},
+    "nodekey:e1": {"ID": "n6", "HostName": "nas-4", "DNSName": "nas-4.tail1234.ts.net.", "OS": "linux", "UserID": 1001, "TailscaleIPs": ["100.64.0.16"], "Online": true},
+    "nodekey:e2": {"ID": "n7", "HostName": "lab-5", "DNSName": "lab-5.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.17"], "Online": true},
+    "nodekey:e3": {"ID": "n8", "HostName": "pi-6", "DNSName": "pi-6.tail1234.ts.net.", "OS": "linux", "UserID": 1001, "TailscaleIPs": ["100.64.0.18"], "Online": true},
+    "nodekey:e4": {"ID": "n9", "HostName": "dev-7", "DNSName": "dev-7.tail1234.ts.net.", "OS": "macOS", "UserID": 1001, "TailscaleIPs": ["100.64.0.19"], "Online": true}
   },
   "User": {
     "1001": {"ID": 1001, "LoginName": "person@example.com", "DisplayName": "Person"},
