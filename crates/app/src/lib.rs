@@ -18,6 +18,7 @@ pub mod mac;
 pub mod machines;
 pub mod menu;
 pub mod notch;
+pub mod organizations;
 pub mod pages;
 pub mod phone;
 pub mod search;

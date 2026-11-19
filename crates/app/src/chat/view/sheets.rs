@@ -132,8 +132,16 @@ impl ChatView {
         let home = self.root.home.to_string_lossy().into_owned();
         let snapshot = self.accounts.snapshot();
         let choices = accounts(&targets(&snapshot), &agents, &snapshot.providers.providers);
+        let chrome = self.root.fixture.is_none()
+            && notchling_engine::settings::Settings::open(
+                &self.root.data_dir.join("settings.json"),
+            )
+            .ok()
+            .and_then(|store| store.get_bool("claudeUseChrome"))
+            .unwrap_or(false);
         let model = NewSession::new(choices, folders(&[], &agents), &home)
-            .with_run_on(RunOn::from_cluster(&self.cluster.snapshot()));
+            .with_run_on(RunOn::from_cluster(&self.cluster.snapshot()))
+            .with_chrome(chrome);
         let acts = self.acts(cx);
         let handle = self.accounts.is_live().then(|| AccountsHandle {
             store: self.accounts.clone(),
@@ -247,6 +255,7 @@ impl ChatView {
         entity.update(cx, |view, cx| {
             view.ask_hooks(hooks, cx);
             view.ask_client(cx);
+            view.ask_sidecar(cx);
             view.watch_cluster(cx);
         });
         self.show(entity, cx);

@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::SystemTime;
 
 use notchling_engine::sessions::Agent;
-use notchling_engine::tools::agy::summaries::{self, Row, DB_NAME};
+use notchling_engine::tools::agy::app_store;
+use notchling_engine::tools::agy::summaries::{Row, DB_NAME};
 
 use super::foreign::agy_agent;
 
@@ -28,7 +29,7 @@ impl Stamp {
 struct State {
     listed_at_ms: Option<i64>,
     read_at_ms: i64,
-    stamps: Option<[Stamp; 2]>,
+    stamps: Option<[Stamp; 4]>,
     rows: Vec<Agent>,
 }
 
@@ -73,7 +74,7 @@ impl AgyList {
 
     pub fn rows(&self, now_ms: i64) -> Vec<Agent> {
         self.rows_with(now_ms, |root, copy_dir, now| {
-            summaries::rows(root, copy_dir, now)
+            app_store::all_rows_cached(root, copy_dir, now, std::time::Duration::ZERO)
         })
     }
 
@@ -91,7 +92,13 @@ impl AgyList {
         }
         state.listed_at_ms = Some(now_ms);
         let db = self.root.join(DB_NAME);
-        let stamps = [Stamp::of(&db), Stamp::of(&with_wal(&db))];
+        let [app_db, app_wal] = app_store::watched_files(&self.root);
+        let stamps = [
+            Stamp::of(&db),
+            Stamp::of(&with_wal(&db)),
+            Stamp::of(&app_db),
+            Stamp::of(&app_wal),
+        ];
         let unchanged = state.stamps.as_ref() == Some(&stamps)
             && now_ms >= state.read_at_ms
             && now_ms - state.read_at_ms < REUSE_MAX_MS;
@@ -179,6 +186,29 @@ mod tests {
         assert_eq!(reads.get(), 3);
         list.rows_with(17_000 + REUSE_MAX_MS, read);
         assert_eq!(reads.get(), 4);
+    }
+
+    #[test]
+    fn the_apps_database_changing_makes_the_list_read_again() {
+        let (scratch, list) = rig("agy-list-app");
+        let app = scratch.path().join("antigravity");
+        std::fs::create_dir_all(&app).expect("a folder");
+        let reads = Cell::new(0);
+        let read = |_: &Path, _: &Path, _: f64| {
+            reads.set(reads.get() + 1);
+            vec![row("a")]
+        };
+        list.rows_with(1_000, read);
+        list.rows_with(5_000, read);
+        assert_eq!(reads.get(), 1);
+        std::fs::write(app.join(DB_NAME), "app db").expect("a write");
+        list.rows_with(9_000, read);
+        assert_eq!(reads.get(), 2, "an app database appeared");
+        std::fs::write(app.join(format!("{DB_NAME}-wal")), "wal").expect("a write");
+        list.rows_with(13_000, read);
+        assert_eq!(reads.get(), 3, "and grew");
+        list.rows_with(17_000, read);
+        assert_eq!(reads.get(), 3, "and then stayed as it was");
     }
 
     #[test]

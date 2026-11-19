@@ -12,6 +12,7 @@ log_choice! {
         HideNotch = "hideNotch",
         AnswerFromNotch = "answerFromNotch",
         KeepPages = "keepPages",
+        ClaudeUseChrome = "claudeUseChrome",
         ShowPet = "showPet",
         ReplyFromNotch = "replyFromNotch",
         ShowLastReply = "showLastReply",
@@ -77,6 +78,7 @@ log_choice! {
         Acp = "acp",
         App = "app",
         Remote = "remote",
+        Sidecar = "sidecar",
         Panel = "panel",
         Browser = "browser",
     }

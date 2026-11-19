@@ -175,6 +175,74 @@ chat-steps-used-tools = { $count ->
     [one] used { $count } tool
    *[other] used { $count } tools
 }
+chat-steps-used-chrome = { $count ->
+    [one] used { -brand-chrome } { $count } time
+   *[other] used { -brand-chrome } { $count } times
+}
+
+## Chrome steps
+
+# Rows for what a Claude Code session did in the user's Chrome through the Claude in Chrome extension.
+# $site is a web address such as example.com.
+chat-browser-open = Opened { $site }
+chat-browser-open-page = Opened a page
+chat-browser-new-tab = New tab
+# $site is a web address such as example.com.
+chat-browser-new-tab-site = New tab: { $site }
+chat-browser-close-tab = Closed tab
+chat-browser-tabs = Checked open tabs
+chat-browser-click = Clicked
+# $what is the session's own short description of the click.
+chat-browser-click-what = Clicked: { $what }
+chat-browser-type = Typed text
+# $what is the session's own short description of what it typed and where.
+chat-browser-type-what = Typed text: { $what }
+# $key is the name of a key such as Enter.
+chat-browser-key = Pressed { $key }
+chat-browser-key-none = Pressed a key
+chat-browser-scroll = Scrolled the page
+chat-browser-scroll-up = Scrolled up
+chat-browser-scroll-down = Scrolled down
+chat-browser-scroll-left = Scrolled left
+chat-browser-scroll-right = Scrolled right
+chat-browser-hover = Moved the pointer
+chat-browser-drag = Dragged
+chat-browser-screenshot = Took a screenshot
+chat-browser-zoom = Zoomed in on the page
+chat-browser-wait = Waited
+chat-browser-read-page = Read the page layout
+chat-browser-read-text = Read the page
+# $what is what the session looked for.
+chat-browser-find = Looked for “{ $what }”
+chat-browser-find-none = Looked for an element
+chat-browser-console = Read console
+# $count is how many errors the console held.
+chat-browser-console-errors = { $count ->
+    [one] Read console (1 error)
+   *[other] Read console ({ $count } errors)
+}
+chat-browser-network = Read network requests
+chat-browser-script = Ran a script
+chat-browser-fill = Filled in a form field
+chat-browser-upload = Uploaded a file
+chat-browser-resize = Resized the window
+chat-browser-switch = Switched browser
+chat-browser-shortcut = Used a shortcut
+chat-browser-recording = Made a recording
+chat-browser-other = Used { -brand-chrome }
+# A batch of steps run in one call. $count is how many.
+chat-browser-batch = { $count ->
+    [one] 1 browser step
+   *[other] { $count } browser steps
+}
+chat-browser-not-connected = { -brand-chrome } isn't connected
+chat-browser-not-connected-hint = Open { -brand-chrome } and check that the Claude in Chrome extension is on and signed in to the same account.
+chat-browser-needs-permission = Waiting for permission in the { -brand-chrome } extension
+chat-browser-needs-permission-hint = Allow the site in the Claude in Chrome extension, then ask again.
+chat-browser-denied = Permission was refused in { -brand-chrome }
+chat-browser-denied-hint = The site was not allowed in the Claude in Chrome extension.
+# Under a step that took a screenshot Chat does not hold: an older one, or one too large to read.
+chat-browser-shot-missing = Screenshot not kept
 
 ## Tools
 
@@ -671,6 +739,8 @@ chat-sheet-main-login = Main login
 chat-sheet-lane = Lane
 chat-sheet-opens-lane = Opens a lane
 chat-sheet-in-use = In use
+# A switch in New Session for a Claude Code session: start it with Claude in Chrome turned on.
+chat-sheet-use-chrome = Use { -brand-chrome }
 # $tool is the tool whose account it switches.
 chat-sheet-switches = Switches { $tool }
 # $host is the tool's name.

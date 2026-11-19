@@ -86,6 +86,8 @@ pub struct NewSession {
     pub home: String,
     pub run_on: RunOn,
     pub target: RunTarget,
+    pub chrome: bool,
+    pub chrome_default: bool,
 }
 
 pub fn accounts(
@@ -268,6 +270,37 @@ impl NewSession {
             home: home.to_owned(),
             run_on: RunOn::default(),
             target: RunTarget::default(),
+            chrome: false,
+            chrome_default: false,
+        }
+    }
+
+    pub fn with_chrome(mut self, on: bool) -> NewSession {
+        self.chrome = on;
+        self.chrome_default = on;
+        self
+    }
+
+    pub fn chrome_offered(&self) -> bool {
+        !self.on_worker()
+            && matches!(
+                self.account
+                    .and_then(|i| self.accounts.get(i))
+                    .map(|a| &a.pick),
+                Some(Pick::Claude(_) | Pick::ClaudeSaved(_))
+            )
+    }
+
+    pub fn toggle_chrome(&mut self) {
+        self.chrome = !self.chrome;
+        self.reset();
+    }
+
+    fn chrome_flags(&self) -> Vec<String> {
+        match (self.chrome, self.chrome_default) {
+            (true, _) => vec!["--chrome".to_owned()],
+            (false, true) => vec!["--no-chrome".to_owned()],
+            (false, false) => Vec::new(),
         }
     }
 
@@ -336,11 +369,12 @@ impl NewSession {
         if self.on_worker() {
             return self.dispatch_request();
         }
+        let flags = self.chrome_flags();
         let (account, folder) = self.chosen()?;
         let Pick::Claude(dir) = &account.pick else {
             return None;
         };
-        let request = Request::new_session(folder, dir.as_deref(), &[]);
+        let request = Request::new_session(folder, dir.as_deref(), &flags);
         self.stage = Stage::Starting;
         Some(request)
     }

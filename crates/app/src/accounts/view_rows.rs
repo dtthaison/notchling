@@ -449,6 +449,29 @@ pub fn segmented<V: 'static>(
     cx: &mut Context<V>,
     on: Handler<V, String>,
 ) -> Div {
+    segmented_with(id, options, picked, false, a, cx, on)
+}
+
+pub fn segmented_full<V: 'static>(
+    id: &str,
+    options: &[(String, String)],
+    picked: &str,
+    a: Appearance,
+    cx: &mut Context<V>,
+    on: Handler<V, String>,
+) -> Div {
+    segmented_with(id, options, picked, true, a, cx, on)
+}
+
+fn segmented_with<V: 'static>(
+    id: &str,
+    options: &[(String, String)],
+    picked: &str,
+    full: bool,
+    a: Appearance,
+    cx: &mut Context<V>,
+    on: Handler<V, String>,
+) -> Div {
     let mut row = div()
         .flex()
         .p(px(2.0))
@@ -471,6 +494,7 @@ pub fn segmented<V: 'static>(
                 PartState::Rest,
                 a,
             )
+            .when(full, |b| b.flex_1())
             .on_click(cx.listener(move |this, _, _, cx| handler(this, key_out.clone(), cx))),
         );
     }

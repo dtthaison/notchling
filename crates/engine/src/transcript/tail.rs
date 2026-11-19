@@ -130,10 +130,16 @@ pub fn tail_start_with(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Spot<'a> {
+    pub path: &'a str,
+    pub at: u64,
+}
+
 pub trait LineParser: Default {
     fn consume(&mut self, line: &[u8]);
 
-    fn consume_oversized(&mut self, _head: &[u8], _len: u64) {}
+    fn consume_oversized(&mut self, _head: &[u8], _len: u64, _spot: Option<Spot<'_>>) {}
 }
 
 struct Cursor<P, O> {
@@ -259,7 +265,9 @@ impl<P: LineParser, O: Clone> Cursors<P, O> {
         };
         let done = scan_lines(path, start, end, cut, cap, |line| match line {
             Line::Whole(line) => parser.consume(line),
-            Line::Oversized { head, len } => parser.consume_oversized(head, len),
+            Line::Oversized { head, len, at } => {
+                parser.consume_oversized(head, len, Some(Spot { path, at }))
+            }
         })?;
         self.count_parsed(done.parsed);
         Ok(done.span)

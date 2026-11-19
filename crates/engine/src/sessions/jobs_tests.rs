@@ -354,6 +354,17 @@ fn launch_flags_drop_resume_and_background() {
 }
 
 #[test]
+fn launch_flags_keep_the_chrome_choice() {
+    let j = json!({"respawnFlags": ["--name", "x", "--chrome", "--model", "opus", "--bg"]});
+    assert_eq!(
+        launch_flags(&j, "x"),
+        vec!["--name", "x", "--chrome", "--model", "opus"]
+    );
+    let off = json!({"respawnFlags": ["--no-chrome", "--resume", "abc"]});
+    assert_eq!(launch_flags(&off, "x"), vec!["--no-chrome"]);
+}
+
+#[test]
 fn resume_flags_only_when_no_job_to_continue() {
     let flags = vec!["--name".to_string(), "x".to_string()];
     assert_eq!(

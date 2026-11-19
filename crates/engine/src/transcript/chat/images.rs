@@ -2,6 +2,7 @@ use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -139,8 +140,15 @@ fn png_size(data: &[u8]) -> Option<(i64, i64)> {
     Some((int(16), int(20)))
 }
 
-fn ordered_images(content: Option<&Value>) -> Vec<(&Value, bool)> {
-    fn walk<'a>(value: Option<&'a Value>, nested: bool, found: &mut Vec<(&'a Value, bool)>) {
+type Found<'a> = (&'a Value, bool, Option<&'a str>);
+
+fn ordered_images(content: Option<&Value>) -> Vec<Found<'_>> {
+    fn walk<'a>(
+        value: Option<&'a Value>,
+        owner: Option<&'a str>,
+        nested: bool,
+        found: &mut Vec<Found<'a>>,
+    ) {
         let Some(blocks) = value.and_then(Value::as_array) else {
             return;
         };
@@ -150,14 +158,21 @@ fn ordered_images(content: Option<&Value>) -> Vec<(&Value, bool)> {
                 .and_then(|s| s.get("type"))
                 .and_then(Value::as_str);
             match block.get("type").and_then(Value::as_str) {
-                Some("image") if source_type == Some("base64") => found.push((block, nested)),
-                Some("tool_result") => walk(block.get("content"), true, found),
+                Some("image") if source_type == Some("base64") => {
+                    found.push((block, nested, owner));
+                }
+                Some("tool_result") => walk(
+                    block.get("content"),
+                    block.get("tool_use_id").and_then(Value::as_str),
+                    true,
+                    found,
+                ),
                 _ => {}
             }
         }
     }
     let mut found = Vec::new();
-    walk(content, false, &mut found);
+    walk(content, None, false, &mut found);
     found
 }
 
@@ -165,11 +180,13 @@ pub fn refs(
     content: Option<&Value>,
     line_offset: u64,
     stripped: &[Stripped],
+    hidden: &HashSet<String>,
 ) -> Vec<(ImageRef, bool)> {
     ordered_images(content)
         .into_iter()
         .enumerate()
-        .map(|(index, (block, in_tool_result))| {
+        .filter(|(_, (_, _, owner))| owner.is_none_or(|id| !hidden.contains(id)))
+        .map(|(index, (block, in_tool_result, _))| {
             let media_type = block
                 .get("source")
                 .and_then(|s| s.get("media_type"))
@@ -381,7 +398,7 @@ pub fn data(image: &ImageRef, transcript: &Path, home: &Path) -> Result<Vec<u8>,
     let blocks = ordered_images(content);
     let base64 = blocks
         .get(index)
-        .and_then(|(block, _)| block.get("source"))
+        .and_then(|(block, _, _)| block.get("source"))
         .and_then(|s| s.get("data"))
         .and_then(Value::as_str)
         .ok_or(ImageError::NotFound)?;

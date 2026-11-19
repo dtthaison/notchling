@@ -48,13 +48,37 @@ fn the_texts_are_one_plain_sentence_each() {
 fn the_page_and_tool_lists_keep_their_order() {
     assert_eq!(
         Page::ALL,
-        [Page::General, Page::Agents, Page::Skills, Page::Activity]
+        [
+            Page::General,
+            Page::Organizations,
+            Page::Agents,
+            Page::Skills,
+            Page::Activity
+        ]
     );
-    assert_eq!(Tool::ALL, [Tool::ClaudeCode]);
+    assert_eq!(
+        Tool::ALL,
+        [Tool::ClaudeCode, Tool::Codex, Tool::Antigravity]
+    );
     assert_eq!(
         Tool::ClaudeCode.sections(),
-        [Section::Client, Section::Hooks]
+        [
+            Section::Settings,
+            Section::Client,
+            Section::Chrome,
+            Section::Hooks,
+            Section::Capabilities
+        ]
     );
+    assert_eq!(
+        Tool::Codex.sections(),
+        [Section::Settings, Section::Capabilities]
+    );
+    assert_eq!(
+        Tool::Antigravity.sections(),
+        [Section::Settings, Section::Capabilities]
+    );
+    assert_eq!(Page::Organizations.title(), "Organizations");
     assert_eq!(Page::Agents.title(), "Agents");
     assert_eq!(Page::Skills.title(), "Skills & Models");
     assert_eq!(Page::Activity.title(), "Activity");

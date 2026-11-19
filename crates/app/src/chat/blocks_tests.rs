@@ -49,6 +49,7 @@ fn step(id: &str, kind: ToolKind, input: &str, output: Option<(&str, usize)>) ->
         removed: 0,
         is_error: false,
         finished: true,
+        browser: None,
     }
 }
 

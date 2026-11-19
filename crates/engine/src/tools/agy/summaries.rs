@@ -70,7 +70,7 @@ pub fn copy_file(copy_dir: &Path) -> PathBuf {
     copy_dir.join(COPY_NAME)
 }
 
-fn with_copy<T>(
+pub(super) fn with_copy<T>(
     root: &Path,
     copy_dir: &Path,
     reuse: Duration,

@@ -11,6 +11,7 @@ pub mod branch_list;
 pub mod branch_rows;
 pub mod branches_preview;
 pub mod branches_state;
+pub mod browser_rows;
 pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
@@ -50,6 +51,8 @@ pub mod lane_limits;
 pub mod limit_ring;
 pub mod link_target;
 pub mod loader;
+#[cfg(test)]
+mod loader_app_tests;
 #[cfg(test)]
 mod loader_change_tests;
 pub mod log;

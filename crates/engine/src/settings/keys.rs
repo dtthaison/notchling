@@ -189,6 +189,8 @@ pub const KEYS: &[KeySpec] = &[
         .ask("Answer prompts from the notch", "Answer questions and permission prompts from the notch", "it changes where permission prompts are answered"),
     key("keepPages", K::Bool, D::Bool(true), true, "Keep local copies of published artifacts (the page hook)")
         .ask("Keep local copies of artifacts", "Keep a local copy of every page published with the Artifact tool", "it changes what Claude Code's hook does on every publish"),
+    key("claudeUseChrome", K::Bool, D::Bool(false), false, "Start Claude Code sessions with Claude in Chrome turned on (`--chrome`); New Session's Use Chrome starts from it")
+        .ask("Use Chrome", "Start new Claude Code sessions with Claude in Chrome turned on, so they can use your Chrome and its sign-ins", "it lets a session drive the user's real Chrome with their sign-ins"),
     key("showPet", K::Bool, D::Bool(true), true, "The animated pet in the notch")
         .free("Animate pet", "Show the animated pet in the notch", "a display preference"),
     key("replyFromNotch", K::Bool, D::Bool(true), true, "A reply box in the notch")
@@ -221,8 +223,8 @@ pub const KEYS: &[KeySpec] = &[
         .ask("Codex limit", "When the Codex account in use nears its limit: off, notify, or notify and switch", "Notify and Switch moves to another login"),
     choice("antigravityLimitMode", "notify", &["off", "notify", "notifyAndSwitch"], true, "Antigravity limit watching")
         .ask("Antigravity limit", "When the Antigravity account in use nears its limit: off, notify, or notify and switch", "Notify and Switch moves to another login"),
-    choice("antigravityChannel", "acp", &["acp", "app", "remote"], false, "How Notchling talks to Antigravity: acp runs the agy command line and sends for you, app opens the Antigravity app with the message as a draft you send there, remote opens the conversation in Antigravity Remote Control in the browser")
-        .ask("Antigravity channel", "How Notchling talks to Antigravity: through the agy command line (acp), by opening the Antigravity app with your message as a draft (app), or by opening the conversation in Remote Control in the browser (remote)", "it decides whether Notchling runs agy and sends text for you"),
+    choice("antigravityChannel", "acp", &["acp", "app", "remote", "sidecar"], false, "How Notchling talks to Antigravity: acp runs the agy command line and sends for you, app opens the Antigravity app with the message as a draft you send there, remote opens the conversation in Antigravity Remote Control in the browser, sidecar drives the Antigravity app through its sidecar and hooks")
+        .ask("Antigravity channel", "How Notchling talks to Antigravity: through the agy command line (acp), by opening the Antigravity app with your message as a draft (app), or by opening the conversation in Remote Control in the browser (remote), or through the Antigravity app's sidecar and hooks (sidecar)", "it decides whether Notchling runs agy and sends text for you"),
     choice("antigravityRemoteIn", "panel", &["panel", "browser"], false, "Where Antigravity Remote Control opens: panel is Chat's right-hand panel, browser is the default browser")
         .free("Open Remote Control in", "Where Antigravity Remote Control opens: Chat's right-hand panel, or the default browser", "a display preference"),
     key("codexNetwork", K::Bool, D::Bool(true), true, "Open the network in Codex turns (Allow Network in Codex Turns)")

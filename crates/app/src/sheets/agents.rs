@@ -4,17 +4,25 @@ use notchling_locale::{self as t, Text};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     General,
+    Organizations,
     Agents,
     Skills,
     Activity,
 }
 
 impl Page {
-    pub const ALL: [Page; 4] = [Page::General, Page::Agents, Page::Skills, Page::Activity];
+    pub const ALL: [Page; 5] = [
+        Page::General,
+        Page::Organizations,
+        Page::Agents,
+        Page::Skills,
+        Page::Activity,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
             Page::General => t::settings::page_general(),
+            Page::Organizations => t::organizations::page(),
             Page::Agents => t::settings::page_agents(),
             Page::Skills => t::settings::page_skills(),
             Page::Activity => t::settings::page_activity(),
@@ -24,6 +32,7 @@ impl Page {
     pub fn id(self) -> &'static str {
         match self {
             Page::General => "general",
+            Page::Organizations => "organizations",
             Page::Agents => "agents",
             Page::Skills => "skills",
             Page::Activity => "activity",
@@ -34,28 +43,62 @@ impl Page {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tool {
     ClaudeCode,
+    Codex,
+    Antigravity,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 1] = [Tool::ClaudeCode];
+    pub const ALL: [Tool; 3] = [Tool::ClaudeCode, Tool::Codex, Tool::Antigravity];
 
     pub fn title(self) -> &'static str {
         match self {
             Tool::ClaudeCode => t::settings::tool_claude_code(),
+            Tool::Codex => t::settings::tool_codex(),
+            Tool::Antigravity => t::settings::tool_antigravity(),
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Tool::ClaudeCode => "claude-code",
+            Tool::Codex => "codex",
+            Tool::Antigravity => "antigravity",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Tool> {
+        Tool::ALL.into_iter().find(|t| t.id() == id)
+    }
+
+    pub fn contract(self) -> notchling_engine::contract::Tool {
+        match self {
+            Tool::ClaudeCode => notchling_engine::contract::Tool::Claude,
+            Tool::Codex => notchling_engine::contract::Tool::Codex,
+            Tool::Antigravity => notchling_engine::contract::Tool::Antigravity,
         }
     }
 
     pub fn sections(self) -> &'static [Section] {
         match self {
-            Tool::ClaudeCode => &[Section::Client, Section::Hooks],
+            Tool::ClaudeCode => &[
+                Section::Settings,
+                Section::Client,
+                Section::Chrome,
+                Section::Hooks,
+                Section::Capabilities,
+            ],
+            Tool::Codex | Tool::Antigravity => &[Section::Settings, Section::Capabilities],
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
+    Settings,
     Client,
+    Chrome,
     Hooks,
+    Capabilities,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

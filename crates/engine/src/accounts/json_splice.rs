@@ -52,6 +52,49 @@ pub fn set_top_level(text: &str, key: &str, value: &Value) -> Result<String, Spl
     Ok(out)
 }
 
+pub fn remove_top_level(text: &str, key: &str) -> Result<String, SpliceError> {
+    let before = match serde_json::from_str::<Value>(text) {
+        Ok(Value::Object(map)) => map,
+        _ => return Err(SpliceError::NotAnObject),
+    };
+    let spans = top_level_spans(text.as_bytes()).ok_or(SpliceError::NotAnObject)?;
+    let found: Vec<usize> = spans
+        .members
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.key == key)
+        .map(|(i, _)| i)
+        .collect();
+    let at = match found.as_slice() {
+        [] => return Ok(text.to_string()),
+        [at] => *at,
+        _ => return Err(SpliceError::Duplicate),
+    };
+    let members = &spans.members;
+    let out = if members.len() == 1 {
+        let close = text.rfind('}').ok_or(SpliceError::NotAnObject)?;
+        format!("{}{{}}{}", &text[..spans.open], &text[close + 1..])
+    } else if at + 1 < members.len() {
+        format!(
+            "{}{}",
+            &text[..members[at].key_start],
+            &text[members[at + 1].key_start..]
+        )
+    } else {
+        format!(
+            "{}{}",
+            &text[..members[at - 1].end],
+            &text[members[at].end..]
+        )
+    };
+    let mut expected = before;
+    expected.remove(key);
+    match serde_json::from_str::<Value>(&out) {
+        Ok(Value::Object(after)) if after == expected => Ok(out),
+        _ => Err(SpliceError::Mismatch),
+    }
+}
+
 fn check(
     before: &Map<String, Value>,
     out: &str,
@@ -82,6 +125,7 @@ fn render(value: &Value, indent: Option<&str>) -> String {
 
 struct Span {
     key: String,
+    key_start: usize,
     start: usize,
     end: usize,
 }
@@ -181,7 +225,12 @@ fn top_level_spans(b: &[u8]) -> Option<Spans> {
         }
         let start = skip_ws(b, i + 1);
         let end = skip_value(b, start)?;
-        spans.members.push(Span { key, start, end });
+        spans.members.push(Span {
+            key,
+            key_start,
+            start,
+            end,
+        });
         i = skip_ws(b, end);
         match b.get(i)? {
             b',' => i = skip_ws(b, i + 1),
@@ -240,6 +289,30 @@ mod tests {
             out,
             r#"{"a": "} \" {", "oauthAccount": "y", "b": ["]", {"c": "}"}]}"#
         );
+    }
+
+    #[test]
+    fn a_key_is_removed_with_its_comma_and_the_rest_stays() {
+        let text = "{\n  \"a\": 1,\n  \"b\": {\"x\": [1, 2]},\n  \"c\": 3\n}\n";
+        assert_eq!(
+            remove_top_level(text, "a").unwrap(),
+            "{\n  \"b\": {\"x\": [1, 2]},\n  \"c\": 3\n}\n"
+        );
+        assert_eq!(
+            remove_top_level(text, "b").unwrap(),
+            "{\n  \"a\": 1,\n  \"c\": 3\n}\n"
+        );
+        assert_eq!(
+            remove_top_level(text, "c").unwrap(),
+            "{\n  \"a\": 1,\n  \"b\": {\"x\": [1, 2]}\n}\n"
+        );
+        assert_eq!(remove_top_level("{\"a\":1}", "a").unwrap(), "{}");
+        assert_eq!(remove_top_level(text, "zzz").unwrap(), text);
+        assert_eq!(
+            remove_top_level("{\"a\":1,\"a\":2}", "a"),
+            Err(SpliceError::Duplicate)
+        );
+        assert_eq!(remove_top_level("[]", "a"), Err(SpliceError::NotAnObject));
     }
 
     #[test]

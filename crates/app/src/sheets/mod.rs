@@ -25,6 +25,8 @@ pub mod models_rows;
 mod models_rows_tests;
 pub mod new_session;
 #[cfg(test)]
+mod new_session_chrome_tests;
+#[cfg(test)]
 mod new_session_run_on_tests;
 pub mod renders;
 pub mod run_on;
@@ -40,10 +42,13 @@ mod settings_cluster_tests;
 pub mod settings_hooks_view;
 #[cfg(target_os = "macos")]
 pub mod settings_skills_view;
+#[cfg(test)]
+mod settings_tabs_tests;
 #[cfg(target_os = "macos")]
 pub mod settings_view;
 #[cfg(test)]
 mod settings_words_tests;
+pub mod sidecar_rows;
 pub mod skills_models;
 #[cfg(test)]
 mod skills_models_tests;

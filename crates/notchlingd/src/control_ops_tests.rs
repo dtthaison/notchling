@@ -141,6 +141,40 @@ fn new_session_starts_claude_bg_and_names_the_job() {
     );
 }
 
+#[test]
+fn new_session_passes_the_chrome_flag_alone_or_after_a_model() {
+    let (_d, s, fake) = control("newchrome", true);
+    for (flags, job) in [
+        (json!(["--chrome"]), "aaaa0001"),
+        (json!(["--no-chrome"]), "aaaa0002"),
+        (
+            json!(["--model", "claude-opus-5-5", "--chrome"]),
+            "aaaa0003",
+        ),
+    ] {
+        fake.push_output(Ok(LaunchOutput::ok(&format!(
+            "backgrounded · {job} (idle)\n"
+        ))));
+        assert_eq!(
+            call(
+                &s,
+                ops::SESSION_NEW,
+                json!({"folder": "/w/api", "flags": flags})
+            ),
+            Ok(json!({"jobId": job}))
+        );
+    }
+    assert_eq!(
+        fake.commands(),
+        [
+            main_login(&["claude", "--chrome", "--bg"]).in_dir("/w/api"),
+            main_login(&["claude", "--no-chrome", "--bg"]).in_dir("/w/api"),
+            main_login(&["claude", "--model", "claude-opus-5-5", "--chrome", "--bg"])
+                .in_dir("/w/api"),
+        ]
+    );
+}
+
 fn live(id: &str) -> LiveModel {
     LiveModel {
         id: id.into(),
@@ -231,6 +265,10 @@ fn new_session_refuses_a_folder_it_cannot_use() {
         json!({"folder": "/w", "flags": ["--model", "claude-opus-9-9"]}),
         json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5[1m] --dangerously-skip-permissions"]}),
         json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5[x]\n/permissions"]}),
+        json!({"folder": "/w", "flags": ["--chrome", "--no-chrome"]}),
+        json!({"folder": "/w", "flags": ["--chrome", "--model", "claude-opus-5-5"]}),
+        json!({"folder": "/w", "flags": ["--chrome=1"]}),
+        json!({"folder": "/w", "flags": ["--model", "claude-opus-5-5", "--chrome", "--chrome"]}),
     ] {
         assert_eq!(
             call(&s, ops::SESSION_NEW, args.clone()).unwrap_err().0,

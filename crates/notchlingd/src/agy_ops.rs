@@ -1,7 +1,9 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{broad_folder, text_arg, Room};
+use crate::agy_app::{AppSessions, NOT_SIDECAR};
 use crate::agy_elsewhere::Elsewhere;
 use crate::agy_phone::{LogReads, PhoneRead};
+use crate::agy_sidecar_ops::SidecarLink;
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::catalog_ops::CatalogService;
 use crate::layout::Layout;
@@ -9,6 +11,7 @@ use crate::outbox_ops::{OutboxOps, SendArgs};
 use crate::outbox_runners::Delivery;
 use crate::pages_ops::Titles;
 use notchling_engine::contract::channel::{self, Ability, Channel};
+use notchling_engine::contract::channels::SIDECAR;
 use notchling_engine::contract::Tool;
 use notchling_engine::outbox::Via;
 use notchling_engine::search::index::TitledSession;
@@ -16,11 +19,13 @@ use notchling_engine::settings::Settings;
 use notchling_engine::tools::acp::{RealSpawner, Spawner};
 use notchling_engine::tools::agy::summaries::{self, Row};
 use notchling_engine::tools::agy::{self, RunError, Runner, Timing};
+use notchling_engine::tools::agy_sidecar::ids::{is_uuid, valid_model};
 use notchling_engine::tools::codex::plan::MAX_PROMPT_BYTES;
 use notchling_local_api::{ops, topics, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -49,6 +54,8 @@ pub const PERMISSION: &str = ops::AGY_PERMISSION;
 pub const PERMISSION_PENDING: &str = topics::AGY_PERMISSION_PENDING;
 pub const PERMISSION_RESOLVED: &str = topics::AGY_PERMISSION_RESOLVED;
 
+static START_JOBS: AtomicU64 = AtomicU64::new(0);
+
 pub(crate) const CONVERSATION_BYTES: usize = 512 * 1024;
 
 pub const ACTING_OPS: [&str; 5] = [OPEN, SEND, CANCEL, SET_OPTION, PERMISSION];
@@ -72,8 +79,10 @@ pub struct AgyOps {
     runner: Runner,
     setup: AgySetup,
     elsewhere: Arc<Elsewhere>,
+    app: Arc<AppSessions>,
     logs: LogReads,
     outbox: OnceLock<Arc<OutboxOps>>,
+    sidecar: OnceLock<Arc<SidecarLink>>,
     settings: OnceLock<PathBuf>,
     held: Mutex<HashMap<String, (Instant, bool)>>,
 }
@@ -120,6 +129,11 @@ impl AgyOps {
             runner.clone(),
             shared.clone(),
         ));
+        let app = Arc::new(AppSessions::new(
+            setup.root.clone(),
+            setup.copy_dir.clone(),
+            shared.clone(),
+        ));
         AgyOps {
             acting,
             shared,
@@ -127,7 +141,9 @@ impl AgyOps {
             logs: LogReads::new(setup.root.clone()),
             setup,
             elsewhere,
+            app,
             outbox: OnceLock::new(),
+            sidecar: OnceLock::new(),
             settings: OnceLock::new(),
             held: Mutex::new(HashMap::new()),
         }
@@ -151,6 +167,20 @@ impl AgyOps {
         channel::chosen(Tool::Antigravity, value.as_deref())
     }
 
+    pub fn attach_sidecar(&self, link: Arc<SidecarLink>) {
+        let _ = self.sidecar.set(link);
+    }
+
+    pub(crate) fn sidecar_chosen(&self) -> bool {
+        self.channel().id() == SIDECAR
+    }
+
+    fn sidecar_link(&self) -> Result<&Arc<SidecarLink>, ApiError> {
+        self.sidecar
+            .get()
+            .ok_or_else(|| failed("the Antigravity sidecar is not set up in this daemon"))
+    }
+
     pub(crate) fn allow(&self, ability: Ability, phone: bool) -> Result<(), ApiError> {
         let chosen = self.channel();
         let refused = if phone {
@@ -167,6 +197,10 @@ impl AgyOps {
     }
 
     pub fn phone_read(&self, session: &str, row_working: bool) -> PhoneRead {
+        if self.app.is_app(session) {
+            let read = self.app.read(session, CONVERSATION_BYTES);
+            return PhoneRead::bounded(read.conversation, read.working, CONVERSATION_BYTES);
+        }
         if self.runner.is_open(session) && !self.runner.is_loading(session) {
             if let Some(open) = self.runner.peek_conversation(session) {
                 let working = self.runner.is_working(session);
@@ -214,6 +248,13 @@ impl AgyOps {
             SEND => self.send(args),
             CANCEL => {
                 let session = self.session_arg(args)?;
+                if self.sidecar_chosen() {
+                    if let Some(refused) = channel::refusal(self.channel(), Ability::SoftStop) {
+                        return Err(bad(refused).with_data(json!({"why": CHANNEL_WHY})));
+                    }
+                    self.sidecar_link()?.stop(&session)?;
+                    return Ok(json!({"cancelled": true, "soft": true}));
+                }
                 self.runner.cancel(&session);
                 Ok(json!({"cancelled": true}))
             }
@@ -263,6 +304,9 @@ impl AgyOps {
     }
 
     pub fn close(&self) {
+        if let Some(link) = self.sidecar.get() {
+            link.close();
+        }
         self.runner.close_all();
         self.drain_pending("closed");
     }
@@ -321,12 +365,39 @@ impl AgyOps {
                 ));
             }
         }
+        for row in self.app.rows() {
+            if !listed.contains(&row.id) {
+                out.push(session_json(
+                    &row.row_id(),
+                    &row.title,
+                    &row.folder,
+                    row.modified,
+                    row.running,
+                ));
+            }
+        }
         out.sort_by(|a, b| since(b).total_cmp(&since(a)));
         Value::Array(out)
     }
 
     fn state(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
+        if self.app.is_app(&session) {
+            let read = self.app.read(&session, CONVERSATION_BYTES);
+            return Ok(json!({
+                "id": row_id(&session),
+                "open": true,
+                "loading": false,
+                "loadError": null,
+                "working": read.working,
+                "elsewhere": null,
+                "title": read.title,
+                "folder": read.folder,
+                "config": [],
+                "commands": [],
+                "permission": null,
+            }));
+        }
         let r = &self.runner;
         let elsewhere = self.elsewhere.watched(&session);
         let working = match &elsewhere {
@@ -350,6 +421,21 @@ impl AgyOps {
 
     fn conversation(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
+        if self.app.is_app(&session) {
+            let read = self.app.read(&session, CONVERSATION_BYTES);
+            let conversation =
+                serde_json::to_value(read.conversation).map_err(|e| failed(e.to_string()))?;
+            return Ok(json!({
+                "id": row_id(&session),
+                "open": true,
+                "loading": false,
+                "loadError": null,
+                "working": read.working,
+                "conversation": conversation,
+                "truncated": read.omitted > 0,
+                "omitted": read.omitted,
+            }));
+        }
         let peek = match args.get("peek") {
             None | Some(Value::Null) => false,
             Some(Value::Bool(peek)) => *peek,
@@ -394,6 +480,9 @@ impl AgyOps {
 
     fn open(&self, args: &Value) -> Result<Value, ApiError> {
         let session = self.session_arg(args)?;
+        if self.app.is_app(&session) {
+            return Ok(self.app.open(&session));
+        }
         let folder = self.folder_for(&session)?;
         if let Some(holder) = self.elsewhere.check(&session) {
             return Ok(json!({"id": row_id(&session), "loading": false,
@@ -424,6 +513,9 @@ impl AgyOps {
         }
         if args.get("id").is_some() {
             let session = self.session_arg(args)?;
+            if !self.sidecar_chosen() && self.app.is_app(&session) {
+                return Err(failed(NOT_SIDECAR));
+            }
             if let Some(outbox) = self.outbox.get() {
                 let row = outbox.send(&SendArgs {
                     id: row_id(&session),
@@ -459,6 +551,9 @@ impl AgyOps {
                 "a new session never starts in the root or the home folder",
             ));
         }
+        if self.sidecar_chosen() {
+            return self.sidecar_start(args, text);
+        }
         let started = self.runner.start(&folder, self.setup.start_wait);
         self.settle();
         let session = started.map_err(run_error)?;
@@ -476,11 +571,43 @@ impl AgyOps {
         Ok(json!({"id": row_id(&session), "sent": true}))
     }
 
+    fn sidecar_start(&self, args: &Value, text: &str) -> Result<Value, ApiError> {
+        let optional = |key: &str| -> Result<Option<String>, ApiError> {
+            match args.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(v)) if !v.is_empty() => Ok(Some(v.clone())),
+                Some(_) => Err(bad(format!("{key} is text"))),
+            }
+        };
+        let model = optional("model")?;
+        if model.as_deref().is_some_and(|m| !valid_model(m)) {
+            return Err(bad("that is not a model name Antigravity takes"));
+        }
+        let title = optional("title")?.unwrap_or_else(|| summaries::title(text));
+        let job = format!("start-{}-{:x}", now_secs(), text.len());
+        let job = format!("{job}-{}", START_JOBS.fetch_add(1, Ordering::SeqCst));
+        let session = self
+            .sidecar_link()?
+            .start(&job, text, model.as_deref(), Some(&title))?;
+        self.app.started(&session, &title);
+        Ok(json!({"id": row_id(&session), "sent": true}))
+    }
+
     pub(crate) fn attach_outbox(&self, outbox: Arc<OutboxOps>) {
         let _ = self.outbox.set(outbox);
     }
 
     pub(crate) fn check_session(&self, session: &str) -> Result<(), ApiError> {
+        if self.sidecar_chosen() {
+            return if is_uuid(session) {
+                Ok(())
+            } else {
+                Err(bad("No such session."))
+            };
+        }
+        if self.app.is_app(session) {
+            return Err(failed(NOT_SIDECAR));
+        }
         self.folder_for(session)
             .map_err(|_| bad("No such session."))?;
         match self.elsewhere.check(session) {
@@ -490,6 +617,9 @@ impl AgyOps {
     }
 
     pub(crate) fn is_busy(&self, session: &str) -> bool {
+        if self.sidecar_chosen() {
+            return false;
+        }
         self.runner.is_working(session) || self.held(session)
     }
 
@@ -505,12 +635,21 @@ impl AgyOps {
         held
     }
 
-    pub(crate) fn deliver(&self, session: &str, text: &str) -> Result<(), Delivery> {
+    pub(crate) fn deliver(&self, job: &str, session: &str, text: &str) -> Result<(), Delivery> {
         if let Err(refused) = self.allow(Ability::Reply, false) {
             return Err(Delivery::Failed(refused.message));
         }
         if !self.acting.is_on() {
             return Err(Delivery::Busy);
+        }
+        if self.sidecar_chosen() {
+            let link = self
+                .sidecar_link()
+                .map_err(|e| Delivery::Failed(e.message))?;
+            return link.reply(job, session, text);
+        }
+        if self.app.is_app(session) {
+            return Err(Delivery::Failed(NOT_SIDECAR.to_owned()));
         }
         let folder = self
             .folder_for(session)
@@ -570,6 +709,7 @@ impl AgyOps {
         }
         self.rows()
             .into_iter()
+            .chain(self.app.rows())
             .find(|r| r.id == session)
             .map(|r| r.folder)
             .ok_or_else(|| bad(format!("no Antigravity session {session}")))
@@ -626,3 +766,7 @@ impl AgyOps {
 #[cfg(test)]
 #[path = "agy_ops_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "agy_ops_app_tests.rs"]
+mod app_tests;

@@ -23,6 +23,7 @@ fn step(id: &str, kind: ToolKind, input: &str) -> ToolRow {
         removed: 0,
         is_error: false,
         finished: true,
+        browser: None,
     }
 }
 

@@ -152,6 +152,13 @@ work.
 | `agy.cancel` | app | yes | `{id}` | `{cancelled: true}` |
 | `agy.set_option` | app | yes | `{id, option, value}` | `{requested: true}`: the session's own options only |
 | `agy.permission` | app | yes | `{id, rpc_id, option_id?}` | `{outcome}`; no `option_id` cancels |
+| `agy.sidecar.take` | agent | no | `{waitMs?}` | `{jobs: [{id, kind: "reply"\|"start", session?, model?, title?, text}]}`; waits at most 25 s; only `notchling agy-sidecar` (client `hook`) with Antigravity above it in the process tree; also marks the sidecar as running |
+| `agy.sidecar.report` | agent | no | `{id, result: "delivered"\|"unconfirmed"\|"failed", session?, error?}` | `{accepted}`; true only for a job that was taken and not yet reported; same caller rule as take |
+| `agy.hook` | agent | no | `{event: "pre-tool"\|"pre-invocation", input, waitMs?}` | `{output}`: the JSON `notchling agy-hook` prints, or null for nothing; same caller rule; null unless acting is on and the sidecar channel is chosen |
+| `agy.sidecar.status` | app | no | `{}` | `{state: "no_app"\|"off"\|"partial"\|"on"\|"blocked", app, chosen, enabled, plugin, pluginCurrent, hooks, running, waiting}` |
+| `agy.sidecar.setup` | app | no | `{action: "turn_on"\|"turn_off", confirm?}` | the status plus `{backups}`; `turn_on` needs `confirm: true` and the install switch, and writes Antigravity's `config.json` (one key), `hooks.json` and Notchling's own plugin folder; `turn_off` removes the hooks, the plugin folder and the one `enabled` key (with a backup) |
+
+While the `sidecar` channel is chosen (setting `antigravityChannel`), `agy.send` (with `id`, through the Outbox, or with `draft_folder`, which also takes optional `model` and `title`) and the Outbox's delivery to an `agy:` row queue a job for the sidecar instead of running `agy acp`, and `agy.cancel` asks for a soft stop (`{cancelled: true, soft: true}`) that the next `PreInvocation` hook turns into a terminate. A job waits for the sidecar's report: a sidecar that is not polling (or whose process is gone) fails the send at once with words that say so, a job nobody takes in 100 s is withdrawn and fails, and a taken job without a report in 100 s is shown as unsure. `agy.sidecar.take` takes optional `max` (jobs per take; the sidecar asks for one). A job's id is the Outbox row's id and its try number, so a repeat of an attempt that was delivered or is unsure never sends twice, while Send Again is a new attempt. `agy.send` for a new conversation can take up to 200 s and its caller should wait longer. The folder of `draft_folder` is checked and then unused: a new conversation has no workspace folder. Hook prompts are ordinary prompts (`prompt.pending`, answered by `session.permission`) with the session id `agy:<conversation>`, so Chat, the notch and the phone show them like any other.
 
 `id` is a row id, `agy:<session>`. A session's folder comes from the summaries copy or from the
 session this daemon started, never from the caller; a draft's `draft_folder` is an absolute
@@ -1016,6 +1023,43 @@ that reads or writes a login sits behind the traits in
   `switch_at` (80 to 99, refused outside it) or both. Antigravity refuses `notifyAndSwitch`.
 - Every message the watchers say goes out as `limits.notice {"at", "text"}` on the `limits`
   topic (app tier), for the app to show.
+
+## `organizations_ops.rs`
+
+What Settings > Organizations shows and changes, over `notchling_engine::organizations` (the `organizations`
+document in `notchling.db`). Every op is app tier, so an agent can't list folders, create, change or delete an
+organization (the design's reduced agent-tier `organizations.list` waits for the phase that needs it). No
+switch. The two reads are `OpSpec::APP_QUIET` (the page asks on open, after each edit and while a folder is
+typed); the five edits are `OpSpec::APP` and recorded as `op.called`. The registry is opened read only here, so
+no op migrates a machines file.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `organizations.list` | app, quiet | `{}` | `{organizations: [{id, name, githubOwner, color, folders, personal, counts: {accounts, secrets, machines}}], colors, onlyPersonal, unreadable}` |
+| `organizations.create` | app | `{name, color?, githubOwner?}` | `{id}`; with only Personal it first marks every account and secret as Personal's (machines without a mark already count as Personal) |
+| `organizations.rename` | app | `{id, name}` | `{}` |
+| `organizations.color.set` | app | `{id, color}` | `{}` |
+| `organizations.folders.set` | app | `{id, folders: [path]}` | `{folders}`, the folders as stored |
+| `organizations.folders.preview` | app, quiet | `{id, folders: [path]}` | `{folders, problem, problemText, overlaps: [{folder, organization, other, relation}], moved: [{folder, from, to}]}`; writes nothing |
+| `organizations.delete` | app | `{id}` | `{}` |
+
+- Personal first, then the others in their `order`. `colors` is the closed list a colour must come from
+  (`organizations::COLORS`: grey, orange, yellow, lime, teal, blue, purple, pink, red); a colour already stored
+  that isn't in it still reads, and only a new choice is checked. `unreadable` is `null`, or why the document
+  can't be read: the list then shows Personal alone and every edit answers `failed` with `data.kind` `unreadable`
+  and writes nothing.
+- A refused edit is `bad_request` with a plain `message` and `data: {problems: [{kind, ...}]}`; `kind` is one of
+  `name_empty`, `name_too_long`, `name_taken {name}`, `id_unknown {id}`, `color_invalid {color}`,
+  `folder_invalid {folder}`, `folder_taken {folder, by}`, `personal_not_deletable` and
+  `not_empty {counts: {accounts, secrets, machines}}`. The app words these from its own messages, never from
+  `message`.
+- `folders` are full paths or start with `~/`; they are normalized (`~/work/./x/` is `~/work/x`), a folder can
+  belong to one organization only (same real folder, case folded where the disk folds it), and a folder inside
+  another organization's folder is allowed: the longest match wins. The preview's `overlaps` say `inside` (the
+  folder lies in the other's) or `contains`; `moved` lists the sessions the daemon knows whose organization
+  would change, with the organization ids before and after.
+- Delete is refused for Personal and for an organization that still holds an account, a secret or a machine,
+  counted inside one transaction with the removal.
 
 ## `outbox_ops.rs`
 

@@ -14,6 +14,7 @@ use crate::tools::agy_hand_off::{self, Target, Words};
 use crate::tools::requests::{agy_cancel, agy_send_draft, is_draft};
 use notchling_engine::contract::channel::Opener;
 use notchling_engine::contract::channel_draft;
+use notchling_engine::contract::channels::SIDECAR;
 
 pub(super) struct Antigravity;
 
@@ -85,7 +86,7 @@ impl ChatTool for Antigravity {
     }
 
     fn refusal(&self, view: &ChatView, session: &Session) -> Option<&'static str> {
-        if self.hand_off(view).is_some() {
+        if self.hand_off(view).is_some() || view.tools.agy_channel().id() == SIDECAR {
             return None;
         }
         if let Some(note) = view.tools.agy.as_ref().and_then(|a| a.elsewhere.as_deref()) {

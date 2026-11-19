@@ -50,6 +50,11 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::AGY_CANCEL, Home::Called),
     (ops::AGY_SET_OPTION, Home::Called),
     (ops::AGY_PERMISSION, Home::Called),
+    (ops::AGY_SIDECAR_TAKE, Home::Called),
+    (ops::AGY_SIDECAR_REPORT, Home::Called),
+    (ops::AGY_SIDECAR_STATUS, Home::Quiet),
+    (ops::AGY_SIDECAR_SETUP, Home::Called),
+    (ops::AGY_HOOK, Home::Called),
     (ops::BRIDGE_SET, Home::Kind("switch.changed")),
     (ops::BRIDGE_STATUS, Home::Quiet),
     (ops::BRIDGE_PAIR_BEGIN, Home::Called),
@@ -150,6 +155,13 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::ASK_ANSWER, Home::Kind("session.ask")),
     (ops::ASK_DISMISS, Home::Kind("session.ask")),
     (ops::ASK_LIST, Home::Called),
+    (ops::ORGANIZATIONS_LIST, Home::Quiet),
+    (ops::ORGANIZATIONS_CREATE, Home::Called),
+    (ops::ORGANIZATIONS_RENAME, Home::Called),
+    (ops::ORGANIZATIONS_COLOR_SET, Home::Called),
+    (ops::ORGANIZATIONS_FOLDERS_SET, Home::Called),
+    (ops::ORGANIZATIONS_FOLDERS_PREVIEW, Home::Quiet),
+    (ops::ORGANIZATIONS_DELETE, Home::Called),
 ];
 
 pub fn home(op: &str) -> OpHome {

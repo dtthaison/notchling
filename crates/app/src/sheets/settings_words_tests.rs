@@ -6,7 +6,9 @@ use serde_json::{json, Value};
 use super::agents::{Page, Tool, HOOKS};
 use super::capabilities::RowState;
 use super::hook_rows::{HookState, HooksShown};
-use super::settings::{choice_key, sections, title_key, Daemon, Field, Row};
+use super::settings::{
+    choice_key, every_section, shared_agent_sections, title_key, tool_sections, Daemon, Field, Row,
+};
 use crate::acting::Acting;
 use crate::welcome::hooks::DETACHED;
 
@@ -19,7 +21,7 @@ fn every_row() -> Vec<Row> {
         acting: Acting::Off,
         ..Daemon::detached()
     };
-    sections(&store, &daemon)
+    every_section(&store, &daemon)
         .into_iter()
         .flat_map(|s| s.rows)
         .collect()
@@ -87,7 +89,7 @@ fn choice_labels_are_per_setting() {
     let mut seen = HashSet::new();
     let mut choices = 0;
     for row in &rows {
-        let Field::Choice { options, .. } = &row.field else {
+        let (Field::Choice { options, .. } | Field::List { options, .. }) = &row.field else {
             continue;
         };
         for (value, label) in options {
@@ -99,12 +101,13 @@ fn choice_labels_are_per_setting() {
             choices += 1;
         }
     }
-    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 3 + 2 + 4);
+    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4 + 2 + 4);
 }
 
 #[test]
 fn section_titles_and_footers_come_from_messages() {
-    let sections = sections(&|_| None, &Daemon::detached());
+    let read = |_: &str| None::<Value>;
+    let sections = every_section(&read, &Daemon::detached());
     let titles: Vec<&str> = sections.iter().map(|s| s.title).collect();
     assert_eq!(
         titles,
@@ -114,11 +117,11 @@ fn section_titles_and_footers_come_from_messages() {
             t::settings::SECTION_DAEMON.get(),
             t::settings::SECTION_KEEP_MAC_AWAKE.get(),
             t::settings::SECTION_NOTCH.get(),
-            t::settings::SECTION_CLAUDE_CODE.get(),
+            t::settings::SECTION_CHAT.get(),
             t::settings::SECTION_ACCOUNT_LIMIT.get(),
+            t::settings::SECTION_CLAUDE_CODE.get(),
             t::settings::SECTION_CODEX.get(),
             t::settings::SECTION_ANTIGRAVITY.get(),
-            t::settings::SECTION_CHAT.get(),
         ]
     );
     let footers: Vec<Option<&str>> = sections.iter().map(|s| s.footer).collect();
@@ -130,26 +133,38 @@ fn section_titles_and_footers_come_from_messages() {
             Some(t::settings::FOOTER_DAEMON.get()),
             Some(t::settings::FOOTER_KEEP_MAC_AWAKE.get()),
             None,
-            None,
+            Some(t::settings::FOOTER_CHAT.get()),
             Some(t::settings::FOOTER_ACCOUNT_LIMIT.get()),
             None,
+            None,
             Some(t::settings::FOOTER_ANTIGRAVITY.get()),
-            Some(t::settings::FOOTER_CHAT.get()),
         ]
     );
+    assert_eq!(shared_agent_sections(&read).len(), 1);
+    for tool in Tool::ALL {
+        assert_eq!(tool_sections(tool, &read).len(), 1, "{}", tool.id());
+    }
 }
 
 #[test]
 fn pages_and_hooks_use_messages() {
     assert_eq!(Page::General.title(), t::settings::page_general());
+    assert_eq!(Page::Organizations.title(), t::organizations::page());
     assert_eq!(Page::Agents.title(), t::settings::page_agents());
     assert_eq!(Page::Skills.title(), t::settings::page_skills());
     assert_eq!(Page::Activity.title(), t::settings::page_activity());
     assert_eq!(Tool::ClaudeCode.title(), t::settings::tool_claude_code());
     assert_eq!(Tool::ClaudeCode.title(), "Claude Code");
+    assert_eq!(Tool::Codex.title(), t::settings::tool_codex());
+    assert_eq!(Tool::Antigravity.title(), t::settings::tool_antigravity());
+    assert_eq!(
+        Tool::ALL.map(Tool::id),
+        ["claude-code", "codex", "antigravity"],
+        "an element id never changes with the language"
+    );
     assert_eq!(
         Page::ALL.map(Page::id),
-        ["general", "agents", "skills", "activity"],
+        ["general", "organizations", "agents", "skills", "activity"],
         "an element id never changes with the language"
     );
     let installed = HookState::Installed.word();
