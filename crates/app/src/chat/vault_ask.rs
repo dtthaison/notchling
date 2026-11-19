@@ -10,6 +10,7 @@ use super::sidebar::SidebarModel;
 pub struct Ticket {
     pub id: String,
     pub session: Option<String>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +28,12 @@ fn ticket_of(data: &Value) -> Option<Ticket> {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .map(str::to_owned),
+        cwd: data
+            .get("verified")
+            .and_then(|v| v.get("cwd"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
     })
 }
 
@@ -38,7 +45,7 @@ pub fn tickets(approvals: &[Value], requests: &[Value]) -> Vec<Ticket> {
         .collect()
 }
 
-pub fn row_for(sessions: &[Session], session: &str) -> Option<String> {
+fn matched<'a>(sessions: &'a [Session], session: &str) -> Option<&'a Session> {
     let mut rows = sessions.iter().filter(|s| {
         s.agent.session_id().as_deref() == Some(session)
             || s.transcript
@@ -48,7 +55,41 @@ pub fn row_for(sessions: &[Session], session: &str) -> Option<String> {
                 == Some(session)
     });
     let first = rows.next()?;
-    rows.next().is_none().then(|| first.agent.id.clone())
+    rows.next().is_none().then_some(first)
+}
+
+pub fn row_for(sessions: &[Session], session: &str) -> Option<String> {
+    matched(sessions, session).map(|s| s.agent.id.clone())
+}
+
+fn real(path: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(path);
+    for alias in ["tmp", "var", "etc"] {
+        if let Ok(rest) = path.strip_prefix(format!("/private/{alias}")) {
+            return std::path::Path::new("/").join(alias).join(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
+pub fn cwd_within(folder: &str, cwd: &str) -> bool {
+    if folder.is_empty() || cwd.is_empty() {
+        return false;
+    }
+    let (folder, cwd) = (real(folder), real(cwd));
+    folder.is_absolute() && cwd.is_absolute() && cwd.starts_with(folder)
+}
+
+fn lives_there(session: &Session, cwd: Option<&str>) -> bool {
+    let Some(cwd) = cwd else {
+        return false;
+    };
+    cwd_within(&session.agent.cwd, cwd)
+        || session
+            .agent
+            .worktree_path
+            .as_deref()
+            .is_some_and(|w| cwd_within(w, cwd))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -95,12 +136,13 @@ pub fn pick(ids: &[&str], raised: Option<&str>) -> Option<usize> {
 }
 
 pub fn place(ticket: &Ticket, sessions: &[Session]) -> Placement {
-    match ticket
+    let row = ticket
         .session
         .as_deref()
-        .and_then(|session| row_for(sessions, session))
-    {
-        Some(row) => Placement::Card(row),
+        .and_then(|session| matched(sessions, session))
+        .filter(|s| lives_there(s, ticket.cwd.as_deref()));
+    match row {
+        Some(s) => Placement::Card(s.agent.id.clone()),
         None => Placement::Sheet,
     }
 }

@@ -116,6 +116,10 @@ impl VaultApprovalView {
     }
 
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if !super::presence::keeps_focus(visible, self.presence) && self.visible {
+            self.reset_focus = true;
+            cx.notify();
+        }
         self.visible = visible;
         self.refresh_arming(cx);
     }
@@ -372,7 +376,7 @@ impl Render for VaultApprovalView {
                 cx.listener(|this, _, window, _| window.focus(&this.focus)),
             )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
+                if super::presence::escape_denies(this.visible, &event.keystroke.key) {
                     this.answer(Decision::Deny, cx);
                     cx.stop_propagation();
                 }

@@ -29,21 +29,50 @@ impl CallerSession {
     }
 }
 
-pub const CLAUDE_PROCESS: &str = "claude";
+pub fn claude_binaries(home: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    (
+        vec![
+            notchling_engine::control::launcher::claude_path(home),
+            home.join(".local").join("bin").join("claude"),
+            PathBuf::from("/usr/local/bin/claude"),
+            PathBuf::from("/opt/homebrew/bin/claude"),
+        ],
+        vec![
+            home.join(".local").join("share").join("claude"),
+            home.join(".claude").join("local"),
+        ],
+    )
+}
 
-pub fn is_claude(procs: &dyn Processes, hit: &SessionHit) -> bool {
-    procs.name(hit.claude_pid).as_deref() == Some(CLAUDE_PROCESS)
+pub fn is_claude_binary(procs: &dyn Processes, pid: u32, home: &Path) -> bool {
+    let Some(exe) = procs.exe(pid).and_then(|e| procs.resolve(&e)) else {
+        return false;
+    };
+    let (files, folders) = claude_binaries(home);
+    files
+        .iter()
+        .filter_map(|f| procs.resolve(f))
+        .any(|f| f == exe)
+        || folders
+            .iter()
+            .filter_map(|f| procs.resolve(f))
+            .any(|f| exe.starts_with(&f))
 }
 
 pub fn trusted_in(
     roots: Roots,
     procs: Arc<dyn Processes>,
 ) -> Arc<dyn Fn(u32) -> Option<String> + Send + Sync> {
+    let home = roots
+        .main_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     let finder = CallerSession::new(roots, procs.clone());
     Arc::new(move |pid| {
         finder
             .session_of(pid)
-            .filter(|hit| is_claude(procs.as_ref(), hit))
+            .filter(|hit| is_claude_binary(procs.as_ref(), hit.claude_pid, &home))
             .map(|hit| hit.session_id)
     })
 }

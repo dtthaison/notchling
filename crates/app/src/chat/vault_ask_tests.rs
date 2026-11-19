@@ -7,7 +7,9 @@ use serde_json::json;
 use super::super::data::Tool;
 use super::super::sidebar::sidebar_model;
 use super::super::sidebar::tests::session;
-use super::{pick, place, row_for, tickets, visible, waiting_rows, Covers, Placement, Ticket};
+use super::{
+    cwd_within, pick, place, row_for, tickets, visible, waiting_rows, Covers, Placement, Ticket,
+};
 use crate::accounts::store::Snapshot;
 
 const NOW: i64 = 1_000_000_000_000;
@@ -16,6 +18,7 @@ fn ticket(id: &str, session: Option<&str>) -> Ticket {
     Ticket {
         id: id.into(),
         session: session.map(str::to_owned),
+        cwd: Some("/w/p".into()),
     }
 }
 
@@ -32,12 +35,16 @@ fn tickets_come_from_both_lists_and_name_a_session_only_when_it_is_not_blank() {
             json!({"id": ""}),
         ],
     );
+    let bare = |id: &str, session: Option<&str>| Ticket {
+        cwd: None,
+        ..ticket(id, session)
+    };
     assert_eq!(
         list,
         vec![
-            ticket("ap-1", Some("s-1")),
-            ticket("r-1", None),
-            ticket("r-2", None)
+            bare("ap-1", Some("s-1")),
+            bare("r-1", None),
+            bare("r-2", None)
         ]
     );
 }
@@ -205,4 +212,42 @@ fn a_row_waiting_on_the_vault_shows_the_needs_you_marker_like_a_question() {
     assert_eq!(status(&after, "asker"), Some(Status::Needs));
     assert_eq!(status(&after, "quiet"), status(&model, "quiet"));
     assert_eq!(model.clone().with_vault(&BTreeSet::new()), model);
+}
+
+#[test]
+fn the_card_needs_the_callers_real_folder_to_sit_in_the_rows_project() {
+    assert!(cwd_within("/w/p", "/w/p"));
+    assert!(cwd_within("/w/p", "/w/p/crates/app"));
+    assert!(cwd_within("/tmp/x", "/private/tmp/x/sub"));
+    assert!(
+        !cwd_within("/w/p", "/w/pp"),
+        "a sibling with the same prefix"
+    );
+    assert!(!cwd_within("/w/p", "/w"));
+    assert!(!cwd_within("/w/p", "/other/w/p"));
+    assert!(!cwd_within("", "/w/p") && !cwd_within("/w/p", ""));
+    assert!(!cwd_within("w/p", "w/p"), "relative paths never match");
+    let mut a = session("job-a", AgentGroup::Working, None, Tool::Claude);
+    a.agent.transcript_path = Some("/p/sess-a.jsonl".into());
+    a.agent.worktree_path = Some("/wt/p".into());
+    let rows = vec![a];
+    let mut t = ticket("t1", Some("sess-a"));
+    assert_eq!(place(&t, &rows), Placement::Card("job-a".into()));
+    t.cwd = Some("/wt/p/src".into());
+    assert_eq!(
+        place(&t, &rows),
+        Placement::Card("job-a".into()),
+        "worktree"
+    );
+    t.cwd = Some("/elsewhere".into());
+    assert_eq!(place(&t, &rows), Placement::Sheet, "another folder");
+    t.cwd = None;
+    assert_eq!(place(&t, &rows), Placement::Sheet, "no verified folder");
+    let unverified = tickets(&[json!({"id": "a", "session": "sess-a"})], &[]);
+    assert_eq!(place(&unverified[0], &rows), Placement::Sheet);
+    let verified = tickets(
+        &[json!({"id": "a", "session": "sess-a", "verified": {"cwd": "/w/p/sub"}})],
+        &[],
+    );
+    assert_eq!(place(&verified[0], &rows), Placement::Card("job-a".into()));
 }

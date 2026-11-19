@@ -217,6 +217,7 @@ impl ChatView {
                 ticket: Ticket {
                     id: approval.id.clone(),
                     session: approval.session.clone(),
+                    cwd: approval.verified.as_ref().and_then(|v| v.cwd.clone()),
                 },
                 prompt: Prompt::Approval(entity),
                 forced: None,
@@ -231,6 +232,7 @@ impl ChatView {
             let ticket = Ticket {
                 id: request.id.clone(),
                 session: request.session.clone(),
+                cwd: request.verified.as_ref().and_then(|v| v.cwd.clone()),
             };
             let entity =
                 cx.new(|cx| VaultRequestView::live_in(feed, vault, request, Presence::Sheet, cx));
@@ -334,6 +336,7 @@ impl State {
                 ticket: Ticket {
                     id: "preview".into(),
                     session: None,
+                    cwd: None,
                 },
                 prompt,
                 forced: Some(forced),
