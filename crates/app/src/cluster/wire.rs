@@ -56,6 +56,13 @@ pub fn join(typed: &str) -> JoinInput {
     }
 }
 
+pub fn switch_network(tailnet: &str) -> Request {
+    Request {
+        op: ops::TAILSCALE_SWITCH,
+        args: json!({"tailnet": tailnet}),
+    }
+}
+
 pub fn status() -> Request {
     Request {
         op: ops::CLUSTER_STATUS,

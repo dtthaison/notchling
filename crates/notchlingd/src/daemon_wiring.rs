@@ -44,6 +44,7 @@ use crate::quiet_ops;
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::shell_jobs::ShellJobs;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
+use crate::tailscale_ops::TailscaleOps;
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
 use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
@@ -900,6 +901,7 @@ impl Wired {
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(Arc::new(OrganizationsOps::for_daemon(layout, folders)))
+            .with_group(Arc::new(TailscaleOps::system()))
             .with_group(self.codex_children.clone())
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {

@@ -2,6 +2,7 @@ use super::admin_secret::{AdminSecrets, FromSource};
 use super::engine_plan::ShownRecord;
 use super::github::GitHubHttp;
 use super::masks::Masks;
+use super::reach::Router;
 use super::release_download::{NoDownloads, ReleaseDownloads};
 
 use super::registry::{Machine, RegistryFiles};
@@ -108,6 +109,7 @@ pub struct SetupEngine {
     pub(super) mac_daemon: Option<PathBuf>,
     pub(super) downloads: Arc<dyn ReleaseDownloads>,
     pub(super) admin_secrets: Arc<dyn AdminSecrets>,
+    pub(super) router: Arc<Router>,
 }
 
 #[derive(Default)]
@@ -187,6 +189,7 @@ impl SetupEngine {
             mac_daemon: None,
             downloads: Arc::new(NoDownloads),
             admin_secrets,
+            router: Arc::new(Router::off()),
         };
         engine.load_offers();
         engine.load_tools();
@@ -211,6 +214,15 @@ impl SetupEngine {
     pub fn with_downloads(mut self, downloads: Arc<dyn ReleaseDownloads>) -> SetupEngine {
         self.downloads = downloads;
         self
+    }
+
+    pub fn with_router(mut self, router: Arc<Router>) -> SetupEngine {
+        self.router = router;
+        self
+    }
+
+    pub fn router(&self) -> &Arc<Router> {
+        &self.router
     }
 
     pub fn with_admin_secrets(mut self, admin_secrets: Arc<dyn AdminSecrets>) -> SetupEngine {
@@ -279,7 +291,9 @@ impl SetupEngine {
     pub(super) fn current_machines(&self) -> Vec<Machine> {
         let list = self.deps.store.machines();
         let state = lock(&self.state);
-        list.iter().map(|m| with_facts(&state, m)).collect()
+        list.iter()
+            .map(|m| self.router.routed(&with_facts(&state, m)))
+            .collect()
     }
 
     pub(super) fn machine(&self, name: &str) -> Option<Machine> {
@@ -348,9 +362,10 @@ impl SetupEngine {
     }
 
     pub(super) fn context(&self, m: &Machine, masks: &Masks) -> StepContext {
+        let all = self.current_machines();
         StepContext {
-            machine: m.clone(),
-            all: self.current_machines(),
+            machine: self.router.reached(m, &all),
+            all,
             runner: self.deps.runner.clone(),
             secrets: self.deps.secrets.clone(),
             http: self.deps.http.clone(),

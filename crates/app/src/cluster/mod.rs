@@ -10,7 +10,15 @@ pub mod add_sheet;
 pub mod add_source;
 #[cfg(target_os = "macos")]
 mod add_view;
+#[cfg(target_os = "macos")]
+mod address_rows_view;
+pub mod addresses_form;
+#[cfg(target_os = "macos")]
+mod edit_addresses_view;
 pub mod feed;
+pub mod from_tailscale;
+#[cfg(target_os = "macos")]
+mod from_tailscale_view;
 pub mod install;
 pub mod machine_add;
 pub mod model;
@@ -58,7 +66,11 @@ mod add_sheet_tests;
 #[cfg(test)]
 mod add_tests;
 #[cfg(test)]
+mod addresses_form_tests;
+#[cfg(test)]
 mod feed_tests;
+#[cfg(test)]
+mod from_tailscale_tests;
 #[cfg(test)]
 mod install_tests;
 #[cfg(test)]

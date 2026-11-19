@@ -128,6 +128,8 @@ pub mod ops {
 
     pub const AWAKE_STATE: &str = "awake.state";
 
+    pub const TAILSCALE_SWITCH: &str = "tailscale.switch";
+
     pub const CLUSTER_STATUS: &str = "cluster.status";
     pub const CLUSTER_CREATE: &str = "cluster.create";
     pub const CLUSTER_JOIN_TOKEN: &str = "cluster.join.token";

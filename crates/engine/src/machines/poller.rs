@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::reach::Router;
 use super::registry::Machine;
 use super::runner::{Call, CommandResult, Runner};
 use super::shell;
@@ -127,6 +128,7 @@ pub struct MachinePoller {
     state: Mutex<State>,
     on_new_needs_you: Option<NewNeedsYou>,
     on_questions_waiting: Option<QuestionsWaiting>,
+    router: Arc<Router>,
 }
 
 fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
@@ -154,7 +156,13 @@ impl MachinePoller {
             state: Mutex::new(State::default()),
             on_new_needs_you: None,
             on_questions_waiting: None,
+            router: Arc::new(Router::off()),
         }
+    }
+
+    pub fn with_router(mut self, router: Arc<Router>) -> MachinePoller {
+        self.router = router;
+        self
     }
 
     pub fn on_new_needs_you(
@@ -211,16 +219,22 @@ impl MachinePoller {
     }
 
     pub fn poll_once(&self) {
-        let list: Vec<Machine> = (self.machines)()
-            .into_iter()
+        let all = (self.machines)();
+        let list: Vec<Machine> = all
+            .iter()
             .filter(|m| m.sd_worker().is_some() && !m.sd_path().is_empty())
+            .cloned()
             .collect();
         let results: Vec<CommandResult> = std::thread::scope(|scope| {
             let handles: Vec<_> = list
                 .iter()
                 .map(|m| {
                     let runner = &self.runner;
+                    let router = &self.router;
+                    let all = &all;
                     scope.spawn(move || {
+                        let routed = router.reached(m, all);
+                        let m = &routed;
                         let script = format!(
                             "{} {} worker status --json",
                             shell::path(m.python()),

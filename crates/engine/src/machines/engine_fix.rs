@@ -498,6 +498,7 @@ impl SetupEngine {
     }
 
     pub fn forget(&self, machine: &str) {
+        self.router.forget(machine);
         {
             let mut s = lock(&self.state);
             s.results.remove(machine);

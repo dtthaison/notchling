@@ -8,12 +8,13 @@ use super::add_sheet::{
     brief, derived_name, install, may_open, not_joined_line, parse_draft, view, AddPassword,
     Button, Draft,
 };
-use super::not_joined::{NotJoined, Reach};
+use super::not_joined::{NotJoined, Reach, RouteLine};
 
 fn draft(address: &str, name: &str) -> Draft {
     Draft {
         address: address.into(),
         name: name.into(),
+        ..Draft::default()
     }
 }
 
@@ -89,7 +90,11 @@ fn address_errors_show_in_the_form_and_hold_check_back() {
     );
     assert_eq!(
         buttons(&none),
-        [(Button::Cancel, true), (Button::Add, false)]
+        [
+            (Button::Cancel, true),
+            (Button::FromTailscale, true),
+            (Button::Add, false)
+        ]
     );
 
     let root = view(None, &draft("root@vps", ""), 0, "me", &[]);
@@ -246,6 +251,7 @@ fn not_in_the_cluster_lines_say_the_system() {
         node_on: false,
         reach: Reach::Unchecked,
         checked_s: None,
+        route: RouteLine::Hidden,
     };
     assert_eq!(not_joined_line(&mac), "sondoan@m1 · macOS");
     let linux = NotJoined {
@@ -334,7 +340,11 @@ fn the_add_form_walks_check_saved_and_stopped() {
     assert_eq!(form.title, "Add Machine");
     assert_eq!(
         buttons(&form),
-        [(Button::Cancel, true), (Button::Add, true)]
+        [
+            (Button::Cancel, true),
+            (Button::FromTailscale, true),
+            (Button::Add, true)
+        ]
     );
     let checking = machine_view(&Added::Checking, &typed, "me", &[]);
     assert!(!checking.form);
@@ -375,4 +385,18 @@ fn the_add_form_walks_check_saved_and_stopped() {
         &[],
     );
     assert_eq!(buttons(&hard), [(Button::Close, true)]);
+}
+
+#[test]
+fn a_bare_ipv6_address_and_a_bad_port_are_named_not_mangled() {
+    let v6 = parse_draft(&draft("agent@fd7a:115c::1", ""), "me", &[]).unwrap();
+    assert_eq!(v6.target, "agent@fd7a:115c::1");
+    assert_eq!(derived_name("fd7a:115c::1", "me"), "machine-1");
+    let bracketed = parse_draft(&draft("agent@[fd7a:115c::1]:2200", ""), "me", &[]).unwrap();
+    assert_eq!(bracketed.addresses[0].port, Some(2200));
+    let bad = parse_draft(&draft("agent@host:99999", ""), "me", &[]).unwrap_err();
+    assert!(bad.to_lowercase().contains("port"), "{bad}");
+    let zero = parse_draft(&draft("agent@host:0", ""), "me", &[]).unwrap_err();
+    assert!(zero.to_lowercase().contains("port"), "{zero}");
+    assert_eq!(derived_name("agent@host:99999", "me"), "");
 }

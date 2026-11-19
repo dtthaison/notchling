@@ -49,7 +49,7 @@ const OWN_QUIET: [&str; 12] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 122] = [
+const NEVER_QUIET: [&str; 123] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -172,6 +172,7 @@ const NEVER_QUIET: [&str; 122] = [
     ops::ASK_ANSWER,
     ops::ASK_DISMISS,
     ops::ASK_LIST,
+    ops::TAILSCALE_SWITCH,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];

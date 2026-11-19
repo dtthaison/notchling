@@ -182,17 +182,12 @@ fn hash_script(new: &str) -> String {
 }
 
 fn scp_target(m: &Machine) -> String {
-    let host = if m.host.contains(':') {
-        format!("[{}]", m.host)
-    } else {
-        m.host.clone()
-    };
     let relative = binary_new(m).strip_prefix("~/").unwrap_or_default();
-    format!("{}@{host}:{relative}", m.user)
+    format!("{}:{relative}", m.route().scp_host())
 }
 
 fn scp_args(from: &str, m: &Machine) -> Vec<String> {
-    vec![
+    let mut args: Vec<String> = vec![
         "/usr/bin/scp".into(),
         "-O".into(),
         "-q".into(),
@@ -200,10 +195,10 @@ fn scp_args(from: &str, m: &Machine) -> Vec<String> {
         "BatchMode=yes".into(),
         "-o".into(),
         "ConnectTimeout=8".into(),
-        "--".into(),
-        from.into(),
-        scp_target(m),
-    ]
+    ];
+    args.extend(m.route().scp_options());
+    args.extend(["--".into(), from.into(), scp_target(m)]);
+    args
 }
 
 fn display(m: &Machine) -> String {

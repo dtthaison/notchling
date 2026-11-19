@@ -9,12 +9,13 @@ use super::add_sheet::Draft;
 use super::add_source::AddSource;
 use super::machine_add::{remove, MachineAdd, Phase};
 use super::model::ClusterModel;
-use super::not_joined::{annotated, checked_line, not_joined, NotJoined, Reach};
+use super::not_joined::{annotated, checked_line, not_joined, NotJoined, Reach, RouteLine};
 
 fn draft(address: &str, name: &str) -> Draft {
     Draft {
         address: address.into(),
         name: name.into(),
+        ..Draft::default()
     }
 }
 
@@ -145,7 +146,7 @@ fn an_unreachable_machine_is_not_saved_and_check_again_works() {
 fn a_taken_name_or_bad_address_is_refused_before_any_ssh() {
     let rig = Rig::new(vec![sd_machine("m1", "sondoan")]);
     let mut add = MachineAdd::new();
-    for typed in ["", "root@x", "agent@host:22", "a b@host"] {
+    for typed in ["", "root@x", "agent@host:99999", "a b@host", "host:ab"] {
         assert!(add.begin(&rig.parts(), &draft(typed, ""), None).is_err());
     }
     assert!(add
@@ -301,6 +302,7 @@ fn row(reach: Reach, at: Option<i64>) -> NotJoined {
         node_on: false,
         reach,
         checked_s: at,
+        route: RouteLine::Hidden,
     }
 }
 

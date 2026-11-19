@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use notchling_engine::machines::actions::MorningActions;
+use notchling_engine::machines::addresses::list_problems;
 use notchling_engine::machines::engine::SetupEngine;
 use notchling_engine::machines::forms::{
     job_problems, job_settings, machine_problems, migrated_note, secret_row, unreadable_note,
@@ -511,12 +512,24 @@ impl MachinesModel {
         user: &str,
         existing: &[String],
     ) -> DraftCheck {
-        let inputs = vec![name.to_owned(), host.to_owned(), user.to_owned()];
-        let problems = machine_problems(name, host, user, existing);
+        MachinesModel::draft_check_of(engine, &Machine::new(name, host, user), existing)
+    }
+
+    pub fn draft_check_of(
+        engine: &SetupEngine,
+        draft: &Machine,
+        existing: &[String],
+    ) -> DraftCheck {
+        let (name, host, user) = (&draft.name, &draft.host, &draft.user);
+        let inputs = vec![name.clone(), host.clone(), user.clone()];
+        let mut problems = machine_problems(name, host, user, existing);
+        if draft.has_addresses() {
+            problems.extend(list_problems(&draft.addresses, name));
+        }
         if !problems.is_empty() {
             return DraftCheck::refused(problems, &inputs);
         }
-        let results = engine.check_draft(&Machine::new(name, host, user));
+        let results = engine.check_draft(draft);
         DraftCheck::from_results(&results, &inputs)
     }
 

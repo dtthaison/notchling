@@ -12,7 +12,7 @@ use notchling_locale as t;
 use super::add_sheet::{brief, not_joined_line};
 use super::machine_add::remove;
 use super::model::ClusterModel;
-use super::not_joined::{checked_line, NotJoined};
+use super::not_joined::{checked_line, NotJoined, RouteLine};
 use super::view::ClusterSheetView;
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
@@ -169,18 +169,31 @@ impl ClusterSheetView {
 
     fn machine_menu(&self, name: &str, a: Appearance, cx: &mut Context<Self>) -> Div {
         let remove = name.to_owned();
-        let items = menu_panel(a).child(
-            MenuItem::new(
-                SharedString::from(format!("machine-remove-{name}")),
-                t::cluster::machine_remove(),
+        let edit = name.to_owned();
+        let items = menu_panel(a)
+            .child(
+                MenuItem::new(
+                    SharedString::from(format!("machine-edit-addresses-{name}")),
+                    t::cluster::machine_edit_addresses(),
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.menu = None;
+                    this.open_edit_addresses(&edit, cx);
+                })),
             )
-            .build(a)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.menu = None;
-                this.removing_machine = Some(remove.clone());
-                cx.notify();
-            })),
-        );
+            .child(
+                MenuItem::new(
+                    SharedString::from(format!("machine-remove-{name}")),
+                    t::cluster::machine_remove(),
+                )
+                .build(a)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.menu = None;
+                    this.removing_machine = Some(remove.clone());
+                    cx.notify();
+                })),
+            );
         div()
             .absolute()
             .right(px(SPACE[1]))
@@ -219,6 +232,42 @@ impl ClusterSheetView {
         let ink = match machine.reach {
             super::not_joined::Reach::Down => Ink::Needs,
             _ => Ink::TextMuted,
+        };
+        let route_text = match &machine.route {
+            RouteLine::Hidden => None,
+            RouteLine::Via(text) => Some(text.clone()),
+            RouteLine::Wrong { wanted, active } => {
+                Some(t::cluster::machine_wrong_network(wanted, active))
+            }
+            RouteLine::NoAnswer => Some(t::cluster::machine_no_address().to_owned()),
+        };
+        let route_ink = match &machine.route {
+            RouteLine::Wrong { .. } | RouteLine::NoAnswer => Ink::Needs,
+            _ => Ink::TextMuted,
+        };
+        let switch = match &machine.route {
+            RouteLine::Wrong { wanted, active } => {
+                let (name, wanted, active) = (machine.name.clone(), wanted.clone(), active.clone());
+                Some(
+                    button(
+                        super::edit_addresses_view::switch_button_id(&machine.name),
+                        t::cluster::machine_switch_network(),
+                        ButtonKind::Secondary,
+                        if busy {
+                            PartState::Disabled
+                        } else {
+                            PartState::Rest
+                        },
+                        a,
+                    )
+                    .when(!busy, |b| {
+                        b.on_click(cx.listener(move |this, _, _, cx| {
+                            this.ask_switch(&name, &wanted, &active, cx)
+                        }))
+                    }),
+                )
+            }
+            _ => None,
         };
         let check_name = machine.name.clone();
         let check = button(
@@ -290,8 +339,12 @@ impl ClusterSheetView {
                                 Ink::TextMuted,
                                 a,
                             ))
-                            .child(label(&status, TypeRole::Meta, ink, a)),
+                            .child(label(&status, TypeRole::Meta, ink, a))
+                            .children(
+                                route_text.map(|text| label(&text, TypeRole::Meta, route_ink, a)),
+                            ),
                     )
+                    .children(switch)
                     .child(check)
                     .children(can_join.then_some(join))
                     .child(more),

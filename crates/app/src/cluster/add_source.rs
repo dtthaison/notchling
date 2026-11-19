@@ -4,13 +4,14 @@ use std::sync::{Mutex, OnceLock};
 use notchling_engine::cluster::build_id::build_id;
 use notchling_engine::machines::dist_manifest;
 use notchling_engine::machines::node_updates::UpdateRow;
+use notchling_engine::machines::reach::Pick;
 use notchling_engine::machines::release_download::this_release;
 use notchling_engine::machines::step::StepId;
 use notchling_engine::machines::steps_node::dist_dir;
 
 use super::add_parts::AddParts;
 use super::model::ClusterModel;
-use super::not_joined::{annotated, not_joined, NotJoined};
+use super::not_joined::{annotated, not_joined, routed, NotJoined};
 use super::updates::rows_for;
 use crate::chat::data::DataRoot;
 use crate::machines::data::{now_secs, Setup};
@@ -22,6 +23,7 @@ pub struct AddSource {
     parts: OnceLock<Option<AddParts>>,
     fixed_offer: Option<Offer>,
     checked: Mutex<BTreeMap<String, i64>>,
+    forced: Mutex<BTreeMap<String, Pick>>,
 }
 
 impl AddSource {
@@ -31,6 +33,7 @@ impl AddSource {
             parts: OnceLock::new(),
             fixed_offer: None,
             checked: Mutex::new(BTreeMap::new()),
+            forced: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -40,11 +43,20 @@ impl AddSource {
             parts: OnceLock::new(),
             fixed_offer: None,
             checked: Mutex::new(BTreeMap::new()),
+            forced: Mutex::new(BTreeMap::new()),
         }
     }
 
     pub fn with_offer(mut self, offer: Offer) -> AddSource {
         self.fixed_offer = Some(offer);
+        self
+    }
+
+    pub fn with_pick(self, name: &str, pick: Pick) -> AddSource {
+        self.forced
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(name.to_owned(), pick);
         self
     }
 
@@ -71,6 +83,12 @@ impl AddSource {
         parts.engine.refresh(Some(&[name.to_owned()]), true);
         if parts.registry.all().iter().any(|m| m.name == name) {
             self.note_checked(name);
+        }
+    }
+
+    pub fn forget_routes(&self) {
+        if let Some(parts) = self.parts() {
+            parts.engine.router().forget_all();
         }
     }
 
@@ -115,7 +133,12 @@ impl AddSource {
         let list = not_joined(&machines, &joined, model);
         let reach = |name: &str| parts.engine.results(name).get(&StepId::REACHABLE).cloned();
         let stamps = self.checked.lock().unwrap_or_else(|e| e.into_inner());
-        annotated(list, &reach, &|name| stamps.get(name).copied())
+        let list = annotated(list, &reach, &|name| stamps.get(name).copied());
+        let router = parts.engine.router();
+        let forced = self.forced.lock().unwrap_or_else(|e| e.into_inner());
+        routed(list, &machines, &|m| {
+            forced.get(&m.name).cloned().or_else(|| router.cached(m))
+        })
     }
 }
 

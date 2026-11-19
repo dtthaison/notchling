@@ -1,3 +1,5 @@
+use notchling_engine::machines::addresses::{AddressKind, MachineAddress};
+use notchling_engine::machines::reach::Pick;
 use notchling_engine::machines::registry::{Machine, MachineOs};
 use notchling_engine::machines::step::{CheckResult, StepId};
 use notchling_locale as t;
@@ -25,6 +27,70 @@ impl Reach {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum RouteLine {
+    #[default]
+    Hidden,
+    Via(String),
+    Wrong {
+        wanted: String,
+        active: String,
+    },
+    NoAnswer,
+}
+
+pub fn via_text(address: &MachineAddress) -> String {
+    match address.kind {
+        AddressKind::TailscaleName | AddressKind::TailscaleIp => match address.tailnet_name() {
+            Some(network) => t::cluster::machine_via_tailscale_network(network),
+            None => t::cluster::machine_via_tailscale().to_owned(),
+        },
+        AddressKind::Lan => t::cluster::machine_via_lan(&address.host),
+        AddressKind::Public => t::cluster::machine_via_public(&address.host),
+        AddressKind::Jump => {
+            t::cluster::machine_via_jump(address.via.as_deref().unwrap_or(&address.host))
+        }
+    }
+}
+
+pub fn route_line(machine: &Machine, pick: Option<&Pick>) -> RouteLine {
+    match pick {
+        Some(Pick::Reached(choice)) => RouteLine::Via(via_text(&choice.address)),
+        Some(Pick::WrongNetwork { wanted, active }) => RouteLine::Wrong {
+            wanted: wanted.clone(),
+            active: active.clone(),
+        },
+        Some(Pick::Unreachable) => RouteLine::NoAnswer,
+        None if machine.has_addresses() => machine
+            .address_list()
+            .first()
+            .map(|a| RouteLine::Via(via_text(a)))
+            .unwrap_or_default(),
+        None => RouteLine::Hidden,
+    }
+}
+
+pub fn routed(
+    list: Vec<NotJoined>,
+    machines: &[Machine],
+    pick: &dyn Fn(&Machine) -> Option<Pick>,
+) -> Vec<NotJoined> {
+    list.into_iter()
+        .map(|row| {
+            let route = machines
+                .iter()
+                .find(|m| m.name == row.name)
+                .map(|m| route_line(m, pick(m).as_ref()))
+                .unwrap_or_default();
+            let route = match (&row.reach, route) {
+                (Reach::Down, RouteLine::Via(_)) => RouteLine::Hidden,
+                (_, route) => route,
+            };
+            NotJoined { route, ..row }
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NotJoined {
     pub name: String,
@@ -34,6 +100,7 @@ pub struct NotJoined {
     pub node_on: bool,
     pub reach: Reach,
     pub checked_s: Option<i64>,
+    pub route: RouteLine,
 }
 
 pub fn not_joined(
@@ -63,6 +130,7 @@ pub fn not_joined(
             node_on: m.node.is_some(),
             reach: Reach::Unchecked,
             checked_s: None,
+            route: RouteLine::Hidden,
         })
         .collect()
 }

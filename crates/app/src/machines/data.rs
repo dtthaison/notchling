@@ -10,12 +10,14 @@ use notchling_engine::machines::mac_facts;
 use notchling_engine::machines::merge::MergePlan;
 use notchling_engine::machines::poller::MachinePoller;
 use notchling_engine::machines::process::ProcessRunner;
+use notchling_engine::machines::reach::Router;
 use notchling_engine::machines::registry::RegistryFiles;
 use notchling_engine::machines::release_download::CurlDownloads;
 use notchling_engine::machines::roots::{MachineRoots, VaultSecrets};
 use notchling_engine::machines::runner::{Call, Refusing, Runner, OFF};
 use notchling_engine::machines::step::{ClusterTokens, NoCluster, NoSecrets, Opener, SecretSource};
 use notchling_engine::machines::steps_node::dist_dir;
+use notchling_engine::machines::tailscale::{default_cli, Tailscale};
 use notchling_engine::vault::entry::VaultEntry;
 use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::store::{system_keychain, Unsupported, VaultStore};
@@ -129,6 +131,15 @@ impl Setup {
         let opener = Arc::new(UrlOpener {
             runner: runner.clone(),
         });
+        let router: Arc<Router> = if self.live {
+            Arc::new(Router::new(
+                runner.clone(),
+                Tailscale::new(runner.clone(), &default_cli()),
+                Arc::new(now_secs),
+            ))
+        } else {
+            Arc::new(Router::off())
+        };
         let home = self.home.clone();
         let deps = Deps {
             runner: runner.clone(),
@@ -164,17 +175,17 @@ impl Setup {
         };
         let engine = Arc::new(
             SetupEngine::new(deps, catalog::standard())
+                .with_router(router.clone())
                 .with_admin_secrets(admin_secrets)
                 .with_cluster(cluster.clone(), Some(dist_dir(&self.data_dir)))
                 .with_mac_daemon(mac_daemon)
                 .with_downloads(Arc::new(CurlDownloads::new(runner.clone()))),
         );
         let for_poller = registry.clone();
-        let poller = Arc::new(MachinePoller::new(
-            runner.clone(),
-            move || for_poller.all(),
-            now_secs,
-        ));
+        let poller = Arc::new(
+            MachinePoller::new(runner.clone(), move || for_poller.all(), now_secs)
+                .with_router(router.clone()),
+        );
         let for_actions = registry.clone();
         let actions = Arc::new(
             MorningActions::new(
@@ -182,7 +193,8 @@ impl Setup {
                 move || for_actions.all(),
                 roots.own_dir.join("cache"),
             )
-            .with_plan(MergePlan::from_process(&roots.merge_dir())),
+            .with_plan(MergePlan::from_process(&roots.merge_dir()))
+            .with_router(router.clone()),
         );
         let vault = Arc::new(VaultFiles {
             socket: (!self.fixture && !self.vault).then(|| self.data_dir.join(SOCKET_NAME)),

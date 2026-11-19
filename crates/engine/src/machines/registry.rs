@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
+use super::addresses::{MachineAddress, Route};
 use crate::store;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,13 +168,21 @@ pub struct Machine {
     pub claude_secret: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<MachineAddress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abilities: Option<MachineAbilities>,
     #[serde(default)]
     pub jobs: Vec<Job>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeSettings>,
+    #[serde(skip)]
+    pub route: Option<Route>,
+    #[serde(skip)]
+    pub refused: Option<String>,
 }
+
+pub const REFUSED_HOST: &str = "refused.invalid";
 
 impl Machine {
     pub fn new(name: &str, host: &str, user: &str) -> Machine {
@@ -187,9 +196,73 @@ impl Machine {
             admin_secret: None,
             claude_secret: claude_worker(),
             organization: None,
+            addresses: Vec::new(),
             abilities: None,
             jobs: Vec::new(),
             node: None,
+            route: None,
+            refused: None,
+        }
+    }
+
+    pub fn address_list(&self) -> Vec<MachineAddress> {
+        if self.addresses.is_empty() {
+            vec![MachineAddress::legacy(&self.host)]
+        } else {
+            self.addresses.clone()
+        }
+    }
+
+    pub fn set_addresses(&mut self, list: Vec<MachineAddress>) {
+        let mut list: Vec<MachineAddress> =
+            list.into_iter().map(MachineAddress::normalized).collect();
+        if let Some(first) = list.first().and_then(|a| a.user.clone()) {
+            if first != self.user {
+                let old = self.user.clone();
+                for address in list.iter_mut().skip(1) {
+                    if address.user.is_none() {
+                        address.user = Some(old.clone());
+                    }
+                }
+                self.user = first;
+            }
+        }
+        if let Some(first) = list.first_mut() {
+            if first.user.as_deref() == Some(self.user.as_str()) {
+                first.user = None;
+            }
+        }
+        for address in list.iter_mut().skip(1) {
+            if address.user.as_deref() == Some(self.user.as_str()) {
+                address.user = None;
+            }
+        }
+        self.addresses = list;
+        self.sync_host();
+    }
+
+    pub fn has_addresses(&self) -> bool {
+        !self.addresses.is_empty()
+    }
+
+    pub fn address_user<'a>(&'a self, address: &'a MachineAddress) -> &'a str {
+        address.user.as_deref().unwrap_or(&self.user)
+    }
+
+    pub fn route(&self) -> Route {
+        if self.refused.is_some() {
+            return Route::direct(REFUSED_HOST, &self.user);
+        }
+        match &self.route {
+            Some(route) => route.clone(),
+            None if self.has_addresses() => Route::direct(REFUSED_HOST, &self.user),
+            None => Route::direct(&self.host, &self.user),
+        }
+    }
+
+    fn sync_host(&mut self) {
+        if let Some(first) = self.addresses.first() {
+            self.host = first.host.clone();
         }
     }
 
@@ -221,6 +294,8 @@ impl Machine {
     }
 
     fn settle(&mut self) {
+        let list = std::mem::take(&mut self.addresses);
+        self.set_addresses(list);
         self.admin = Some(self.admin());
         if self.admin_secret.as_deref().is_some_and(str::is_empty) {
             self.admin_secret = None;
@@ -352,6 +427,7 @@ enum Raw {
     V1(Vec<Machine>, Vec<u8>),
     V2(Vec<Machine>),
     V3(Vec<Machine>),
+    V4(Vec<Machine>),
 }
 
 pub const REGISTRY_DOC: &str = "machines/registry";
@@ -416,7 +492,7 @@ impl RegistryFiles {
         match self.raw() {
             Raw::Missing => RegistryState::Missing,
             Raw::Unreadable(why) => RegistryState::Unreadable(why),
-            Raw::V2(machines) | Raw::V3(machines) => RegistryState::Loaded {
+            Raw::V2(machines) | Raw::V3(machines) | Raw::V4(machines) => RegistryState::Loaded {
                 machines,
                 migrated: false,
             },
@@ -446,7 +522,7 @@ impl RegistryFiles {
         };
         store::update_doc(&self.data_dir, REGISTRY_DOC, |row| match row {
             Some(old) => match parse(old.as_bytes()) {
-                Raw::V2(_) | Raw::V3(_) => Ok(Some(old)),
+                Raw::V2(_) | Raw::V3(_) | Raw::V4(_) => Ok(Some(old)),
                 Raw::Unreadable(why) => Err(why),
                 Raw::V1(..) | Raw::Missing => Ok(Some(text)),
             },
@@ -478,10 +554,10 @@ impl RegistryFiles {
                 None => self.read_files(),
             };
             match raw {
-                Raw::Missing | Raw::V3(_) => Ok(Some(text)),
-                Raw::V2(_) => {
+                Raw::Missing => Ok(Some(text)),
+                Raw::V2(_) | Raw::V3(_) | Raw::V4(_) => {
                     if let Some(old) = &row {
-                        self.keep_v2(old)?;
+                        self.keep_older(old, &raw, &text)?;
                     }
                     Ok(Some(text))
                 }
@@ -493,10 +569,15 @@ impl RegistryFiles {
         .is_ok()
     }
 
-    fn keep_v2(&self, original: &str) -> Result<(), String> {
-        write_backup(original.as_bytes(), &self.old_own, V2_BACKUP)
+    fn keep_older(&self, original: &str, raw: &Raw, replacement: &str) -> Result<(), String> {
+        let (suffix, version) = match raw {
+            Raw::V2(_) => (V2_BACKUP, 2),
+            Raw::V3(_) if written_version(replacement) == 4 => (V3_BACKUP, 3),
+            _ => return Ok(()),
+        };
+        write_backup(original.as_bytes(), &self.old_own, suffix)
             .map(|_| ())
-            .ok_or_else(|| "the version 2 registry could not be saved aside".to_owned())
+            .ok_or_else(|| format!("the version {version} registry could not be saved aside"))
     }
 
     pub fn adopt_organizations(&self) -> Result<usize, String> {
@@ -505,7 +586,7 @@ impl RegistryFiles {
         }
         self.import_old();
         if let Ok(Some(text)) = store::doc(&self.data_dir, REGISTRY_DOC) {
-            if let Raw::V3(machines) = parse(text.as_bytes()) {
+            if let Raw::V3(machines) | Raw::V4(machines) = parse(text.as_bytes()) {
                 if machines.iter().all(|m| {
                     m.organization
                         .as_deref()
@@ -520,11 +601,12 @@ impl RegistryFiles {
             let Some(old) = row else {
                 return Ok(None);
             };
-            let (mut machines, was_v2) = match parse(old.as_bytes()) {
-                Raw::V2(machines) => (machines, true),
-                Raw::V3(machines) => (machines, false),
+            let raw = parse(old.as_bytes());
+            let (mut machines, was_v2) = match &raw {
+                Raw::V2(machines) => (machines.clone(), true),
+                Raw::V3(machines) | Raw::V4(machines) => (machines.clone(), false),
                 Raw::V1(..) | Raw::Missing => return Ok(Some(old)),
-                Raw::Unreadable(why) => return Err(why),
+                Raw::Unreadable(why) => return Err(why.clone()),
             };
             for machine in machines.iter_mut().filter(|m| {
                 !m.organization
@@ -537,12 +619,10 @@ impl RegistryFiles {
             if !was_v2 && stamped == 0 {
                 return Ok(Some(old));
             }
-            if was_v2 {
-                self.keep_v2(&old)?;
-            }
-            serialize(&machines)
-                .map(Some)
-                .ok_or_else(|| "the registry could not be written".to_owned())
+            let text = serialize(&machines)
+                .ok_or_else(|| "the registry could not be written".to_owned())?;
+            self.keep_older(&old, &raw, &text)?;
+            Ok(Some(text))
         })?;
         Ok(stamped)
     }
@@ -558,6 +638,7 @@ fn file_exists(path: &Path) -> bool {
 
 const V1_BACKUP: &str = ".v1-backup";
 const V2_BACKUP: &str = ".v2-backup";
+const V3_BACKUP: &str = ".v3-backup";
 
 pub fn backup_path(file: &Path) -> PathBuf {
     backup_path_with(file, V1_BACKUP)
@@ -567,10 +648,14 @@ pub fn backup_path_v2(file: &Path) -> PathBuf {
     backup_path_with(file, V2_BACKUP)
 }
 
+pub fn backup_path_v3(file: &Path) -> PathBuf {
+    backup_path_with(file, V3_BACKUP)
+}
+
 fn backup_path_with(file: &Path, suffix: &str) -> PathBuf {
     let mut name = file.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
-    if suffix == V2_BACKUP {
+    if suffix != V1_BACKUP {
         return file
             .with_file_name(crate::organizations::backup::DIR)
             .join(name);
@@ -607,7 +692,7 @@ fn parse(data: &[u8]) -> Raw {
             ),
             Err(e) => Raw::Unreadable(e.to_string()),
         },
-        2 | 3 => match serde_json::from_slice::<FileV3>(data) {
+        2..=4 => match serde_json::from_slice::<FileV3>(data) {
             Ok(f) => {
                 let machines = f
                     .machines
@@ -617,10 +702,10 @@ fn parse(data: &[u8]) -> Raw {
                         m
                     })
                     .collect();
-                if version == 2 {
-                    Raw::V2(machines)
-                } else {
-                    Raw::V3(machines)
+                match version {
+                    2 => Raw::V2(machines),
+                    3 => Raw::V3(machines),
+                    _ => Raw::V4(machines),
                 }
             }
             Err(e) => Raw::Unreadable(e.to_string()),
@@ -637,7 +722,7 @@ pub fn write_lock() -> MutexGuard<'static, ()> {
 
 pub fn organizations_in(text: &str) -> Option<Vec<Option<String>>> {
     match parse(text.as_bytes()) {
-        Raw::V2(machines) | Raw::V3(machines) => {
+        Raw::V2(machines) | Raw::V3(machines) | Raw::V4(machines) => {
             Some(machines.into_iter().map(|m| m.organization).collect())
         }
         _ => None,
@@ -677,8 +762,20 @@ fn serialize(machines: &[Machine]) -> Option<String> {
         })
         .collect();
     let list = serde_json::to_value(&settled).ok()?;
-    let file = serde_json::json!({"version": 3, "machines": list});
+    let version = if settled.iter().any(Machine::has_addresses) {
+        4
+    } else {
+        3
+    };
+    let file = serde_json::json!({"version": version, "machines": list});
     String::from_utf8(pretty_sorted(file)).ok()
+}
+
+fn written_version(text: &str) -> i64 {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|v| v.get("version").and_then(Value::as_i64))
+        .unwrap_or(0)
 }
 
 fn write_backup(original: &[u8], file: &Path, suffix: &str) -> Option<PathBuf> {

@@ -1,6 +1,7 @@
 pub mod actions;
 mod actions_util;
 pub mod address;
+pub mod addresses;
 pub mod admin_secret;
 pub mod catalog;
 pub mod device_login;
@@ -21,6 +22,7 @@ pub mod node_updates;
 pub mod offers;
 pub mod poller;
 pub mod process;
+pub mod reach;
 pub mod registry;
 pub mod release_download;
 pub mod remote_edit;
@@ -51,6 +53,7 @@ pub mod steps_selfupdate;
 pub mod steps_tailscale_linux;
 mod steps_versions;
 mod steps_xcode;
+pub mod tailscale;
 pub mod token_creation;
 pub mod token_scope;
 mod token_scope_net;
@@ -78,6 +81,8 @@ mod tests_actions_gh;
 mod tests_actions_read;
 #[cfg(test)]
 mod tests_address;
+#[cfg(test)]
+mod tests_addresses;
 #[cfg(test)]
 mod tests_admin_vault;
 #[cfg(test)]
@@ -139,6 +144,8 @@ mod tests_node_updates;
 #[cfg(test)]
 mod tests_poller;
 #[cfg(test)]
+mod tests_reach;
+#[cfg(test)]
 mod tests_registry;
 #[cfg(test)]
 mod tests_release_download;
@@ -154,6 +161,8 @@ mod tests_repo_replace;
 mod tests_repo_replace_b;
 #[cfg(all(test, unix))]
 mod tests_repo_shell;
+#[cfg(test)]
+mod tests_routing;
 #[cfg(all(test, unix))]
 mod tests_runner;
 #[cfg(test)]
@@ -186,6 +195,8 @@ mod tests_selfupdate;
 mod tests_shell;
 #[cfg(test)]
 mod tests_status;
+#[cfg(test)]
+mod tests_tailscale;
 #[cfg(test)]
 mod tests_tailscale_linux;
 #[cfg(test)]
