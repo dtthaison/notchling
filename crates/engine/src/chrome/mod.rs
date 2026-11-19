@@ -5,7 +5,10 @@ pub mod menu;
 pub mod status;
 
 #[cfg(test)]
-mod chrome_tests;
+pub(crate) mod chrome_tests;
+
+#[cfg(test)]
+mod drive_tests;
 
 #[cfg(test)]
 mod status_tests;

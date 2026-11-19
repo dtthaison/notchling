@@ -70,6 +70,9 @@ impl Phase {
 pub trait Host {
     fn turn_running(&mut self) -> bool;
     fn tasks_in_flight(&mut self) -> Option<u32>;
+    fn chrome_flag(&mut self) -> Option<bool> {
+        None
+    }
     fn look(&mut self, goal: Goal) -> Result<Report, Refusal>;
     fn restart(&mut self, on: bool) -> Result<(), String>;
     fn sleep(&mut self, ms: u64);
@@ -158,6 +161,16 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
         tries: 0,
     };
     let mut starts = 0;
+    let flag = host.chrome_flag();
+    if !options.on && flag == Some(false) {
+        return Phase::Done {
+            result: Done::AlreadyOff,
+        };
+    }
+    let by_flags = matches!(
+        (options.on, flag),
+        (true, Some(false)) | (false, Some(true))
+    );
     let report = loop {
         if host.cancelled() {
             return Phase::Cancelled;
@@ -171,6 +184,10 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
             say(Phase::Waiting { why: Wait::Turn });
             host.sleep(POLL_MS);
             continue;
+        }
+        if by_flags {
+            patience.clear();
+            return restart(host, options, say);
         }
         say(Phase::Working {
             step: Step::Checking,
@@ -193,7 +210,7 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                         host.sleep(POLL_MS);
                         continue;
                     }
-                    Refusal::Stuck | Refusal::Pty(_) => {
+                    Refusal::Stuck | Refusal::NotListed | Refusal::Pty(_) => {
                         return needs(Need::Failed {
                             text: refusal.to_string(),
                         })

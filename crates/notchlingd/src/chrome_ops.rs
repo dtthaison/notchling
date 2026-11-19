@@ -66,6 +66,10 @@ impl Host for Cancelable {
     fn tasks_in_flight(&mut self) -> Option<u32> {
         self.inner.tasks_in_flight()
     }
+
+    fn chrome_flag(&mut self) -> Option<bool> {
+        self.inner.chrome_flag()
+    }
     fn look(&mut self, goal: Goal) -> Result<Report, Refusal> {
         self.inner.look(goal)
     }
@@ -364,6 +368,13 @@ impl Host for LiveHost {
         let acting = self.acting()?;
         self.agent(&acting)?;
         status::tasks_in_flight(&job_state_path(&acting.roots, &self.job))
+    }
+
+    fn chrome_flag(&mut self) -> Option<bool> {
+        let acting = self.acting()?;
+        self.agent(&acting)?;
+        let flags = status::read_flags(&job_state_path(&acting.roots, &self.job))?;
+        status::flag_of(&flags)
     }
 
     fn look(&mut self, goal: Goal) -> Result<Report, Refusal> {
