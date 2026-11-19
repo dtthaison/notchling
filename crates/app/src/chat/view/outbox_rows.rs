@@ -1,23 +1,82 @@
 use std::path::PathBuf;
 
-use notchling_engine::outbox::{is_settled, CHANGED};
+use gpui::{Div, Styled};
+use notchling_kit::ui::icon;
+use notchling_kit::{Appearance, Icon, Ink};
+
+use notchling_engine::outbox::{is_settled, Tool, CHANGED, HOLD_LEASE_MS};
 use notchling_locale as t;
 use serde_json::{json, Value};
 
 use crate::acting::Request;
-use crate::chat::outbox::{Button, OutboxRow, Status};
+use crate::chat::outbox::{Bubble, Button, OutboxRow, Status};
 use crate::tools::requests::Pick;
 
+fn tool_name(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Claude => t::chat::outbox_tool_claude(),
+        Tool::Codex => t::chat::outbox_tool_codex(),
+        Tool::Antigravity => t::chat::outbox_tool_antigravity(),
+    }
+}
+
+pub fn status_icon(status: &Status, a: Appearance) -> Div {
+    let (glyph, ink) = match status {
+        Status::Editing => (Icon::Edit, Ink::TextFaint),
+        Status::MayBeIn
+        | Status::MayBeInHolding(_)
+        | Status::BoxHasText(_)
+        | Status::BoxHoldsThis => (Icon::Warning, Ink::Needs),
+        Status::Stopped => (Icon::Stop, Ink::TextFaint),
+        Status::NotFound => (Icon::Fail, Ink::Needs),
+        _ => (Icon::Clock, Ink::TextFaint),
+    };
+    icon(glyph, 13.0, ink, a).flex_shrink_0()
+}
+
+pub fn countdown(until_ms: i64, now_ms: i64) -> String {
+    let left = ((until_ms - now_ms).max(0) + 999) / 1000;
+    format!("{}:{:02}", left / 60, left % 60)
+}
+
+pub fn bubble_line(bubble: &Bubble, now_ms: i64) -> String {
+    let line = status_line_at(&bubble.status, Some(now_ms));
+    if bubble.joined > 1 {
+        format!(
+            "{} · {line}",
+            t::chat::outbox_joined(i64::from(bubble.joined))
+        )
+    } else {
+        line
+    }
+}
+
+#[cfg(test)]
 pub fn status_line(status: &Status) -> String {
+    status_line_at(status, None)
+}
+
+pub fn status_line_at(status: &Status, now_ms: Option<i64>) -> String {
     match status {
         Status::Queued => t::chat::outbox_queued().to_owned(),
         Status::QueuedRetry => t::chat::outbox_retry().to_owned(),
         Status::WaitingDialog => t::chat::outbox_dialog().to_owned(),
         Status::WaitsForTurn => t::chat::outbox_turn().to_owned(),
+        Status::WaitsForQueue(tool) => t::chat::outbox_wait_queue(tool_name(*tool)),
+        Status::WaitsForPrevious => t::chat::outbox_wait_unsure().to_owned(),
+        Status::Editing => t::chat::outbox_editing_row().to_owned(),
         Status::Sending => t::chat::outbox_sending().to_owned(),
-        Status::QueuedInSession => t::chat::outbox_in_queue().to_owned(),
+        Status::QueuedInSession(tool) => t::chat::outbox_in_queue(tool_name(*tool)),
         Status::Sent => t::chat::outbox_sent().to_owned(),
         Status::MayBeIn => t::chat::outbox_maybe().to_owned(),
+        Status::MayBeInHolding(until) => match now_ms {
+            Some(now) => format!(
+                "{} · {}",
+                t::chat::outbox_maybe(),
+                t::chat::outbox_hold_left(&countdown(*until, now))
+            ),
+            None => t::chat::outbox_maybe().to_owned(),
+        },
         Status::BoxHasText(text) => t::chat::outbox_box(&shortened(text)),
         Status::BoxHoldsThis => t::chat::outbox_box_same().to_owned(),
         Status::Stopped => t::chat::outbox_stopped().to_owned(),
@@ -38,8 +97,8 @@ pub fn button_label(button: Button) -> &'static str {
     match button {
         Button::Edit => t::chat::outbox_edit(),
         Button::Remove => t::chat::outbox_remove(),
-        Button::SendAgain => t::chat::outbox_send_again(),
-        Button::Drop => t::chat::outbox_drop(),
+        Button::Retry => t::chat::outbox_retry_send(),
+        Button::MarkAsSent => t::chat::outbox_mark_sent(),
         Button::ClearBoxAndSend => t::chat::outbox_clear_send(),
         Button::ResumeAndSend => t::chat::outbox_resume_send(),
     }
@@ -49,8 +108,8 @@ pub fn button_id(button: Button) -> &'static str {
     match button {
         Button::Edit => "outbox-edit",
         Button::Remove => "outbox-remove",
-        Button::SendAgain => "outbox-send-again",
-        Button::Drop => "outbox-drop",
+        Button::Retry => "outbox-retry",
+        Button::MarkAsSent => "outbox-mark-sent",
         Button::ClearBoxAndSend => "outbox-clear-send",
         Button::ResumeAndSend => "outbox-resume-send",
     }
@@ -59,7 +118,7 @@ pub fn button_id(button: Button) -> &'static str {
 pub fn is_main(button: Button) -> bool {
     matches!(
         button,
-        Button::SendAgain | Button::ClearBoxAndSend | Button::ResumeAndSend
+        Button::Retry | Button::ClearBoxAndSend | Button::ResumeAndSend
     )
 }
 
@@ -80,6 +139,12 @@ fn options_of(pick: &Pick) -> Option<Value> {
         options["effort"] = json!(effort);
     }
     (pick.model.is_some() || pick.effort.is_some()).then_some(options)
+}
+
+pub const HOLD_RENEW_MS: i64 = HOLD_LEASE_MS / 4;
+
+pub fn hold_due(editing: Option<&Editing>, held_ms: i64, now_ms: i64) -> bool {
+    editing.is_some_and(|open| !open.sending) && now_ms - held_ms >= HOLD_RENEW_MS
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,6 +218,18 @@ impl Editing {
         }
     }
 
+    pub fn hold_refused(&self, message: &str, text: &str) -> EditEnd {
+        if is_settled(message) {
+            return self.finished(Err(message), text);
+        }
+        EditEnd {
+            leave: true,
+            draft: Some(self.before.clone()),
+            note: Some(message.to_owned()),
+            refresh: false,
+        }
+    }
+
     pub fn current_text<'a>(&self, rows: &'a [OutboxRow]) -> Option<&'a str> {
         rows.iter()
             .find(|row| row.id == self.outbox_id)
@@ -197,3 +274,7 @@ mod tests;
 #[cfg(test)]
 #[path = "outbox_box_same_tests.rs"]
 mod box_same_tests;
+
+#[cfg(test)]
+#[path = "outbox_queue_tests.rs"]
+mod queue_tests;

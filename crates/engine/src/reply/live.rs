@@ -1,7 +1,7 @@
 use super::exec::{Pty, ScreenCheck};
 use super::keys::timing;
 use crate::control::{PtyScript, CONFIG_DIR_VAR};
-use crate::terminal::{ask_dialog, PtyCommand, PtyError, Terminal};
+use crate::terminal::{ask_dialog, PtyCommand, PtyError, Shade, Terminal};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -67,6 +67,13 @@ impl Pty for LiveTerminal {
     fn cursor(&mut self) -> Option<(usize, usize)> {
         let screen = self.terminal.as_ref()?.screen();
         screen.cursor_visible().then(|| screen.cursor())
+    }
+
+    fn shades(&mut self) -> Vec<Vec<Shade>> {
+        match self.terminal.as_ref() {
+            Some(t) => t.screen().shades(),
+            None => Vec::new(),
+        }
     }
 
     fn sleep(&mut self, duration: Duration) {

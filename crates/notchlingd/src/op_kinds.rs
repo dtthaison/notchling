@@ -31,6 +31,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::OUTBOX_LIST, Home::Called),
     (ops::OUTBOX_EDIT, Home::Kind("session.outbox")),
     (ops::OUTBOX_REMOVE, Home::Kind("session.outbox")),
+    (ops::OUTBOX_HOLD, Home::Called),
     (ops::OUTBOX_RESEND, Home::Called),
     (ops::OUTBOX_DISCARD, Home::Kind("session.outbox")),
     (ops::SETTINGS_SET_ACTING, Home::Kind("switch.changed")),

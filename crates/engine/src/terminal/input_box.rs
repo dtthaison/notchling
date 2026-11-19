@@ -1,3 +1,7 @@
+use super::screen::Shade;
+use crate::transcript::message::is_picture_name;
+use crate::transcript::stored::{as_stored, is_dropped};
+
 pub const RULE: char = '─';
 pub const RULE_MIN: usize = 16;
 pub const HOME_COL: usize = 2;
@@ -25,11 +29,15 @@ pub struct Input {
 }
 
 fn squeezed(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
+    text.chars()
+        .filter(|c| !c.is_whitespace() && !is_dropped(*c))
+        .collect()
 }
 
 fn letters(text: &str) -> String {
-    text.chars().filter(|c| c.is_alphanumeric()).collect()
+    text.chars()
+        .filter(|c| c.is_alphanumeric() && !is_dropped(*c))
+        .collect()
 }
 
 fn strip_chips(text: &str) -> (String, usize) {
@@ -55,7 +63,6 @@ fn strip_chips(text: &str) -> (String, usize) {
     (out, chips)
 }
 
-const PICTURE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const PICTURES_MAX: usize = 8;
 
 fn path_shaped(path: &str) -> bool {
@@ -106,12 +113,17 @@ fn path_line(line: &str) -> Option<Vec<String>> {
 }
 
 fn is_picture(path: &str) -> bool {
-    let path = path.to_ascii_lowercase();
-    PICTURE_EXTENSIONS.iter().any(|ext| path.ends_with(ext))
+    is_picture_name(path)
+}
+
+struct Piece {
+    letters: String,
+    exact: String,
+    picture: bool,
 }
 
 struct Message {
-    pieces: Vec<(String, bool)>,
+    pieces: Vec<Piece>,
     literal: bool,
 }
 
@@ -119,15 +131,24 @@ impl Message {
     fn of(text: &str) -> Message {
         let mut pieces = Vec::new();
         let mut literal = false;
+        let text = as_stored(text);
         for line in text.split('\n') {
             match path_line(line) {
                 Some(paths) => {
-                    pieces.extend(paths.iter().map(|path| (letters(path), is_picture(path))));
+                    pieces.extend(paths.iter().map(|path| Piece {
+                        letters: letters(path),
+                        exact: squeezed(path),
+                        picture: is_picture(path),
+                    }));
                 }
                 None => {
                     let line = squeezed(line);
                     literal |= strip_chips(&line).1 > 0;
-                    pieces.push((letters(&line), false));
+                    pieces.push(Piece {
+                        letters: letters(&line),
+                        exact: line,
+                        picture: false,
+                    });
                 }
             }
         }
@@ -143,37 +164,43 @@ impl Message {
     }
 
     fn pictures(&self) -> usize {
-        self.pieces.iter().filter(|(_, picture)| *picture).count()
+        self.pieces.iter().filter(|piece| piece.picture).count()
     }
 
-    fn kept(&self, gone: impl Fn(usize) -> bool) -> String {
+    fn wordless(&self) -> bool {
+        self.pieces
+            .iter()
+            .all(|piece| piece.picture || piece.letters.is_empty())
+    }
+
+    fn kept(&self, gone: impl Fn(usize) -> bool, exact: bool) -> String {
         let mut nth = 0;
         let mut kept = String::new();
-        for (words, picture) in &self.pieces {
-            let read = *picture && gone(nth);
-            nth += usize::from(*picture);
+        for piece in &self.pieces {
+            let read = piece.picture && gone(nth);
+            nth += usize::from(piece.picture);
             if !read {
-                kept.push_str(words);
+                kept.push_str(if exact { &piece.exact } else { &piece.letters });
             }
         }
         kept
     }
 
-    fn without(&self, chips: usize) -> Vec<String> {
+    fn without(&self, chips: usize, exact: bool) -> Vec<String> {
         let pictures = self.pictures();
         if chips > pictures {
             return Vec::new();
         }
         if pictures > PICTURES_MAX {
             return match chips {
-                0 => vec![self.kept(|_| false)],
-                n if n == pictures => vec![self.kept(|_| true)],
+                0 => vec![self.kept(|_| false, exact)],
+                n if n == pictures => vec![self.kept(|_| true, exact)],
                 _ => Vec::new(),
             };
         }
         (0..1usize << pictures)
             .filter(|mask| mask.count_ones() as usize == chips)
-            .map(|mask| self.kept(|nth| mask >> nth & 1 == 1))
+            .map(|mask| self.kept(|nth| mask >> nth & 1 == 1, exact))
             .collect()
     }
 }
@@ -232,7 +259,7 @@ impl Input {
             let have = letters(&shown);
             let size = have.chars().count();
             size > 0
-                && message.without(chips).iter().any(|want| {
+                && message.without(chips, false).iter().any(|want| {
                     have == *want
                         || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
                 })
@@ -264,7 +291,7 @@ impl Input {
                 };
                 let have = letters(&shown);
                 message
-                    .without(chips.min(message.pictures()))
+                    .without(chips.min(message.pictures()), false)
                     .iter()
                     .any(|want| !want.is_empty() && have.contains(want))
             }
@@ -289,7 +316,7 @@ impl Input {
         if letters(text).is_empty() {
             return Fill::Whole;
         }
-        let wants = message.without(real);
+        let wants = message.without(real, false);
         let have = letters(&shown);
         if wants.contains(&have) {
             Fill::Whole
@@ -312,8 +339,45 @@ pub fn holds_message(typed: &str, text: &str) -> bool {
     !letters(text).is_empty() && !letters(typed).is_empty() && input.fill(text) == Fill::Whole
 }
 
+pub struct Pictured(Message);
+
+impl Pictured {
+    pub fn of(text: &str) -> Option<Pictured> {
+        let message = Message::of(text);
+        (message.pictures() > 0 && !message.literal).then_some(Pictured(message))
+    }
+
+    pub fn is_shown_as(&self, shown: &str, images: Option<usize>) -> bool {
+        let shown = as_stored(shown);
+        let bare = shown.trim().is_empty();
+        if !bare && !shown.contains("[Image #") {
+            return false;
+        }
+        let (rest, chips) = strip_chips(&squeezed(&shown));
+        let pictures = self.0.pictures();
+        let chips = match (chips, images) {
+            (0, Some(n)) if bare && n >= pictures => pictures,
+            (0, _) => return false,
+            (n, Some(images)) if images < n => return false,
+            (n, _) if n > pictures => return false,
+            (n, _) => n,
+        };
+        let exact = self.0.wordless();
+        let have = if exact { rest } else { letters(&rest) };
+        self.0.without(chips, exact).contains(&have)
+    }
+}
+
 pub fn typed_text(lines: &[String], cursor: Option<(usize, usize)>) -> Option<String> {
-    let input = read(lines, cursor).filter(|input| !input.empty)?;
+    typed_text_shaded(lines, cursor, &[])
+}
+
+pub fn typed_text_shaded(
+    lines: &[String],
+    cursor: Option<(usize, usize)>,
+    shades: &[Vec<Shade>],
+) -> Option<String> {
+    let input = read_shaded(lines, cursor, shades).filter(|input| !input.empty)?;
     let text = input.typed();
     (!text.trim().is_empty()).then_some(text)
 }
@@ -377,13 +441,124 @@ fn bare(held: &[String]) -> bool {
     }
 }
 
-pub fn read(lines: &[String], cursor: Option<(usize, usize)>) -> Option<Input> {
-    let (top, bottom) = span(lines)?;
-    let held: Vec<String> = lines[top + 1..bottom]
+const HINT_AT: usize = 3;
+
+fn chip_in(text: &str) -> bool {
+    text.contains("[Image]")
+        || text.match_indices('[').any(|(at, _)| {
+            let tail = &text[at + 1..];
+            let inner = tail.split(']').next().unwrap_or(tail);
+            let inner: String = inner.chars().take(60).collect();
+            inner
+                .match_indices(" #")
+                .any(|(n, _)| inner[n + 2..].starts_with(|c: char| c.is_ascii_digit()))
+        })
+}
+
+fn marked(held: &[String]) -> bool {
+    held.first()
+        .and_then(|row| row.chars().next())
+        .is_some_and(|c| MARKS.contains(&c))
+}
+
+fn hinted(held: &[String], rows: &[Vec<Shade>]) -> bool {
+    if held.len() != rows.len() || !marked(held) || chip_in(&held.join(" ")) {
+        return false;
+    }
+    let (mut faint, mut first, mut gap) = (0, true, false);
+    for (n, (row, shades)) in held.iter().zip(rows).enumerate() {
+        let mut drawn = false;
+        for (i, c) in row.chars().enumerate() {
+            if c.is_whitespace() || is_dropped(c) || (n == 0 && i == 0) {
+                continue;
+            }
+            if gap || (first && (n > 0 || i > HINT_AT)) {
+                return false;
+            }
+            match (shades.get(i), first) {
+                (Some(Shade::Faint), _) => faint += 1,
+                (Some(Shade::Cursor), true) => {}
+                _ => return false,
+            }
+            (first, drawn) = (false, true);
+        }
+        gap |= !drawn && !first;
+    }
+    faint > 0
+}
+
+fn held_rows(lines: &[String], top: usize, bottom: usize) -> Vec<String> {
+    lines[top + 1..bottom]
         .iter()
         .map(|l| l.trim_end().to_string())
-        .collect();
-    let home = cursor.is_some_and(|(row, col)| row == top + 1 && col <= HOME_COL);
+        .collect()
+}
+
+fn shades_of(shades: &[Vec<Shade>], top: usize, bottom: usize) -> &[Vec<Shade>] {
+    shades.get(top + 1..bottom).unwrap_or(&[])
+}
+
+pub fn hint_shown(lines: &[String], shades: &[Vec<Shade>]) -> bool {
+    span(lines).is_some_and(|(top, bottom)| {
+        hinted(
+            &held_rows(lines, top, bottom),
+            shades_of(shades, top, bottom),
+        )
+    })
+}
+
+pub fn cursor_drawn(lines: &[String], shades: &[Vec<Shade>]) -> bool {
+    let Some((top, bottom)) = span(lines) else {
+        return false;
+    };
+    let rows = shades_of(shades, top, bottom);
+    let first = rows.first().map(Vec::as_slice).unwrap_or_default();
+    let runs = |cells: &[Shade]| {
+        cells
+            .iter()
+            .enumerate()
+            .filter(|(i, shade)| {
+                **shade == Shade::Cursor && (*i == 0 || cells[i - 1] != Shade::Cursor)
+            })
+            .count()
+    };
+    marked(&held_rows(lines, top, bottom))
+        && runs(first) == 1
+        && rows.iter().skip(1).all(|row| runs(row) == 0)
+}
+
+pub fn stray_highlight(lines: &[String], shades: &[Vec<Shade>]) -> bool {
+    span(lines).is_some_and(|(top, bottom)| {
+        shades_of(shades, top, bottom)
+            .iter()
+            .any(|row| row.contains(&Shade::Cursor))
+    })
+}
+
+pub fn prompt_row(lines: &[String]) -> bool {
+    span(lines).is_some_and(|(top, bottom)| marked(&held_rows(lines, top, bottom)))
+}
+
+pub fn read(lines: &[String], cursor: Option<(usize, usize)>) -> Option<Input> {
+    read_shaded(lines, cursor, &[])
+}
+
+pub fn read_shaded(
+    lines: &[String],
+    cursor: Option<(usize, usize)>,
+    shades: &[Vec<Shade>],
+) -> Option<Input> {
+    let (top, bottom) = span(lines)?;
+    let mut held = held_rows(lines, top, bottom);
+    let styled = held.len() == shades_of(shades, top, bottom).len();
+    if hinted(&held, shades_of(shades, top, bottom)) {
+        held = vec![held[0]
+            .chars()
+            .take(1)
+            .filter(|c| MARKS.contains(c))
+            .collect()];
+    }
+    let home = !styled && cursor.is_some_and(|(row, col)| row == top + 1 && col <= HOME_COL);
     Some(Input {
         empty: home || bare(&held),
         held,

@@ -1,4 +1,5 @@
 use crate::transcript::sent::joined;
+use crate::transcript::stored::{as_stored, same_stored};
 use crate::transcript::typed::typed_prompt;
 use crate::transcript::util::str_of;
 use serde_json::Value;
@@ -32,7 +33,7 @@ impl Queue {
                 }
             }
             Some("remove" | "popAll") => {
-                if let Some(i) = self.items.iter().position(|q| *q == content) {
+                if let Some(i) = self.items.iter().position(|q| same_stored(q, &content)) {
                     self.items.remove(i);
                 }
             }
@@ -74,7 +75,8 @@ impl Queue {
 }
 
 fn names(entry: &str, line: &str) -> bool {
-    entry == line || bash_command(line).is_some_and(|command| entry.trim() == command)
+    same_stored(entry, line)
+        || bash_command(line).is_some_and(|command| as_stored(entry).trim() == command)
 }
 
 fn bash_command(line: &str) -> Option<&str> {

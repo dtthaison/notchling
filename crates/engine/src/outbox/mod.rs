@@ -16,6 +16,8 @@ pub const GONE_RECHECK_MS: i64 = 10_000;
 pub const DIALOG_RECHECK_MS: i64 = 30_000;
 pub const REPLY_WAIT_MS: i64 = 50_000;
 pub const POSTMEN_MAX: usize = 32;
+pub const UNSURE_HOLD_MS: i64 = 120_000;
+pub const HOLD_LEASE_MS: i64 = 600_000;
 
 pub use gate::{gate, Facts, Gate, Job};
 pub use model::{
@@ -42,8 +44,14 @@ mod refusal_tests;
 #[path = "store_anchor_tests.rs"]
 mod store_anchor_tests;
 #[cfg(test)]
-#[path = "store_combine_tests.rs"]
-mod store_combine_tests;
+#[path = "store_aside_tests.rs"]
+mod store_aside_tests;
+#[cfg(test)]
+#[path = "store_blank_tests.rs"]
+mod store_blank_tests;
+#[cfg(test)]
+#[path = "store_join_tests.rs"]
+mod store_join_tests;
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod store_tests;

@@ -180,10 +180,10 @@ fn outbox_status(bubble: &OutboxBubble, chat: &WeakEntity<ChatView>, a: Appearan
         .justify_end()
         .items_center()
         .gap(px(4.0))
-        .child(icon(Icon::Clock, 13.0, Ink::TextFaint, a).flex_shrink_0())
+        .child(outbox_rows::status_icon(&bubble.status, a))
         .child(
             label(
-                &outbox_rows::status_line(&bubble.status),
+                &outbox_rows::bubble_line(bubble, super::now_ms()),
                 TypeRole::Meta,
                 Ink::TextFaint,
                 a,

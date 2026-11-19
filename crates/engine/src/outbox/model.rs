@@ -108,6 +108,12 @@ pub struct Row {
     pub next_ms: Option<i64>,
     pub noticed_ms: Option<i64>,
     pub anchor: Option<Anchor>,
+    pub aside_at_ms: Option<i64>,
+    pub aside_ms: Option<i64>,
+    pub hold_ms: Option<i64>,
+    pub joined: u32,
+    #[serde(default)]
+    pub awaited: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

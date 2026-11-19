@@ -127,7 +127,7 @@
   ]},
   {"name":"session.outbox","kv":1,"group":"agents","lock":"toggle","sinks":["activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"session","type":"ref:session","optional":false,"list":false,"choices":[]},
-    {"name":"then","type":"choice","optional":false,"list":false,"choices":["queued","in_queue","sent","unsure","box","stopped","gone","edited","removed","discarded","session_removed","restored_unsure","noticed","combined","other"]},
+    {"name":"then","type":"choice","optional":false,"list":false,"choices":["queued","in_queue","sent","unsure","box","stopped","gone","edited","removed","discarded","session_removed","restored_unsure","noticed","combined","aside","marked_sent","joined","other"]},
     {"name":"chars","type":"count","optional":false,"list":false,"choices":[]},
     {"name":"via","type":"choice","optional":false,"list":false,"choices":["chat","notch","phone","held","agent","other"]}
   ]},

@@ -4,10 +4,11 @@ use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
 use notchling_engine::sessions::Agent;
 use notchling_engine::terminal::input_box;
 use notchling_engine::transcript::model::Conversation;
+use notchling_engine::transcript::stored::{is_blank, same_words, squeezed as squeeze};
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
-use super::outgoing::{dated_since, Outgoing};
+use super::outgoing::{sent_since, Outgoing, Turns, Wanted, GRACE_MS};
 use crate::acting::Request;
 
 const SENT_KEPT: usize = 50;
@@ -28,6 +29,10 @@ pub struct OutboxRow {
     pub queued_ms: i64,
     pub updated_ms: i64,
     pub attempt_ms: Option<i64>,
+    pub aside_at_ms: Option<i64>,
+    pub aside_ms: Option<i64>,
+    pub held_until_ms: Option<i64>,
+    pub joined: u32,
     pub via: Via,
 }
 
@@ -54,6 +59,13 @@ impl OutboxRow {
             queued_ms: value.get("queuedMs").and_then(Value::as_i64).unwrap_or(0),
             updated_ms: value.get("updatedMs").and_then(Value::as_i64).unwrap_or(0),
             attempt_ms: value.get("attemptMs").and_then(Value::as_i64),
+            aside_at_ms: value.get("asideAtMs").and_then(Value::as_i64),
+            aside_ms: value.get("asideMs").and_then(Value::as_i64),
+            held_until_ms: value.get("heldUntilMs").and_then(Value::as_i64),
+            joined: value
+                .get("joined")
+                .and_then(Value::as_u64)
+                .map_or(1, |n| u32::try_from(n).unwrap_or(1)),
             via: Via::parse(word(value, "via").unwrap_or("chat")).unwrap_or(Via::Chat),
         })
     }
@@ -65,10 +77,14 @@ pub enum Status {
     QueuedRetry,
     WaitingDialog,
     WaitsForTurn,
+    WaitsForQueue(Tool),
+    WaitsForPrevious,
+    Editing,
     Sending,
-    QueuedInSession,
+    QueuedInSession(Tool),
     Sent,
     MayBeIn,
+    MayBeInHolding(i64),
     BoxHasText(String),
     BoxHoldsThis,
     Stopped,
@@ -79,8 +95,8 @@ pub enum Status {
 pub enum Button {
     Edit,
     Remove,
-    SendAgain,
-    Drop,
+    Retry,
+    MarkAsSent,
     ClearBoxAndSend,
     ResumeAndSend,
 }
@@ -89,8 +105,9 @@ impl Button {
     pub fn request(self, id: &str, session: &str) -> Option<Request> {
         match self {
             Button::Edit => None,
-            Button::Remove | Button::Drop => Some(Request::outbox_remove(id, session)),
-            Button::SendAgain => Some(Request::outbox_resend(id, session, false, false)),
+            Button::Remove => Some(Request::outbox_remove(id, session)),
+            Button::MarkAsSent => Some(Request::outbox_mark_sent(id, session)),
+            Button::Retry => Some(Request::outbox_resend(id, session, false, false)),
             Button::ClearBoxAndSend => Some(Request::outbox_resend(id, session, true, false)),
             Button::ResumeAndSend => Some(Request::outbox_resend(id, session, false, true)),
         }
@@ -103,35 +120,46 @@ pub struct Bubble {
     pub text: String,
     pub status: Status,
     pub buttons: Vec<Button>,
+    pub joined: u32,
 }
 
-fn squeeze(text: &str) -> String {
+fn collapsed(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn bubble(row: &OutboxRow) -> Bubble {
     let (status, buttons) = match row.state {
+        State::Queued | State::Waiting if row.held_until_ms.is_some() => {
+            (Status::Editing, Vec::new())
+        }
         State::Queued => (Status::Queued, vec![Button::Edit, Button::Remove]),
         State::Waiting => {
             let status = match row.why {
                 Some(Why::Retry) => Status::QueuedRetry,
                 Some(Why::Dialog) => Status::WaitingDialog,
                 Some(Why::Turn) => Status::WaitsForTurn,
+                Some(Why::Queue) => Status::WaitsForQueue(row.tool),
                 _ => Status::Queued,
             };
             (status, vec![Button::Edit, Button::Remove])
         }
         State::Sending => (Status::Sending, Vec::new()),
-        State::InQueue => (Status::QueuedInSession, Vec::new()),
-        State::Unsure => (Status::MayBeIn, vec![Button::SendAgain, Button::Drop]),
+        State::InQueue => (Status::QueuedInSession(row.tool), Vec::new()),
+        State::Unsure => {
+            let status = match (row.aside_ms, row.aside_at_ms) {
+                (None, Some(at)) => Status::MayBeInHolding(at),
+                _ => Status::MayBeIn,
+            };
+            (status, vec![Button::Retry, Button::MarkAsSent])
+        }
         State::Box => {
             let boxed = row.boxed.as_deref().unwrap_or_default();
-            let held = squeeze(boxed);
-            let same = held == squeeze(&row.text) || input_box::holds_message(boxed, &row.text);
-            let status = if !held.is_empty() && same {
+            let shown = collapsed(boxed);
+            let same = same_words(boxed, &row.text) || input_box::holds_message(boxed, &row.text);
+            let status = if !is_blank(boxed) && same {
                 Status::BoxHoldsThis
             } else {
-                Status::BoxHasText(held)
+                Status::BoxHasText(shown)
             };
             (
                 status,
@@ -149,6 +177,16 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         text: row.text.clone(),
         status,
         buttons,
+        joined: row.joined,
+    }
+}
+
+fn blocks_next(row: &OutboxRow) -> bool {
+    match row.state {
+        State::Unsure => row.aside_ms.is_none(),
+        State::Box | State::Stopped | State::Gone | State::InQueue => true,
+        State::Queued | State::Waiting => row.held_until_ms.is_some(),
+        State::Sending => false,
     }
 }
 
@@ -161,34 +199,40 @@ pub fn head_needs_you(rows: &[OutboxRow]) -> bool {
     })
 }
 
-fn shown_by_transcript(row: &OutboxRow, conversation: &Conversation) -> bool {
+fn shown_by_transcript(row: &OutboxRow, turns: &mut Turns) -> bool {
     let since = match row.state {
         State::Sending => row.updated_ms,
         State::Unsure => row.attempt_ms.unwrap_or(row.queued_ms),
         _ => return false,
     };
-    dated_since(&row.text, since as f64, conversation)
+    turns.take(&Wanted::of(&row.text), since as f64)
 }
 
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
     let held = rows.iter().find(|r| r.state == State::InQueue)?;
-    let wanted = squeeze(&held.text);
-    queued.iter().position(|entry| squeeze(entry) == wanted)
+    let pictured = input_box::Pictured::of(&held.text);
+    queued.iter().position(|entry| {
+        same_words(entry, &held.text)
+            || pictured
+                .as_ref()
+                .is_some_and(|pictured| pictured.is_shown_as(entry, None))
+    })
 }
 
 pub fn unbubbled(outgoing: Vec<String>, bubbles: &[Bubble]) -> Vec<String> {
     let mut covered: Vec<String> = bubbles.iter().map(|b| squeeze(&b.text)).collect();
     outgoing
         .into_iter()
-        .filter(
-            |text| match covered.iter().position(|c| *c == squeeze(text)) {
+        .filter(|text| {
+            let key = squeeze(text);
+            match covered.iter().position(|c| *c == key) {
                 Some(at) => {
                     covered.remove(at);
                     false
                 }
                 None => true,
-            },
-        )
+            }
+        })
         .collect()
 }
 
@@ -301,6 +345,13 @@ impl OutboxFeed {
         self.rows(&agent.outbox_key())
     }
 
+    pub fn holding_until(&self, agent: &Agent) -> Option<i64> {
+        self.rows_for(agent)
+            .iter()
+            .find(|row| row.state == State::Unsure && row.aside_ms.is_none())
+            .and_then(|row| row.aside_at_ms)
+    }
+
     pub fn needs_you(&self, agent: &Agent) -> bool {
         head_needs_you(self.rows_for(agent))
     }
@@ -379,21 +430,24 @@ impl OutboxFeed {
             return false;
         };
         let before = list.len();
+        let mut turns = Turns::new(conversation);
         list.retain(|kept| {
-            let waiting = Outgoing {
-                text: kept.row.text.clone(),
-                seen: usize::MAX,
-                delivered_at: Some(kept.at_ms),
-                sent_at: kept.row.queued_ms,
-                boxed: None,
-            };
-            waiting.keep(conversation, now_ms)
+            let arrived = turns.take(&Wanted::of(&kept.row.text), sent_since(kept.row.queued_ms));
+            !arrived && now_ms.saturating_sub(kept.at_ms) < GRACE_MS
         });
         let changed = list.len() != before;
         if list.is_empty() {
             self.sent.remove(session);
         }
         changed
+    }
+
+    pub fn sent_expired(&self, agent: &Agent, now_ms: i64) -> bool {
+        self.sent
+            .get(&agent.outbox_key())
+            .into_iter()
+            .flatten()
+            .any(|kept| now_ms.saturating_sub(kept.at_ms) >= GRACE_MS)
     }
 
     pub fn bubbles(&self, session: &str) -> Vec<Bubble> {
@@ -405,23 +459,31 @@ impl OutboxFeed {
     }
 
     pub fn bubbles_in(&self, session: &str, conversation: &Conversation) -> Vec<Bubble> {
-        let sent = self
-            .sent
-            .get(session)
-            .into_iter()
-            .flatten()
-            .map(|kept| Bubble {
+        let mut turns = Turns::new(conversation);
+        let mut out: Vec<Bubble> = Vec::new();
+        for kept in self.sent.get(session).into_iter().flatten() {
+            turns.take(&Wanted::of(&kept.row.text), sent_since(kept.row.queued_ms));
+            out.push(Bubble {
                 id: kept.row.id.clone(),
                 text: kept.row.text.clone(),
                 status: Status::Sent,
                 buttons: Vec::new(),
+                joined: kept.row.joined,
             });
-        let waiting = self
-            .rows(session)
-            .iter()
-            .filter(|row| !shown_by_transcript(row, conversation))
-            .map(bubble);
-        sent.chain(waiting).collect()
+        }
+        let mut blocked = false;
+        for row in self.rows(session) {
+            if shown_by_transcript(row, &mut turns) {
+                continue;
+            }
+            let mut shown = bubble(row);
+            if blocked && shown.status == Status::Queued {
+                shown.status = Status::WaitsForPrevious;
+            }
+            blocked |= blocks_next(row);
+            out.push(shown);
+        }
+        out
     }
 
     pub fn is_empty(&self) -> bool {

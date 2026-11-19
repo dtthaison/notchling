@@ -1,7 +1,7 @@
 use super::*;
 use crate::outbox_courier::Courier;
 use crate::outbox_testkit::{rig, rig_with, Options, Rig, BUSY, DIALOG, DRAFT, IDLE, NO_BOX, T0};
-use notchling_engine::outbox::{Facts, Kind, Tried, TryEnd};
+use notchling_engine::outbox::{Facts, Kind, Tried, TryEnd, UNSURE_HOLD_MS};
 use notchling_engine::transcript::queue_state::QueueState;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -37,8 +37,8 @@ fn busy_session_message_is_typed_at_once() {
 #[test]
 fn three_rows_typed_in_order_through_one_attach() {
     let r = rig();
-    for text in ["one", "two", "three"] {
-        r.send("job-idle", text);
+    for (text, clear) in [("one", false), ("two", true), ("three", true)] {
+        r.send_with("job-idle", text, clear);
     }
     let mut p = r.postmen.postman(IDLE);
     assert_eq!(p.pass(r.at(T0)), Next::At(T0 + ATTACH_IDLE_MS));
@@ -157,7 +157,7 @@ fn rows_behind_a_box_head_wait() {
         ..Options::default()
     });
     let first = r.send("job-idle", "first");
-    let second = r.send("job-idle", "second");
+    let second = r.send_with("job-idle", "second", true);
     let mut p = r.postmen.postman(IDLE);
     p.pass(r.at(T0));
     p.pass(r.at(T0 + 1_000));
@@ -172,7 +172,7 @@ fn rows_behind_an_in_queue_head_wait() {
     let r = rig();
     r.verifier.waits.lock().unwrap().push_back(Verdict::InQueue);
     let first = r.send("job-idle", "first");
-    let second = r.send("job-idle", "second");
+    let second = r.send_with("job-idle", "second", true);
     let mut p = r.postmen.postman(IDLE);
     p.pass(r.at(T0));
     assert_eq!(state(&r, &first.id), Some((State::InQueue, None)));
@@ -479,7 +479,7 @@ fn acting_off_during_a_verify_types_nothing_more() {
         switch.set(false);
     }));
     let first = r.send("job-idle", "first");
-    let second = r.send("job-idle", "second");
+    let second = r.send_with("job-idle", "second", true);
     let mut p = r.postmen.postman(IDLE);
     assert_eq!(p.pass(r.at(T0)), Next::Done);
     assert_eq!(r.row(&first.id), None);
@@ -792,7 +792,11 @@ fn a_sending_head_left_by_a_dropped_postman_is_settled_when_acting_turns_on() {
     r.ops.store().run_sql_for_tests("DROP TRIGGER no_delete;");
     r.acting_switch().set(true);
     let mut fresh = r.postmen.postman(IDLE);
-    assert_eq!(fresh.pass(r.at(T0 + 2 * TICK_MS)), Next::Done);
+    assert_eq!(
+        fresh.pass(r.at(T0 + 2 * TICK_MS)),
+        Next::At(T0 + 2 * TICK_MS + UNSURE_HOLD_MS),
+        "an unsure head waits for its turn to step aside"
+    );
     assert_eq!(
         state(&r, &row.id),
         Some((State::Unsure, Some(Why::Restart)))

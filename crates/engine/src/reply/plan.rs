@@ -2,6 +2,7 @@ use super::keys::{self, timing::*, ENTER, ESC, SUBMIT, UP};
 use super::question::{page_keys, Choice, PendingQuestion};
 use super::shell;
 pub use crate::terminal::permission_dialog::{self, Decision, Expected};
+use crate::transcript::stored::precleaned;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
@@ -151,7 +152,7 @@ fn detach() -> Vec<Step> {
 }
 
 pub fn reply(text: &str) -> Plan {
-    let text = shell::normalize(text);
+    let text = shell::normalize(&precleaned(text));
     Plan {
         steps: vec![
             attach(None),

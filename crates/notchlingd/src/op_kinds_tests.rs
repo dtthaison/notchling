@@ -49,7 +49,7 @@ const OWN_QUIET: [&str; 12] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 125] = [
+const NEVER_QUIET: [&str; 126] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -82,6 +82,7 @@ const NEVER_QUIET: [&str; 125] = [
     ops::OUTBOX_LIST,
     ops::OUTBOX_EDIT,
     ops::OUTBOX_REMOVE,
+    ops::OUTBOX_HOLD,
     ops::OUTBOX_RESEND,
     ops::OUTBOX_DISCARD,
     ops::SETTINGS_SET_ACTING,

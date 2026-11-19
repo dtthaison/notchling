@@ -177,12 +177,29 @@ fn every_status_has_words_and_every_button_a_label_and_an_id() {
         (Status::Queued, "Queued"),
         (
             Status::QueuedRetry,
-            "Queued · couldn't reach the terminal, trying again",
+            "Couldn't reach the session, trying again",
         ),
-        (Status::WaitingDialog, "Waiting: dialog open"),
-        (Status::WaitsForTurn, "Waits for the current turn"),
-        (Status::Sending, "Sending"),
-        (Status::QueuedInSession, "Queued in the session"),
+        (Status::WaitingDialog, "Waiting for a dialog"),
+        (Status::WaitsForTurn, "Waiting for the turn to end"),
+        (
+            Status::WaitsForQueue(Tool::Claude),
+            "Waiting for Claude Code to read the message before",
+        ),
+        (
+            Status::WaitsForQueue(Tool::Codex),
+            "Waiting for Codex to read the message before",
+        ),
+        (Status::WaitsForPrevious, "Waiting for the message before"),
+        (Status::Editing, "Editing"),
+        (Status::Sending, "Sending…"),
+        (
+            Status::QueuedInSession(Tool::Claude),
+            "In Claude Code's queue",
+        ),
+        (
+            Status::QueuedInSession(Tool::Antigravity),
+            "In Antigravity's queue",
+        ),
         (Status::Sent, "Sent"),
         (Status::MayBeIn, "May already be in the session"),
         (
@@ -198,8 +215,8 @@ fn every_status_has_words_and_every_button_a_label_and_an_id() {
     let labels = [
         (Button::Edit, "Edit"),
         (Button::Remove, "Remove"),
-        (Button::SendAgain, "Send Again"),
-        (Button::Drop, "Drop"),
+        (Button::Retry, "Retry"),
+        (Button::MarkAsSent, "Mark as Sent"),
         (Button::ClearBoxAndSend, "Clear Box and Send"),
         (Button::ResumeAndSend, "Resume and Send"),
     ];
@@ -264,4 +281,34 @@ fn the_current_text_of_a_changed_row_is_read_from_the_feed() {
     };
     assert_eq!(editing().current_text(&unchanged), None);
     assert_eq!(editing().current_text(&[queued_row("x")]), None);
+}
+
+#[test]
+fn an_open_edit_renews_its_hold_well_before_the_lease_runs_out() {
+    let open = editing();
+    const { assert!(HOLD_RENEW_MS * 2 <= HOLD_LEASE_MS) };
+    assert!(!hold_due(Some(&open), 1_000, 1_000 + HOLD_RENEW_MS - 1));
+    assert!(hold_due(Some(&open), 1_000, 1_000 + HOLD_RENEW_MS));
+    assert!(!hold_due(None, 0, i64::MAX));
+    let saving = Editing {
+        sending: true,
+        ..editing()
+    };
+    assert!(!hold_due(Some(&saving), 0, i64::MAX));
+}
+
+#[test]
+fn a_refused_hold_ends_the_edit_and_says_why() {
+    let open = editing();
+    for message in [NO_MESSAGE, BEING_SENT, IN_QUEUE] {
+        let end = open.hold_refused(message, "my words");
+        assert!(end.leave, "{message}");
+        assert_eq!(end.draft.as_deref(), Some("my words"));
+        assert_eq!(end.note.as_deref(), Some(t::chat::outbox_already_sent()));
+    }
+    let end = open.hold_refused("Couldn't reach Notchling.", "my words");
+    assert!(end.leave);
+    assert_eq!(end.draft.as_deref(), Some("a half-typed line"));
+    assert_eq!(end.note.as_deref(), Some("Couldn't reach Notchling."));
+    assert!(!end.refresh);
 }

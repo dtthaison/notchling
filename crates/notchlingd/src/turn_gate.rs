@@ -1,5 +1,6 @@
 use notchling_engine::reply::exec::Pty;
 use notchling_engine::reply::keys::{ENTER, PASTE_START};
+use notchling_engine::terminal::Shade;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -47,6 +48,10 @@ impl Pty for Guarded<'_> {
         self.inner.cursor()
     }
 
+    fn shades(&mut self) -> Vec<Vec<Shade>> {
+        self.inner.shades()
+    }
+
     fn sleep(&mut self, duration: Duration) {
         self.inner.sleep(duration)
     }
@@ -59,3 +64,7 @@ impl Pty for Guarded<'_> {
 #[cfg(test)]
 #[path = "turn_gate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "turn_gate_shades_tests.rs"]
+mod shades_tests;

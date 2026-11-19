@@ -382,6 +382,11 @@ impl SessionSource {
         state.outbox.covers(id)
     }
 
+    pub fn outbox_holding_until(&self, agent: &Agent) -> Option<i64> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.holding_until(agent)
+    }
+
     pub fn outbox_rows(&self, agent: &Agent) -> Vec<OutboxRow> {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.outbox.rows_for(agent).to_vec()
@@ -390,6 +395,16 @@ impl SessionSource {
     pub fn settle_outbox_for(&self, agent: &Agent, conversation: &Conversation) {
         let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.outbox.settle_for(agent, conversation, now_ms()) {
+            state.generation += 1;
+        }
+    }
+
+    pub fn settle_outbox_expired(&self, agent: &Agent, conversation: &Conversation) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        let now = now_ms();
+        if state.outbox.sent_expired(agent, now)
+            && state.outbox.settle_for(agent, conversation, now)
+        {
             state.generation += 1;
         }
     }
@@ -686,3 +701,7 @@ mod outbox_tests;
 #[cfg(all(test, unix))]
 #[path = "session_source_asks_tests.rs"]
 mod asks_tests;
+
+#[cfg(test)]
+#[path = "session_source_expiry_tests.rs"]
+mod expiry_tests;

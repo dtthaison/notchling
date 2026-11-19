@@ -71,6 +71,16 @@ fn migrate_from_v5_adds_the_anchor_and_old_rows_load_without_one() {
     assert_eq!(rows[0].text, "kept");
     assert_eq!(rows[0].seen_before, Some(1));
     assert_eq!(rows[0].anchor, None, "an old row has no anchor");
+    assert_eq!(
+        (
+            rows[0].aside_at_ms,
+            rows[0].aside_ms,
+            rows[0].hold_ms,
+            rows[0].joined
+        ),
+        (None, None, None, 0),
+        "an old row has no aside plan, hold or join"
+    );
     outbox
         .set_baseline(
             "o1",
@@ -95,7 +105,7 @@ fn migrate_from_v5_adds_the_anchor_and_old_rows_load_without_one() {
         .unwrap()
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 8);
 }
 
 #[test]

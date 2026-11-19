@@ -494,7 +494,7 @@ fn migrate_from_v3_keeps_rows() {
         .unwrap()
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 8);
 }
 
 fn corrupt_options(store: &OutboxStore, id: &str) {
@@ -543,4 +543,29 @@ fn get_finds_one_row_by_id() {
     let row = store.insert(&new("s", "a"), 1).unwrap();
     assert_eq!(store.get(&row.id).unwrap(), Some(row));
     assert_eq!(store.get("nope").unwrap(), None);
+}
+
+#[test]
+fn a_store_from_before_the_waiter_mark_and_the_strike_gets_both_columns() {
+    let tmp = TempDir::new("outbox-v7");
+    let dir = tmp.path("data");
+    {
+        let store = OutboxStore::open(&dir).unwrap();
+        store.insert(&new("s", "kept"), 1).unwrap();
+    }
+    {
+        let db = store::open(&dir).unwrap();
+        db.execute_batch(
+            "ALTER TABLE outbox DROP COLUMN awaited;
+             ALTER TABLE outbox DROP COLUMN strike;
+             PRAGMA user_version = 7;",
+        )
+        .unwrap();
+    }
+    let store = OutboxStore::open(&dir).unwrap();
+    let rows = store.list(None).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].awaited);
+    let waited = store.insert_as(&new("s", "w"), true, 2).unwrap();
+    assert!(waited.awaited);
 }

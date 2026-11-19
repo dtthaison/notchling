@@ -1,6 +1,6 @@
 use super::exec::Pty;
 use super::keys::{self, ENTER, PASTE_END, PASTE_START};
-use crate::terminal::input_box;
+use crate::terminal::{input_box, Shade};
 use std::time::Duration;
 
 pub const RULE: &str = "────────────────────────────────────────";
@@ -25,6 +25,7 @@ pub struct FakePrompt {
     noisy: bool,
     fold_at: usize,
     reads_pictures: bool,
+    own_cursor: bool,
     chips: u32,
     human: Vec<(u64, String)>,
     pub writes: Vec<String>,
@@ -118,6 +119,11 @@ impl FakePrompt {
 
     pub fn hinting(mut self, hint: &str) -> FakePrompt {
         self.hint = hint.to_string();
+        self
+    }
+
+    pub fn drawing_its_cursor(mut self) -> FakePrompt {
+        self.own_cursor = true;
         self
     }
 
@@ -266,8 +272,32 @@ impl Pty for FakePrompt {
         lines
     }
 
+    fn shades(&mut self) -> Vec<Vec<Shade>> {
+        if !self.own_cursor || !self.boxed || self.starting() {
+            return Vec::new();
+        }
+        let hinted = self.text.is_empty() && !self.hint.is_empty();
+        let rows = self.rows();
+        let last = rows.len() - 1;
+        let mut shades = vec![Vec::new(); self.before.len()];
+        for (n, row) in rows.iter().enumerate() {
+            let mut cells: Vec<Shade> = row.chars().map(|_| Shade::Plain).collect();
+            match (hinted, n == last) {
+                (true, _) => {
+                    cells[2] = Shade::Cursor;
+                    cells[3..].fill(Shade::Faint);
+                }
+                (false, true) => cells.push(Shade::Cursor),
+                (false, false) => {}
+            }
+            shades.push(cells);
+        }
+        shades.resize(shades.len() + self.after.len(), Vec::new());
+        shades
+    }
+
     fn cursor(&mut self) -> Option<(usize, usize)> {
-        if !self.boxed || self.starting() {
+        if !self.boxed || self.starting() || self.own_cursor {
             return None;
         }
         let rows = self.rows();

@@ -73,6 +73,12 @@ mod outbox_box_wrap_tests;
 #[cfg(test)]
 mod outbox_confirmed_tests;
 #[cfg(test)]
+mod outbox_hearts_tests;
+#[cfg(test)]
+mod outbox_invisible_tests;
+#[cfg(test)]
+mod outbox_picture_tests;
+#[cfg(test)]
 mod outbox_unsure_tests;
 pub mod outgoing;
 pub mod page_panel;

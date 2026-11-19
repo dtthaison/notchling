@@ -1,4 +1,5 @@
 use crate::sessions::iso::parse_iso_ms;
+use crate::transcript::stored::same_words;
 use serde_json::Value;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -19,7 +20,10 @@ pub fn popped_all(tail: &str, text: &str, since_ms: i64) -> bool {
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .any(|obj| {
             obj.get("operation").and_then(Value::as_str) == Some("popAll")
-                && obj.get("content").and_then(Value::as_str) == Some(text)
+                && obj
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| same_words(content, text))
                 && obj
                     .get("timestamp")
                     .and_then(Value::as_str)

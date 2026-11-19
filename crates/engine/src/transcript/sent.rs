@@ -1,5 +1,6 @@
 use super::message::{cut_chips, Message};
 use super::restart::{carries_result, flag, WINDOW_BYTES};
+use super::stored::as_stored;
 use super::tail::read_lines;
 use super::text::between;
 use super::typed::human_prompt;
@@ -16,9 +17,7 @@ pub struct Seen {
     pub taken: usize,
 }
 
-pub(super) fn squeezed(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
+pub(super) use super::stored::squeezed;
 
 pub(super) fn said(obj: &Value) -> String {
     match obj.pointer("/message/content") {
@@ -196,7 +195,8 @@ impl Queue {
         let Some(first) = self.batch.first() else {
             return;
         };
-        let command = text.contains("<command-name>") && first.trim_start().starts_with('/');
+        let command =
+            text.contains("<command-name>") && as_stored(first).trim_start().starts_with('/');
         let one = self.batch.len() == 1;
         let consumed = if one {
             names(first, text) || command
@@ -267,7 +267,7 @@ fn command_matches(message: &Message, text: &str) -> bool {
         return false;
     };
     let given = between(text, "<command-args>", "</command-args>", true).unwrap_or_default();
-    named.trim_start_matches('/') == name && squeezed(&given) == *args
+    as_stored(&named).trim_start_matches('/') == name && squeezed(&given) == *args
 }
 
 pub(super) fn took_prompt(obj: &Value, text: &str, images: usize) -> bool {
@@ -397,6 +397,12 @@ mod count_tests;
 #[cfg(test)]
 #[path = "sent_human_tests.rs"]
 mod human_tests;
+#[cfg(test)]
+#[path = "sent_invisible_tests.rs"]
+mod invisible_tests;
+#[cfg(test)]
+#[path = "sent_pictures_tests.rs"]
+mod pictures_tests;
 #[cfg(test)]
 #[path = "sent_tests.rs"]
 mod tests;

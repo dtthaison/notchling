@@ -22,6 +22,11 @@ fn row(kind: Kind) -> Row {
         next_ms: None,
         noticed_ms: None,
         anchor: None,
+        aside_at_ms: None,
+        aside_ms: None,
+        hold_ms: None,
+        joined: 0,
+        awaited: false,
     }
 }
 

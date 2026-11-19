@@ -3,6 +3,7 @@ use super::plan::{Plan, Step, Until};
 use super::popall;
 use crate::terminal::input_box::{self, Fill, Input};
 use crate::terminal::permission_dialog::{self, Decision, PermissionDialog};
+use crate::terminal::Shade;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -12,6 +13,9 @@ pub trait Pty {
     fn screen(&mut self) -> Vec<String>;
     fn cursor(&mut self) -> Option<(usize, usize)> {
         None
+    }
+    fn shades(&mut self) -> Vec<Vec<Shade>> {
+        Vec::new()
     }
     fn sleep(&mut self, duration: Duration);
     fn now_ms(&self) -> u64;
@@ -32,6 +36,9 @@ impl<P: Pty + ?Sized> Pty for &mut P {
     }
     fn cursor(&mut self) -> Option<(usize, usize)> {
         (**self).cursor()
+    }
+    fn shades(&mut self) -> Vec<Vec<Shade>> {
+        (**self).shades()
     }
     fn sleep(&mut self, duration: Duration) {
         (**self).sleep(duration)
@@ -70,7 +77,9 @@ pub fn wait_attached(
 fn box_focused(pty: &mut dyn Pty) -> bool {
     let lines = pty.screen();
     let cursor = pty.cursor();
-    !input_box::starting(&lines, cursor) && input_box::focused(&lines, cursor)
+    let shades = pty.shades();
+    !input_box::starting(&lines, cursor)
+        && (input_box::focused(&lines, cursor) || input_box::cursor_drawn(&lines, &shades))
 }
 
 pub trait ScreenCheck {
@@ -306,7 +315,12 @@ fn cut(row: &str) -> String {
     row.trim().chars().take(TRAIL_ROW).collect()
 }
 
-fn seen(shown: &Shown, lines: &[String], cursor: Option<(usize, usize)>) -> String {
+fn seen(
+    shown: &Shown,
+    lines: &[String],
+    cursor: Option<(usize, usize)>,
+    shades: &[Vec<Shade>],
+) -> String {
     let last = || {
         input_box::last_row(lines)
             .map(|r| cut(r))
@@ -329,8 +343,16 @@ fn seen(shown: &Shown, lines: &[String], cursor: Option<(usize, usize)>) -> Stri
                 "input box, {} {}, {}, {at}{}, under it: {under}",
                 input.held.len(),
                 if input.held.len() == 1 { "row" } else { "rows" },
-                if input.empty { "empty" } else { "holding text" },
-                if *focused { " in the box" } else { "" },
+                match (input.empty, input_box::hint_shown(lines, shades)) {
+                    (_, true) => "empty, showing a hint",
+                    (true, false) => "empty",
+                    (false, false) => "holding text",
+                },
+                match (*focused, cursor) {
+                    (true, Some(_)) => " in the box",
+                    (true, None) => ", drawn by the session in the box",
+                    (false, _) => "",
+                },
             )
         }
     }
@@ -388,17 +410,24 @@ impl Run<'_> {
     fn shown(&mut self) -> Shown {
         let lines = self.pty.screen();
         let cursor = self.pty.cursor();
+        let shades = self.pty.shades();
         let shown = if input_box::starting(&lines, cursor) {
             Shown::Starting
         } else if self.check.dialog_open(&lines) {
             Shown::Dialog
         } else {
-            match input_box::read(&lines, cursor) {
-                Some(input) => Shown::Input(input, input_box::focused(&lines, cursor)),
+            match input_box::read_shaded(&lines, cursor, &shades)
+                .filter(|_| input_box::prompt_row(&lines))
+            {
+                Some(input) => {
+                    let focused = input_box::focused(&lines, cursor)
+                        || input_box::cursor_drawn(&lines, &shades);
+                    Shown::Input(input, focused)
+                }
                 None => Shown::Other,
             }
         };
-        let what = seen(&shown, &lines, cursor);
+        let what = seen(&shown, &lines, cursor, &shades);
         self.note(&what);
         shown
     }
@@ -470,6 +499,12 @@ impl Run<'_> {
         }
     }
 
+    fn highlight_in_box(&mut self) -> bool {
+        let lines = self.pty.screen();
+        let shades = self.pty.shades();
+        input_box::stray_highlight(&lines, &shades)
+    }
+
     fn await_prompt(&mut self, timeout_ms: u64) -> Result<(), Failure> {
         let start = self.pty.now_ms();
         let mut deadline = start + timeout_ms;
@@ -501,6 +536,9 @@ impl Run<'_> {
             if now >= deadline {
                 let lately = boxed.is_some_and(|at| now - at <= 2 * INPUT_POLL_MS);
                 match shown {
+                    Shown::Input(_, false) if self.highlight_in_box() => {
+                        return Err(Failure::NoInput)
+                    }
                     Shown::Input(..) => return Ok(()),
                     Shown::Starting => return Err(Failure::Timeout),
                     Shown::Other if lately && grace => {

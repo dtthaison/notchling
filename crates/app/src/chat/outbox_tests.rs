@@ -68,7 +68,7 @@ fn every_state_maps_to_words_and_buttons() {
         ),
         (
             row("a", "waiting", Some("queue"), "x"),
-            Status::Queued,
+            Status::WaitsForQueue(Tool::Claude),
             vec![Edit, Remove],
         ),
         (
@@ -89,13 +89,13 @@ fn every_state_maps_to_words_and_buttons() {
         (row("a", "sending", None, "x"), Status::Sending, vec![]),
         (
             row("a", "in_queue", None, "x"),
-            Status::QueuedInSession,
+            Status::QueuedInSession(Tool::Claude),
             vec![],
         ),
         (
             row("a", "unsure", Some("not_found"), "x"),
             Status::MayBeIn,
-            vec![SendAgain, Drop],
+            vec![Retry, MarkAsSent],
         ),
         (
             row("a", "stopped", None, "x"),
@@ -141,10 +141,10 @@ fn buttons_that_act_without_text_make_their_request() {
         json!({"id": "o1", "session": "ab12"})
     );
     assert_eq!(
-        Button::Drop.request("o1", "ab12").unwrap().op,
-        "outbox.remove"
+        Button::MarkAsSent.request("o1", "ab12").unwrap().args,
+        json!({"id": "o1", "session": "ab12", "sent": true})
     );
-    let again = Button::SendAgain.request("o1", "ab12").unwrap();
+    let again = Button::Retry.request("o1", "ab12").unwrap();
     assert_eq!(
         (again.op, again.args),
         ("outbox.resend", json!({"id": "o1", "session": "ab12"}))
@@ -579,4 +579,44 @@ fn a_combined_queued_row_is_one_bubble_in_its_place_and_both_sends_leave_no_ghos
     assert_eq!(bubbles[0].text, "first\n\nsecond");
     assert_eq!(bubbles[0].status, Status::Queued);
     assert_eq!(bubbles[0].buttons, [Button::Edit, Button::Remove]);
+}
+
+#[test]
+fn rows_the_daemon_joined_leave_one_bubble_and_no_ghost_of_any_send() {
+    let mut feed = OutboxFeed::default();
+    let mut list = Vec::new();
+    for (n, (id, text)) in [("o1", "one"), ("o2", "two"), ("o3", "three")]
+        .into_iter()
+        .enumerate()
+    {
+        list.push(pending(text));
+        deliver(&mut list, text, 100, Some(id));
+        let mut row = wire(id, "s1", "queued", None, text);
+        row["queuedMs"] = json!(1_000 * (n as i64 + 1));
+        row["position"] = json!(n + 1);
+        feed.apply(&changed(row), 200);
+    }
+    assert_eq!(feed.bubbles("s1").len(), 3);
+    let mut head = wire("o1", "s1", "sending", None, "one\n\ntwo\n\nthree");
+    head["queuedMs"] = json!(1_000);
+    head["joined"] = json!(3);
+    assert!(feed.apply(&changed(head), 300));
+    for id in ["o2", "o3"] {
+        assert!(feed.apply(&removed(id, "s1", "joined"), 310));
+    }
+    drop_boxed(&mut list, |id| feed.covers(id));
+    assert!(
+        list.is_empty(),
+        "no send is drawn again beside the joined one"
+    );
+    let bubbles = feed.bubbles("s1");
+    assert_eq!(bubbles.len(), 1);
+    assert_eq!(bubbles[0].text, "one\n\ntwo\n\nthree");
+    assert_eq!(bubbles[0].joined, 3);
+    assert_eq!(
+        bubbles[0].text.split("\n\n").count(),
+        bubbles[0].joined as usize
+    );
+    assert_eq!(bubbles[0].status, Status::Sending);
+    assert!(unbubbled(outgoing_texts(&list), &bubbles).is_empty());
 }

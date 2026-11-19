@@ -1,4 +1,6 @@
+use notchling_engine::terminal::input_box::Pictured;
 use notchling_engine::transcript::model::{Conversation, ItemKind};
+use notchling_engine::transcript::stored::squeezed_chars;
 
 pub const GRACE_MS: i64 = 30_000;
 const CLOCK_SLACK_MS: f64 = 2_000.0;
@@ -39,45 +41,97 @@ impl Outgoing {
     }
 
     fn dated_copy(&self, conversation: &Conversation) -> bool {
-        dated_since(
-            &self.text,
-            self.sent_at as f64 - CLOCK_SLACK_MS,
+        dated_since(&self.text, sent_since(self.sent_at), conversation)
+    }
+}
+
+pub fn sent_since(queued_ms: i64) -> f64 {
+    queued_ms as f64 - CLOCK_SLACK_MS
+}
+
+pub struct Wanted {
+    exact: String,
+    pictured: Option<Pictured>,
+}
+
+impl Wanted {
+    pub fn of(text: &str) -> Wanted {
+        Wanted {
+            exact: comparable(text).collect(),
+            pictured: Pictured::of(text),
+        }
+    }
+
+    pub fn is(&self, turn: &str, images: Option<usize>) -> bool {
+        comparable(turn).eq(self.exact.chars())
+            || self
+                .pictured
+                .as_ref()
+                .is_some_and(|pictured| pictured.is_shown_as(turn, images))
+    }
+}
+
+pub struct Turns<'a> {
+    conversation: &'a Conversation,
+    taken: Vec<usize>,
+}
+
+impl<'a> Turns<'a> {
+    pub fn new(conversation: &'a Conversation) -> Turns<'a> {
+        Turns {
             conversation,
-        )
+            taken: Vec::new(),
+        }
+    }
+
+    pub fn take(&mut self, wanted: &Wanted, since_ms: f64) -> bool {
+        let found = self
+            .conversation
+            .items
+            .iter()
+            .enumerate()
+            .position(|(at, item)| {
+                item.date.is_some_and(|d| d * 1000.0 >= since_ms)
+                    && !self.taken.contains(&at)
+                    && matches!(&item.kind, ItemKind::User { text, images, .. } if wanted.is(text, Some(*images)))
+            });
+        if let Some(at) = found {
+            self.taken.push(at);
+        }
+        found.is_some()
     }
 }
 
 pub fn dated_since(text: &str, since_ms: f64, conversation: &Conversation) -> bool {
-    let text = comparable(text);
-    conversation.items.iter().any(|item| {
-        matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text)
-            && item.date.is_some_and(|d| d * 1000.0 >= since_ms)
-    })
+    Turns::new(conversation).take(&Wanted::of(text), since_ms)
 }
 
 fn copies(text: &str, conversation: &Conversation) -> usize {
-    let text = comparable(text);
+    let wanted = Wanted::of(text);
     let sent = conversation
         .items
         .iter()
-        .filter(
-            |item| matches!(&item.kind, ItemKind::User { text: t, .. } if comparable(t) == text),
-        )
+        .filter(|item| {
+            matches!(&item.kind, ItemKind::User { text, images, .. } if wanted.is(text, Some(*images)))
+        })
         .count();
     let queued = conversation
         .queued
         .iter()
-        .filter(|t| comparable(t) == text)
+        .filter(|t| wanted.is(t, None))
         .count();
     sent + queued
 }
 
-fn comparable(text: &str) -> String {
-    let text = text.trim();
-    match text.strip_prefix('!') {
-        Some(command) => format!("!{}", command.trim_start()),
-        None => text.to_owned(),
-    }
+fn comparable(text: &str) -> impl Iterator<Item = char> + '_ {
+    let mut first = true;
+    let mut after_bang = false;
+    squeezed_chars(text).filter(move |c| {
+        let gap = after_bang && *c == ' ';
+        after_bang = first && *c == '!';
+        first = false;
+        !gap
+    })
 }
 
 #[cfg(test)]

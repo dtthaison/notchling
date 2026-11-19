@@ -289,6 +289,10 @@ impl ChatView {
     }
 
     pub(super) fn tick(&mut self, cx: &mut Context<Self>) {
+        if let Some(session) = self.selected_session() {
+            self.source
+                .settle_outbox_expired(&session.agent, &self.conversation);
+        }
         let generation = self.source.generation();
         if generation != self.seen_generation {
             self.seen_generation = generation;
@@ -314,6 +318,7 @@ impl ChatView {
         {
             self.redraw_chrome(cx);
         }
+        self.outbox_clock(cx);
         self.inbox_tick(cx);
         self.chrome_tick(cx);
         self.cluster_tick(cx);

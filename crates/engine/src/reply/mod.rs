@@ -11,6 +11,8 @@ pub mod shell;
 #[cfg(test)]
 mod exec_box_tests;
 #[cfg(test)]
+mod exec_hint_tests;
+#[cfg(test)]
 mod exec_leftover_tests;
 #[cfg(test)]
 mod exec_permission_tests;
@@ -22,3 +24,5 @@ mod exec_send_tests;
 mod exec_tests;
 #[cfg(test)]
 mod pin_tests;
+#[cfg(test)]
+mod plan_clean_tests;

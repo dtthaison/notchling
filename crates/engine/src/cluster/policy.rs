@@ -157,6 +157,7 @@ pub const RULES: &[Rule] = &[
     client_app_by("outbox.list", "session"),
     client_app_by("outbox.edit", "session"),
     client_app_by("outbox.remove", "session"),
+    client_app_by("outbox.hold", "session"),
     client_app_by("outbox.resend", "session"),
     client_app_by("outbox.discard", "session"),
     client_app("session.answer"),

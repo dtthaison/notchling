@@ -3,7 +3,7 @@ use notchling_engine::outbox::NO_MESSAGE;
 use notchling_engine::sessions::Agent;
 use notchling_locale as t;
 
-use super::outbox_rows::{settle_edit, EditEnd, Editing};
+use super::outbox_rows::{hold_due, settle_edit, EditEnd, Editing};
 use super::ChatView;
 use crate::acting::{Acting, Request};
 use crate::chat::outbox::Button;
@@ -28,7 +28,7 @@ impl ChatView {
         {
             self.cancel_edit(cx);
         }
-        if matches!(button, Button::Remove | Button::Drop) {
+        if matches!(button, Button::Remove | Button::MarkAsSent) {
             self.tools.forget_outbox(id);
         }
         self.spawn_send(
@@ -60,7 +60,10 @@ impl ChatView {
             _ => self.tools.draft(&chat_row).to_owned(),
         };
         self.tools.edit_round += 1;
-        self.tools.editing = Some(Editing {
+        if let Some(open) = self.tools.editing.clone() {
+            self.hold_row(&open.outbox_id, &open.session, false, cx);
+        }
+        let editing = Editing {
             chat_row: chat_row.clone(),
             outbox_id: row.id,
             session: row.session,
@@ -68,17 +71,76 @@ impl ChatView {
             was: row.text.clone(),
             round: self.tools.edit_round,
             sending: false,
-        });
+        };
+        self.tools.editing = Some(editing.clone());
+        self.hold_open(editing, cx);
         self.put_draft(&chat_row, row.text, cx);
         cx.notify();
+    }
+
+    fn hold_open(&mut self, editing: Editing, cx: &mut Context<Self>) {
+        self.tools.hold_sent_ms = super::now_ms();
+        let actions = self.acts(cx).actions;
+        let request = Request::outbox_hold(&editing.outbox_id, &editing.session, true);
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions.send_full(&request) })
+                .await;
+            if let Err(failure) = result {
+                this.update(cx, |view, cx| {
+                    let typed = view.tools.editor.read(cx).text().to_owned();
+                    let end = editing.hold_refused(&failure.message, &typed);
+                    view.end_edit(&editing, end, cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    fn renew_hold(&mut self, cx: &mut Context<Self>) {
+        let now = super::now_ms();
+        if !hold_due(self.tools.editing.as_ref(), self.tools.hold_sent_ms, now) {
+            return;
+        }
+        if let Some(editing) = self.tools.editing.clone() {
+            self.hold_open(editing, cx);
+        }
     }
 
     pub(super) fn cancel_edit(&mut self, cx: &mut Context<Self>) {
         let Some(editing) = self.tools.editing.take() else {
             return;
         };
+        self.hold_row(&editing.outbox_id, &editing.session, false, cx);
         self.put_draft(&editing.chat_row, editing.cancelled(), cx);
         cx.notify();
+    }
+
+    fn hold_row(&mut self, id: &str, session: &str, on: bool, cx: &mut Context<Self>) {
+        let actions = self.acts(cx).actions;
+        let request = Request::outbox_hold(id, session, on);
+        cx.background_executor()
+            .spawn(async move {
+                let _ = actions.send_full(&request);
+            })
+            .detach();
+    }
+
+    pub(super) fn outbox_clock(&mut self, cx: &mut Context<Self>) {
+        self.renew_hold(cx);
+        let holding = self
+            .selected_session()
+            .and_then(|session| self.source.outbox_holding_until(&session.agent));
+        let second = holding.map(|_| super::now_ms().div_euclid(1000));
+        if second != self.outbox_second {
+            self.outbox_second = second;
+            if second.is_some() {
+                cx.notify();
+            }
+        }
     }
 
     pub(super) fn editing_here(&self) -> bool {
