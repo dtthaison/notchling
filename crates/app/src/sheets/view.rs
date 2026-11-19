@@ -702,8 +702,8 @@ impl Render for NewSessionView {
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
     use super::renders::{
-        acting, banners, client, hooks, new_session, page, shown, sidecar, skills_models, tool,
-        values, Shown,
+        acting, banners, client, hooks, models_refreshed, new_session, page, shown, sidecar,
+        skills_models, tool, values, Shown,
     };
     use super::settings_view::{BannersView, SettingsView};
     let which = shown(name)?;
@@ -732,7 +732,9 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
                     view
                 };
                 let view = match skills_models(which) {
-                    Some((skills, models)) => view.with_skills(skills, models),
+                    Some((skills, models)) => view
+                        .with_skills(skills, models)
+                        .with_models_result(models_refreshed(which)),
                     None => view,
                 };
                 match client(which) {

@@ -202,7 +202,10 @@ fn hints_read_a_slug_or_an_object_and_skip_nulls() {
 
 #[test]
 fn the_override_file_adds_replaces_and_marks_a_model_only_the_live_list_reports() {
-    let rig = with(Some(CODEX), Some("gemini-5-neon-high\tN\n"));
+    let rig = with(
+        Some(CODEX),
+        Some("gemini-5-neon-medium\tN\ngemini-5-neon-high\tN\n"),
+    );
     let file = rig.deps.catalog_file.clone().unwrap();
     std::fs::write(
         &file,
@@ -222,9 +225,9 @@ fn the_override_file_adds_replaces_and_marks_a_model_only_the_live_list_reports(
     );
     let mut out = Vec::new();
     models_listing(&[], &rig.deps, &mut out);
-    assert!(String::from_utf8(out)
-        .unwrap()
-        .contains("gemini-5-neon  efforts: high  [review, spec-check at medium]\n    use: mine"));
+    assert!(String::from_utf8(out).unwrap().contains(
+        "gemini-5-neon  efforts: medium, high  [review, spec-check at medium]\n    use: mine"
+    ));
     assert_eq!(
         pick(&rig, "review-final").1,
         "codex --model gpt-6-astra --effort xhigh\n",
@@ -421,4 +424,30 @@ fn a_listed_variant_that_a_run_would_refuse_is_never_printed() {
     let (code, text) = pick(&rig, "review");
     assert_eq!(code, 1);
     assert_eq!(text, "no model for review; run delegate-models\n");
+}
+
+#[test]
+fn an_agy_pick_at_xhigh_is_printed_where_the_model_lists_it_and_skipped_where_it_does_not() {
+    let pick_xhigh = |agy: &'static str| {
+        let rig = with(Some(CODEX), Some(agy));
+        std::fs::write(
+            rig.deps.catalog_file.clone().unwrap(),
+            r#"{"antigravity":{"picks":[
+              {"model":"gemini-4-neon","effort":"xhigh","roles":["review"],
+               "then":{"review":[{"tool":"agy","model":"gemini-4-argon","effort":"high"}]}}]}}"#,
+        )
+        .unwrap();
+        pick(&rig, "review")
+    };
+    let listed = "gemini-4-neon-high\tN\ngemini-4-neon-xhigh\tN\ngemini-4-argon-high\tA\n";
+    assert_eq!(
+        pick_xhigh(listed),
+        (0, "agy --model gemini-4-neon --effort xhigh\n".into())
+    );
+    let without = "gemini-4-neon-high\tN\ngemini-4-argon-high\tA\n";
+    assert_eq!(
+        pick_xhigh(without),
+        (0, "agy --model gemini-4-argon --effort high\n".into()),
+        "no xhigh on that model: the next step is used, never a silent high"
+    );
 }

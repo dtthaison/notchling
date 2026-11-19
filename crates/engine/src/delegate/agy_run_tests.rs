@@ -7,11 +7,23 @@ use std::sync::Arc;
 const RECORDING: &str = include_str!("../../tests/fixtures/notchling/acp-agy.jsonl");
 
 fn config() -> Value {
+    config_for(
+        &["gemini-4-argon", "claude-opus-5-5"],
+        &["low", "medium", "high"],
+    )
+}
+
+fn config_for(models: &[&str], levels: &[&str]) -> Value {
+    let options = |list: &[&str]| -> Vec<Value> {
+        list.iter()
+            .map(|v| json!({"value": v, "name": v}))
+            .collect()
+    };
     json!([
-        {"id": "model", "name": "Model", "type": "select", "currentValue": "gemini-4-argon",
-         "options": [{"value": "gemini-4-argon", "name": "G"}, {"value": "claude-opus-5-5", "name": "C"}]},
+        {"id": "model", "name": "Model", "type": "select", "currentValue": models[0],
+         "options": options(models)},
         {"id": "thought_level", "name": "Thinking", "type": "select", "currentValue": "medium",
-         "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]},
+         "options": options(levels)},
         {"id": "mode", "name": "Mode", "type": "select", "currentValue": "default",
          "options": [{"value": "default"}, {"value": "accept-edits"}]},
     ])
@@ -293,9 +305,7 @@ fn a_model_that_is_not_offered_fails_before_prompting() {
     let (outcome, _) = run_it(&rig, &options);
     assert_eq!(
         outcome.error.as_deref(),
-        Some(
-            "--model gemini-4-argon-xhigh isn't offered. Choices: gemini-4-argon, claude-opus-5-5."
-        )
+        Some("--effort xhigh isn't offered. Choices: low, medium, high.")
     );
 
     let mut options = rig.options(Tool::Agy, "x");
@@ -306,6 +316,78 @@ fn a_model_that_is_not_offered_fails_before_prompting() {
         .error
         .unwrap()
         .starts_with("--effort turbo isn't offered. Choices: low, medium, high."));
+}
+
+fn per_model_levels() -> Responder {
+    let models = ["gemini-4-argon", "gemini-4-hydrogen"];
+    Arc::new(move |m: &Value, h: &FakeHandle| {
+        let Some(method) = m.get("method").and_then(Value::as_str) else {
+            return;
+        };
+        match method {
+            "initialize" => answer(h, m, json!({"protocolVersion": 1})),
+            "session/new" => answer(
+                h,
+                m,
+                json!({"sessionId": "sess-1", "configOptions": config_for(&models, &["low", "medium", "high"])}),
+            ),
+            "session/set_config_option" => {
+                let hydrogen = m["params"]["configId"] == "model"
+                    && m["params"]["value"] == "gemini-4-hydrogen";
+                if hydrogen {
+                    answer(
+                        h,
+                        m,
+                        json!({"configOptions": config_for(&models, &["high", "xhigh"])}),
+                    );
+                } else {
+                    answer(h, m, json!({}));
+                }
+            }
+            "session/prompt" => plain_turn()(h, m),
+            _ => {}
+        }
+    })
+}
+
+#[test]
+fn xhigh_is_taken_where_the_chosen_model_offers_it_and_refused_where_it_does_not() {
+    let rig = rig_with(per_model_levels());
+    let mut options = rig.options(Tool::Agy, "review");
+    options.model = Some("gemini-4-hydrogen".into());
+    options.effort = Some("xhigh".into());
+    let (outcome, _) = run_it(&rig, &options);
+    assert_eq!(outcome.error, None);
+    assert_eq!(outcome.model.as_deref(), Some("gemini-4-hydrogen"));
+    assert_eq!(outcome.effort.as_deref(), Some("xhigh"));
+    let h = rig.agy.spawned().remove(0);
+    assert_eq!(
+        set_options(&h),
+        [
+            ("model".into(), "gemini-4-hydrogen".into()),
+            ("thought_level".into(), "xhigh".into())
+        ]
+    );
+
+    let rig = rig_with(per_model_levels());
+    let mut options = rig.options(Tool::Agy, "review");
+    options.model = Some("gemini-4-hydrogen-xhigh".into());
+    let (outcome, _) = run_it(&rig, &options);
+    assert_eq!(outcome.error, None);
+    assert_eq!(outcome.effort.as_deref(), Some("xhigh"));
+
+    let rig = rig_with(per_model_levels());
+    let mut options = rig.options(Tool::Agy, "review");
+    options.model = Some("gemini-4-argon".into());
+    options.effort = Some("xhigh".into());
+    let (outcome, _) = run_it(&rig, &options);
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some("--effort xhigh isn't offered. Choices: low, medium, high.")
+    );
+    let h = rig.agy.spawned().remove(0);
+    assert!(h.requests("session/prompt").is_empty());
+    assert!(h.killed());
 }
 
 #[test]

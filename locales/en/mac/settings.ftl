@@ -689,6 +689,57 @@ settings-model-unchecked = Not checked against the provider's list yet.
 # Note under the jobs.
 settings-models-footer = The same choice notchling delegate-models --for makes for an agent.
 
+# Button under the model choices: reads each tool's own model list and updates Notchling's copy.
+settings-models-refresh = Refresh Models
+
+# Button text while the model lists are being read.
+settings-models-refreshing = Refreshing…
+
+# Line under Refresh Models when nothing changed in any tool's list.
+settings-models-refreshed-none = The model lists are up to date.
+
+# Start of the line under Refresh Models when something changed. The parts that follow are joined with commas.
+settings-models-refreshed = Model lists updated:
+
+# Part of the line under Refresh Models: models that are new. $count is how many.
+settings-models-refresh-new = { $count ->
+    [one] { $count } new model
+   *[other] { $count } new models
+}
+
+# Part of the line under Refresh Models: models a tool no longer lists. $count is how many.
+settings-models-refresh-gone = { $count ->
+    [one] { $count } model gone
+   *[other] { $count } models gone
+}
+
+# Part of the line under Refresh Models: models whose efforts changed. $count is how many.
+settings-models-refresh-efforts = { $count ->
+    [one] { $count } model with new efforts
+   *[other] { $count } models with new efforts
+}
+
+# Second sentence under Refresh Models: models with no price, which are counted at zero. $count is how many.
+settings-models-refresh-unpriced = { $count ->
+    [one] { $count } model has no price.
+   *[other] { $count } models have no price.
+}
+
+# Third sentence under Refresh Models: job choices worth a look; none is changed. $count is how many.
+settings-models-refresh-picks = { $count ->
+    [one] { $count } job choice to review.
+   *[other] { $count } job choices to review.
+}
+
+# Sentence under Refresh Models when a tool's list could not be read, so Notchling kept what it had. $tools names them.
+settings-models-refresh-unread = Couldn't read: { $tools }.
+
+# Error under Refresh Models. $why says what went wrong.
+settings-models-refresh-failed = Couldn't refresh the models: { $why }
+
+# Note under the model choices.
+settings-models-refresh-footer = Refresh Models reads each tool's own list of models and efforts and updates Notchling's copy and its skills. It never changes which model a job uses.
+
 # Section title on the Skills & Models page: the user's own model list.
 settings-override-title = Override
 

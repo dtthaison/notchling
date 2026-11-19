@@ -348,6 +348,21 @@ file and the daemon's own cache, and the one thing it writes is that cache.
   optional `[1m]`), and the phone's `models` list and `modelId` (`bridge_backend`). A `/model`
   sent through `session.command` isn't checked against it yet.
 
+## `models_ops.rs`
+
+`notchling models` and Settings > Skills & Models > Refresh Models: read each tool's own model list, report what changed, and (for `models.update`) write Notchling's copy.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `models.check` | agent | `{skills?}` | the report, nothing of Notchling's written |
+| `models.update` | agent | `{skills?}` | the report, after writing |
+
+- Sources, read only, no login and no token refresh: Claude Code's list from Anthropic's `GET /v1/models` with the live login's access token (only while `accounts` is on; otherwise the report says it was not read and the pickers keep Claude Code's own list); Codex's from `codex debug models` (Codex's own catalog, which may refresh Codex's own `models_cache.json`); Antigravity's from `agy models`, whose lines are `<model>-<level>`, so a model's efforts are the levels listed for it (`xhigh` only where listed). A tool that can't be run or lists nothing keeps its old list and the report says why.
+- `update` writes: Claude's and Antigravity's lists into `live-models.json` (`catalog.changed {tool}` when they differ; a loaded `agy acp` session keeps the per-model efforts the listing gave), and Codex's, when it differs, as a trimmed `codex-models.json` beside it (same shape as `models_cache.json`; whichever of the two files is newer is Codex's list for `catalog.get`, `delegate-models` and the delegate checks). It never writes `~/.codex`, `~/.gemini` or `~/.claude`, the override file or a price, and never changes a role pick.
+- `skills` (default true): after `update`, the `notchling-delegate` and `notchling-models` skills are rewritten through `install.apply {what}` (so only while the `install` switch is on and only skills Notchling wrote); `check` and an off switch only say what would change. A bad `skills` is `bad_request`.
+- Reply: `{applied, changed, tools: [{tool, source, read, note, total, added, removed, efforts: [{model, added, removed}], unpriced, written}], suggestions: [text], skills: [text], priceHelp, text}`. `suggestions` are role picks to review (a marked model that is gone or has a newer one in its family, or no longer offers the marked effort) and are never applied; `unpriced` are models with no price in the data file or the override; `text` is the report as the command line prints it.
+- `notchling models [check] [--json]` and `notchling models update [--json] [--no-skills]` call these; exit 0 report made, 1 refused or failed, 2 not running or a wrong command. The app waits up to 120 s.
+
 ## `cluster_ops.rs`
 
 Cluster plan B ([plan](superpowers/plans/2026-11-13-cluster-v1-b-nodes.md)): this machine as a node of one

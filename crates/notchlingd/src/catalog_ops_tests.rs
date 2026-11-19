@@ -488,3 +488,45 @@ fn agy_options_seen_are_cached_and_announced() {
     r.service.record_agy_options(&[]);
     assert_eq!(ids(&r.get("antigravity").unwrap()), ["m1", "m2"]);
 }
+
+#[test]
+fn agy_options_seen_keep_the_efforts_a_models_listing_gave() {
+    let r = rig("agy-merge", false, &live_login(None));
+    r.service.store_live(
+        Tool::Antigravity,
+        &[
+            LiveModel {
+                id: "m1".into(),
+                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
+                ..LiveModel::default()
+            },
+            LiveModel {
+                id: "m2".into(),
+                efforts: vec!["low".into(), "medium".into(), "high".into()],
+                ..LiveModel::default()
+            },
+        ],
+    );
+    let options = ConfigOption::parse(Some(&json!([
+        {"id": "model", "name": "Model", "type": "select", "currentValue": "m1",
+         "options": [{"value": "m1", "name": "One"}, {"value": "m2", "name": "Two"}, {"value": "m3", "name": "Three"}]},
+        {"id": "thought_level", "name": "Thinking Level", "type": "select", "currentValue": "medium",
+         "options": [{"value": "low", "name": "Low"}, {"value": "medium", "name": "Medium"}, {"value": "high", "name": "High"}]},
+    ])));
+    r.service.record_agy_options(&options);
+    let reply = r.get("antigravity").unwrap();
+    assert_eq!(
+        reply["models"][0]["efforts"],
+        json!(["low", "medium", "high", "xhigh"]),
+        "a session's shorter list does not drop xhigh"
+    );
+    assert_eq!(
+        reply["models"][1]["efforts"],
+        json!(["low", "medium", "high"])
+    );
+    assert_eq!(
+        reply["models"][2]["efforts"],
+        json!(["low", "medium", "high"]),
+        "a model never listed takes the session's levels"
+    );
+}

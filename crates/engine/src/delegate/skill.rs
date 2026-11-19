@@ -20,7 +20,7 @@ description: Use to hand a job to another AI tool on this Mac and get its result
 
 - `codex`: OpenAI Codex (GPT models). Its image tool makes images.
 - `agy`: Antigravity CLI (Gemini, also Claude and GPT-OSS models). Its image subagent makes images.
-- `--model`, `--effort`: pick both. `'{binary}' delegate-models` lists each tool's models and efforts. For agy, effort is low/medium/high (`xhigh`/`max` become high), and `gemini-4-argon-high` is read as model plus effort.
+- `--model`, `--effort`: pick both. `'{binary}' delegate-models` lists each tool's models and efforts. For agy, each model offers its own efforts (`'{binary}' delegate-models agy` lists them; `xhigh` is accepted only where a model lists it, `max` is read as high), and `gemini-4-argon-high` is read as model plus effort. After a tool updates its models, `'{binary}' models update` refreshes Notchling's lists.
 - `--folder`: the workspace the other agent works in (default: the current folder). Name it for a review.
 - `--write`: let it change files in that folder. Without it, it only reads (Codex read-only sandbox; agy's permission requests are declined and listed). Use `--write` only when the job is to change files.
 - `--out <dir>`: copy the images, videos or audio it generated there. Without it, they are listed where the tool saved them.
@@ -93,6 +93,9 @@ mod tests {
         assert!(claude.contains("'/Apps/N' delegate <codex|agy>"));
         assert!(claude.contains("'/Apps/N' delegate-models"));
         assert!(claude.contains("run_in_background"));
+        assert!(claude.contains("'/Apps/N' models update"));
+        assert!(!claude.contains("become high"));
+        assert!(claude.contains("each model offers its own efforts"));
         assert!(claude.contains("--model <model> --effort high --write"));
         assert!(!claude.contains("escalated permissions"));
         assert!(claude.ends_with("not your context.\n"));

@@ -5,6 +5,7 @@ fn live(models: &[&str]) -> Live {
     Live {
         models: models.iter().map(|m| (*m).to_owned()).collect(),
         hints: Vec::new(),
+        efforts: Vec::new(),
     }
 }
 

@@ -262,11 +262,11 @@ fn delegate_models_lists_both_tools() {
     });
     assert_eq!(
         listing(&rig, &[]),
-        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
+        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort <level>):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
     );
     assert_eq!(
         listing(&rig, &["agy"]),
-        "agy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
+        "agy (--model <model> --effort <level>):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
     );
     assert!(listing(&rig, &["codex"]).starts_with("codex ("));
     assert!(!listing(&rig, &["Codex"]).contains("agy ("));
@@ -277,7 +277,7 @@ fn delegate_models_says_so_when_a_tool_has_nothing_to_list() {
     let rig = rig(AcpFake::new());
     assert_eq!(
         listing(&rig, &[]),
-        "codex (--model <slug> --effort <level>):\n  (Codex hasn't cached its model list yet; run codex once)\nagy (--model <model> --effort low|medium|high):\n  (couldn't run agy models)"
+        "codex (--model <slug> --effort <level>):\n  (Codex hasn't cached its model list yet; run codex once)\nagy (--model <model> --effort <level>):\n  (couldn't run agy models)"
     );
 }
 
@@ -536,4 +536,35 @@ mod quota_gate {
         plain.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
         assert_eq!(delegate(&plain, &["codex", "--", "hi"], None).code, 0);
     }
+}
+
+#[test]
+fn delegate_models_shows_xhigh_only_for_the_models_that_list_it() {
+    let mut rig = rig(AcpFake::new());
+    rig.deps.capture = Arc::new(|_, _| {
+        Some("Fetching available models...\ngemini-4-neon-high\tH\ngemini-4-neon-xhigh\tX\ngemini-4-neon-low\tL\ngemini-4-argon-high\tH\ngemini-4-argon-medium\tM\n".into())
+    });
+    let mut out = Vec::new();
+    assert_eq!(models_listing(&["agy".to_string()], &rig.deps, &mut out), 0);
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("  gemini-4-neon  efforts: low, high, xhigh"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  gemini-4-argon  efforts: medium, high"),
+        "{text}"
+    );
+    assert!(!text.contains("argon  efforts: medium, high, xhigh"));
+
+    let mut out = Vec::new();
+    assert_eq!(
+        models_listing_json(&["agy".to_string()], &rig.deps, &mut out),
+        0
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        v["agy"]["models"][0]["efforts"],
+        serde_json::json!(["low", "high", "xhigh"])
+    );
 }

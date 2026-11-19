@@ -3,6 +3,7 @@ use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::switches::{SwitchFlag, INSTALL_OFF};
 use notchling_engine::ask::skill::{text as ask_text, NAME as ASK_NAME};
+use notchling_engine::delegate::models_skill;
 use notchling_engine::delegate::skill::{content as delegate_text, SkillTool};
 use notchling_engine::install::{
     self, Action, FileError, FilePlan, Found, SkillPlan, SkillSpec, ToolRoots, Want, Wanted,
@@ -42,9 +43,10 @@ impl InstallSetup {
             codex: layout.codex_dir(),
             antigravity,
         };
+        let snapshot = layout.state_dir().join(models::SNAPSHOT);
         let skills = binary
             .as_deref()
-            .map(|b| default_skills(b, &tools.codex))
+            .map(|b| default_skills_with(b, &tools.codex, Some(snapshot)))
             .unwrap_or_default();
         InstallSetup {
             settings: layout.claude_dir.join("settings.json"),
@@ -57,7 +59,16 @@ impl InstallSetup {
 }
 
 pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
+    default_skills_with(binary, codex_home, None)
+}
+
+pub fn default_skills_with(
+    binary: &Path,
+    codex_home: &Path,
+    snapshot: Option<PathBuf>,
+) -> Vec<SkillSpec> {
     let for_delegate = binary.to_string_lossy().into_owned();
+    let for_models = for_delegate.clone();
     let for_pages = for_delegate.clone();
     let for_settings = for_delegate.clone();
     let for_ask = for_delegate.clone();
@@ -67,9 +78,16 @@ pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
             name: notchling_engine::delegate::skill::NAME.to_string(),
             tools: vec![SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity],
             text: Box::new(move |tool| {
-                let model = models::load(&codex_home).first().map(|m| m.slug.clone());
+                let model = models::load_with(&codex_home, snapshot.as_deref())
+                    .first()
+                    .map(|m| m.slug.clone());
                 delegate_text(&for_delegate, tool, model.as_deref())
             }),
+        },
+        SkillSpec {
+            name: models_skill::NAME.to_string(),
+            tools: models_skill::TOOLS.to_vec(),
+            text: Box::new(move |tool| models_skill::content(&for_models, tool)),
         },
         SkillSpec {
             name: notchling_engine::pages::skill::NAME.to_string(),

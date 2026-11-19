@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_CACHE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -14,8 +14,28 @@ pub struct Model {
     pub context_window: Option<u64>,
 }
 
+pub const SNAPSHOT: &str = "codex-models.json";
+
+pub fn source_file(codex_home: &Path, snapshot: Option<&Path>) -> PathBuf {
+    let cache = codex_home.join("models_cache.json");
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (snapshot, modified(&cache)) {
+        (Some(s), Some(cached)) if modified(s).is_some_and(|m| m > cached) => s.to_path_buf(),
+        (Some(s), None) if modified(s).is_some() => s.to_path_buf(),
+        _ => cache,
+    }
+}
+
+pub fn load_with(codex_home: &Path, snapshot: Option<&Path>) -> Vec<Model> {
+    load_file(&source_file(codex_home, snapshot))
+}
+
 pub fn load(codex_home: &Path) -> Vec<Model> {
-    let Ok(file) = std::fs::File::open(codex_home.join("models_cache.json")) else {
+    load_file(&codex_home.join("models_cache.json"))
+}
+
+fn load_file(path: &Path) -> Vec<Model> {
+    let Ok(file) = std::fs::File::open(path) else {
         return Vec::new();
     };
     let mut data = Vec::new();
@@ -125,6 +145,53 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         std::fs::write(dir.join("models_cache.json"), CACHE).expect("write");
         assert_eq!(load(&dir).len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_newer_of_codexs_cache_and_the_snapshot_is_the_list() {
+        use std::time::{Duration, SystemTime};
+        let dir = std::env::temp_dir().join(format!("nl-codex-snap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let cache = dir.join("models_cache.json");
+        let snapshot = dir.join(SNAPSHOT);
+        let set = |path: &Path, ago: u64| {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .expect("open");
+            file.set_modified(SystemTime::now() - Duration::from_secs(ago))
+                .expect("mtime");
+        };
+        assert_eq!(source_file(&dir, Some(&snapshot)), cache, "neither exists");
+        std::fs::write(&cache, CACHE).expect("write");
+        std::fs::write(
+            &snapshot,
+            r#"{"models":[{"slug":"new","visibility":"list"}]}"#,
+        )
+        .expect("write");
+        set(&cache, 100);
+        set(&snapshot, 10);
+        assert_eq!(source_file(&dir, Some(&snapshot)), snapshot);
+        let slugs: Vec<_> = load_with(&dir, Some(&snapshot))
+            .into_iter()
+            .map(|m| m.slug)
+            .collect();
+        assert_eq!(slugs, ["new"]);
+        set(&snapshot, 200);
+        assert_eq!(
+            source_file(&dir, Some(&snapshot)),
+            cache,
+            "Codex's own is newer"
+        );
+        assert_eq!(load_with(&dir, None).len(), 2);
+        std::fs::remove_file(&cache).expect("remove");
+        assert_eq!(
+            source_file(&dir, Some(&snapshot)),
+            snapshot,
+            "no cache of its own"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

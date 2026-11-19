@@ -20,6 +20,7 @@ pub mod client_view;
 pub mod hook_rows;
 #[cfg(test)]
 mod hook_rows_tests;
+pub mod models_refresh;
 pub mod models_rows;
 #[cfg(test)]
 mod models_rows_tests;

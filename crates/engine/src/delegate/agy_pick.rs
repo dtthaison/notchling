@@ -1,10 +1,26 @@
-const LEVELS: [&str; 3] = ["low", "medium", "high"];
-const NOT_OFFERED: [&str; 4] = ["xhigh", "max", "ultra", "minimal"];
+const LEVELS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+const NOT_OFFERED: [&str; 3] = ["max", "ultra", "minimal"];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listed {
+    pub model: String,
+    pub levels: Vec<String>,
+    pub name: Option<String>,
+    pub whole: String,
+}
 
 pub fn accepted(model: &str, effort: Option<&str>, offered: &[String]) -> bool {
     pick(Some(model), effort, offered)
         .0
         .is_some_and(|m| offered.contains(&m))
+}
+
+pub fn offers(model: &str, effort: &str, listed: &[(String, Vec<String>)]) -> bool {
+    let level = level_of(effort);
+    match listed.iter().find(|(m, _)| m == model) {
+        Some((_, levels)) => levels.is_empty() || levels.contains(&level),
+        None => true,
+    }
 }
 
 pub fn pick(
@@ -37,18 +53,19 @@ pub fn pick(
 pub fn level_of(effort: &str) -> String {
     match effort.to_lowercase().as_str() {
         "minimal" | "none" | "low" => "low".into(),
-        "xhigh" | "max" | "high" => "high".into(),
+        "max" | "high" => "high".into(),
         other => other.into(),
     }
 }
 
-pub fn models(listing: &str) -> Vec<(String, Vec<String>)> {
-    let mut order: Vec<String> = Vec::new();
-    let mut levels: Vec<(String, Vec<String>)> = Vec::new();
+pub fn entries(listing: &str) -> Vec<Listed> {
+    let mut out: Vec<Listed> = Vec::new();
     for line in listing.lines() {
-        let Some(id) = line.split('\t').find(|f| !f.is_empty()) else {
+        let mut fields = line.split('\t');
+        let Some(id) = fields.by_ref().find(|f| !f.is_empty()) else {
             continue;
         };
+        let label = fields.find(|f| !f.is_empty()).map(str::trim);
         if id.contains(' ') || NOT_OFFERED.iter().any(|w| id.ends_with(&format!("-{w}"))) {
             continue;
         }
@@ -60,17 +77,48 @@ pub fn models(listing: &str) -> Vec<(String, Vec<String>)> {
                 level = suffix;
             }
         }
-        if !order.contains(&model) {
-            order.push(model.clone());
-            levels.push((model.clone(), Vec::new()));
-        }
-        if !level.is_empty() {
-            if let Some((_, list)) = levels.iter_mut().find(|(m, _)| *m == model) {
-                list.push(level.to_string());
+        let at = match out.iter().position(|e| e.model == model) {
+            Some(at) => at,
+            None => {
+                out.push(Listed {
+                    model: model.clone(),
+                    levels: Vec::new(),
+                    name: None,
+                    whole: id.to_string(),
+                });
+                out.len() - 1
             }
+        };
+        let entry = &mut out[at];
+        if !level.is_empty() {
+            entry.levels.push(level.to_string());
+            if entry.name.is_none() {
+                entry.name = label.map(|l| strip_level_word(l).to_string());
+            }
+        } else {
+            entry.name = label.map(str::to_string);
         }
     }
-    levels
+    for entry in &mut out {
+        entry
+            .levels
+            .sort_by_key(|l| LEVELS.iter().position(|x| x == l));
+    }
+    out
+}
+
+fn strip_level_word(label: &str) -> &str {
+    match label.rsplit_once(" (") {
+        Some((head, tail)) if tail.ends_with(')') && !head.is_empty() => head,
+        _ => label,
+    }
+}
+
+pub fn models(listing: &str) -> Vec<(String, Vec<String>)> {
+    entries(listing)
+        .into_iter()
+        .map(|e| (e.model, e.levels))
+        .collect()
 }
 
 #[cfg(test)]
@@ -101,7 +149,8 @@ mod tests {
             pick(Some("gpt-oss-120b"), None, &m).0.as_deref(),
             Some("gpt-oss-120b-medium")
         );
-        assert_eq!(pick(None, Some("xhigh"), &m).1.as_deref(), Some("high"));
+        assert_eq!(pick(None, Some("xhigh"), &m).1.as_deref(), Some("xhigh"));
+        assert_eq!(pick(None, Some("max"), &m).1.as_deref(), Some("high"));
         assert_eq!(pick(None, Some("minimal"), &m).1.as_deref(), Some("low"));
         assert_eq!(pick(None, None, &m), (None, None));
         assert_eq!(
@@ -117,7 +166,7 @@ mod tests {
         assert!(accepted("gemini-4-argon", None, &m));
         assert!(accepted("gemini-4-argon-high", None, &m));
         assert!(accepted("gpt-oss-120b", None, &m));
-        assert!(!accepted("gemini-4-argon-xhigh", None, &m));
+        assert!(accepted("gemini-4-argon-xhigh", None, &m));
         assert!(!accepted("nonsense", None, &m));
     }
 
@@ -138,8 +187,49 @@ mod tests {
         assert_eq!(groups[0].1, ["medium", "high"]);
         assert!(groups[1].1.is_empty());
         assert!(models("").is_empty());
-        let with_xhigh = "gemini-4-hydrogen-high\tH\ngemini-4-hydrogen-xhigh\tX\n";
-        let names: Vec<_> = models(with_xhigh).into_iter().map(|(m, _)| m).collect();
-        assert_eq!(names, ["gemini-4-hydrogen"]);
+        let with_max =
+            "gemini-4-hydrogen-high\tH\ngemini-4-hydrogen-max\tM\ngemini-4-hydrogen-ultra\tU\n";
+        assert_eq!(
+            models(with_max),
+            [("gemini-4-hydrogen".to_string(), vec!["high".to_string()])]
+        );
+    }
+
+    const LISTING: &str = "Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\ngemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\ngemini-4-neon-medium\tGemini 4 Neon (Medium)\ngemini-4-neon-low\tGemini 4 Neon (Low)\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ngemini-pro-orchestrator-neon\tOrchestrator (Neon)\ngpt-oss-120b-medium\tGPT-OSS 120B (Medium)\n";
+
+    #[test]
+    fn xhigh_is_a_level_where_the_listing_has_it_and_the_levels_come_out_in_order() {
+        let groups = models(LISTING);
+        assert_eq!(
+            groups[0],
+            (
+                "gemini-4-neon".to_string(),
+                ["low", "medium", "high", "xhigh"]
+                    .map(String::from)
+                    .to_vec()
+            )
+        );
+        assert_eq!(groups[1].1, ["medium", "high"]);
+        assert!(groups[2].1.is_empty());
+        assert_eq!(groups[3].0, "gpt-oss-120b");
+        let listed = entries(LISTING);
+        assert_eq!(listed[0].name.as_deref(), Some("Gemini 4 Neon"));
+        assert_eq!(listed[2].name.as_deref(), Some("Orchestrator (Neon)"));
+        assert_eq!(listed[3].whole, "gpt-oss-120b-medium");
+    }
+
+    #[test]
+    fn an_effort_is_offered_only_where_the_model_lists_it() {
+        let groups = models(LISTING);
+        assert!(offers("gemini-4-neon", "xhigh", &groups));
+        assert!(offers("gemini-4-neon", "high", &groups));
+        assert!(!offers("gemini-4-argon", "xhigh", &groups));
+        assert!(!offers("gemini-4-argon", "low", &groups));
+        assert!(
+            offers("gemini-4-argon", "max", &groups),
+            "max is read as high"
+        );
+        assert!(offers("gemini-pro-orchestrator-neon", "xhigh", &groups));
+        assert!(offers("unknown", "xhigh", &groups));
     }
 }

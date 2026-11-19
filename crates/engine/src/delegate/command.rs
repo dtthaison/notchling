@@ -146,7 +146,7 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
     let mut lines: Vec<String> = Vec::new();
     if only != Some(Tool::Agy) {
         lines.push("codex (--model <slug> --effort <level>):".into());
-        let known = models::load(&deps.codex_home);
+        let known = models::load_with(&deps.codex_home, deps.codex_snapshot().as_deref());
         if known.is_empty() {
             lines.push("  (Codex hasn't cached its model list yet; run codex once)".into());
         }
@@ -165,7 +165,7 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
         lines.extend(role_models::effort_lines(roles.tool("codex")));
     }
     if only != Some(Tool::Codex) {
-        lines.push("agy (--model <model> --effort low|medium|high):".into());
+        lines.push("agy (--model <model> --effort <level>):".into());
         let listing = deps
             .agy_binary
             .as_deref()
@@ -198,25 +198,26 @@ pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) ->
     let roles = Roles::load(deps.catalog_file.as_deref());
     let mut root = serde_json::Map::new();
     if only != Some(Tool::Agy) {
-        let models: Vec<serde_json::Value> = models::load(&deps.codex_home)
-            .into_iter()
-            .map(|m| {
-                let mut v = serde_json::json!({
-                    "slug": m.slug,
-                    "name": m.name,
-                    "summary": m.summary,
-                    "efforts": m.efforts,
-                });
-                if let Some(d) = m.default_effort {
-                    v["defaultEffort"] = d.into();
-                }
-                if let Some(w) = m.context_window {
-                    v["contextWindow"] = w.into();
-                }
-                role_models::json_fields(roles.tool("codex"), &m.slug, &mut v);
-                v
-            })
-            .collect();
+        let models: Vec<serde_json::Value> =
+            models::load_with(&deps.codex_home, deps.codex_snapshot().as_deref())
+                .into_iter()
+                .map(|m| {
+                    let mut v = serde_json::json!({
+                        "slug": m.slug,
+                        "name": m.name,
+                        "summary": m.summary,
+                        "efforts": m.efforts,
+                    });
+                    if let Some(d) = m.default_effort {
+                        v["defaultEffort"] = d.into();
+                    }
+                    if let Some(w) = m.context_window {
+                        v["contextWindow"] = w.into();
+                    }
+                    role_models::json_fields(roles.tool("codex"), &m.slug, &mut v);
+                    v
+                })
+                .collect();
         root.insert(
             "codex".into(),
             serde_json::json!({ "models": models, "notForEfforts": role_models::efforts_json(roles.tool("codex")) }),

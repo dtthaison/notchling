@@ -89,11 +89,20 @@ pub fn efforts_json(roles: &ToolRoles) -> Value {
 pub struct Live {
     pub models: Vec<String>,
     pub hints: Vec<(String, String)>,
+    pub efforts: Vec<(String, Vec<String>)>,
 }
 
 pub fn codex_hints(codex_home: &Path) -> Vec<(String, String)> {
+    hints_in(&codex_home.join("models_cache.json"))
+}
+
+pub fn codex_hints_with(codex_home: &Path, snapshot: Option<&Path>) -> Vec<(String, String)> {
+    hints_in(&models::source_file(codex_home, snapshot))
+}
+
+fn hints_in(path: &Path) -> Vec<(String, String)> {
     use std::io::Read;
-    let Ok(file) = std::fs::File::open(codex_home.join("models_cache.json")) else {
+    let Ok(file) = std::fs::File::open(path) else {
         return Vec::new();
     };
     let mut data = Vec::new();
@@ -128,22 +137,30 @@ pub fn hints_of(data: &[u8]) -> Vec<(String, String)> {
 
 fn live_of(tool: Tool, deps: &Deps) -> Live {
     match tool {
-        Tool::Codex => Live {
-            models: models::load(&deps.codex_home)
-                .into_iter()
-                .map(|m| m.slug)
-                .collect(),
-            hints: codex_hints(&deps.codex_home),
-        },
-        Tool::Agy => Live {
-            models: deps
+        Tool::Codex => {
+            let snapshot = deps.codex_snapshot();
+            Live {
+                models: models::load_with(&deps.codex_home, snapshot.as_deref())
+                    .into_iter()
+                    .map(|m| m.slug)
+                    .collect(),
+                hints: codex_hints_with(&deps.codex_home, snapshot.as_deref()),
+                efforts: Vec::new(),
+            }
+        }
+        Tool::Agy => {
+            let listed = deps
                 .agy_binary
                 .as_deref()
                 .and_then(|agy| (deps.capture)(Path::new(agy), &["models"]))
-                .map(|l| agy_pick::models(&l).into_iter().map(|(m, _)| m).collect())
-                .unwrap_or_default(),
-            hints: Vec::new(),
-        },
+                .map(|l| agy_pick::models(&l))
+                .unwrap_or_default();
+            Live {
+                models: listed.iter().map(|(m, _)| m.clone()).collect(),
+                hints: Vec::new(),
+                efforts: listed,
+            }
+        }
     }
 }
 
@@ -278,7 +295,10 @@ fn choose(
         let Some(model) = model else {
             continue;
         };
-        if tool == Tool::Agy && !agy_pick::accepted(&model, Some(&effort), &live.models) {
+        if tool == Tool::Agy
+            && (!agy_pick::accepted(&model, Some(&effort), &live.models)
+                || !agy_pick::offers(&model, &effort, &live.efforts))
+        {
             continue;
         }
         let quota = source.and_then(|s| s.load(tool));

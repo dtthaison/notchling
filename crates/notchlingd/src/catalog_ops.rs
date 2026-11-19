@@ -8,7 +8,7 @@ use notchling_engine::catalog::live_cache::{refresh_due, LiveCache};
 use notchling_engine::catalog::roles::Roles;
 use notchling_engine::catalog::{claude_code, claude_live};
 use notchling_engine::catalog::{model_key, override_file, Catalog, LiveModel, ModelInfo, Tool};
-use notchling_engine::delegate::role_models::{codex_hints, Live};
+use notchling_engine::delegate::role_models::{codex_hints_with, Live};
 use notchling_engine::delegate::role_view;
 use notchling_engine::tools::agy::ConfigOption;
 use notchling_engine::tools::codex::models as codex_models;
@@ -155,6 +155,7 @@ type Held = Mutex<Option<(SystemTime, Vec<LiveModel>)>>;
 pub struct CatalogService {
     inner: Arc<Inner>,
     codex_dir: PathBuf,
+    codex_snapshot: Option<PathBuf>,
     codex: Held,
     claude_code: Option<PathBuf>,
     claude_code_list: Held,
@@ -185,6 +186,7 @@ impl CatalogService {
                 logged: AtomicBool::new(false),
             }),
             codex_dir,
+            codex_snapshot: None,
             codex: Mutex::new(None),
             claude_code: None,
             claude_code_list: Mutex::new(None),
@@ -222,6 +224,55 @@ impl CatalogService {
         .with_room(room)
         .with_claude_code_config(config)
         .with_override_file(state.join("catalog.json"))
+        .with_codex_snapshot(state.join(codex_models::SNAPSHOT))
+    }
+
+    pub fn with_codex_snapshot(mut self, file: PathBuf) -> CatalogService {
+        self.codex_snapshot = Some(file);
+        self
+    }
+
+    pub fn override_path(&self) -> Option<&std::path::Path> {
+        self.override_file.as_deref()
+    }
+
+    pub fn codex_dir(&self) -> &std::path::Path {
+        &self.codex_dir
+    }
+
+    pub fn codex_snapshot_path(&self) -> Option<&std::path::Path> {
+        self.codex_snapshot.as_deref()
+    }
+
+    pub fn live_models(&self, tool: Tool) -> Vec<LiveModel> {
+        self.live(tool).1
+    }
+
+    pub fn store_live(&self, tool: Tool, models: &[LiveModel]) {
+        let inner = &self.inner;
+        let changed = inner.cache.get(tool).is_none_or(|(_, old)| old != models);
+        inner.cache.put(tool, (inner.now)(), models);
+        if changed {
+            inner.announce(tool);
+        }
+    }
+
+    pub fn announce_changed(&self, tool: Tool) {
+        self.inner.announce(tool);
+    }
+
+    pub fn read_claude_now(&self) -> Result<Vec<LiveModel>, String> {
+        let Some((store, flag)) = &self.inner.claude else {
+            return Err("Claude accounts aren't available".into());
+        };
+        if !flag.is_on() {
+            return Err("the accounts switch is off".into());
+        }
+        let token = store
+            .live_token()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no Claude Code login is live".to_string())?;
+        claude_live::fetch(&*self.inner.http, &token).map_err(|e| e.to_string())
     }
 
     pub fn with_override_file(mut self, file: PathBuf) -> CatalogService {
@@ -311,9 +362,10 @@ impl CatalogService {
     }
 
     fn codex_list(&self) -> (Option<f64>, Vec<LiveModel>) {
-        let file = self.codex_dir.join("models_cache.json");
+        let snapshot = self.codex_snapshot.as_deref();
+        let file = codex_models::source_file(&self.codex_dir, snapshot);
         by_mtime(&file, &self.codex, || {
-            codex_models::load(&self.codex_dir)
+            codex_models::load_with(&self.codex_dir, snapshot)
                 .into_iter()
                 .map(|m| LiveModel {
                     id: m.slug,
@@ -383,22 +435,29 @@ impl CatalogService {
             .map(|o| o.values.iter().map(|v| v.value.clone()).collect())
             .unwrap_or_default();
         let default_effort = level.map(|o| o.current.clone()).filter(|c| !c.is_empty());
+        let inner = &self.inner;
+        let before = inner
+            .cache
+            .get(Tool::Antigravity)
+            .map(|(_, old)| old)
+            .unwrap_or_default();
         let models: Vec<LiveModel> = model
             .values
             .iter()
-            .map(|v| LiveModel {
-                id: v.value.clone(),
-                name: Some(v.name.clone()),
-                efforts: efforts.clone(),
-                default_effort: default_effort.clone(),
-                ..LiveModel::default()
+            .map(|v| {
+                let known = before.iter().find(|b| b.id == v.value).filter(|b| {
+                    !b.efforts.is_empty() && efforts.iter().all(|e| b.efforts.contains(e))
+                });
+                LiveModel {
+                    id: v.value.clone(),
+                    name: Some(v.name.clone()),
+                    efforts: known.map_or_else(|| efforts.clone(), |b| b.efforts.clone()),
+                    default_effort: default_effort.clone(),
+                    ..LiveModel::default()
+                }
             })
             .collect();
-        let inner = &self.inner;
-        let changed = inner
-            .cache
-            .get(Tool::Antigravity)
-            .is_none_or(|(_, old)| old != models);
+        let changed = before != models;
         inner.cache.put(Tool::Antigravity, (inner.now)(), &models);
         if changed {
             inner.announce(Tool::Antigravity);
@@ -410,11 +469,18 @@ impl CatalogService {
     fn roles(&self) -> Value {
         let file = self.override_file.as_deref();
         let roles = Roles::load(file);
-        let live = |tool: Tool, hints: Vec<(String, String)>| Live {
-            models: self.live(tool).1.into_iter().map(|m| m.id).collect(),
-            hints,
+        let live = |tool: Tool, hints: Vec<(String, String)>| {
+            let models = self.live(tool).1;
+            Live {
+                models: models.iter().map(|m| m.id.clone()).collect(),
+                hints,
+                efforts: models.into_iter().map(|m| (m.id, m.efforts)).collect(),
+            }
         };
-        let codex = live(Tool::Codex, codex_hints(&self.codex_dir));
+        let codex = live(
+            Tool::Codex,
+            codex_hints_with(&self.codex_dir, self.codex_snapshot.as_deref()),
+        );
         let agy = live(Tool::Antigravity, Vec::new());
         let views = role_view::views(&roles, &Roles::built_in(), &codex, &agy);
         json!({

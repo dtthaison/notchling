@@ -103,6 +103,8 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::VAULT_ADMIN, Home::Kind("vault.secret_used")),
     (ops::CATALOG_GET, Home::Quiet),
     (ops::CATALOG_ROLES, Home::Quiet),
+    (ops::MODELS_CHECK, Home::Called),
+    (ops::MODELS_UPDATE, Home::Called),
     (ops::INBOX_LIST, Home::Quiet),
     (ops::INBOX_ANSWER, Home::Kind("inbox.closed")),
     (ops::INBOX_SEEN, Home::Called),

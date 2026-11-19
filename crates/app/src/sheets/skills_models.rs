@@ -21,6 +21,13 @@ pub fn load(actions: &Actions, home: &str) -> (SkillsShown, ModelsShown) {
     )
 }
 
+pub fn refresh_models(actions: &Actions) -> Result<Value, String> {
+    actions.read(&Request {
+        op: ops::MODELS_UPDATE,
+        args: json!({}),
+    })
+}
+
 pub fn reinstall(actions: &Actions, names: &[String]) -> Result<Value, String> {
     actions.read(&Request {
         op: ops::INSTALL_APPLY,

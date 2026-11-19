@@ -30,6 +30,7 @@ use crate::layout::Layout;
 use crate::limits_ops::LimitsOps;
 use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
+use crate::models_ops::ModelsOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
 use crate::organizations_ops::OrganizationsOps;
@@ -478,6 +479,7 @@ pub struct Wired {
     pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
     pub install: Arc<InstallOps>,
+    pub models: Arc<ModelsOps>,
     pub sidecar: Arc<AgySidecarOps>,
     pub settings: Arc<SettingsOps>,
     pub versions: Arc<VersionsOps>,
@@ -791,6 +793,12 @@ impl Wired {
         }
         outbox.set_remote(cluster.remote_outbox());
         acting.attach_login(cluster.login.clone());
+        let install = Arc::new(install);
+        let models = Arc::new(ModelsOps::for_daemon(
+            layout,
+            catalog.clone(),
+            install.clone(),
+        ));
         Wired {
             acting,
             codex,
@@ -808,7 +816,8 @@ impl Wired {
             postmen,
             outbox_notice,
             vault,
-            install: Arc::new(install),
+            install,
+            models,
             sidecar,
             settings,
             versions,
@@ -880,6 +889,7 @@ impl Wired {
             ))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
+            .with_group(self.models.clone())
             .with_group(self.sidecar.clone())
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
