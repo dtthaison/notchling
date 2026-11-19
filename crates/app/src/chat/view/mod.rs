@@ -56,6 +56,7 @@ mod tasks;
 mod terminal;
 mod tool;
 mod tools;
+mod vault_cards;
 mod worktrees_ask;
 
 use std::collections::{HashMap, HashSet};
@@ -191,6 +192,7 @@ pub struct ChatView {
     switches: Arc<crate::switches::feed::SwitchFeed>,
     prompt: prompts::State,
     asks: ask_cards::State,
+    vault: vault_cards::State,
     composer: composer::State,
     limit_ring: limit_ring::State,
     account_menu: bool,
@@ -253,6 +255,9 @@ impl ChatView {
         }
         if let Ok(state) = std::env::var(ask_cards::ASK_ENV) {
             view.asks = ask_cards::State::preview(&state);
+        }
+        if let Ok(kind) = std::env::var(vault_cards::VAULT_ENV) {
+            view.vault = vault_cards::State::preview(&kind, cx);
         }
         view.tools.sending = switch(SENDING_ENV);
         view.outbox_preview = std::env::var(OUTBOX_ENV)
@@ -429,6 +434,7 @@ impl ChatView {
             switches,
             prompt: prompts::State::new(None, cx),
             asks: ask_cards::State::default(),
+            vault: vault_cards::State::default(),
             composer: composer::State::default(),
             limit_ring: limit_ring::State::default(),
             account_menu: false,

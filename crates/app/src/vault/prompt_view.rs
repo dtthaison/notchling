@@ -1,21 +1,25 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, Context, FocusHandle, Focusable, KeyDownEvent, Render, Window};
+use gpui::{
+    div, prelude::*, px, Context, FocusHandle, Focusable, KeyDownEvent, MouseButton, Render, Window,
+};
 use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::form::{Form, Typed};
 use super::form_view::{clipboard_key, form_body, form_footer, FormEvent};
+use super::presence::Presence;
 use super::store::Vault;
 use super::wire::PendingRequest;
 use crate::accounts::view_rows::Handler;
-use crate::sheets::header::close_button;
+use crate::sheets::header::{close_button, sheet_header_closing};
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
 pub const REQUEST_SIZE: (f32, f32) = (540.0, 720.0);
+pub const CARD_BODY_MAX: f32 = 300.0;
 
 pub struct VaultRequestView {
     feed: Arc<SwitchFeed>,
@@ -24,6 +28,7 @@ pub struct VaultRequestView {
     form: Form,
     busy: bool,
     done: bool,
+    presence: Presence,
     focus: FocusHandle,
     fixed_today: Option<i64>,
 }
@@ -42,6 +47,7 @@ impl VaultRequestView {
             form: Form::request(&pending),
             busy: false,
             done: false,
+            presence: Presence::Window,
             focus: cx.focus_handle(),
             fixed_today: None,
         }
@@ -55,9 +61,26 @@ impl VaultRequestView {
             form: Form::request(&pending),
             busy: false,
             done: false,
+            presence: Presence::Window,
             focus: cx.focus_handle(),
             fixed_today: Some(today),
         }
+    }
+
+    pub fn with_presence(mut self, presence: Presence) -> Self {
+        self.presence = presence;
+        self
+    }
+
+    pub fn set_presence(&mut self, presence: Presence, cx: &mut Context<Self>) {
+        if self.presence != presence {
+            self.presence = presence;
+            cx.notify();
+        }
+    }
+
+    pub fn done(&self) -> bool {
+        self.done
     }
 
     fn today(&self) -> i64 {
@@ -184,53 +207,113 @@ impl Focusable for VaultRequestView {
 impl Render for VaultRequestView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if !self.focus.is_focused(window) && self.fixed_today.is_none() {
+        if self.presence.takes_focus()
+            && !self.focus.is_focused(window)
+            && self.fixed_today.is_none()
+        {
             window.focus(&self.focus);
         }
         if self.done {
-            return div().size_full().fill(Ink::Window, a).into_any_element();
+            return match self.presence {
+                Presence::Window => div().size_full().fill(Ink::Window, a).into_any_element(),
+                _ => div().into_any_element(),
+            };
         }
         let on: Handler<Self, FormEvent> = Rc::new(|this, event, cx| this.event(event, cx));
         let off = self.feed.switches().message(Switch::Vault);
         let footer = form_footer(&self.form, self.busy, off, a, cx, on.clone());
-        div()
+        let frame = div()
             .id("vault-request")
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
-            .size_full()
-            .flex()
-            .flex_col()
-            .rounded(px(RADIUS_CARD))
-            .border(px(1.0))
-            .border_color(hsla(Ink::Hairline.color(a)))
-            .fill(Ink::Window, a)
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .px(px(SIDE_PADDING))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .border_b(px(1.0))
-                    .border_color(hsla(Ink::Hairline.color(a)))
-                    .child(icon(
-                        Icon::Permission,
-                        TypeRole::Heading.spec().size,
-                        Ink::TextMuted,
-                        a,
-                    ))
-                    .child(label(self.form.title(), TypeRole::Heading, Ink::Text, a))
-                    .child(div().flex_1())
-                    .child(close_button(
-                        "sheet-close",
-                        a,
-                        cx,
-                        |this: &mut Self, _, cx| this.cancel(cx),
-                    )),
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, _| window.focus(&this.focus)),
             )
-            .child(scrollable(form_body(&self.form, self.today(), a, cx, on)))
-            .child(footer)
-            .into_any_element()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)));
+        let body = form_body(&self.form, self.today(), a, cx, on);
+        match self.presence {
+            Presence::Window => frame
+                .size_full()
+                .flex()
+                .flex_col()
+                .rounded(px(RADIUS_CARD))
+                .border(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .fill(Ink::Window, a)
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING))
+                        .py(px(12.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .border_b(px(1.0))
+                        .border_color(hsla(Ink::Hairline.color(a)))
+                        .child(icon(
+                            Icon::Permission,
+                            TypeRole::Heading.spec().size,
+                            Ink::TextMuted,
+                            a,
+                        ))
+                        .child(label(self.form.title(), TypeRole::Heading, Ink::Text, a))
+                        .child(div().flex_1())
+                        .child(close_button(
+                            "sheet-close",
+                            a,
+                            cx,
+                            |this: &mut Self, _, cx| this.cancel(cx),
+                        )),
+                )
+                .child(scrollable(body))
+                .child(footer)
+                .into_any_element(),
+            Presence::Card => frame
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING))
+                        .py(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .border_b(px(1.0))
+                        .border_color(hsla(Ink::Hairline.color(a)))
+                        .child(icon(
+                            Icon::Permission,
+                            TypeRole::Heading.spec().size,
+                            Ink::AccentText,
+                            a,
+                        ))
+                        .child(label(self.form.title(), TypeRole::Heading, Ink::Text, a))
+                        .child(div().flex_1())
+                        .child(close_button(
+                            "sheet-close",
+                            a,
+                            cx,
+                            |this: &mut Self, _, cx| this.cancel(cx),
+                        )),
+                )
+                .child(scrollable(body.flex_none().max_h(px(CARD_BODY_MAX))))
+                .child(footer)
+                .into_any_element(),
+            Presence::Sheet => frame
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(sheet_header_closing(
+                    Icon::Permission,
+                    self.form.title(),
+                    Vec::new(),
+                    a,
+                    cx,
+                    |this: &mut Self, _, cx| this.cancel(cx),
+                ))
+                .child(scrollable(body))
+                .child(footer)
+                .into_any_element(),
+        }
     }
 }

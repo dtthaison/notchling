@@ -60,6 +60,9 @@ impl VaultOps {
         if let Who::Machine(machine) = who {
             event["machine"] = json!(machine);
         }
+        if let Some(session) = super::vault_events::session_id() {
+            event["session"] = json!(session);
+        }
         self.approvals.describe(&id, &event);
         let by = match who {
             Who::Grant(grant) => Some(*grant),
@@ -173,8 +176,11 @@ impl VaultOps {
             Refused::NoId => ApiError::internal("no randomness for a request id"),
         })?;
         let id = ticket.id.clone();
-        let event = json!({"id": id, "request": request, "entry": entry_json(&entry),
+        let mut event = json!({"id": id, "request": request, "entry": entry_json(&entry),
                            "existing": existing.is_some(), "changes": changes});
+        if let Some(session) = super::vault_events::session_id() {
+            event["session"] = json!(session);
+        }
         self.requests.describe(&id, &event);
         let raised = self.raise_request(&id, &request);
         self.room

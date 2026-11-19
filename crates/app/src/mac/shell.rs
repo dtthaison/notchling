@@ -446,6 +446,21 @@ pub fn open_chat_ask(cx: &mut App, session: &str, id: &str) {
     }
 }
 
+pub fn open_chat_vault(cx: &mut App, ids: &[String]) -> bool {
+    let openable = chat_window(cx).is_some() || cx.global::<Shell>().root.is_some();
+    if !openable {
+        return false;
+    }
+    open_chat(cx);
+    let Some(handle) = chat_window(cx) else {
+        return false;
+    };
+    let ids = ids.to_vec();
+    handle
+        .update(cx, |view, window, cx| view.show_vault(&ids, window, cx))
+        .is_ok()
+}
+
 pub fn open_chat_inbox(cx: &mut App) {
     open_chat(cx);
     if let Some(handle) = chat_window(cx) {

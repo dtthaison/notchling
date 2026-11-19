@@ -23,12 +23,15 @@ impl Render for ChatView {
         }
         self.sync_prompt(cx);
         self.sync_asks(window, cx);
+        self.sync_vault(window, cx);
         let inset = super::tasks::shown(self);
         self.sync_tasks(cx);
         if super::tasks::shown(self) != inset {
             self.refresh_conversation(cx);
         }
+        let vault_sheet = self.vault_sheet_shown();
         self.overlay_open = self.sheet.is_some()
+            || vault_sheet
             || self.account_menu
             || self.row_menu.is_some()
             || self.copy_menu.is_some()
@@ -44,7 +47,7 @@ impl Render for ChatView {
         self.parts
             .native
             .set(!native_spin::covered(native_spin::Covers {
-                sheet: self.sheet.is_some(),
+                sheet: self.sheet.is_some() || vault_sheet,
                 menu: self.account_menu || self.row_menu.is_some() || self.phone.is_some(),
                 composer_menu: self.tools.picker.is_some()
                     || self.composer.is_open()
@@ -56,7 +59,7 @@ impl Render for ChatView {
             }));
         self.page_covered =
             crate::chat::page_panel::page_covered(crate::chat::page_panel::Covers {
-                sheet: self.sheet.is_some(),
+                sheet: self.sheet.is_some() || vault_sheet,
                 phone: self.phone.is_some(),
                 inbox: self.inbox_panel.is_some(),
                 parts: parts_on(cx),
@@ -170,6 +173,7 @@ impl Render for ChatView {
             .children(row_menu::render(self, a, cx))
             .children(copy_menu::render(self, a, cx))
             .children(sheets::render(self, a))
+            .children(vault_cards::sheet(self, a, window, cx))
             .children(phone::render(self.phone.as_ref(), a, cx))
             .children(inbox::render(self.inbox_panel.as_ref(), cx))
             .child(resize_edges(window, TopBorder::InContent))

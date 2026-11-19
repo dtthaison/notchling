@@ -148,6 +148,10 @@ impl ApprovalModel {
         self.shown_at = None;
     }
 
+    pub fn is_shown(&self) -> bool {
+        self.shown_at.is_some()
+    }
+
     pub fn armed(&self, now_ms: i64) -> bool {
         self.shown_at
             .is_some_and(|at| now_ms.saturating_sub(at) >= ARMING_MS)

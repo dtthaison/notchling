@@ -319,6 +319,7 @@ impl ChatView {
             self.redraw_chrome(cx);
         }
         self.outbox_clock(cx);
+        self.vault_tick(cx);
         self.inbox_tick(cx);
         self.chrome_tick(cx);
         self.cluster_tick(cx);

@@ -116,6 +116,7 @@ pub fn pending_request() -> PendingRequest {
             }),
         },
         request,
+        session: Some("s-chat".into()),
     }
 }
 
