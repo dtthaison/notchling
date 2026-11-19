@@ -24,6 +24,10 @@ fn a_kept(a: &Action) -> bool {
     a.reason.as_deref() == Some("kept")
 }
 
+fn only_kept(notes: &[String]) -> bool {
+    !notes.is_empty() && notes.iter().all(|n| n.ends_with(": kept"))
+}
+
 fn everything() -> Options {
     let parts: Vec<&str> = CONSENTS
         .iter()
@@ -54,6 +58,9 @@ pub fn check(env: &Env, profile: &Profile) -> Vec<Row> {
         let (state, detail) = match action {
             None => fallback(env, entry),
             Some(a) => match (a.kind, a.state) {
+                (Kind::Unchanged, _) if only_kept(&a.notes) => {
+                    ("skipped", Some("kept".to_string()))
+                }
                 (Kind::Unchanged, _) if !a.notes.is_empty() => {
                     ("changed_by_tool", Some(a.notes.join("; ")))
                 }

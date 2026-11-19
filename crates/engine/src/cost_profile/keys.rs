@@ -231,6 +231,12 @@ pub fn undo_json_keys(text: &str, recs: &[KeyRec]) -> Result<(String, Vec<Confli
     let mut text = text.to_string();
     let mut conflicts = Vec::new();
     for rec in recs.iter().rev() {
+        if rec.kept {
+            conflicts.push(Conflict {
+                path: rec.path.clone(),
+            });
+            continue;
+        }
         let now = current(&text, &rec.path)?.map(|v| v.to_string());
         if now.is_none() || now == rec.before {
             continue;
@@ -364,6 +370,12 @@ pub fn undo_toml_keys(text: &str, recs: &[KeyRec]) -> Result<(String, Vec<Confli
         let Some(key) = rec.path.get(1) else {
             continue;
         };
+        if rec.kept {
+            conflicts.push(Conflict {
+                path: rec.path.clone(),
+            });
+            continue;
+        }
         let now = toml_edit::get_raw(&text, Some(AGENTS), key).map_err(toml)?;
         match now {
             None => continue,

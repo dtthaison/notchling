@@ -90,6 +90,9 @@ fn undo_file(env: &Env, e: &Entry) -> (UndoResult, bool) {
     let Some(text) = now else {
         return (done(e, Outcome::Gone, None), true);
     };
+    if e.released {
+        return (done(e, Outcome::Conflict, Some("kept".into())), false);
+    }
     if never_applied(e, &text) {
         return (done(e, Outcome::Gone, Some("never-applied".into())), true);
     }
@@ -173,6 +176,9 @@ fn undo_block(env: &Env, e: &Entry) -> (UndoResult, bool) {
     let Some((s, end)) = fence_region(&text, FENCE_ID) else {
         return (done(e, Outcome::Gone, None), true);
     };
+    if e.released {
+        return (done(e, Outcome::Conflict, Some("kept".into())), false);
+    }
     if e.pending && e.before_hash.as_deref() == Some(hash(&text[s..end]).as_str()) {
         return (done(e, Outcome::Gone, Some("never-applied".into())), true);
     }

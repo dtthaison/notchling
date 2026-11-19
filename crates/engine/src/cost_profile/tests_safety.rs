@@ -1,8 +1,8 @@
 use super::action::{hash, Kind, Options, Plan, CONSENT_PSTACK, CONSENT_RULES};
 use super::apply::{apply, Applied};
-use super::check::{resolve, Choice};
+use super::check::{check, resolve, Choice};
 use super::import::import_rules;
-use super::keys::{claude_keys, codex_keys, undo_json_keys};
+use super::keys::{claude_keys, codex_keys, undo_json_keys, undo_toml_keys};
 use super::manifest::Manifest;
 use super::model::Profile;
 use super::plan::{plan, ID_PSTACK, ID_RULE, ID_SETTINGS};
@@ -413,4 +413,92 @@ fn managing_pstack_keeps_comments_unknown_lines_and_their_order() {
     assert!(out.contains("feature, refactoring: sonnet high"), "{out}");
     assert!(out.contains("bug-fix: sonnet xhigh"), "{out}");
     assert!(out.contains("hardest tasks:"), "{out}");
+}
+
+fn kept_after<F: FnOnce(&Rig)>(tag: &str, id: &str, edit: F) -> (Rig, Manifest, Profile) {
+    let rig = Rig::new(tag).claude().codex();
+    let (_, first) = run(
+        &rig,
+        &Manifest::default(),
+        &Profile::default(),
+        &Options::default(),
+        1,
+    );
+    edit(&rig);
+    let (have, probe) = (avail(), Fake::all());
+    let kept = {
+        let e = env(&rig, &have, &probe, &first.manifest);
+        resolve(&e, &first.profile, id, Choice::Keep, 2).expect("keep")
+    };
+    (rig, kept.manifest, kept.profile)
+}
+
+#[test]
+fn undo_never_touches_a_file_the_user_kept() {
+    let path_of = |rig: &Rig| rig.rule("notchling-cost.md");
+    let (rig, manifest, _) = kept_after("undo-kept-file", ID_RULE, |rig| {
+        let path = path_of(rig);
+        rig.write(&path, &format!("{}\n## Mine\nkeep me\n", rig.read(&path)));
+    });
+    let (results, left) = undo_all(&rig, &manifest, Tool::Claude, 3);
+    assert!(rig.read(&path_of(&rig)).contains("keep me"));
+    let one = results.iter().find(|r| r.id == ID_RULE).expect("rule");
+    assert_eq!(one.outcome, Outcome::Conflict, "{one:?}");
+    assert_eq!(one.detail.as_deref(), Some("kept"));
+    assert!(left.get(ID_RULE).is_some());
+}
+
+#[test]
+fn undo_never_touches_a_codex_block_the_user_kept() {
+    let path = |rig: &Rig| rig.roots.codex.join("AGENTS.md");
+    let (rig, manifest, _) = kept_after("undo-kept-block", "codex.agents_md", |rig| {
+        let edited = rig.read(&path(rig)).replace("Notchling", "My Own");
+        rig.write(&path(rig), &edited);
+    });
+    let edited = rig.read(&path(&rig));
+    let (results, _) = undo_all(&rig, &manifest, Tool::Codex, 3);
+    assert_eq!(rig.read(&path(&rig)), edited);
+    let one = results
+        .iter()
+        .find(|r| r.id == "codex.agents_md")
+        .expect("block");
+    assert_eq!(one.outcome, Outcome::Conflict, "{one:?}");
+}
+
+#[test]
+fn undo_never_touches_a_key_the_user_kept_and_check_calls_it_skipped() {
+    let (rig, manifest, profile) = kept_after("undo-kept-key", ID_SETTINGS, |rig| {
+        let text = rig.read(&rig.settings()).replace("12000", "9000");
+        assert!(text.contains("9000"));
+        rig.write(&rig.settings(), &text);
+    });
+    let (have, probe) = (avail(), Fake::all());
+    let rows = check(&env(&rig, &have, &probe, &manifest), &profile);
+    let row = rows.iter().find(|r| r.id == ID_SETTINGS).expect("row");
+    assert_eq!(
+        (row.state, row.detail.as_deref()),
+        ("skipped", Some("kept"))
+    );
+    let (results, left) = undo_all(&rig, &manifest, Tool::Claude, 3);
+    assert!(rig.read(&rig.settings()).contains("9000"));
+    let one = results.iter().find(|r| r.id == ID_SETTINGS).expect("keys");
+    assert_eq!(one.outcome, Outcome::Conflict, "{one:?}");
+    assert!(left.get(ID_SETTINGS).is_some());
+}
+
+#[test]
+fn a_kept_toml_key_is_a_conflict_and_its_table_stays() {
+    let planned = codex_keys(
+        "model = \"x\"\n",
+        &Profile::default(),
+        &avail(),
+        &Fake::all(),
+        &[],
+    )
+    .expect("plan");
+    let mut recs = planned.recs.clone();
+    recs[0].kept = true;
+    let (back, conflicts) = undo_toml_keys(&planned.text, &recs).expect("undo");
+    assert_eq!(conflicts.len(), 1);
+    assert!(back.contains("[agents]") && back.contains(&format!("{} = ", recs[0].path[1])));
 }

@@ -110,16 +110,29 @@ pub fn publish_new(path: &Path, data: &[u8]) -> Result<(), Publish> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(Publish::Exists),
         Err(_) if fs::symlink_metadata(path).is_ok() => Err(Publish::Exists),
-        Err(_) => {
-            let again = temp_beside(path);
-            write_temp(&again, data, None).map_err(failed)?;
-            let moved = fs::rename(&again, path);
-            if moved.is_err() {
-                let _ = fs::remove_file(&again);
-            }
-            moved.map_err(failed)
-        }
+        Err(_) => create_exclusive(path, data),
     }
+}
+
+pub fn create_exclusive(path: &Path, data: &[u8]) -> Result<(), Publish> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => Publish::Exists,
+        _ => Publish::Failed(e.to_string()),
+    })?;
+    let written = file.write_all(data).and_then(|_| file.sync_all());
+    if let Err(e) = written {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(Publish::Failed(e.to_string()));
+    }
+    Ok(())
 }
 
 pub fn replace_if(path: &Path, expected: &str, blank_ok: bool, data: &[u8]) -> Result<(), String> {

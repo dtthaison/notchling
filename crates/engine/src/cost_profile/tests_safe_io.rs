@@ -3,7 +3,7 @@ use super::apply::apply;
 use super::manifest::{Entry, Manifest, Part};
 use super::model::Profile;
 use super::plan::{plan, ID_SETTINGS};
-use super::safe::{backup, guard, publish_new, replace_if, Publish};
+use super::safe::{backup, create_exclusive, guard, publish_new, replace_if, Publish};
 use super::tests::*;
 use super::undo::{undo, Outcome};
 use crate::catalog::Tool;
@@ -121,4 +121,16 @@ fn an_apply_leaves_no_pending_entry_behind() {
     assert!(done.manifest.entries.iter().all(|x| !x.pending));
     let saved = Manifest::load(&rig.data).expect("saved");
     assert_eq!(saved, done.manifest);
+}
+
+#[test]
+fn the_fallback_when_links_fail_never_replaces_a_file() {
+    let rig = Rig::new("exclusive");
+    let path = rig.dir.join("a.md");
+    rig.write(&path, "theirs");
+    assert_eq!(create_exclusive(&path, b"ours"), Err(Publish::Exists));
+    assert_eq!(rig.read(&path), "theirs");
+    let fresh = rig.dir.join("b.md");
+    assert_eq!(create_exclusive(&fresh, b"ours"), Ok(()));
+    assert_eq!(rig.read(&fresh), "ours");
 }
