@@ -1,4 +1,4 @@
-use super::status::{self, Basis};
+use super::status;
 use crate::sessions::testutil::TempDir;
 
 #[test]
