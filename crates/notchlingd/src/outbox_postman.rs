@@ -399,6 +399,7 @@ impl Postman {
                 }
             }
             let holds = self.release_holds(now);
+            self.prune_looked();
             let aside = self.look_aside(now);
             self.aside_timer = earliest(holds, aside);
             let row = match self.inner.ops.store().head(&self.session) {
@@ -503,6 +504,17 @@ impl Postman {
             }
             _ => false,
         }
+    }
+
+    fn prune_looked(&mut self) {
+        if self.looked.is_empty() {
+            return;
+        }
+        let Ok(rows) = self.inner.ops.store().list(Some(&self.session)) else {
+            return;
+        };
+        self.looked
+            .retain(|id, _| rows.iter().any(|row| row.id == *id));
     }
 
     fn look_aside(&mut self, now: i64) -> Option<i64> {
@@ -772,7 +784,7 @@ impl Postman {
 
     fn try_land(&self, owed: &Owed) -> bool {
         match owed {
-            Owed::Sent(row) => match self.inner.ops.store().delete(&row.id) {
+            Owed::Sent(row) => match self.inner.ops.store().sent(&row.id) {
                 Ok(_) => self.announce_sent(row),
                 Err(_) => false,
             },
@@ -834,6 +846,9 @@ mod aside_tests;
 #[cfg(test)]
 #[path = "outbox_join_tests.rs"]
 mod join_tests;
+#[cfg(test)]
+#[path = "outbox_review_tests.rs"]
+mod review_tests;
 #[cfg(test)]
 #[path = "outbox_postman_tests.rs"]
 mod tests;

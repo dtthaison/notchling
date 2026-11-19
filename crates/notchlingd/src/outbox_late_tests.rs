@@ -306,6 +306,7 @@ fn a_job_with_no_link_path_yet_is_found_by_its_session_id() {
         aside_ms: None,
         hold_ms: None,
         joined: 0,
+        awaited: false,
     };
     let based = verifier.seen(&row);
     assert_eq!(based.seen.taken, 1, "{based:?}");

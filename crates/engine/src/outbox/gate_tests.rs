@@ -26,6 +26,7 @@ fn row(kind: Kind) -> Row {
         aside_ms: None,
         hold_ms: None,
         joined: 0,
+        awaited: false,
     }
 }
 

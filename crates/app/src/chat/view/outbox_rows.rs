@@ -4,7 +4,7 @@ use gpui::{Div, Styled};
 use notchling_kit::ui::icon;
 use notchling_kit::{Appearance, Icon, Ink};
 
-use notchling_engine::outbox::{is_settled, Tool, CHANGED};
+use notchling_engine::outbox::{is_settled, Tool, CHANGED, HOLD_LEASE_MS};
 use notchling_locale as t;
 use serde_json::{json, Value};
 
@@ -141,6 +141,12 @@ fn options_of(pick: &Pick) -> Option<Value> {
     (pick.model.is_some() || pick.effort.is_some()).then_some(options)
 }
 
+pub const HOLD_RENEW_MS: i64 = HOLD_LEASE_MS / 4;
+
+pub fn hold_due(editing: Option<&Editing>, held_ms: i64, now_ms: i64) -> bool {
+    editing.is_some_and(|open| !open.sending) && now_ms - held_ms >= HOLD_RENEW_MS
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Editing {
     pub chat_row: String,
@@ -209,6 +215,18 @@ impl Editing {
                 note: Some(message.to_owned()),
                 refresh: false,
             },
+        }
+    }
+
+    pub fn hold_refused(&self, message: &str, text: &str) -> EditEnd {
+        if is_settled(message) {
+            return self.finished(Err(message), text);
+        }
+        EditEnd {
+            leave: true,
+            draft: Some(self.before.clone()),
+            note: Some(message.to_owned()),
+            refresh: false,
         }
     }
 

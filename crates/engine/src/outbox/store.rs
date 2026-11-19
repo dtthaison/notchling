@@ -4,20 +4,20 @@ use super::model::{
 use super::UNSURE_HOLD_MS;
 use crate::store;
 use crate::transcript::sent::Seen;
-use crate::transcript::stored::is_blank;
+use crate::transcript::stored::{is_blank, precleaned};
 use rusqlite::{params, Connection, TransactionBehavior};
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 const COLUMNS: &str = "n, id, session, tool, kind, text, options, via, state, why, clear_box, \
     queued_ms, updated_ms, attempt_ms, seen_before, queued_before, tries, next_ms, noticed_ms, \
-    anchor_file, anchor_slack_ms, aside_at_ms, aside_ms, hold_ms, joined";
+    anchor_file, anchor_slack_ms, aside_at_ms, aside_ms, hold_ms, joined, awaited";
 
 const JOIN: &str = "\n\n";
 
-fn shell_line(text: &str) -> bool {
-    text.trim_start().starts_with('!')
+fn typed_as_command(tool: Tool, text: &str) -> bool {
+    let typed = precleaned(text);
+    typed.trim_start().starts_with('!') || Kind::of(tool, &typed) != Kind::Prompt
 }
 
 const EDITABLE: &[State] = &[
@@ -30,7 +30,6 @@ const EDITABLE: &[State] = &[
 
 pub struct OutboxStore {
     db: Mutex<Connection>,
-    streaks: Mutex<HashMap<String, String>>,
 }
 
 fn db_err(e: rusqlite::Error) -> String {
@@ -97,6 +96,7 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         aside_ms: r.get(22)?,
         hold_ms: r.get(23)?,
         joined: u32::try_from(r.get::<_, i64>(24)?).unwrap_or(0),
+        awaited: r.get::<_, i64>(25)? != 0,
     })
 }
 
@@ -114,6 +114,15 @@ fn fetch(db: &Connection, id: &str) -> Result<Option<Row>, String> {
     rows.next().transpose().map_err(db_err)
 }
 
+fn calm(db: &Connection, session: &str) -> Result<(), String> {
+    db.execute(
+        "UPDATE outbox SET strike = 0 WHERE session = ?1 AND strike = 1",
+        [session],
+    )
+    .map(|_| ())
+    .map_err(db_err)
+}
+
 fn select(db: &Connection, tail: &str, args: &[&dyn rusqlite::ToSql]) -> Result<Vec<Row>, String> {
     let sql = format!("SELECT {COLUMNS} FROM outbox {tail}");
     let mut query = db.prepare_cached(&sql).map_err(db_err)?;
@@ -125,17 +134,13 @@ impl OutboxStore {
     pub fn open(data_dir: &Path) -> Result<OutboxStore, String> {
         Ok(OutboxStore {
             db: Mutex::new(store::open(data_dir)?),
-            streaks: Mutex::new(HashMap::new()),
         })
     }
 
     pub fn in_memory_for_tests() -> OutboxStore {
         let db = Connection::open_in_memory().expect("in-memory database");
         store::migrate(&db).expect("migrate");
-        OutboxStore {
-            db: Mutex::new(db),
-            streaks: Mutex::new(HashMap::new()),
-        }
+        OutboxStore { db: Mutex::new(db) }
     }
 
     pub fn run_sql_for_tests(&self, sql: &str) {
@@ -147,6 +152,10 @@ impl OutboxStore {
     }
 
     pub fn insert(&self, new: &New, now_ms: i64) -> Result<Row, InsertError> {
+        self.insert_as(new, false, now_ms)
+    }
+
+    pub fn insert_as(&self, new: &New, awaited: bool, now_ms: i64) -> Result<Row, InsertError> {
         if is_blank(&new.text) {
             return Err(InsertError::Empty);
         }
@@ -171,8 +180,8 @@ impl OutboxStore {
             return Err(InsertError::Full);
         }
         tx.execute(
-            "INSERT INTO outbox (id, session, tool, kind, text, options, via, state, clear_box, queued_ms, updated_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8, ?9, ?9)",
+            "INSERT INTO outbox (id, session, tool, kind, text, options, via, state, clear_box, queued_ms, updated_ms, awaited)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8, ?9, ?9, ?10)",
             params![
                 id,
                 new.session,
@@ -182,7 +191,8 @@ impl OutboxStore {
                 options,
                 new.via.as_str(),
                 i64::from(new.clear_box),
-                now_ms
+                now_ms,
+                i64::from(awaited)
             ],
         )
         .map_err(|e| InsertError::Db(e.to_string()))?;
@@ -208,7 +218,7 @@ impl OutboxStore {
         let rows = select(
             &db,
             "WHERE session = ?1 AND NOT (state = 'unsure' AND aside_ms IS NOT NULL)
-             ORDER BY n LIMIT 1",
+             ORDER BY state NOT IN ('sending', 'in_queue', 'unsure'), n LIMIT 1",
             &[&session],
         )?;
         Ok(rows.into_iter().next())
@@ -221,14 +231,6 @@ impl OutboxStore {
             "WHERE session = ?1 AND state = 'unsure' AND aside_ms IS NOT NULL ORDER BY n",
             &[&session],
         )
-    }
-
-    fn streak(&self) -> MutexGuard<'_, HashMap<String, String>> {
-        self.streaks.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn end_streak(&self, session: &str) {
-        self.streak().remove(session);
     }
 
     pub fn sessions(&self) -> Result<Vec<String>, String> {
@@ -308,14 +310,18 @@ impl OutboxStore {
         if !from.contains(&row.state) {
             return Ok(false);
         }
-        let alone = self
-            .streak()
-            .get(&row.session)
-            .is_none_or(|last| last == id);
-        let aside_at = (to == State::Unsure && alone).then_some(now_ms + UNSURE_HOLD_MS);
+        let struck: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM outbox WHERE session = ?1 AND strike = 1",
+                [&row.session],
+                |r| r.get(0),
+            )
+            .map_err(db_err)?;
+        let aside_at = (to == State::Unsure && struck == 0).then_some(now_ms + UNSURE_HOLD_MS);
         let sql = format!(
             "UPDATE outbox SET state = ?2, why = ?3, next_ms = ?4, updated_ms = ?5,
-                 aside_at_ms = ?6, aside_ms = NULL
+                 aside_at_ms = ?6, aside_ms = NULL,
+                 strike = CASE WHEN ?2 = 'unsure' THEN 1 ELSE strike END
              WHERE id = ?1 AND state IN ({})",
             states(from)
         );
@@ -332,9 +338,6 @@ impl OutboxStore {
                 ],
             )
             .map_err(db_err)?;
-        if changed > 0 && to == State::Unsure {
-            self.streak().insert(row.session, id.to_string());
-        }
         Ok(changed > 0)
     }
 
@@ -416,7 +419,8 @@ impl OutboxStore {
         if head.state != State::Sending
             || head.kind != Kind::Prompt
             || head.clear_box
-            || shell_line(&head.text)
+            || head.awaited
+            || typed_as_command(head.tool, &head.text)
         {
             return Ok(Vec::new());
         }
@@ -439,7 +443,8 @@ impl OutboxStore {
                 || row.tool != head.tool
                 || row.kind != Kind::Prompt
                 || row.clear_box
-                || shell_line(&row.text)
+                || row.awaited
+                || typed_as_command(row.tool, &row.text)
                 || row.options != head.options
                 || row.tries > 0
                 || row.next_ms.is_some()
@@ -493,7 +498,8 @@ impl OutboxStore {
         }
         let sql = format!(
             "UPDATE outbox SET text = ?2, kind = ?3, tries = 0, next_ms = NULL, clear_box = 0,
-                 why = NULL, state = 'queued', updated_ms = ?4, hold_ms = NULL, joined = 0
+                 why = NULL, state = 'queued', updated_ms = ?4, hold_ms = NULL, joined = 0,
+                 aside_at_ms = NULL, aside_ms = NULL
              WHERE id = ?1 AND state IN ({})",
             states(EDITABLE)
         );
@@ -535,9 +541,6 @@ impl OutboxStore {
             )
             .map_err(db_err)?;
         tx.commit().map_err(db_err)?;
-        if changed > 0 {
-            self.end_streak(&row.session);
-        }
         Ok(if changed > 0 {
             (Change::Done, Some(row))
         } else {
@@ -603,29 +606,45 @@ impl OutboxStore {
     }
 
     pub fn delete(&self, id: &str) -> Result<bool, String> {
-        let db = self.lock();
-        let session = fetch(&db, id)?.map(|row| row.session);
-        let changed = db
+        let changed = self
+            .lock()
             .execute("DELETE FROM outbox WHERE id = ?1", [id])
             .map_err(db_err)?;
-        if let Some(session) = session.filter(|_| changed > 0) {
-            self.end_streak(&session);
+        Ok(changed > 0)
+    }
+
+    pub fn sent(&self, id: &str) -> Result<bool, String> {
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let session = fetch(&tx, id)?.map(|row| row.session);
+        let changed = tx
+            .execute("DELETE FROM outbox WHERE id = ?1", [id])
+            .map_err(db_err)?;
+        if let Some(session) = session {
+            calm(&tx, &session)?;
         }
+        tx.commit().map_err(db_err)?;
         Ok(changed > 0)
     }
 
     pub fn delete_unsure(&self, id: &str, updated_ms: i64) -> Result<bool, String> {
-        let db = self.lock();
-        let session = fetch(&db, id)?.map(|row| row.session);
-        let changed = db
+        let mut db = self.lock();
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let session = fetch(&tx, id)?.map(|row| row.session);
+        let changed = tx
             .execute(
                 "DELETE FROM outbox WHERE id = ?1 AND state = 'unsure' AND updated_ms = ?2",
                 params![id, updated_ms],
             )
             .map_err(db_err)?;
         if let Some(session) = session.filter(|_| changed > 0) {
-            self.end_streak(&session);
+            calm(&tx, &session)?;
         }
+        tx.commit().map_err(db_err)?;
         Ok(changed > 0)
     }
 
@@ -645,7 +664,6 @@ impl OutboxStore {
         )
         .map_err(db_err)?;
         tx.commit().map_err(db_err)?;
-        self.end_streak(session);
         Ok(rows)
     }
 
@@ -664,7 +682,6 @@ impl OutboxStore {
             }
             tx.execute("DELETE FROM outbox WHERE id = ?1", [id])
                 .map_err(db_err)?;
-            self.end_streak(&row.session);
             gone.push(row);
         }
         tx.commit().map_err(db_err)?;

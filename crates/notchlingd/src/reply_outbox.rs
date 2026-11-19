@@ -87,7 +87,7 @@ impl ActingOps {
             options: None,
             via: via_of(caller, args),
         };
-        let row = match outbox.send(&send) {
+        let row = match outbox.send_awaited(&send) {
             Ok(row) => row,
             Err(e) => {
                 self.note_reply(session, via, chars, Some(FailWhy::Other), None, false);

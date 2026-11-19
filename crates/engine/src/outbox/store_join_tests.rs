@@ -220,3 +220,55 @@ fn only_a_row_that_can_still_be_edited_is_held() {
     store.take(&row.id, 5).unwrap().unwrap();
     assert_eq!(store.hold(&row.id, Some(900), 10), Ok(Change::Busy));
 }
+
+#[test]
+fn a_row_somebody_is_waiting_on_is_never_joined_and_never_carries_one() {
+    let store = OutboxStore::in_memory_for_tests();
+    let head = store.insert(&new("s", "one"), 10).unwrap();
+    let waited = store.insert_as(&new("s", "two"), true, 11).unwrap();
+    let after = store.insert(&new("s", "three"), 12).unwrap();
+    assert!(waited.awaited && !head.awaited);
+    store.take(&head.id, 100).unwrap().expect("taken");
+    assert!(store.join_behind(&head.id, 100).unwrap().is_empty());
+    assert_eq!(store.get(&waited.id).unwrap().unwrap().text, "two");
+    assert_eq!(store.get(&after.id).unwrap().unwrap().text, "three");
+    store.sent(&head.id).unwrap();
+
+    let carrier = store.take(&waited.id, 200).unwrap().expect("taken");
+    assert!(carrier.awaited);
+    assert!(store.join_behind(&waited.id, 200).unwrap().is_empty());
+    assert_eq!(store.get(&waited.id).unwrap().unwrap().text, "two");
+    assert_eq!(store.get(&waited.id).unwrap().unwrap().joined, 0);
+    assert_eq!(store.get(&after.id).unwrap().unwrap().text, "three");
+}
+
+#[test]
+fn a_hidden_character_cannot_hide_a_shell_line_or_a_command_from_the_join() {
+    for hidden in [
+        "\u{200b}!ls",
+        "\u{feff} !ls",
+        "\u{200b}/compact",
+        "\u{2060}/clear",
+    ] {
+        let store = OutboxStore::in_memory_for_tests();
+        let made = head_of(&store, &["one", "two"]);
+        store.run_sql_for_tests(&format!(
+            "UPDATE outbox SET text = '{hidden}' WHERE id = '{}'",
+            made[1].id
+        ));
+        assert!(
+            store.join_behind(&made[0].id, 100).unwrap().is_empty(),
+            "{hidden:?} behind"
+        );
+        let store = OutboxStore::in_memory_for_tests();
+        let made = head_of(&store, &["one", "two"]);
+        store.run_sql_for_tests(&format!(
+            "UPDATE outbox SET text = '{hidden}' WHERE id = '{}'",
+            made[0].id
+        ));
+        assert!(
+            store.join_behind(&made[0].id, 100).unwrap().is_empty(),
+            "{hidden:?} as the head"
+        );
+    }
+}

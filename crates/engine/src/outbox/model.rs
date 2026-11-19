@@ -112,6 +112,8 @@ pub struct Row {
     pub aside_ms: Option<i64>,
     pub hold_ms: Option<i64>,
     pub joined: u32,
+    #[serde(default)]
+    pub awaited: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

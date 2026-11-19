@@ -242,7 +242,7 @@ impl OutboxOps {
         let judged = before.map_or(Verdict::Unsure, |b| verdict(seen, b, VERIFY_LOOK_MS));
         let (to, why, then) = match judged {
             Verdict::Sent => {
-                let Ok(true) = self.store.delete(&row.id) else {
+                let Ok(true) = self.store.sent(&row.id) else {
                     return false;
                 };
                 self.publish_removed(&row.id, &row.session, "sent");
@@ -496,6 +496,14 @@ impl OutboxOps {
     }
 
     pub fn send(&self, args: &SendArgs) -> Result<Row, ApiError> {
+        self.send_as(args, false)
+    }
+
+    pub fn send_awaited(&self, args: &SendArgs) -> Result<Row, ApiError> {
+        self.send_as(args, true)
+    }
+
+    fn send_as(&self, args: &SendArgs, awaited: bool) -> Result<Row, ApiError> {
         check_text(&args.text)?;
         let target = self.target(&args.id, &args.text)?;
         if target.tool == Tool::Antigravity {
@@ -514,12 +522,15 @@ impl OutboxOps {
             via: args.via,
             clear_box: args.clear_box,
         };
-        let row = self.store.insert(&new, now_ms()).map_err(|e| match e {
-            InsertError::Empty => bad(EMPTY),
-            InsertError::TooLong => bad(TOO_LONG),
-            InsertError::Full => failed("200 messages are already waiting for this session."),
-            InsertError::Db(_) => save_failed(),
-        })?;
+        let row = self
+            .store
+            .insert_as(&new, awaited, now_ms())
+            .map_err(|e| match e {
+                InsertError::Empty => bad(EMPTY),
+                InsertError::TooLong => bad(TOO_LONG),
+                InsertError::Full => failed("200 messages are already waiting for this session."),
+                InsertError::Db(_) => save_failed(),
+            })?;
         self.publish_changed(&row);
         self.emit_then(&row, OutboxThen::Queued);
         self.wake_session(&row.session);

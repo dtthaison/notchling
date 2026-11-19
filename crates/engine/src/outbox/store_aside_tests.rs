@@ -1,4 +1,5 @@
 use super::*;
+use crate::sessions::testutil::TempDir;
 
 fn new(session: &str, text: &str) -> New {
     New {
@@ -51,13 +52,45 @@ fn another_session_has_its_own_streak() {
 }
 
 #[test]
-fn a_row_removed_in_between_ends_the_streak() {
+fn a_row_sent_in_between_ends_the_streak() {
     let store = OutboxStore::in_memory_for_tests();
     make_unsure(&store, "s", "one", 1_000);
     let sent = store.insert(&new("s", "sent in between"), 1_500).unwrap();
-    store.delete(&sent.id).unwrap();
+    assert_eq!(store.sent(&sent.id), Ok(true));
     let next = make_unsure(&store, "s", "two", 2_000);
     assert_eq!(next.aside_at_ms, Some(2_000 + UNSURE_HOLD_MS));
+}
+
+#[test]
+fn removing_or_discarding_other_rows_does_not_end_the_streak() {
+    let store = OutboxStore::in_memory_for_tests();
+    make_unsure(&store, "s", "one", 1_000);
+    let other = store.insert(&new("s", "other"), 1_100).unwrap();
+    assert_eq!(store.remove(&other.id).unwrap().0, Change::Done);
+    let another = store.insert(&new("s", "another"), 1_200).unwrap();
+    assert_eq!(store.delete(&another.id), Ok(true));
+    let third = store.insert(&new("s", "third"), 1_300).unwrap();
+    assert_eq!(store.discard_rows(&[third.id]).unwrap().len(), 1);
+    store.insert(&new("t", "elsewhere"), 1_400).unwrap();
+    assert_eq!(store.discard_session("t").unwrap().len(), 1);
+    let next = make_unsure(&store, "s", "two", 2_000);
+    assert_eq!(next.aside_at_ms, None, "the streak is still running");
+}
+
+#[test]
+fn the_streak_survives_a_restart() {
+    let tmp = TempDir::new("outbox-streak");
+    let dir = tmp.path("data");
+    {
+        let store = OutboxStore::open(&dir).unwrap();
+        make_unsure(&store, "s", "one", 1_000);
+    }
+    let store = OutboxStore::open(&dir).unwrap();
+    let second = make_unsure(&store, "s", "two", 2_000);
+    assert_eq!(
+        second.aside_at_ms, None,
+        "the first unsure was not forgotten"
+    );
 }
 
 #[test]
@@ -73,11 +106,12 @@ fn a_late_proof_or_a_removal_of_the_unsure_row_ends_the_streak_too() {
 }
 
 #[test]
-fn the_same_row_going_unsure_again_is_not_a_second_in_a_row() {
+fn the_same_row_going_unsure_again_after_a_retry_is_a_second_in_a_row() {
     let store = OutboxStore::in_memory_for_tests();
     let one = make_unsure(&store, "s", "one", 1_000);
+    store.step_aside(&one.id, 1_000 + UNSURE_HOLD_MS).unwrap();
     store
-        .requeue(&one.id, &[State::Unsure], false, 1_500)
+        .requeue(&one.id, &[State::Unsure], false, 200_000)
         .unwrap();
     assert_eq!(store.get(&one.id).unwrap().unwrap().aside_at_ms, None);
     store
@@ -87,11 +121,47 @@ fn the_same_row_going_unsure_again_is_not_a_second_in_a_row() {
             State::Unsure,
             Some(Why::NotFound),
             None,
-            2_000,
+            201_000,
         )
         .unwrap();
     let again = store.get(&one.id).unwrap().unwrap();
-    assert_eq!(again.aside_at_ms, Some(2_000 + UNSURE_HOLD_MS));
+    assert_eq!(again.aside_at_ms, None, "the same failure twice holds");
+}
+
+#[test]
+fn a_retried_row_that_is_then_sent_leaves_a_clean_streak() {
+    let store = OutboxStore::in_memory_for_tests();
+    let one = make_unsure(&store, "s", "one", 1_000);
+    store
+        .requeue(&one.id, &[State::Unsure], false, 1_500)
+        .unwrap();
+    store.sent(&one.id).unwrap();
+    let next = make_unsure(&store, "s", "two", 2_000);
+    assert_eq!(next.aside_at_ms, Some(2_000 + UNSURE_HOLD_MS));
+}
+
+#[test]
+fn a_late_proof_of_an_unsure_row_ends_the_streak_for_the_others() {
+    let store = OutboxStore::in_memory_for_tests();
+    let one = make_unsure(&store, "s", "one", 1_000);
+    let two = make_unsure(&store, "s", "two", 2_000);
+    assert_eq!(two.aside_at_ms, None);
+    assert_eq!(store.delete_unsure(&one.id, 1_000), Ok(true));
+    store
+        .requeue(&two.id, &[State::Unsure], false, 3_000)
+        .unwrap();
+    store
+        .set_state(
+            &two.id,
+            &[State::Queued],
+            State::Unsure,
+            Some(Why::NotFound),
+            None,
+            4_000,
+        )
+        .unwrap();
+    let again = store.get(&two.id).unwrap().unwrap();
+    assert_eq!(again.aside_at_ms, Some(4_000 + UNSURE_HOLD_MS));
 }
 
 #[test]
@@ -170,4 +240,93 @@ fn remove_when_only_removes_a_row_still_in_the_state_the_person_saw() {
     assert_eq!(change, Change::Done);
     assert_eq!(gone.map(|row| row.id), Some(unsure.id));
     assert_eq!(store.remove_when("nope", None).unwrap().0, Change::Missing);
+}
+
+#[test]
+fn a_retried_aside_row_waits_behind_a_later_row_that_is_going_in() {
+    for state in [State::Sending, State::InQueue] {
+        let store = OutboxStore::in_memory_for_tests();
+        let one = make_unsure(&store, "s", "one", 1_000);
+        let two = store.insert(&new("s", "two"), 2_000).unwrap();
+        store.step_aside(&one.id, 1_000 + UNSURE_HOLD_MS).unwrap();
+        store.take(&two.id, 130_000).unwrap().expect("taken");
+        if state == State::InQueue {
+            store
+                .set_state(
+                    &two.id,
+                    &[State::Sending],
+                    State::InQueue,
+                    None,
+                    None,
+                    131_000,
+                )
+                .unwrap();
+        }
+        store
+            .requeue(&one.id, &[State::Unsure], false, 140_000)
+            .unwrap();
+        assert_eq!(
+            store.head("s").unwrap().unwrap().id,
+            two.id,
+            "{state:?}: the later row is still the head"
+        );
+        store.sent(&two.id).unwrap();
+        assert_eq!(store.head("s").unwrap().unwrap().id, one.id);
+    }
+}
+
+#[test]
+fn a_retried_aside_row_does_not_cut_a_later_rows_hold() {
+    let store = OutboxStore::in_memory_for_tests();
+    let one = make_unsure(&store, "s", "one", 1_000);
+    let two = store.insert(&new("s", "two"), 2_000).unwrap();
+    store.step_aside(&one.id, 1_000 + UNSURE_HOLD_MS).unwrap();
+    store
+        .set_state(
+            &two.id,
+            &[State::Queued],
+            State::Unsure,
+            Some(Why::NotFound),
+            None,
+            130_000,
+        )
+        .unwrap();
+    store
+        .requeue(&one.id, &[State::Unsure], false, 140_000)
+        .unwrap();
+    assert_eq!(store.head("s").unwrap().unwrap().id, two.id);
+    store
+        .requeue(&two.id, &[State::Unsure], false, 150_000)
+        .unwrap();
+    assert_eq!(store.head("s").unwrap().unwrap().id, one.id);
+}
+
+#[test]
+fn an_unsure_row_cannot_be_held_or_edited_and_keeps_its_clocks() {
+    let store = OutboxStore::in_memory_for_tests();
+    let row = make_unsure(&store, "s", "one", 1_000);
+    store.step_aside(&row.id, 1_000 + UNSURE_HOLD_MS).unwrap();
+    let before = store.get(&row.id).unwrap().unwrap();
+    assert_eq!(
+        store.hold(&row.id, Some(9_000_000), 500_000),
+        Ok(Change::Busy)
+    );
+    assert_eq!(
+        store.edit(&row.id, "other words", 500_000),
+        Ok(Change::Busy)
+    );
+    assert_eq!(store.get(&row.id).unwrap().unwrap(), before);
+}
+
+#[test]
+fn an_edited_row_carries_no_aside_plan() {
+    let store = OutboxStore::in_memory_for_tests();
+    let row = store.insert(&new("s", "one"), 1_000).unwrap();
+    store.run_sql_for_tests(&format!(
+        "UPDATE outbox SET aside_at_ms = 5, aside_ms = 6 WHERE id = '{}'",
+        row.id
+    ));
+    assert_eq!(store.edit(&row.id, "two", 2_000), Ok(Change::Done));
+    let edited = store.get(&row.id).unwrap().unwrap();
+    assert_eq!((edited.aside_at_ms, edited.aside_ms), (None, None));
 }
