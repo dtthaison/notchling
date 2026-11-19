@@ -42,6 +42,9 @@ mod refusal_tests;
 #[path = "store_anchor_tests.rs"]
 mod store_anchor_tests;
 #[cfg(test)]
+#[path = "store_blank_tests.rs"]
+mod store_blank_tests;
+#[cfg(test)]
 #[path = "store_combine_tests.rs"]
 mod store_combine_tests;
 #[cfg(test)]

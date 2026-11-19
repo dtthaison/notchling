@@ -1,3 +1,4 @@
+use notchling_engine::transcript::stored::is_blank;
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
@@ -16,7 +17,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Attempts {
     pub fn note(&self, id: &str, text: &str, now_ms: i64) {
-        if text.trim().is_empty() {
+        if is_blank(text) {
             return;
         }
         let mut all = lock(&self.by_session);

@@ -1,5 +1,4 @@
-use super::sent::squeezed;
-use super::stored::as_stored;
+use super::stored::{as_stored, squeezed};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,8 +11,8 @@ pub struct Message {
 
 impl Message {
     pub fn parse(text: &str, exists: impl Fn(&Path) -> bool) -> Message {
-        let (words, pictures) = split_pictures(text, exists);
-        let words = as_stored(&words);
+        let text = as_stored(text);
+        let (words, pictures) = split_pictures(&text, exists);
         let lead = words.trim_start();
         let bash = lead
             .strip_prefix('!')

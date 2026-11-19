@@ -1,4 +1,4 @@
-use super::outbox::{hidden_queued, OutboxFeed, OutboxRow, Status};
+use super::outbox::{bubble, hidden_queued, unbubbled, OutboxFeed, OutboxRow, Status};
 use super::outgoing::{Outgoing, GRACE_MS};
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::model::{ChatItem, Conversation, ItemKind};
@@ -192,4 +192,81 @@ fn a_delivered_message_the_transcript_never_shows_still_lets_go_after_a_while() 
     out.delivered(1_000);
     assert!(out.keep(&c, 1_000 + GRACE_MS - 1));
     assert!(!out.keep(&c, 1_000 + GRACE_MS));
+}
+
+fn boxed_row(state: &str, text: &str, boxed: &str) -> OutboxRow {
+    let mut value = wire(state, text);
+    value["box"] = json!(boxed);
+    OutboxRow::from_wire(&value).expect("a row")
+}
+
+#[test]
+fn a_box_holding_the_message_without_its_zero_width_spaces_is_this_message() {
+    let row = boxed_row("box", &joined(), "carrythebluelanternacrossthebridge");
+    assert_eq!(bubble(&row).status, Status::BoxHoldsThis);
+    let picture = boxed_row(
+        "box",
+        &with_shot(),
+        "[Image #2]why this lamp carrythebluelanternacrossthebridge",
+    );
+    assert_eq!(bubble(&picture).status, Status::BoxHoldsThis);
+    let part = boxed_row("box", &with_shot(), "[Image #2]why this lamp");
+    assert_eq!(
+        bubble(&part).status,
+        Status::BoxHasText("[Image #2]why this lamp".into())
+    );
+}
+
+#[test]
+fn a_box_with_another_draft_shows_that_draft_with_every_character_it_has() {
+    let draft = "family \u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}\n\u{2764}\u{fe0f}  and\u{200f} می\u{200c}شود";
+    let row = boxed_row("box", "something else", draft);
+    assert_eq!(
+        bubble(&row).status,
+        Status::BoxHasText(
+            "family \u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467} \u{2764}\u{fe0f} and\u{200f} می\u{200c}شود"
+                .into()
+        )
+    );
+}
+
+#[test]
+fn a_box_of_only_dropped_characters_holds_nothing() {
+    let row = boxed_row("box", &joined(), "\u{200b}\u{feff}");
+    assert_eq!(
+        bubble(&row).status,
+        Status::BoxHasText("\u{200b}\u{feff}".into())
+    );
+}
+
+#[test]
+fn the_bubbles_cover_an_outgoing_text_whose_dropped_characters_differ() {
+    let row = OutboxRow::from_wire(&wire("queued", &joined())).expect("a row");
+    let bubbles = vec![bubble(&row)];
+    let plain = "carrythebluelanternacrossthebridge".to_string();
+    assert!(unbubbled(vec![plain.clone()], &bubbles).is_empty());
+    assert!(unbubbled(vec![joined()], &bubbles).is_empty());
+    assert_eq!(
+        unbubbled(vec![plain.clone(), joined()], &bubbles),
+        vec![joined()]
+    );
+    let other = "carrythebluelampacrossthebridge".to_string();
+    assert_eq!(unbubbled(vec![other.clone()], &bubbles), vec![other]);
+}
+
+#[test]
+fn a_shell_command_with_dropped_characters_arrives_as_the_transcript_writes_it() {
+    assert!(arrived("!ls\u{200b} -la", "! ls -la"));
+    assert!(arrived("! \u{feff}ls -la", "!ls -la"));
+    assert!(!arrived("!ls -la", "ls -la"));
+}
+
+#[test]
+fn a_queued_copy_with_a_picture_chip_hides_the_in_queue_row() {
+    let row = OutboxRow::from_wire(&wire("in_queue", &with_shot())).expect("a row");
+    let queued = vec!["[Image #2]why this lamp carrythebluelanternacrossthebridge".to_string()];
+    assert_eq!(hidden_queued(&queued, &[row]), Some(0));
+    let plain = OutboxRow::from_wire(&wire("in_queue", &joined())).expect("a row");
+    let other = vec!["carrythebluelampacrossthebridge".to_string()];
+    assert_eq!(hidden_queued(&other, &[plain]), None);
 }

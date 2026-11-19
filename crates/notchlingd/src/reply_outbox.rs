@@ -4,6 +4,7 @@ use crate::outbox_ops::{via_of, OutboxOps, SendArgs};
 use crate::outbox_settle::Settled;
 use notchling_engine::outbox::{Row, State, REPLY_WAIT_MS};
 use notchling_engine::reply::exec::Failure;
+use notchling_engine::transcript::stored::is_blank;
 use notchling_events::kinds::choices::FailWhy;
 use notchling_events::{Ref, Session};
 use notchling_local_api::{ApiError, Caller, ErrorCode, Tier};
@@ -63,7 +64,7 @@ impl ActingOps {
 
     pub(crate) fn reply(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let text = text_arg(args, "text")?;
-        if text.trim().is_empty() {
+        if is_blank(text) {
             return Err(bad("the reply is empty"));
         }
         let clear_box = clear_box_arg(args)?;

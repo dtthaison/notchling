@@ -4,7 +4,7 @@ use notchling_engine::outbox::{Kind, State, Tool, Via, Why};
 use notchling_engine::sessions::Agent;
 use notchling_engine::terminal::input_box;
 use notchling_engine::transcript::model::Conversation;
-use notchling_engine::transcript::stored::squeezed as squeeze;
+use notchling_engine::transcript::stored::{is_blank, same_words, squeezed as squeeze};
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
@@ -106,6 +106,10 @@ pub struct Bubble {
     pub buttons: Vec<Button>,
 }
 
+fn collapsed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub fn bubble(row: &OutboxRow) -> Bubble {
     let (status, buttons) = match row.state {
         State::Queued => (Status::Queued, vec![Button::Edit, Button::Remove]),
@@ -123,12 +127,12 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         State::Unsure => (Status::MayBeIn, vec![Button::SendAgain, Button::Drop]),
         State::Box => {
             let boxed = row.boxed.as_deref().unwrap_or_default();
-            let held = squeeze(boxed);
-            let same = held == squeeze(&row.text) || input_box::holds_message(boxed, &row.text);
-            let status = if !held.is_empty() && same {
+            let shown = collapsed(boxed);
+            let same = same_words(boxed, &row.text) || input_box::holds_message(boxed, &row.text);
+            let status = if !is_blank(boxed) && same {
                 Status::BoxHoldsThis
             } else {
-                Status::BoxHasText(held)
+                Status::BoxHasText(shown)
             };
             (
                 status,
@@ -169,10 +173,9 @@ fn shown_by_transcript(row: &OutboxRow, turns: &mut Turns) -> bool {
 
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
     let held = rows.iter().find(|r| r.state == State::InQueue)?;
-    let wanted = squeeze(&held.text);
     let pictured = input_box::Pictured::of(&held.text);
     queued.iter().position(|entry| {
-        squeeze(entry) == wanted
+        same_words(entry, &held.text)
             || pictured
                 .as_ref()
                 .is_some_and(|pictured| pictured.is_shown_as(entry, None))
@@ -183,15 +186,16 @@ pub fn unbubbled(outgoing: Vec<String>, bubbles: &[Bubble]) -> Vec<String> {
     let mut covered: Vec<String> = bubbles.iter().map(|b| squeeze(&b.text)).collect();
     outgoing
         .into_iter()
-        .filter(
-            |text| match covered.iter().position(|c| *c == squeeze(text)) {
+        .filter(|text| {
+            let key = squeeze(text);
+            match covered.iter().position(|c| *c == key) {
                 Some(at) => {
                     covered.remove(at);
                     false
                 }
                 None => true,
-            },
-        )
+            }
+        })
         .collect()
 }
 

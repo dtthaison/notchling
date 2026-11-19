@@ -3,6 +3,7 @@ use super::model::{
 };
 use crate::store;
 use crate::transcript::sent::Seen;
+use crate::transcript::stored::is_blank;
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -131,7 +132,7 @@ impl OutboxStore {
     }
 
     pub fn insert(&self, new: &New, now_ms: i64) -> Result<Row, InsertError> {
-        if new.text.trim().is_empty() {
+        if is_blank(&new.text) {
             return Err(InsertError::Empty);
         }
         if new.text.len() > MAX_TEXT {

@@ -1,4 +1,4 @@
-use crate::transcript::stored::as_stored;
+use crate::transcript::stored::{as_stored, is_dropped};
 
 pub const RULE: char = '─';
 pub const RULE_MIN: usize = 16;
@@ -27,16 +27,14 @@ pub struct Input {
 }
 
 fn squeezed(text: &str) -> String {
-    as_stored(text)
-        .chars()
-        .filter(|c| !c.is_whitespace())
+    text.chars()
+        .filter(|c| !c.is_whitespace() && !is_dropped(*c))
         .collect()
 }
 
 fn letters(text: &str) -> String {
-    as_stored(text)
-        .chars()
-        .filter(|c| c.is_alphanumeric())
+    text.chars()
+        .filter(|c| c.is_alphanumeric() && !is_dropped(*c))
         .collect()
 }
 
@@ -133,6 +131,7 @@ impl Message {
     fn of(text: &str) -> Message {
         let mut pieces = Vec::new();
         let mut literal = false;
+        let text = as_stored(text);
         for line in text.split('\n') {
             match path_line(line) {
                 Some(paths) => {

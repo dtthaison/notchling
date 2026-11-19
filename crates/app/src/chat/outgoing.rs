@@ -1,6 +1,6 @@
 use notchling_engine::terminal::input_box::Pictured;
 use notchling_engine::transcript::model::{Conversation, ItemKind};
-use notchling_engine::transcript::stored::squeezed;
+use notchling_engine::transcript::stored::squeezed_chars;
 
 pub const GRACE_MS: i64 = 30_000;
 const CLOCK_SLACK_MS: f64 = 2_000.0;
@@ -57,13 +57,13 @@ pub struct Wanted {
 impl Wanted {
     pub fn of(text: &str) -> Wanted {
         Wanted {
-            exact: comparable(text),
+            exact: comparable(text).collect(),
             pictured: Pictured::of(text),
         }
     }
 
     pub fn is(&self, turn: &str, images: Option<usize>) -> bool {
-        comparable(turn) == self.exact
+        comparable(turn).eq(self.exact.chars())
             || self
                 .pictured
                 .as_ref()
@@ -123,12 +123,15 @@ fn copies(text: &str, conversation: &Conversation) -> usize {
     sent + queued
 }
 
-fn comparable(text: &str) -> String {
-    let text = squeezed(text);
-    match text.strip_prefix('!') {
-        Some(command) => format!("!{}", command.trim_start()),
-        None => text,
-    }
+fn comparable(text: &str) -> impl Iterator<Item = char> + '_ {
+    let mut first = true;
+    let mut after_bang = false;
+    squeezed_chars(text).filter(move |c| {
+        let gap = after_bang && *c == ' ';
+        after_bang = first && *c == '!';
+        first = false;
+        !gap
+    })
 }
 
 #[cfg(test)]

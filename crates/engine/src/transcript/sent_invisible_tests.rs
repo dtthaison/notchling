@@ -215,3 +215,104 @@ fn sent_since_ignores_the_characters_claude_code_drops() {
         Some(true)
     );
 }
+
+fn counted(lines: &[String], message: &Message) -> Option<Seen> {
+    let (_dir, path) = write(lines);
+    count_since(&path, message, since(42))
+}
+
+fn local_command(inner: &str, second: u32) -> String {
+    json!({"type": "system", "subtype": "local_command", "timestamp": stamp(second),
+        "content": inner})
+    .to_string()
+}
+
+#[test]
+fn a_context_character_claude_code_kept_or_dropped_does_not_stop_the_match() {
+    let pairs = [
+        ("\u{2764}\u{fe0f} thanks", "\u{2764} thanks"),
+        ("family 👨\u{200d}👩\u{200d}👧", "family 👨👩👧"),
+        (
+            "flag 🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}",
+            "flag 🏴",
+        ),
+        ("می\u{200c}شود", "میشود"),
+        ("\u{200f}שלום\u{200e} עולם", "שלום עולם"),
+        ("ក\u{200b}ខ", "កខ"),
+    ];
+    for (sent, stripped) in pairs {
+        for stored in [sent, stripped] {
+            assert_eq!(
+                taken_as(stored, &plain(sent), 0),
+                seen(1, 1),
+                "{sent:?} {stored:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn context_characters_do_not_hide_a_difference_in_the_visible_ones() {
+    let sent = plain("family 👨\u{200d}👩\u{200d}👧");
+    assert_eq!(taken_as("family 👨\u{200d}👩", &sent, 0), seen(0, 0));
+    assert_eq!(
+        taken_as("family 👩\u{200d}👨\u{200d}👧", &sent, 0),
+        seen(0, 0)
+    );
+    let persian = plain("می\u{200c}شود");
+    assert_eq!(taken_as("می\u{200c}شوم", &persian, 0), seen(0, 0));
+}
+
+#[test]
+fn windows_line_breaks_around_a_picture_path_still_find_the_picture() {
+    let sent = format!("why this lamp\r\n\r\n'{SHOT}'\r\n");
+    let message = with_picture(&sent);
+    assert_eq!(message.pictures, 1);
+    assert_eq!(message.text, "why this lamp");
+    let other = format!("why this lamp\u{2028}\u{2028}'{SHOT}'");
+    assert_eq!(with_picture(&other), message);
+}
+
+#[test]
+fn a_dropped_character_beside_a_picture_path_still_finds_the_picture() {
+    let message = with_picture(&format!("\u{200b}why\n\n\u{feff}'{SHOT}'\u{200b}"));
+    assert_eq!(message.pictures, 1);
+    assert_eq!(message.text, "why");
+}
+
+#[test]
+fn a_message_of_only_dropped_characters_is_never_taken() {
+    let nothing = plain("\u{200b}\u{feff}\u{2060}\n");
+    assert_eq!(nothing.text, "");
+    assert_eq!(taken_as("\u{200b}", &nothing, 0), seen(0, 0));
+    assert_eq!(taken_as("anything", &nothing, 0), seen(0, 0));
+}
+
+#[test]
+fn a_slash_command_with_dropped_characters_is_taken_by_its_local_command_line() {
+    let inner = "<command-name>/model</command-name><command-args>opus</command-args>";
+    let lines = [local_command(inner, 52)];
+    assert_eq!(
+        counted(&lines, &plain("\u{200b}/model\u{200b} opus")),
+        seen(0, 1)
+    );
+    let spelled = "<command-name>\u{200b}/model</command-name><command-args>opus</command-args>";
+    assert_eq!(
+        counted(&[local_command(spelled, 52)], &plain("/model opus")),
+        seen(0, 1)
+    );
+    assert_eq!(counted(&lines, &plain("/model sonnet")), seen(0, 0));
+}
+
+#[test]
+fn a_batch_entry_that_starts_with_a_dropped_character_and_a_slash_is_a_command() {
+    let command = "<command-name>/model</command-name><command-args>opus</command-args>";
+    let mut queue = Queue::default();
+    queue.batch.push("\u{200b}/model opus".to_string());
+    queue.other_line(command);
+    assert!(queue.batch.is_empty());
+    let mut other = Queue::default();
+    other.batch.push("\u{200b}model opus".to_string());
+    other.other_line(command);
+    assert_eq!(other.batch.len(), 1);
+}

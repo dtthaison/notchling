@@ -18,6 +18,7 @@ use notchling_engine::outbox::{
 use notchling_engine::sessions::{fresh, Agent, Probes, Roots};
 use notchling_engine::tools::codex::plan::valid_session_id;
 use notchling_engine::transcript::sent::Seen;
+use notchling_engine::transcript::stored::is_blank;
 use notchling_events::field::Count;
 use notchling_events::kinds::agents::{OutboxThen, SessionOutbox};
 use notchling_events::spec::Outcome;
@@ -133,7 +134,7 @@ fn refuse_menu(tool: Tool, text: &str) -> Result<(), ApiError> {
 }
 
 fn check_text(text: &str) -> Result<(), ApiError> {
-    if text.trim().is_empty() {
+    if is_blank(text) {
         return Err(bad(EMPTY));
     }
     if text.len() > MAX_TEXT {
@@ -776,6 +777,9 @@ impl OpGroup for OutboxOps {
     }
 }
 
+#[cfg(test)]
+#[path = "outbox_blank_tests.rs"]
+mod blank_tests;
 #[cfg(test)]
 #[path = "outbox_ops_tests.rs"]
 mod tests;
