@@ -100,6 +100,8 @@ fn status(
         .map(|(_, note)| *note)
     {
         (sentence(note), Ink::TextMuted)
+    } else if let Some(note) = view.chrome_note() {
+        (note, Ink::TextMuted)
     } else if let Some(note) = view.offline_note() {
         (note, Ink::TextMuted)
     } else if view.tools.sending {

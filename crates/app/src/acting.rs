@@ -24,6 +24,7 @@ pub mod ops {
     pub const SESSION_COMMAND: &str = "session.command";
     pub const SESSION_QUESTION: &str = "session.question";
     pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
+    pub const SESSION_CHROME: &str = "session.chrome";
     pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
     pub const CLUSTER_FOLLOW: &str = "cluster.follow";
     pub const CLUSTER_RETURN: &str = "cluster.return";
@@ -355,6 +356,22 @@ impl Request {
 
     pub fn cluster_dispatch(args: Value) -> Request {
         Request::new(ops::CLUSTER_DISPATCH, args)
+    }
+
+    pub fn chrome(id: &str, on: bool, force: bool) -> Request {
+        let mut args = json!({ "id": id, "command": crate::chat::chrome::command(on) });
+        if force {
+            args["force"] = json!(true);
+        }
+        Request::new(ops::SESSION_COMMAND, args)
+    }
+
+    pub fn chrome_state(id: &str, ack: bool) -> Request {
+        let mut args = json!({ "id": id });
+        if ack {
+            args["ack"] = json!(true);
+        }
+        Request::new(ops::SESSION_CHROME, args)
     }
 
     pub fn command(id: &str, command: &str) -> Request {

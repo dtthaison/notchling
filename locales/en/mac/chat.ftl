@@ -795,3 +795,51 @@ chat-ask-already-by = Already answered · { $by }
 chat-ask-type-answer = Type an answer…
 chat-ask-send = Send
 chat-ask-dismiss = Dismiss
+
+# The /chrome command and the Use Chrome menu item: what Chat shows while it turns Chrome on or off for a session.
+chat-chrome-use = Use { -brand-chrome }
+chat-chrome-suggest-on = Turn on { -brand-chrome } for this session
+chat-chrome-suggest-off = Turn off { -brand-chrome } for this session
+chat-chrome-title = { -brand-chrome } for This Session
+chat-chrome-turning-on = Turning on { -brand-chrome }… the session restarts if it has to, and the conversation is kept
+chat-chrome-turning-off = Turning off { -brand-chrome }… the session restarts if it has to, and the conversation is kept
+chat-chrome-restarting-on = Turning on { -brand-chrome }… restarting the session, the conversation is kept
+chat-chrome-restarting-off = Turning off { -brand-chrome }… restarting the session, the conversation is kept
+chat-chrome-connecting = Connecting to { -brand-chrome }…
+chat-chrome-wait-turn = Waiting for the turn to end
+chat-chrome-wait-box = Waiting for the message box to empty
+chat-chrome-wait-question = Waiting for the open question to be answered
+chat-chrome-already-on = { -brand-chrome } is on for this session
+chat-chrome-is-on = { -brand-chrome } is on
+chat-chrome-is-off = { -brand-chrome } is off
+chat-chrome-already-off = { -brand-chrome } is already off for this session
+chat-chrome-needs-you = { -brand-chrome } needs a hand
+chat-chrome-status = Status
+chat-chrome-status-on = On for this session
+chat-chrome-status-off = Off for this session
+chat-chrome-status-unknown = Not known yet
+chat-chrome-tasks = { $count ->
+    [one] A background task is running. Restarting the session stops it.
+   *[other] { $count } background tasks are running. Restarting the session stops them.
+}
+chat-chrome-tasks-unknown = Notchling can't tell whether this session has background work. Restarting the session stops any.
+chat-chrome-restartable = { -brand-chrome } can only be changed for sessions Notchling can restart.
+chat-chrome-no-extension = The Claude in { -brand-chrome } extension isn't installed. Install it from the { -brand-chrome } Web Store, then sign in with the Claude account this session uses.
+chat-chrome-not-connected = The extension isn't connected. Open { -brand-chrome }, check that the Claude in { -brand-chrome } extension is on and signed in to the same Claude account as this session, then try again.
+chat-chrome-mcp-off = Claude in { -brand-chrome } is turned off in this session's tools. Open the terminal and use /chrome there to turn it on.
+chat-chrome-unavailable = This version of Claude Code has no /chrome command. Update Claude Code, then try again.
+chat-chrome-busy-turn = The turn didn't end in time. Try again when it has.
+chat-chrome-busy-box = The message box still holds text. Send or clear it, then try again.
+chat-chrome-busy-question = A question is still open in the session. Answer it, then try again.
+# $text is Claude Code's or Notchling's own words for what went wrong.
+chat-chrome-failed = { $text }
+chat-chrome-help-title = Good to Know
+chat-chrome-help-install = Install the Claude in { -brand-chrome } extension from the { -brand-chrome } Web Store.
+chat-chrome-help-account = Sign in to the extension with the same Claude account this session uses.
+chat-chrome-help-profiles = Several { -brand-chrome } profiles with the extension can confuse it: keep it in one profile.
+chat-chrome-try-again = Try Again
+chat-chrome-turn-on = Turn On
+chat-chrome-turn-on-anyway = Turn On Anyway
+chat-chrome-turn-off = Turn Off
+chat-chrome-turn-off-anyway = Turn Off Anyway
+chat-chrome-open-terminal = Open Terminal

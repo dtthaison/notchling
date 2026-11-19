@@ -3,7 +3,6 @@ use crate::acting_ops::{keep_screen, shown_box, ActingOps, NoLog};
 use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
-use notchling_engine::control::plan_respawn;
 use notchling_engine::outbox::{
     Facts, Job, Kind, Row, Tried, TryEnd, DIALOG_RECHECK_MS, GONE_AFTER_MS,
 };
@@ -272,7 +271,7 @@ impl ClaudeCourier {
 
     pub fn resume(&self, row: &Row) -> Result<(), ApiError> {
         self.acting
-            .run_raw(&plan_respawn(&row.session, &self.acting.roots))
+            .respawn(&row.session)
             .map(|_| ())
             .map_err(|e| ApiError::new(ErrorCode::Failed, e.to_string()))
     }

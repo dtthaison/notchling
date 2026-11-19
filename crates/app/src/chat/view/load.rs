@@ -315,6 +315,7 @@ impl ChatView {
             self.redraw_chrome(cx);
         }
         self.inbox_tick(cx);
+        self.chrome_tick(cx);
         self.cluster_tick(cx);
         let dot = self.bridge_on();
         if dot != self.phone_dot {

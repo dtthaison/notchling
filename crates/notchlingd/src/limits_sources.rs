@@ -3,7 +3,7 @@ use crate::limits_ops::SYNC_EVERY;
 use crate::switches::SwitchFlag;
 use notchling_engine::accounts::claude::{ClaudeAccounts, SwitchWhy};
 use notchling_engine::accounts::http::{HttpRequest, USAGE_URL};
-use notchling_engine::control::{job_state_path, plan_respawn};
+use notchling_engine::control::job_state_path;
 use notchling_engine::limits::renew::{self, LoginRenewer, RenewState, Seat};
 use notchling_engine::limits::report::{Bar, BarKind, Group, UsageReport};
 use notchling_engine::limits::sources::{
@@ -424,11 +424,7 @@ impl SessionJobs {
         let state = job_state_path(&acting.roots, job_id);
         let stamp = || std::fs::metadata(&state).and_then(|m| m.modified()).ok();
         let before: Option<SystemTime> = stamp();
-        if !acting.is_on()
-            || acting
-                .run_raw(&plan_respawn(job_id, &acting.roots))
-                .is_err()
-        {
+        if !acting.is_on() || acting.respawn(job_id).is_err() {
             return;
         }
         let deadline = std::time::Instant::now() + timing.respawn_wait;

@@ -6,6 +6,7 @@ use notchling_kit::ui::{label, menu_panel, menu_row, KitPart, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
+use crate::chat::chrome;
 use crate::chat::data::Tool;
 use crate::chat::remote_control::Action;
 use crate::chat::slash_menu::{picked, query};
@@ -18,14 +19,21 @@ impl ChatView {
         if session.tool != Tool::Claude || self.remote_refused(&session.agent.id, Action::Slash) {
             return Vec::new();
         }
+        let text = self.tools.editor.read(cx).text().to_owned();
+        if chrome::offered(session) && self.slash.hidden_at.as_deref() != Some(text.as_str()) {
+            let spaced = chrome::spaced(&text);
+            if !spaced.is_empty() {
+                return spaced;
+            }
+        }
         let Some((cwd, commands)) = &self.slash_commands else {
             return Vec::new();
         };
         if *cwd != session.agent.cwd {
             return Vec::new();
         }
-        let text = self.tools.editor.read(cx).text().to_owned();
-        self.slash.rows(&text, commands)
+        self.slash
+            .rows(&text, &chrome::commands_for(session, commands))
     }
 
     pub(super) fn slash_typed(&mut self, text: &str) {

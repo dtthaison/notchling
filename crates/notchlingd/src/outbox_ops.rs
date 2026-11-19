@@ -42,6 +42,7 @@ const SAVE_FAILED: &str = "Couldn't save the message.";
 const EMPTY: &str = "Type a message first.";
 const TOO_LONG: &str = "That message is over 100 KB.";
 const NO_SESSION: &str = "No such session.";
+const CHROME: &str = "Chrome is turned on with the /chrome command in Chat, not queued.";
 const MENU: &str = "That command opens a menu; open the session's terminal.";
 
 pub struct SendArgs {
@@ -125,7 +126,10 @@ fn foreign_key(id: &str) -> Option<String> {
     valid_session(session).then(|| format!("agy:{session}"))
 }
 
-fn refuse_menu(tool: Tool, text: &str) -> Result<(), ApiError> {
+pub(crate) fn refuse_menu(tool: Tool, text: &str) -> Result<(), ApiError> {
+    if tool == Tool::Claude && notchling_engine::chrome::command::is_chrome(text) {
+        return Err(bad(CHROME));
+    }
     if tool == Tool::Claude && opens_menu(text) {
         return Err(bad(MENU));
     }

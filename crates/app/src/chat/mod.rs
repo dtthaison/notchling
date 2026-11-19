@@ -15,6 +15,9 @@ pub mod browser_rows;
 pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
+pub mod chrome;
+#[cfg(test)]
+mod chrome_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;

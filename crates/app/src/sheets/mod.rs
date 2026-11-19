@@ -9,6 +9,8 @@ pub mod capabilities;
 mod capabilities_tests;
 #[cfg(target_os = "macos")]
 pub mod capabilities_view;
+#[cfg(target_os = "macos")]
+pub mod chrome_view;
 pub mod client_check;
 pub mod client_model;
 #[cfg(test)]

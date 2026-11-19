@@ -5,6 +5,7 @@ mod branches_panel;
 mod bring_back;
 mod changes;
 mod changes_panel;
+mod chrome;
 mod cluster;
 mod composer;
 mod conversation;
@@ -193,6 +194,7 @@ pub struct ChatView {
     limit_ring: limit_ring::State,
     account_menu: bool,
     row_menu: Option<row_menu::RowMenu>,
+    use_chrome: crate::chat::chrome::State,
     copy_menu: Option<copy_menu::CopyMenu>,
     keys: copy::Keys,
     accounts_polled_ms: i64,
@@ -267,7 +269,12 @@ impl ChatView {
             view.render_simulator(&how, cx);
         }
         if let Ok(how) = std::env::var(ROW_MENU_ENV) {
-            let job = how == "job" || how == "confirm" || how == "keep";
+            let job = ["job", "confirm", "keep", "chrome-on", "chrome-off"].contains(&how.as_str());
+            if how.starts_with("chrome-") {
+                view.use_chrome
+                    .on
+                    .insert("fix-the-bug".into(), how == "chrome-on");
+            }
             if how == "keep" {
                 view.cluster = Arc::new(crate::cluster::feed::ClusterFeed::fixed(
                     crate::cluster::renders::keep_model("fix-the-bug"),
@@ -425,6 +432,7 @@ impl ChatView {
             limit_ring: limit_ring::State::default(),
             account_menu: false,
             row_menu: None,
+            use_chrome: crate::chat::chrome::State::default(),
             copy_menu: None,
             keys: copy::Keys::new(cx),
             accounts_polled_ms: 0,

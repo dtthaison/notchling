@@ -84,6 +84,18 @@ impl ActingOps {
         self.run_raw(plan).map_err(failed)
     }
 
+    pub(crate) fn respawn_guarded<R>(&self, job: &str, then: impl FnOnce() -> R) -> R {
+        let lock = self.respawns.for_job(job);
+        let _one = lock.lock().unwrap_or_else(|e| e.into_inner());
+        then()
+    }
+
+    pub(crate) fn respawn(&self, job: &str) -> Result<Option<String>, ControlError> {
+        self.respawn_guarded(job, || {
+            self.run_raw(&notchling_engine::control::plan_respawn(job, &self.roots))
+        })
+    }
+
     pub(crate) fn run_raw(&self, plan: &Plan) -> Result<Option<String>, ControlError> {
         let pause = |ms: u64| (self.pause)(ms);
         execute(plan, self.launcher.as_ref(), &pause).map(|report| report.job_id)
@@ -205,6 +217,20 @@ impl ActingOps {
         let command = text_arg(args, "command")?.trim();
         if !command.starts_with('/') || command.len() < 2 {
             return Err(bad("a command starts with /"));
+        }
+        if let Some(which) = notchling_engine::chrome::command::parse(command) {
+            let agent = self.agent(args)?;
+            let chrome = self
+                .chrome()
+                .ok_or_else(|| bad("Chrome can't be turned on here"))?;
+            if !crate::chrome_ops::offers(&agent) {
+                return Err(bad(
+                    "Chrome can only be changed for sessions Notchling can restart",
+                ));
+            }
+            let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+            let on = which == notchling_engine::chrome::command::Command::On;
+            return Ok(json!({"sent": false, "chrome": chrome.start(&agent, on, force)}));
         }
         if route(command) == Route::Terminal {
             return Err(bad(format!(

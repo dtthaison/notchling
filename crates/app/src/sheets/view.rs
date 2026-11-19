@@ -713,6 +713,11 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
     };
     Some(match which {
         Shown::Banner => cx.new(|_| BannersView { banners: banners() }).into(),
+        Shown::ChromeOn | Shown::ChromeOff | Shown::ChromeNotConnected => {
+            let sheet = super::renders::chrome_sheet(which)?;
+            cx.new(|_| super::chrome_view::ChromeView::new(sheet))
+                .into()
+        }
         Shown::NewSession | Shown::NewSessionWorker | Shown::TrustFolder => cx
             .new(|cx| NewSessionView::new(new_session(which), acts, None, cx))
             .into(),
