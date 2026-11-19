@@ -16,7 +16,7 @@ use notchling_local_api::SOCKET_NAME;
 use super::codex_children::{DaemonChildren, Kept};
 use super::data::{DataRoot, Session, Tool};
 use super::inspector::SubagentRow;
-use super::job_fan::{extra_shells, mark_running};
+use super::job_fan::{extra_shells_found, mark_running, FanOutputs};
 use super::log::{self, Change};
 use super::paging::{Counts, Tree};
 use super::subagent_rows::{decorate, Disk, SubagentRows};
@@ -60,6 +60,7 @@ pub struct Loader {
     children: Arc<dyn ChildSource>,
     peeked: SubagentRows,
     fans: FanReader,
+    fan_outputs: FanOutputs,
     agy_log: Option<AgyLog>,
     last: Option<(String, Arc<Conversation>)>,
 }
@@ -95,6 +96,7 @@ impl Loader {
             tree: Tree::default(),
             peeked: SubagentRows::new(Disk(registry.clone())),
             fans: FanReader::default(),
+            fan_outputs: FanOutputs::default(),
             agy_log: None,
             last: None,
             root,
@@ -172,7 +174,14 @@ impl Loader {
             Some(session) if !partial => self.fan_of(session),
             _ => Arc::default(),
         };
-        let fan_shells = extra_shells(&fan, &conversation);
+        let tmp = self.root.task_tmp();
+        if !partial {
+            self.fan_outputs.keep_only(&fan);
+        }
+        let outputs = &mut self.fan_outputs;
+        let fan_shells = extra_shells_found(&fan, &conversation, &mut |entry| {
+            outputs.lookup(&tmp, entry, now_ms)
+        });
         let (subagents, subagent_rows, subagent_counts) = if partial {
             (Vec::new(), Vec::new(), Counts::default())
         } else {

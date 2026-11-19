@@ -6,6 +6,7 @@ pub mod job_fan;
 pub mod jobs;
 pub mod lanes;
 pub mod monitor;
+pub mod task_output;
 
 #[cfg(test)]
 mod jobs_prompt_tests;

@@ -13,12 +13,13 @@ pub fn shell_rows(
     shown: Option<&[String]>,
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Vec<ShellRow> {
-    shell_rows_with_fan(conversation, &[], shown, writers)
+    shell_rows_with_fan(conversation, &[], &[], shown, writers)
 }
 
 pub fn shell_rows_with_fan(
     conversation: &Conversation,
     fan: &[BackgroundShell],
+    idle: &[String],
     shown: Option<&[String]>,
     writers: &dyn Fn(&str) -> Vec<i32>,
 ) -> Vec<ShellRow> {
@@ -32,8 +33,12 @@ pub fn shell_rows_with_fan(
                     .is_none_or(|ids| ids.contains(shell.id.as_str()))
             })
             .map(|(shell, from_fan)| {
-                let state = if from_fan {
-                    ShellState::Running
+                let state = if from_fan && !conversation.finished_agents.contains_key(&shell.id) {
+                    if idle.contains(&shell.id) {
+                        ShellState::Ended("ended".to_string())
+                    } else {
+                        ShellState::Running
+                    }
                 } else {
                     shells::state(shell, &conversation.finished_agents, writers)
                 };
