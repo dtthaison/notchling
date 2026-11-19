@@ -216,7 +216,7 @@ pub fn choose_model(
 }
 
 pub fn pick_text(model: &str, effort: &str) -> String {
-    format!("{model} {effort}")
+    [model, effort].join(" ")
 }
 
 pub fn tool_name(tool: usize) -> &'static str {

@@ -224,7 +224,7 @@ pub fn fate_text(fate: &str) -> String {
 pub fn why_text(text: &str) -> String {
     text.split("; ")
         .map(|part| match part.rsplit_once(": ") {
-            Some((key, why)) if known_why(why) => format!("{key}: {}", one_why(why)),
+            Some((key, why)) if known_why(why) => t::costs::why_for_key(key, &one_why(why)),
             _ if known_why(part) => one_why(part),
             _ => part.to_owned(),
         })
@@ -256,6 +256,18 @@ fn one_why(why: &str) -> String {
         "edited" => t::costs::why_edited(),
         "replacement-skipped" => t::costs::why_replacement_skipped(),
         _ => t::costs::why_duplicate_id(),
+    }
+    .to_owned()
+}
+
+pub fn undo_text(detail: &str) -> String {
+    match detail {
+        "kept" => t::costs::undo_kept(),
+        "changed-since" => t::costs::undo_changed_since(),
+        "re-created" => t::costs::undo_re_created(),
+        "backup-missing" => t::costs::undo_backup_missing(),
+        "never-applied" => t::costs::undo_never_applied(),
+        other => return other.to_owned(),
     }
     .to_owned()
 }
@@ -626,7 +638,7 @@ impl SetupModel {
                                     &self.home,
                                 ),
                                 outcome: Outcome::parse(r["outcome"].as_str().unwrap_or_default()),
-                                detail: r["detail"].as_str().map(str::to_owned),
+                                detail: r["detail"].as_str().map(undo_text),
                             })
                             .collect()
                     })

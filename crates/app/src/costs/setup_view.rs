@@ -456,10 +456,10 @@ impl SetupView {
             let ink = if w.done { Ink::Done } else { Ink::Needs };
             let mut detail = change_word(w.change).to_owned();
             if let Some(backup) = &w.backup {
-                detail = format!("{detail} · {}", t::costs::written_backup(backup));
+                detail = t::costs::joined(&detail, &t::costs::written_backup(backup));
             }
             if let Some(error) = &w.error {
-                detail = format!("{detail} · {error}");
+                detail = t::costs::joined(&detail, error);
             }
             rows = rows.child(
                 div()
@@ -571,7 +571,7 @@ impl SetupView {
                     };
                     let mut line = word.to_owned();
                     if let Some(d) = &r.detail {
-                        line = format!("{line} · {d}");
+                        line = t::costs::joined(&line, d);
                     }
                     row = row.child(
                         div()

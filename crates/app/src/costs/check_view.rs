@@ -67,7 +67,7 @@ impl CostsView {
     fn check_row(&self, row: &Row, first: bool, a: Appearance, cx: &mut Context<Self>) -> Div {
         let mut detail = format!("{} · {}", tool_title(row.tool), drift_word(row.state));
         if let Some(extra) = &row.detail {
-            detail = format!("{detail} · {extra}");
+            detail = t::costs::joined(&detail, extra);
         }
         let id = SharedString::from(format!("costs-dot-{}", row.id));
         let dot = gate::tip_text(

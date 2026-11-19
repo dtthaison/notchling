@@ -18,7 +18,7 @@ impl Drift {
     pub fn from_row(state: &str, detail: Option<&str>) -> Drift {
         let kept = |d: &str| {
             d.split("; ")
-                .all(|part| part == "kept" || part.ends_with(": kept"))
+                .all(|part| part.rsplit(':').next().is_some_and(|w| w.trim() == "kept"))
         };
         match (state, detail) {
             ("skipped", Some("kept")) => Drift::Yours,

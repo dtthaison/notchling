@@ -426,6 +426,21 @@ costs-outcome-gone = Already gone
 # What Undo did to a file: it changed since Apply, so it was left alone.
 costs-outcome-conflict = Left as it is
 
+# Under a file Undo left alone: the person took it over with Keep Mine.
+costs-undo-kept = Yours, kept
+
+# Under a file Undo left alone: it was edited after Notchling wrote it.
+costs-undo-changed-since = Edited since Notchling wrote it; left as it is
+
+# Under a file Undo left alone: it was created again after Notchling took it away.
+costs-undo-re-created = Created again since; left as it is
+
+# Under a file Undo could not put back: its backup is gone.
+costs-undo-backup-missing = Its backup is missing
+
+# Under a file Undo found never written.
+costs-undo-never-applied = Was never written
+
 # What Undo did to a file: it failed.
 costs-outcome-failed = Failed
 
@@ -466,3 +481,11 @@ costs-why-replacement-skipped = Skipped until the new rule file is written
 
 # A file skipped because another action names the same file.
 costs-why-duplicate-id = Skipped, listed twice
+
+## Joins
+
+# Two pieces of a status line, such as a state and what it concerns.
+costs-joined = { $first } · { $second }
+
+# A key's name and why Notchling left it, in one line.
+costs-why-for-key = { $key }: { $why }

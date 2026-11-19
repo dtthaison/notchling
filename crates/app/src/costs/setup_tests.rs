@@ -1,7 +1,5 @@
 use super::renders::{plan_reply, setup, versions_reply, Shown, HOME};
-use super::setup::{
-    diff_line, fate_text, why_text, Change, DiffLine, Outcome, Plan, SetupModel, Stage,
-};
+use super::setup::{diff_line, fate_text, Change, DiffLine, Outcome, Plan, SetupModel, Stage};
 use serde_json::json;
 
 fn plan(on: bool, ticked: bool) -> Plan {
@@ -179,15 +177,16 @@ fn undo_is_offered_for_each_tool_that_was_written_until_it_is_undone() {
 fn an_undo_lists_the_files_it_left_alone() {
     let m = setup(Shown::Applied);
     let undone = m.undone_for(0).unwrap();
-    assert_eq!(undone.rows.len(), 3);
+    assert_eq!(undone.rows.len(), 4);
     let conflicts = undone.conflicts();
-    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts.len(), 2);
     assert_eq!(conflicts[0].path, "~/.claude/agents/notchling-builder.md");
     assert_eq!(conflicts[0].outcome, Outcome::Conflict);
     assert_eq!(
         conflicts[0].detail.as_deref(),
-        Some("edited since Notchling wrote it; left as it is")
+        Some("Edited since Notchling wrote it; left as it is")
     );
+    assert_eq!(conflicts[1].detail.as_deref(), Some("Yours, kept"));
 }
 
 #[test]
