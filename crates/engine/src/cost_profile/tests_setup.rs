@@ -74,7 +74,7 @@ fn a_bare_claude_install_gets_only_notchlings_own_files_and_keys() {
     assert!(rig
         .names(&rig.roots.claude)
         .iter()
-        .any(|n| n.starts_with("settings.json.notchling-backup-")));
+        .any(|n| n.starts_with("settings.json.notchling-setup-")));
 }
 
 #[test]
@@ -280,7 +280,8 @@ fn replacing_the_hand_written_rules_needs_consent_and_keeps_every_other_line() {
     rig.write(&rig.rule("model-choice.md"), MODEL_CHOICE);
     rig.write(&rig.rule("model-choice.md.bak-20261115"), "old copy");
     let p = planned(&rig, &Options::default());
-    assert_eq!(kind(&p, ID_OWN_RULES), Kind::Offer);
+    let own = format!("{ID_OWN_RULES}model-choice.md");
+    assert_eq!(kind(&p, &own), Kind::Offer);
     assert!(!p
         .get(ID_RULE)
         .and_then(|a| a.after.clone())
@@ -288,7 +289,7 @@ fn replacing_the_hand_written_rules_needs_consent_and_keeps_every_other_line() {
         .contains("Escalate one step"));
     assert!(!p.report.is_empty());
     let p = planned(&rig, &Options::consenting(&[CONSENT_RULES]));
-    assert_eq!(kind(&p, ID_OWN_RULES), Kind::Remove);
+    assert_eq!(kind(&p, &own), Kind::Remove);
     let text = p.get(ID_RULE).and_then(|a| a.after.clone()).expect("text");
     assert!(text.contains("## Your own rules, kept from model-choice.md"));
     assert!(text.contains("Escalate one step"));
@@ -297,9 +298,9 @@ fn replacing_the_hand_written_rules_needs_consent_and_keeps_every_other_line() {
     assert_eq!(p.profile.preset, "balanced");
     assert!(p
         .profile
-        .imported
-        .as_ref()
-        .is_some_and(|i| i.source == "model-choice.md"));
+        .imports
+        .iter()
+        .any(|i| i.source == "model-choice.md"));
     let (have, probe, manifest) = (avail(), Fake::all(), Manifest::default());
     let done = apply(&env(&rig, &have, &probe, &manifest), &p, 5);
     assert!(!done.failed(), "{:?}", done.results);
@@ -307,19 +308,20 @@ fn replacing_the_hand_written_rules_needs_consent_and_keeps_every_other_line() {
     let backups = rig.names(&rig.roots.claude.join("rules"));
     let backup = backups
         .iter()
-        .find(|n| n.starts_with("model-choice.md.notchling-backup-"))
+        .find(|n| n.starts_with("model-choice.md.notchling-setup-"))
         .expect("backup");
     assert_eq!(rig.read(&rig.rule(backup)), MODEL_CHOICE);
     assert!(backups.contains(&"model-choice.md.bak-20261115".to_string()));
 }
 
 #[test]
-fn a_second_hand_written_model_file_is_left_alone() {
+fn a_second_hand_written_model_file_is_replaced_and_imported_too() {
     let rig = Rig::new("own2").claude();
     rig.write(&rig.rule("model-choice.md"), MODEL_CHOICE);
     rig.write(&rig.rule("models-extra.md"), "# my other rule\n");
     let p = planned(&rig, &everything());
-    assert_eq!(kind(&p, "claude.rules.left.models-extra.md"), Kind::Skip);
+    let other = format!("{ID_OWN_RULES}models-extra.md");
+    assert_eq!(kind(&p, &other), Kind::Remove);
 }
 
 #[test]
@@ -386,10 +388,10 @@ fn files_that_point_at_the_replaced_rule_get_a_pointer_fix_with_consent() {
         "# mine\nno pointer here\n",
     );
     let p = planned(&rig, &Options::default());
-    assert_eq!(kind(&p, "claude.pointer.helper.md"), Kind::Offer);
+    assert_eq!(kind(&p, "claude.pointer.agents/helper.md"), Kind::Offer);
     assert!(p.get("claude.pointer.CLAUDE.md").is_none());
     let p = planned(&rig, &Options::consenting(&[CONSENT_RULES]));
-    let a = p.get("claude.pointer.helper.md").expect("pointer");
+    let a = p.get("claude.pointer.agents/helper.md").expect("pointer");
     assert_eq!(
         a.after.as_deref(),
         Some("see ~/.claude/rules/notchling-cost.md for models\n")

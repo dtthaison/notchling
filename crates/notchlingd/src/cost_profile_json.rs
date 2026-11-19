@@ -53,14 +53,15 @@ pub fn profile(profile: &Profile, avail: &Available, tier: Tier) -> Value {
     });
     if tier == Tier::App {
         out["guards"] = json!(profile.guards);
-        out["imported"] = match &profile.imported {
-            Some(i) => json!({
+        let one = |i: &notchling_engine::cost_profile::model::Imported| {
+            json!({
                 "source": i.source,
                 "kept": i.kept,
                 "report": i.report.iter().map(|r| json!({"line": r.number, "text": r.text, "fate": r.fate})).collect::<Vec<_>>(),
-            }),
-            None => Value::Null,
+            })
         };
+        out["imported"] = profile.imports.first().map_or(Value::Null, one);
+        out["imports"] = Value::Array(profile.imports.iter().map(one).collect());
     }
     out
 }

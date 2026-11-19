@@ -7,6 +7,7 @@ pub mod import;
 pub mod keys;
 pub mod manifest;
 pub mod model;
+pub mod paths;
 pub mod plan;
 pub mod plan_other;
 pub mod presets;
@@ -14,6 +15,7 @@ pub mod probe;
 pub mod pstack;
 pub mod render;
 pub mod resolve;
+pub mod safe;
 pub mod service;
 pub mod undo;
 
@@ -32,6 +34,10 @@ pub use undo::{undo, Outcome, UndoResult};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_safe_io;
+#[cfg(test)]
+mod tests_safety;
 #[cfg(test)]
 mod tests_setup;
 #[cfg(test)]

@@ -90,6 +90,7 @@ pub struct Action {
     pub keys: Vec<KeyRec>,
     pub notes: Vec<String>,
     pub block: Option<String>,
+    pub requires: Vec<String>,
     pub keep_backup_of: Option<String>,
 }
 
@@ -110,6 +111,7 @@ impl Action {
             keys: Vec::new(),
             notes: Vec::new(),
             block: None,
+            requires: Vec::new(),
             keep_backup_of: None,
         }
     }

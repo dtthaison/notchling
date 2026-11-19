@@ -1,11 +1,12 @@
 use super::action::*;
 use super::detect::Detected;
 use super::diff::unified;
-use super::keys::codex_keys;
+use super::keys::codex_keys_with;
 use super::manifest::Part;
 use super::model::Profile;
 use super::plan::file_action;
 use super::render::{self as r, fence_close, fence_open};
+use super::safe::read_in;
 use crate::catalog::Tool;
 use crate::tools::agy_sidecar::plugin::{self, Plugin, MARK, MARK_TEXT};
 use crate::tools::agy_sidecar::Roots;
@@ -38,7 +39,7 @@ fn block_action(env: &Env, opts: &Options, profile: &Profile, path: &std::path::
         r::FENCE_ID,
         &r::codex_block(profile, env.avail, opts.features),
     );
-    let current = match read_text(path) {
+    let current = match read_in(env.roots, path) {
         Ok(t) => t,
         Err(why) => return a.skip(&format!("unreadable: {why}")),
     };
@@ -59,6 +60,13 @@ fn block_action(env: &Env, opts: &Options, profile: &Profile, path: &std::path::
         Some(text) => match fence_region(text, r::FENCE_ID) {
             Some((s, e)) => {
                 let region = &text[s..e];
+                if entry.is_some_and(|x| x.released) && !forced {
+                    a.before = current.clone();
+                    a.state = State::Edited;
+                    a.kind = Kind::Skip;
+                    a.reason = Some("kept".to_string());
+                    return a;
+                }
                 let unedited =
                     entry.is_none_or(|x| x.hash.as_deref() == Some(hash(region).as_str()));
                 if !unedited && !forced {
@@ -146,7 +154,7 @@ pub fn codex_plan(
 fn config_action(env: &Env, opts: &Options, profile: &Profile, path: &std::path::Path) -> Action {
     let mut a = Action::new(ID_CODEX_CONFIG, Tool::Codex, path, Part::Keys);
     a.needs = Some(CONSENT_CODEX_CONFIG);
-    let text = match read_text(path) {
+    let text = match read_in(env.roots, path) {
         Ok(Some(t)) => t,
         Ok(None) => return a.skip("no-file"),
         Err(why) => return a.skip(&format!("unreadable: {why}")),
@@ -156,7 +164,8 @@ fn config_action(env: &Env, opts: &Options, profile: &Profile, path: &std::path:
         .get(ID_CODEX_CONFIG)
         .map(|e| e.keys.clone())
         .unwrap_or_default();
-    match codex_keys(&text, profile, env.avail, env.probe, &prior) {
+    let forced = opts.force.contains(ID_CODEX_CONFIG);
+    match codex_keys_with(&text, profile, env.avail, env.probe, &prior, forced) {
         Err(why) => a.skip(&format!("refused: {why}")),
         Ok(plan) => {
             a.diff = unified(&path.to_string_lossy(), &text, &plan.text);

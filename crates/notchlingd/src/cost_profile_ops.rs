@@ -285,7 +285,7 @@ impl CostProfileOps {
 
     fn plan(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let opts = Self::consent(args)?;
-        let plan = self.service.plan(&opts);
+        let plan = self.service.plan(&opts).map_err(failed)?;
         let avail = self.service.available();
         Ok(json!({"on": self.switch.is_on(), "plan": view::plan(&plan, &avail, caller.tier)}))
     }
@@ -300,11 +300,11 @@ impl CostProfileOps {
         let _one = self.writing.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(off) = self.off() {
             let mut out = off;
-            let plan = self.service.plan(&opts);
+            let plan = self.service.plan(&opts).map_err(failed)?;
             out["plan"] = view::plan(&plan, &self.service.available(), caller.tier);
             return Ok(out);
         }
-        let (plan, applied, saved) = self.service.apply(&opts, (self.clock)());
+        let (plan, applied, saved) = self.service.apply(&opts, (self.clock)()).map_err(failed)?;
         let mut out = json!({
             "on": true,
             "applied": applied.results.iter().any(|r| r.done),
@@ -332,7 +332,7 @@ impl CostProfileOps {
         if let Some(off) = self.off() {
             return Ok(off);
         }
-        let results = self.service.undo(tool, (self.clock)());
+        let results = self.service.undo(tool, (self.clock)()).map_err(failed)?;
         Ok(json!({
             "on": true,
             "tool": tool_key(tool),
@@ -366,7 +366,7 @@ impl CostProfileOps {
                 .resolve(id, choice, (self.clock)())
                 .map_err(failed)?;
         }
-        let rows = self.service.check();
+        let rows = self.service.check().map_err(failed)?;
         let drift = rows
             .iter()
             .any(|r| !matches!(r.state, "in_step" | "skipped"));

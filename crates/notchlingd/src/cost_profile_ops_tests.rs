@@ -343,7 +343,7 @@ fn a_consent_the_person_did_not_give_leaves_that_part_an_offer() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|a| a["id"] == "claude.rules.replaced")
+        .find(|a| a["id"] == "claude.rules.replaced.model-choice.md")
         .unwrap();
     assert_eq!(replaced["kind"], "offer");
     assert_eq!(replaced["needs"], "rules");

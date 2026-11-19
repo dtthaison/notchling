@@ -2,11 +2,12 @@ use super::action::*;
 use super::apply::{apply, Applied};
 use super::import::cost_table_picks;
 use super::keys::current_raw;
-use super::manifest::{Manifest, Part};
+use super::manifest::{Entry, Manifest, Part};
 use super::model::Profile;
 use super::plan::{plan, ID_RULE};
 use super::plan_other::fence_region;
 use super::render::FENCE_ID;
+use super::safe::read_in;
 use crate::catalog::Tool;
 use std::path::PathBuf;
 
@@ -19,6 +20,10 @@ pub struct Row {
     pub detail: Option<String>,
 }
 
+fn a_kept(a: &Action) -> bool {
+    a.reason.as_deref() == Some("kept")
+}
+
 fn everything() -> Options {
     let parts: Vec<&str> = CONSENTS
         .iter()
@@ -28,8 +33,8 @@ fn everything() -> Options {
     Options::consenting(&parts)
 }
 
-fn fallback(entry: &super::manifest::Entry) -> (&'static str, Option<String>) {
-    match read_text(&entry.path) {
+fn fallback(env: &Env, entry: &Entry) -> (&'static str, Option<String>) {
+    match read_in(env.roots, &entry.path) {
         Ok(Some(text)) => match (entry.part, &entry.hash) {
             (Part::File, Some(h)) if !entry.removed && *h != hash(&text) => ("edited", None),
             (Part::File, _) if entry.removed => ("returned", None),
@@ -47,12 +52,13 @@ pub fn check(env: &Env, profile: &Profile) -> Vec<Row> {
     for entry in &env.manifest.entries {
         let action = planned.get(&entry.id);
         let (state, detail) = match action {
-            None => fallback(entry),
+            None => fallback(env, entry),
             Some(a) => match (a.kind, a.state) {
                 (Kind::Unchanged, _) if !a.notes.is_empty() => {
                     ("changed_by_tool", Some(a.notes.join("; ")))
                 }
                 (Kind::Unchanged, _) => ("in_step", None),
+                (Kind::Skip, _) if a_kept(a) => ("skipped", Some("kept".to_string())),
                 (Kind::Skip, State::Edited) => ("edited", None),
                 (Kind::Skip, _) => ("skipped", a.reason.clone()),
                 (Kind::Remove | Kind::Offer, _) if entry.removed => ("returned", None),
@@ -109,32 +115,37 @@ pub fn resolve(
         .get(id)
         .cloned()
         .ok_or_else(|| format!("nothing of Notchling's is recorded as {id}"))?;
-    if choice == Choice::Keep && id == ID_RULE {
-        let text = read_text(&entry.path)?.unwrap_or_default();
-        let mut profile = profile.clone();
-        for (role, cell) in cost_table_picks(&text) {
-            if profile.cell(role, Tool::Claude).is_none_or(|c| c != cell) {
-                profile.picks.insert((role, Tool::Claude), cell);
-            }
-        }
-        return rewrite_one(env, &profile, id, stamp);
-    }
     match choice {
         Choice::Restore => rewrite_one(env, profile, id, stamp),
         Choice::Keep => {
             let mut manifest = env.manifest.clone();
             let mut entry = entry;
-            let text = read_text(&entry.path)?.unwrap_or_default();
+            let text = read_in(env.roots, &entry.path)?.unwrap_or_default();
+            let mut profile = profile.clone();
             match entry.part {
-                Part::File => entry.hash = Some(hash(&text)),
+                Part::File => {
+                    entry.hash = Some(hash(&text));
+                    entry.released = true;
+                    if id == ID_RULE {
+                        for (role, cell) in cost_table_picks(&text) {
+                            if profile.cell(role, Tool::Claude).is_none_or(|c| c != cell) {
+                                profile.picks.insert((role, Tool::Claude), cell);
+                            }
+                        }
+                    }
+                }
                 Part::Block => {
                     let (s, e) = fence_region(&text, FENCE_ID).ok_or("the block is gone")?;
                     entry.hash = Some(hash(&text[s..e]));
+                    entry.released = true;
                 }
                 Part::Keys => {
                     for rec in &mut entry.keys {
                         if let Some(now) = current_raw(&text, entry.tool, &rec.path) {
-                            rec.after = now;
+                            if now != rec.after {
+                                rec.after = now;
+                                rec.kept = true;
+                            }
                         }
                     }
                 }
@@ -143,7 +154,7 @@ pub fn resolve(
             manifest.save(env.data_dir)?;
             Ok(Resolved {
                 manifest,
-                profile: profile.clone(),
+                profile,
                 applied: None,
             })
         }

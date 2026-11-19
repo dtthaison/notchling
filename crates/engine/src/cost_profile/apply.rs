@@ -1,8 +1,12 @@
 use super::action::*;
 use super::manifest::{Entry, Manifest, Part};
 use super::model::Profile;
-use crate::install::file::{rewrite, write_backup};
-use std::path::{Path, PathBuf};
+use super::paths::target_of;
+use super::plan_other::fence_region;
+use super::render::FENCE_ID;
+use super::safe::{backup, guard, make_parent, prune_backups, publish_new, replace_if, Publish};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct ActionResult {
@@ -27,52 +31,44 @@ impl Applied {
     }
 }
 
-pub(crate) fn make_parent(path: &Path) -> Result<(), String> {
-    match path.parent() {
-        Some(dir) => std::fs::create_dir_all(dir).map_err(|e| format!("the folder: {e}")),
-        None => Ok(()),
-    }
+enum Stop {
+    Failed(String),
+    Halt(String),
 }
 
-fn create(a: &Action) -> Result<Option<PathBuf>, String> {
+fn create(a: &Action) -> Result<(), String> {
     let text = a.after.as_deref().unwrap_or_default();
     make_parent(&a.path)?;
-    if std::fs::symlink_metadata(&a.path).is_ok() {
-        return Err("the file appeared while the plan was made; nothing was written".into());
-    }
-    notchling_platform::files::write_private_no_follow(&a.path, text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    Ok(None)
+    publish_new(&a.path, text.as_bytes()).map_err(|e| match e {
+        Publish::Exists => "the file appeared while the plan was made; nothing was written".into(),
+        Publish::Failed(why) => why,
+    })
 }
 
-fn update(a: &Action, stamp: u64) -> Result<Option<PathBuf>, String> {
+fn update(a: &Action) -> Result<(), String> {
     let before = a.before.clone().unwrap_or_default();
     let after = a.after.clone().unwrap_or_default();
-    let blank_ok = before.is_empty();
-    let change =
-        move |old: &str, _: crate::install::file::State| -> Result<Option<String>, String> {
-            if old != before && !(blank_ok && old.trim().is_empty()) {
-                return Err("the file changed while the plan was made; nothing was written".into());
-            }
-            Ok(Some(after.clone()))
-        };
-    rewrite(&a.path, stamp, &change)
-        .map(|done| done.backup)
-        .map_err(|e| e.to_string())
+    replace_if(&a.path, &before, before.is_empty(), after.as_bytes())
 }
 
-fn remove(a: &Action, stamp: u64) -> Result<Option<PathBuf>, String> {
+fn remove(a: &Action) -> Result<(), String> {
     let before = a.before.clone().unwrap_or_default();
     match read_text(&a.path)? {
         Some(now) if now == before => {}
         Some(_) => {
             return Err("the file changed while the plan was made; nothing was removed".into())
         }
-        None => return Ok(None),
+        None => return Ok(()),
     }
-    let backup = write_backup(&a.path, &before, stamp).map_err(|e| e.to_string())?;
-    std::fs::remove_file(&a.path).map_err(|e| e.to_string())?;
-    Ok(Some(backup))
+    std::fs::remove_file(&a.path).map_err(|e| e.to_string())
+}
+
+fn before_hash_of(a: &Action) -> Option<String> {
+    let before = a.before.as_deref()?;
+    match a.part {
+        Part::Block => fence_region(before, FENCE_ID).map(|(s, e)| hash(&before[s..e])),
+        _ => Some(hash(before)),
+    }
 }
 
 fn entry_for(a: &Action, backup: Option<PathBuf>, prior: Option<&Entry>, stamp: u64) -> Entry {
@@ -94,20 +90,78 @@ fn entry_for(a: &Action, backup: Option<PathBuf>, prior: Option<&Entry>, stamp: 
         backup: carried.map_or(backup.clone(), |p| p.backup.clone().or(backup)),
         keys: a.keys.clone(),
         at: stamp,
+        pending: true,
+        before_hash: before_hash_of(a),
+        released: false,
+    }
+}
+
+fn revert(env: &Env, manifest: &mut Manifest, id: &str, prior: Option<Entry>) {
+    match prior {
+        Some(entry) => manifest.put(entry),
+        None => manifest.drop_id(id),
+    }
+    let _ = manifest.save(env.data_dir);
+}
+
+fn run_one(
+    env: &Env,
+    plan: &Plan,
+    a: &Action,
+    manifest: &mut Manifest,
+    done: &HashSet<String>,
+    stamp: u64,
+) -> Result<Option<PathBuf>, Stop> {
+    for need in &a.requires {
+        let met = done.contains(need) || plan.get(need).is_some_and(|x| x.kind == Kind::Unchanged);
+        if !met {
+            return Err(Stop::Failed(
+                "its replacement wasn't written, so this was left alone".into(),
+            ));
+        }
+    }
+    match target_of(env.roots, &a.id) {
+        Some((tool, path)) if tool == a.tool && path == a.path => {}
+        _ => return Err(Stop::Failed("this is not one of Notchling's files".into())),
+    }
+    guard(env.roots, &a.path).map_err(Stop::Failed)?;
+    let made = match (a.kind, &a.before) {
+        (Kind::Update | Kind::Remove, Some(before)) => {
+            Some(backup(&a.path, before, stamp).map_err(Stop::Failed)?)
+        }
+        _ => None,
+    };
+    let prior = manifest.get(&a.id).cloned();
+    manifest.put(entry_for(a, made.clone(), prior.as_ref(), stamp));
+    if let Err(why) = manifest.save(env.data_dir) {
+        match prior {
+            Some(entry) => manifest.put(entry),
+            None => manifest.drop_id(&a.id),
+        }
+        return Err(Stop::Halt(why));
+    }
+    let wrote = match a.kind {
+        Kind::Remove => remove(a),
+        Kind::Create => create(a),
+        _ => update(a),
+    };
+    match wrote {
+        Ok(()) => Ok(made),
+        Err(why) => {
+            revert(env, manifest, &a.id, prior);
+            Err(Stop::Failed(why))
+        }
     }
 }
 
 pub fn apply(env: &Env, plan: &Plan, stamp: u64) -> Applied {
     let mut manifest = env.manifest.clone();
     let mut results = Vec::new();
+    let mut done: HashSet<String> = HashSet::new();
     let mut ordered: Vec<&Action> = plan.actions.iter().filter(|a| a.kind.writes()).collect();
     ordered.sort_by_key(|a| a.kind == Kind::Remove);
+    let mut halted = false;
     for a in ordered {
-        let done = match (a.part, a.kind) {
-            (_, Kind::Remove) => remove(a, stamp),
-            (_, Kind::Create) => create(a),
-            _ => update(a, stamp),
-        };
         let mut result = ActionResult {
             id: a.id.clone(),
             path: a.path.clone(),
@@ -116,26 +170,51 @@ pub fn apply(env: &Env, plan: &Plan, stamp: u64) -> Applied {
             backup: None,
             error: None,
         };
-        match done {
-            Ok(backup) => {
-                let prior = manifest.get(&a.id).cloned();
-                manifest.put(entry_for(a, backup.clone(), prior.as_ref(), stamp));
+        if halted {
+            result.error = Some("left alone: the record of earlier changes can't be saved".into());
+            results.push(result);
+            continue;
+        }
+        match run_one(env, plan, a, &mut manifest, &done, stamp) {
+            Ok(made) => {
+                done.insert(a.id.clone());
                 result.done = true;
-                result.backup = backup;
+                result.backup = made;
             }
-            Err(why) => result.error = Some(why),
+            Err(Stop::Failed(why)) => result.error = Some(why),
+            Err(Stop::Halt(why)) => {
+                halted = true;
+                result.error = Some(format!("the record of changes: {why}"));
+            }
         }
         results.push(result);
     }
-    if let Err(why) = manifest.save(env.data_dir) {
-        results.push(ActionResult {
-            id: "manifest".to_string(),
-            path: super::manifest::Manifest::path(env.data_dir),
-            kind: Kind::Update,
-            done: false,
-            backup: None,
-            error: Some(why),
-        });
+    for entry in manifest.entries.iter_mut() {
+        if done.contains(&entry.id) {
+            entry.pending = false;
+        }
+    }
+    if !done.is_empty() {
+        if let Err(why) = manifest.save(env.data_dir) {
+            results.push(ActionResult {
+                id: "manifest".to_string(),
+                path: Manifest::path(env.data_dir),
+                kind: Kind::Update,
+                done: false,
+                backup: None,
+                error: Some(why),
+            });
+        }
+    }
+    let pinned: HashSet<PathBuf> = manifest
+        .entries
+        .iter()
+        .filter_map(|e| e.backup.clone())
+        .collect();
+    for id in &done {
+        if let Some(entry) = manifest.get(id) {
+            prune_backups(&entry.path, &pinned);
+        }
     }
     Applied {
         results,

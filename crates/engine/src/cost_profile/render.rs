@@ -85,18 +85,19 @@ fn claude(profile: &Profile, role: Role, avail: &Available) -> Option<Resolved> 
 }
 
 fn kept_section(profile: &Profile) -> String {
-    let Some(imported) = &profile.imported else {
-        return String::new();
-    };
-    let lines: Vec<&str> = imported.kept.iter().map(String::as_str).collect();
-    if lines.iter().all(|l| l.trim().is_empty()) {
-        return String::new();
+    let mut out = String::new();
+    for imported in &profile.imports {
+        let lines: Vec<&str> = imported.kept.iter().map(String::as_str).collect();
+        if lines.iter().all(|l| l.trim().is_empty()) {
+            continue;
+        }
+        out.push_str(&format!(
+            "\n## Your own rules, kept from {}\n\n{}\n",
+            imported.source,
+            lines.join("\n").trim_matches('\n')
+        ));
     }
-    format!(
-        "\n## Your own rules, kept from {}\n\n{}\n",
-        imported.source,
-        lines.join("\n").trim_matches('\n')
-    )
+    out
 }
 
 fn wait_line(habits: &Habits, features: Features) -> String {

@@ -48,7 +48,7 @@ fn snapshot(rig: &Rig) -> Vec<(String, String)> {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, out);
-            } else if !p.to_string_lossy().contains("notchling-backup")
+            } else if !p.to_string_lossy().contains("notchling-setup")
                 && !p.to_string_lossy().contains("/data/")
             {
                 out.push((
@@ -257,8 +257,8 @@ fn check_reports_each_kind_of_drift_and_keep_mine_imports_the_edit() {
         after
             .iter()
             .find(|r| r.id == "claude.rule")
-            .map(|r| r.state),
-        Some("in_step")
+            .map(|r| (r.state, r.detail.as_deref())),
+        Some(("skipped", Some("kept")))
     );
 }
 

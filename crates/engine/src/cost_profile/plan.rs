@@ -2,13 +2,15 @@ use super::action::*;
 use super::detect::{detect, ours, Detected, OLD_RULE_REF, ORCHESTRATOR_FILE, PSTACK_RULE};
 use super::diff::unified;
 use super::import::{apply_to, import_rules};
-use super::keys::claude_keys;
+use super::keys::claude_keys_with;
 use super::manifest::Part;
 use super::model::Profile;
+use super::paths::pointer_id;
 use super::pstack;
 use super::render::{self as r, Features};
+use super::safe::{is_backup_of, read_in};
 use crate::catalog::Tool;
-use crate::install::file::{load, State as FileState};
+use crate::install::jsonc::is_blank;
 use std::path::Path;
 
 pub const ID_RULE: &str = "claude.rule";
@@ -18,7 +20,8 @@ pub const ID_REVIEWER: &str = "claude.agent.reviewer";
 pub const ID_ORCHESTRATOR: &str = "claude.orchestrator";
 pub const ID_SETTINGS: &str = "claude.settings";
 pub const ID_PSTACK: &str = "claude.pstack";
-pub const ID_OWN_RULES: &str = "claude.rules.replaced";
+pub const ID_OWN_RULES: &str = "claude.rules.replaced.";
+pub const LEGACY_ID_OWN_RULES: &str = "claude.rules.replaced";
 pub const ID_POINTER: &str = "claude.pointer.";
 
 fn gate(mut a: Action, opts: &Options) -> Action {
@@ -41,7 +44,7 @@ pub fn file_action(
 ) -> Action {
     let mut a = Action::new(id, tool, path, Part::File);
     a.needs = needs;
-    let current = match read_text(path) {
+    let current = match read_in(env.roots, path) {
         Ok(t) => t,
         Err(why) => return a.skip(&format!("unreadable: {why}")),
     };
@@ -65,6 +68,12 @@ pub fn file_action(
     };
     let mine = entry.is_some() || ours(&text);
     if mine {
+        if entry.is_some_and(|e| e.released) && !forced {
+            a.state = State::Edited;
+            a.kind = Kind::Skip;
+            a.reason = Some("kept".to_string());
+            return a;
+        }
         let unedited = entry.is_none_or(|e| e.hash.as_deref() == Some(hash(&text).as_str()));
         if !unedited && !forced {
             a.state = State::Edited;
@@ -103,7 +112,7 @@ fn remove_action(
 ) -> Action {
     let mut a = Action::new(id, tool, path, Part::File);
     a.needs = Some(needs);
-    match read_text(path) {
+    match read_in(env.roots, path) {
         Ok(Some(text)) => {
             a.diff = unified(&path.to_string_lossy(), &text, "");
             a.before = Some(text);
@@ -146,11 +155,13 @@ fn orchestrator_base(
     path: &Path,
     features: Features,
 ) -> Option<String> {
-    let current = read_text(path).ok().flatten()?;
+    let current = read_in(env.roots, path).ok().flatten()?;
     let entry = env.manifest.get(id).filter(|e| !e.removed);
     if let (true, Some(backup)) = (
         opts.force.contains(id),
-        entry.and_then(|e| e.backup.as_ref()),
+        entry
+            .and_then(|e| e.backup.as_ref())
+            .filter(|b| is_backup_of(path, b)),
     ) {
         if let Ok(Some(original)) = read_text(backup) {
             return Some(r::orchestrator_in_place(&original, features));
@@ -216,47 +227,55 @@ fn claude_plan(
             None => out.push(Action::new(id, Tool::Claude, path, Part::File).skip("no-model")),
         }
     }
-    claude_settings(env, profile, &settings, out);
+    claude_settings(env, opts, profile, &settings, out);
     claude_optional(env, opts, profile, found, out);
 }
 
-fn claude_settings(env: &Env, profile: &Profile, path: &Path, out: &mut Vec<Action>) {
+fn claude_settings(
+    env: &Env,
+    opts: &Options,
+    profile: &Profile,
+    path: &Path,
+    out: &mut Vec<Action>,
+) {
     let mut a = Action::new(ID_SETTINGS, Tool::Claude, path, Part::Keys);
-    let loaded = match load(path) {
-        Ok(l) => l,
+    let current = match read_in(env.roots, path) {
+        Ok(Some(text)) => text,
+        Ok(None) => {
+            out.push(a.skip("no-file"));
+            return;
+        }
         Err(e) => {
             out.push(a.skip(&format!("unreadable: {e}")));
             return;
         }
     };
-    if loaded.state == FileState::Missing {
-        out.push(a.skip("no-file"));
-        return;
-    }
     let prior = env
         .manifest
         .get(ID_SETTINGS)
         .map(|e| e.keys.clone())
         .unwrap_or_default();
-    let text = if loaded.state == FileState::Empty {
+    let blank = is_blank(&current);
+    let text = if blank {
         "{}\n".to_string()
     } else {
-        loaded.text.clone()
+        current.clone()
     };
-    match claude_keys(&text, profile, env.avail, &prior) {
+    let forced = opts.force.contains(ID_SETTINGS);
+    match claude_keys_with(&text, profile, env.avail, &prior, forced) {
         Err(why) => out.push(a.skip(&format!("refused: {why}"))),
         Ok(plan) => {
-            a.diff = unified(&path.to_string_lossy(), &loaded.text, &plan.text);
+            a.diff = unified(&path.to_string_lossy(), &current, &plan.text);
             a.notes = plan
                 .skipped
                 .iter()
                 .map(|s| format!("{}: {}", s.path.join("."), s.why))
                 .collect();
             a.keys = plan.recs;
-            a.before = Some(loaded.text.clone());
+            a.before = Some(current.clone());
             a.after = Some(plan.text.clone());
             let seen = env.manifest.get(ID_SETTINGS).is_some();
-            if plan.text == loaded.text && loaded.state != FileState::Empty {
+            if plan.text == current && !blank {
                 a.kind = Kind::Unchanged;
                 a.state = State::InStep;
             } else {
@@ -322,7 +341,7 @@ fn claude_optional(
     }
     if found.pstack {
         let path = rules.join(PSTACK_RULE);
-        let existing = read_text(&path).ok().flatten();
+        let existing = read_in(env.roots, &path).ok().flatten();
         let text = pstack::render(profile, env.avail, existing.as_deref());
         out.push(file_action(
             env,
@@ -335,36 +354,34 @@ fn claude_optional(
             true,
         ));
     }
-    if let Some(own) = found.own_rules.first() {
-        out.push(remove_action(
-            env,
-            ID_OWN_RULES,
-            Tool::Claude,
-            own,
-            CONSENT_RULES,
-            opts,
-        ));
-        for other in found.own_rules.iter().skip(1) {
-            let name = other.file_name().and_then(|n| n.to_str()).unwrap_or("rule");
-            out.push(
-                Action::new(
-                    &format!("claude.rules.left.{name}"),
-                    Tool::Claude,
-                    other,
-                    Part::File,
-                )
-                .skip("another-model-rule"),
-            );
+    let rule_written = out
+        .iter()
+        .find(|x| x.id == ID_RULE)
+        .is_some_and(|x| x.kind != Kind::Skip);
+    let after_rule = |mut a: Action| {
+        if !rule_written {
+            a.kind = Kind::Skip;
+            a.reason = Some("replacement-skipped".to_string());
+        } else if a.kind.writes() || a.kind == Kind::Offer {
+            a.requires = vec![ID_RULE.to_string()];
         }
+        a
+    };
+    for own in &found.own_rules {
+        let name = own.file_name().and_then(|n| n.to_str()).unwrap_or("rule");
+        let id = format!("{ID_OWN_RULES}{name}");
+        let action = remove_action(env, &id, Tool::Claude, own, CONSENT_RULES, opts);
+        out.push(after_rule(action));
     }
     for file in &found.pointers {
-        let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let id = format!("{ID_POINTER}{name}");
-        let Ok(Some(text)) = read_text(file) else {
+        let Some(id) = pointer_id(env.roots, file) else {
+            continue;
+        };
+        let Ok(Some(text)) = read_in(env.roots, file) else {
             continue;
         };
         let new = text.replace(OLD_RULE_REF, r::RULE_NAME);
-        out.push(file_action(
+        let action = file_action(
             env,
             opts,
             &id,
@@ -373,7 +390,20 @@ fn claude_optional(
             &new,
             Some(CONSENT_RULES),
             true,
-        ));
+        );
+        out.push(after_rule(action));
+    }
+}
+
+fn mark_duplicates(actions: &mut [Action]) {
+    let mut seen: Vec<String> = Vec::new();
+    for a in actions.iter_mut() {
+        if seen.contains(&a.id) {
+            a.kind = Kind::Skip;
+            a.reason = Some("duplicate-id".to_string());
+        } else {
+            seen.push(a.id.clone());
+        }
     }
 }
 
@@ -381,10 +411,10 @@ pub fn plan(env: &Env, profile: &Profile, opts: &Options) -> Plan {
     let found = detect(env.roots);
     let mut profile = profile.clone();
     let mut report = Vec::new();
-    if let Some(own) = found.own_rules.first() {
-        if let Ok(Some(text)) = read_text(own) {
+    for own in &found.own_rules {
+        if let Ok(Some(text)) = read_in(env.roots, own) {
             let outcome = import_rules(&text, &profile);
-            report = outcome.report.clone();
+            report.extend(outcome.report.clone());
             if opts.allows(Some(CONSENT_RULES)) {
                 let source = own.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 apply_to(&mut profile, &outcome, source);
@@ -395,6 +425,7 @@ pub fn plan(env: &Env, profile: &Profile, opts: &Options) -> Plan {
     claude_plan(env, opts, &profile, &found, &mut actions);
     super::plan_other::codex_plan(env, opts, &profile, &found, &mut actions);
     super::plan_other::agy_plan(env, opts, &profile, &found, &mut actions);
+    mark_duplicates(&mut actions);
     Plan {
         actions,
         profile,

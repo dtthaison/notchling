@@ -254,3 +254,12 @@ fn an_empty_table_notchling_added_is_pruned_and_a_used_one_is_not() {
     assert_eq!(prune_empty_table(used, "agents").unwrap(), used);
     assert_eq!(prune_empty_table("a = 1\n", "agents").unwrap(), "a = 1\n");
 }
+
+#[test]
+fn an_agents_header_inside_a_multiline_string_is_not_a_table() {
+    use super::toml_edit::prune_empty_table;
+    let text = "developer_instructions = \"\"\"\n[agents]\n\n[example]\nx = 1\n\"\"\"\n";
+    assert_eq!(prune_empty_table(text, "agents").unwrap(), text);
+    let both = format!("{text}\n[agents]\n");
+    assert_eq!(prune_empty_table(&both, "agents").unwrap(), text);
+}

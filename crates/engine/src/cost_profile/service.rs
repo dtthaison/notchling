@@ -70,12 +70,13 @@ impl Service {
         Available::from_catalog(&self.catalog, &live).with_codex(&models)
     }
 
-    pub fn manifest(&self) -> Manifest {
+    pub fn manifest(&self) -> Result<Manifest, String> {
         Manifest::load(&self.data_dir)
     }
 
-    fn with_env<T>(&self, run: impl FnOnce(&Env, &Profile) -> T) -> T {
-        let (avail, manifest, profile) = (self.available(), self.manifest(), self.profile());
+    fn with_env<T>(&self, run: impl FnOnce(&Env, &Profile) -> T) -> Result<T, String> {
+        let manifest = self.manifest()?;
+        let (avail, profile) = (self.available(), self.profile());
         let env = Env {
             roots: &self.roots,
             data_dir: &self.data_dir,
@@ -83,38 +84,42 @@ impl Service {
             probe: self.probe.as_ref(),
             manifest: &manifest,
         };
-        run(&env, &profile)
+        Ok(run(&env, &profile))
     }
 
-    pub fn plan(&self, opts: &Options) -> Plan {
+    pub fn plan(&self, opts: &Options) -> Result<Plan, String> {
         self.with_env(|env, profile| plan(env, profile, opts))
     }
 
-    pub fn apply(&self, opts: &Options, stamp: u64) -> (Plan, Applied, Option<String>) {
+    pub fn apply(
+        &self,
+        opts: &Options,
+        stamp: u64,
+    ) -> Result<(Plan, Applied, Option<String>), String> {
         let (planned, applied) = self.with_env(|env, profile| {
             let planned = plan(env, profile, opts);
             let applied = apply(env, &planned, stamp);
             (planned, applied)
-        });
+        })?;
         let saved = applied
             .results
             .iter()
             .any(|r| r.done)
             .then(|| self.save_profile(&applied.profile).err())
             .flatten();
-        (planned, applied, saved)
+        Ok((planned, applied, saved))
     }
 
-    pub fn undo(&self, tool: Tool, stamp: u64) -> Vec<UndoResult> {
+    pub fn undo(&self, tool: Tool, stamp: u64) -> Result<Vec<UndoResult>, String> {
         self.with_env(|env, _| undo(env, tool, stamp).0)
     }
 
-    pub fn check(&self) -> Vec<Row> {
+    pub fn check(&self) -> Result<Vec<Row>, String> {
         self.with_env(check)
     }
 
     pub fn resolve(&self, id: &str, choice: Choice, stamp: u64) -> Result<Resolved, String> {
-        let done = self.with_env(|env, profile| resolve(env, profile, id, choice, stamp))?;
+        let done = self.with_env(|env, profile| resolve(env, profile, id, choice, stamp))??;
         self.save_profile(&done.profile)?;
         Ok(done)
     }

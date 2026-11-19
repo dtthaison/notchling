@@ -279,7 +279,7 @@ pub struct Profile {
     pub picks: BTreeMap<(Role, Tool), Cell>,
     pub habit_edits: BTreeMap<String, u64>,
     pub guards: BTreeMap<String, String>,
-    pub imported: Option<Imported>,
+    pub imports: Vec<Imported>,
 }
 
 impl Default for Profile {
@@ -296,7 +296,7 @@ impl Profile {
             picks: BTreeMap::new(),
             habit_edits: BTreeMap::new(),
             guards: BTreeMap::new(),
-            imported: None,
+            imports: Vec::new(),
         }
     }
 
@@ -342,7 +342,14 @@ impl Profile {
                     }
                 }
             }
-            p.imported = app.get("imported").and_then(imported_of);
+            p.imports = match app.get("imports").and_then(Value::as_array) {
+                Some(list) => list.iter().filter_map(imported_of).collect(),
+                None => app
+                    .get("imported")
+                    .and_then(imported_of)
+                    .into_iter()
+                    .collect(),
+            };
         }
         p
     }
@@ -353,12 +360,19 @@ impl Profile {
             "habits": self.habit_edits,
             "guards": self.guards,
         });
-        if let Some(i) = &self.imported {
-            app["imported"] = json!({
-                "source": i.source,
-                "kept": i.kept,
-                "report": i.report.iter().map(|r| json!({"n": r.number, "text": r.text, "fate": r.fate})).collect::<Vec<_>>(),
-            });
+        if !self.imports.is_empty() {
+            app["imports"] = Value::Array(
+                self.imports
+                    .iter()
+                    .map(|i| {
+                        json!({
+                            "source": i.source,
+                            "kept": i.kept,
+                            "report": i.report.iter().map(|r| json!({"n": r.number, "text": r.text, "fate": r.fate})).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect(),
+            );
         }
         Stored {
             preset: Some(self.preset.clone()),
