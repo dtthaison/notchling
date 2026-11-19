@@ -30,6 +30,7 @@ use super::skills_rows::{reinstall_result, SkillsShown};
 use super::view::{sheet_header, Acts, Dismiss};
 use crate::activity::view::ActivityView;
 mod cluster;
+mod organizations;
 mod shortcut;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
 use crate::switches::restart::{Area, LiveTurnOn};
@@ -57,6 +58,7 @@ pub struct SettingsView {
     activity: Option<Entity<ActivityView>>,
     shortcut: shortcut::ShortcutState,
     cluster: Option<Arc<crate::cluster::feed::ClusterFeed>>,
+    organizations: Option<Entity<crate::organizations::view::OrganizationsView>>,
 }
 
 pub struct SettingChanged {
@@ -94,6 +96,7 @@ impl SettingsView {
             activity: None,
             shortcut: shortcut::ShortcutState::default(),
             cluster: None,
+            organizations: None,
         }
     }
 
@@ -141,6 +144,9 @@ impl SettingsView {
         }
         if page == Page::Skills {
             self.ask_skills(cx);
+        }
+        if page == Page::Organizations {
+            self.show_organizations(cx);
         }
         if page == Page::Activity {
             match &self.activity {
@@ -657,6 +663,7 @@ impl Render for SettingsView {
                 list = list.children(self.cluster_section(a, cx));
             }
         }
+        list = list.children(self.organizations_page());
         if self.page == Page::Agents {
             let handlers = self.client_handlers(cx);
             list = list.child(agents_page(

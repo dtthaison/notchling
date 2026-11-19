@@ -7,6 +7,7 @@ pub mod ink;
 pub mod labels;
 pub mod metric;
 pub mod motion;
+pub mod org_color;
 mod palette;
 pub mod part;
 pub mod render_map;
@@ -22,6 +23,7 @@ pub use color::Color;
 pub use icon::{Icon, IconSize};
 pub use ink::{Ink, Status};
 pub use motion::{Curve, Motion};
+pub use org_color::{org_color, OrgColor, ORG_COLORS};
 pub use part::{ButtonKind, PartState};
 pub use typescale::{sentence, TypeRole, TypeSpec, Weight};
 

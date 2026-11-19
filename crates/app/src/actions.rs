@@ -285,6 +285,28 @@ impl Actions {
         self.send(&Request::ask_dismiss(id))
     }
 
+    pub fn read_full(&self, request: &Request) -> Result<Value, SendFailure> {
+        let Some(transport) = &self.transport else {
+            return Err(SendFailure::said(
+                Acting::Detached.message().unwrap_or_default(),
+            ));
+        };
+        transport
+            .call(request.op, request.args.clone())
+            .map_err(|e| match e {
+                ClientError::Api(api) => SendFailure {
+                    message: api.message,
+                    data: api.data,
+                },
+                other => {
+                    if let Some(Acting::Detached) = acting::after_error(&other) {
+                        self.set(Acting::Detached);
+                    }
+                    SendFailure::said(&acting::failure_message(other))
+                }
+            })
+    }
+
     pub fn read(&self, request: &Request) -> Result<Value, String> {
         let Some(transport) = &self.transport else {
             return Err(Acting::Detached.message().unwrap_or_default().to_owned());
