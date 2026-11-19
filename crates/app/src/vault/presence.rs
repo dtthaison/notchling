@@ -1,3 +1,6 @@
+#[derive(Clone, Copy, Debug)]
+pub struct Done;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Presence {
     #[default]

@@ -78,6 +78,7 @@ pub struct Form {
     pub custom_vars: bool,
     pub advanced: bool,
     pub focus: Field,
+    pub keyboard: bool,
     pub changes: PrefillChanges,
     pub host_confirmed: bool,
     pub error: Option<String>,
@@ -118,6 +119,7 @@ impl Form {
             custom_vars: false,
             advanced: false,
             focus: Field::Name,
+            keyboard: true,
             changes: PrefillChanges::default(),
             host_confirmed: false,
             error: None,
@@ -144,6 +146,7 @@ impl Form {
             secret_var: entry.secret_var.clone(),
             custom_vars: custom,
             focus: Field::Secret,
+            keyboard: true,
             ..Form::add()
         }
     }

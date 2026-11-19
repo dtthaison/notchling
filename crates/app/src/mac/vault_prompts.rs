@@ -75,6 +75,10 @@ impl Tracked {
         fresh
     }
 
+    fn fall_back(&mut self, ids: &[String]) {
+        self.floating.extend(ids.iter().cloned());
+    }
+
     fn for_chat(&self, fresh: &[String], raised: &[String], waiting: &[String]) -> Vec<String> {
         let mut ids: Vec<String> = Vec::new();
         for id in fresh.iter().chain(raised) {
@@ -111,7 +115,7 @@ pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
                 let fresh = seen.arrivals(&waiting);
                 let for_chat = seen.for_chat(&fresh, &raised, &waiting);
                 if !for_chat.is_empty() && !super::shell::open_chat_vault(cx, &for_chat) {
-                    seen.floating.extend(fresh.iter().cloned());
+                    seen.fall_back(&for_chat);
                 }
                 let approvals = approvals
                     .into_iter()
@@ -302,5 +306,22 @@ mod tests {
             ids(&["a", "c"])
         );
         assert!(tracked.for_chat(&[], &[], &waiting).is_empty());
+    }
+
+    #[test]
+    fn when_chat_cannot_open_the_raised_tickets_fall_back_to_the_floating_window() {
+        let mut tracked = Tracked::default();
+        let waiting = ids(&["a", "c"]);
+        let fresh = tracked.arrivals(&waiting);
+        tracked.fall_back(&tracked.for_chat(&fresh, &[], &waiting).clone());
+        let raised = ids(&["c"]);
+        let again = tracked.for_chat(&[], &raised, &waiting);
+        assert!(again.is_empty(), "already floating");
+        let mut later = Tracked::default();
+        later.arrivals(&ids(&["c"]));
+        let for_chat = later.for_chat(&[], &raised, &ids(&["c"]));
+        assert_eq!(for_chat, raised);
+        later.fall_back(&for_chat);
+        assert!(later.floating.contains("c"));
     }
 }

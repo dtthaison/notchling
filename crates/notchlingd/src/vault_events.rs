@@ -56,10 +56,6 @@ fn session_ref() -> Option<Ref<Session>> {
     scope::current().actor.and_then(|a| a.session)
 }
 
-pub(super) fn session_id() -> Option<String> {
-    session_ref().map(|s| s.as_str().to_owned())
-}
-
 pub(super) fn device_now() -> Option<String> {
     scope::current()
         .actor

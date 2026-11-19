@@ -4,15 +4,15 @@ use std::sync::Arc;
 use gpui::{div, prelude::*, px, AnyElement, Context, Div, Entity, Window};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{RADIUS_COMPOSER, SIDE_PADDING};
-use notchling_kit::ui::{hsla, KitPart, KitStyled};
-use notchling_kit::{Appearance, Ink};
+use notchling_kit::ui::{hsla, label, KitPart, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::ChatView;
-use crate::chat::vault_ask::{self, Placement, Ticket};
+use crate::chat::vault_ask::{self, Covers, Placement, Ticket};
 use crate::mac::shell::AppVault;
 use crate::vault::approval::{pending, PROMPT_SIZE};
 use crate::vault::approval_view::VaultApprovalView;
-use crate::vault::presence::Presence;
+use crate::vault::presence::{Done, Presence};
 use crate::vault::prompt_view::{VaultRequestView, REQUEST_SIZE};
 use crate::vault::store::Vault;
 use crate::vault::wire::PendingRequest;
@@ -26,13 +26,16 @@ enum Prompt {
 }
 
 impl Prompt {
-    fn show(&self, presence: Presence, visible: bool, active: bool, cx: &mut gpui::App) {
+    fn show(&self, presence: Presence, visible: bool, cx: &mut gpui::App) {
         match self {
             Prompt::Approval(view) => view.update(cx, |v, cx| {
                 v.set_presence(presence, cx);
-                v.set_visible(visible, active, cx);
+                v.set_visible(visible, cx);
             }),
-            Prompt::Request(view) => view.update(cx, |v, cx| v.set_presence(presence, cx)),
+            Prompt::Request(view) => view.update(cx, |v, cx| {
+                v.set_presence(presence, cx);
+                v.set_visible(visible, cx);
+            }),
         }
     }
 
@@ -55,6 +58,7 @@ struct Item {
     ticket: Ticket,
     prompt: Prompt,
     forced: Option<Placement>,
+    done: bool,
 }
 
 #[derive(Default)]
@@ -63,6 +67,7 @@ pub struct State {
     waiting: BTreeSet<String>,
     seen: Vec<String>,
     preview: bool,
+    raised: Option<String>,
 }
 
 impl State {
@@ -76,7 +81,45 @@ impl ChatView {
         if self.vault.preview {
             return self.vault.items.iter().map(|i| i.ticket.clone()).collect();
         }
-        vault_ask::tickets(&self.switches.approvals(), &self.switches.requests())
+        let mut tickets = vault_ask::tickets(&self.switches.approvals(), &self.switches.requests());
+        tickets.retain(|t| {
+            !self
+                .vault
+                .items
+                .iter()
+                .any(|i| i.done && i.ticket.id == t.id)
+        });
+        tickets
+    }
+
+    fn vault_live(&self) -> impl Iterator<Item = &Item> {
+        self.vault.items.iter().filter(|i| !i.done)
+    }
+
+    fn vault_cards_for(&self, row: &str) -> Vec<&Item> {
+        self.vault_live()
+            .filter(|i| self.vault_place(i) == Placement::Card(row.to_owned()))
+            .collect()
+    }
+
+    fn vault_card_front(&self) -> Option<&Item> {
+        let row = self.selected.as_deref()?;
+        let items = self.vault_cards_for(row);
+        let ids: Vec<&str> = items.iter().map(|i| i.ticket.id.as_str()).collect();
+        let at = vault_ask::pick(&ids, self.vault.raised.as_deref())?;
+        items.get(at).copied()
+    }
+
+    fn vault_covers(&self, window: &Window) -> Covers {
+        Covers {
+            active: window.is_window_active(),
+            sheet: self.sheet.is_some(),
+            inbox: self.inbox_panel.is_some(),
+            phone: self.phone.is_some(),
+            subagent: self.open_subagent.is_some(),
+            terminal: self.terminal.shown() && self.terminal.expanded && !self.page.is_open(),
+            vault_sheet: self.vault_sheet_item().is_some(),
+        }
     }
 
     fn vault_place(&self, item: &Item) -> Placement {
@@ -91,9 +134,7 @@ impl ChatView {
         let tickets = self.vault_tickets();
         let ids: Vec<String> = tickets.iter().map(|t| t.id.clone()).collect();
         let waiting: BTreeSet<String> = if self.vault.preview {
-            self.vault
-                .items
-                .iter()
+            self.vault_live()
                 .filter_map(|i| match self.vault_place(i) {
                     Placement::Card(row) => Some(row),
                     Placement::Sheet => None,
@@ -113,21 +154,24 @@ impl ChatView {
         if !self.vault.preview {
             self.vault_entities(window, cx);
         }
+        let covers = self.vault_covers(window);
         let sheet = self.vault_sheet_item().map(|i| i.ticket.id.clone());
-        let active = window.is_window_active();
-        let elsewhere = self.open_subagent.is_some();
+        let card = self.vault_card_front().map(|i| i.ticket.id.clone());
         for item in &self.vault.items {
-            let (presence, visible) = match self.vault_place(item) {
-                Placement::Card(row) => (
+            let placement = self.vault_place(item);
+            let (presence, front) = match placement {
+                Placement::Card(_) => (
                     Presence::Card,
-                    !elsewhere && self.selected.as_deref() == Some(row.as_str()),
+                    card.as_deref() == Some(item.ticket.id.as_str()),
                 ),
                 Placement::Sheet => (
                     Presence::Sheet,
                     sheet.as_deref() == Some(item.ticket.id.as_str()),
                 ),
             };
-            item.prompt.show(presence, visible, active, cx);
+            let visible = !item.done
+                && vault_ask::visible(&placement, self.selected.as_deref(), front, &covers);
+            item.prompt.show(presence, visible, cx);
         }
     }
 
@@ -147,6 +191,11 @@ impl ChatView {
         self.vault
             .items
             .retain(|i| ids.contains(&i.ticket.id.as_str()));
+        if let Some(raised) = &self.vault.raised {
+            if !self.vault.items.iter().any(|i| &i.ticket.id == raised) {
+                self.vault.raised = None;
+            }
+        }
         let vault = cx
             .try_global::<AppVault>()
             .map(|v| v.0.clone())
@@ -156,7 +205,14 @@ impl ChatView {
                 continue;
             }
             let (feed, vault) = (self.switches.clone(), vault.clone());
-            let entity = cx.new(|cx| VaultApprovalView::live(&approval, feed, vault, window, cx));
+            let entity = cx.new(|cx| {
+                VaultApprovalView::live_in(&approval, feed, vault, Presence::Sheet, window, cx)
+            });
+            let id = approval.id.clone();
+            cx.subscribe(&entity, move |view, _, _: &Done, cx| {
+                view.vault_done(&id, cx)
+            })
+            .detach();
             self.vault.items.push(Item {
                 ticket: Ticket {
                     id: approval.id.clone(),
@@ -164,6 +220,7 @@ impl ChatView {
                 },
                 prompt: Prompt::Approval(entity),
                 forced: None,
+                done: false,
             });
         }
         for request in requests {
@@ -175,32 +232,57 @@ impl ChatView {
                 id: request.id.clone(),
                 session: request.session.clone(),
             };
-            let entity = cx.new(|cx| VaultRequestView::live(feed, vault, request, cx));
+            let entity =
+                cx.new(|cx| VaultRequestView::live_in(feed, vault, request, Presence::Sheet, cx));
+            let id = ticket.id.clone();
+            cx.subscribe(&entity, move |view, _, _: &Done, cx| {
+                view.vault_done(&id, cx)
+            })
+            .detach();
             self.vault.items.push(Item {
                 ticket,
                 prompt: Prompt::Request(entity),
                 forced: None,
+                done: false,
             });
         }
     }
 
+    fn vault_done(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(item) = self.vault.items.iter_mut().find(|i| i.ticket.id == id) {
+            item.done = true;
+        }
+        self.vault_tick(cx);
+        cx.notify();
+    }
+
     pub fn show_vault(&mut self, ids: &[String], window: &mut Window, cx: &mut Context<Self>) {
         self.sync_vault(window, cx);
-        self.vault_tick(cx);
-        let row = ids.iter().find_map(|id| {
-            let item = self.vault.items.iter().find(|i| &i.ticket.id == id)?;
-            match self.vault_place(item) {
-                Placement::Card(row) => Some(row),
-                Placement::Sheet => None,
-            }
-        });
-        if let Some(row) = row {
-            self.inbox_panel = None;
-            if self.open_subagent.is_some() {
-                self.close_subagent(cx);
-            }
+        let raised = ids
+            .iter()
+            .find(|id| self.vault_live().any(|i| &i.ticket.id == *id))
+            .cloned();
+        let Some(raised) = raised else {
+            cx.notify();
+            return;
+        };
+        let placement = self
+            .vault_live()
+            .find(|i| i.ticket.id == raised)
+            .map(|i| self.vault_place(i));
+        self.vault.raised = Some(raised);
+        self.inbox_panel = None;
+        self.phone = None;
+        self.sheet = None;
+        self.terminal.expanded = false;
+        if self.open_subagent.is_some() {
+            self.close_subagent(cx);
+        }
+        if let Some(Placement::Card(row)) = placement {
             self.select(&row, cx);
         }
+        self.sync_vault(window, cx);
+        self.vault_tick(cx);
         cx.notify();
     }
 
@@ -209,10 +291,13 @@ impl ChatView {
     }
 
     fn vault_sheet_item(&self) -> Option<&Item> {
-        self.vault
-            .items
-            .iter()
-            .find(|i| self.vault_place(i) == Placement::Sheet)
+        let sheets: Vec<&Item> = self
+            .vault_live()
+            .filter(|i| self.vault_place(i) == Placement::Sheet)
+            .collect();
+        let ids: Vec<&str> = sheets.iter().map(|i| i.ticket.id.as_str()).collect();
+        let at = vault_ask::pick(&ids, self.vault.raised.as_deref())?;
+        sheets.get(at).copied()
     }
 }
 
@@ -252,10 +337,12 @@ impl State {
                 },
                 prompt,
                 forced: Some(forced),
+                done: false,
             }],
             waiting: BTreeSet::new(),
             seen: Vec::new(),
             preview: true,
+            raised: None,
         }
     }
 }
@@ -278,19 +365,30 @@ pub(super) fn cards(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) 
     let Some(selected) = view.selected.as_deref() else {
         return Vec::new();
     };
-    view.vault
-        .items
+    let items = view.vault_cards_for(selected);
+    let Some(front) = view.vault_card_front() else {
+        return Vec::new();
+    };
+    let at = items
         .iter()
-        .filter(|item| view.vault_place(item) == Placement::Card(selected.to_owned()))
-        .map(|item| {
-            card_frame(a).child(item.prompt.element()).part_at(
-                "Vault Card",
-                Corner::TopTrailing,
-                a,
-                cx,
-            )
-        })
-        .collect()
+        .position(|i| i.ticket.id == front.ticket.id)
+        .unwrap_or(0);
+    let mut out = Vec::new();
+    if items.len() > 1 {
+        out.push(div().mx(px(SIDE_PADDING)).mb(px(4.0)).child(label(
+            &format!("{}/{}", at + 1, items.len()),
+            TypeRole::Meta,
+            Ink::TextMuted,
+            a,
+        )));
+    }
+    out.push(card_frame(a).child(front.prompt.element()).part_at(
+        "Vault Card",
+        Corner::TopTrailing,
+        a,
+        cx,
+    ));
+    out
 }
 
 pub(super) fn sheet(

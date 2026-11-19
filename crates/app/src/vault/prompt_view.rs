@@ -8,9 +8,10 @@ use notchling_kit::metric::{RADIUS_CARD, SIDE_PADDING};
 use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitStyled};
 use notchling_kit::{Icon, Ink, TypeRole};
 
+use super::approval::requested_by;
 use super::form::{Form, Typed};
 use super::form_view::{clipboard_key, form_body, form_footer, FormEvent};
-use super::presence::Presence;
+use super::presence::{Done, Presence};
 use super::store::Vault;
 use super::wire::PendingRequest;
 use crate::accounts::view_rows::Handler;
@@ -19,7 +20,7 @@ use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
 pub const REQUEST_SIZE: (f32, f32) = (540.0, 720.0);
-pub const CARD_BODY_MAX: f32 = 300.0;
+pub const CARD_BODY_MAX: f32 = 240.0;
 
 pub struct VaultRequestView {
     feed: Arc<SwitchFeed>,
@@ -29,15 +30,32 @@ pub struct VaultRequestView {
     busy: bool,
     done: bool,
     presence: Presence,
+    visible: bool,
+    typing: bool,
+    reset_focus: bool,
+    want_focus: bool,
+    requested_by: Option<String>,
     focus: FocusHandle,
     fixed_today: Option<i64>,
 }
+
+impl gpui::EventEmitter<Done> for VaultRequestView {}
 
 impl VaultRequestView {
     pub fn live(
         feed: Arc<SwitchFeed>,
         vault: Arc<Vault>,
         pending: PendingRequest,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::live_in(feed, vault, pending, Presence::Window, cx)
+    }
+
+    pub fn live_in(
+        feed: Arc<SwitchFeed>,
+        vault: Arc<Vault>,
+        pending: PendingRequest,
+        presence: Presence,
         cx: &mut Context<Self>,
     ) -> Self {
         VaultRequestView {
@@ -47,7 +65,12 @@ impl VaultRequestView {
             form: Form::request(&pending),
             busy: false,
             done: false,
-            presence: Presence::Window,
+            presence,
+            visible: !presence.embedded(),
+            typing: presence.takes_focus(),
+            reset_focus: false,
+            want_focus: false,
+            requested_by: requested_by(pending.verified.as_ref()),
             focus: cx.focus_handle(),
             fixed_today: None,
         }
@@ -62,6 +85,11 @@ impl VaultRequestView {
             busy: false,
             done: false,
             presence: Presence::Window,
+            visible: true,
+            typing: true,
+            reset_focus: false,
+            want_focus: false,
+            requested_by: requested_by(pending.verified.as_ref()),
             focus: cx.focus_handle(),
             fixed_today: Some(today),
         }
@@ -73,10 +101,25 @@ impl VaultRequestView {
     }
 
     pub fn set_presence(&mut self, presence: Presence, cx: &mut Context<Self>) {
-        if self.presence != presence {
-            self.presence = presence;
-            cx.notify();
+        if self.presence == presence {
+            return;
         }
+        self.presence = presence;
+        self.typing = presence.takes_focus();
+        self.reset_focus = true;
+        cx.notify();
+    }
+
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.visible == visible {
+            return;
+        }
+        self.visible = visible;
+        if !visible {
+            self.typing = self.presence.takes_focus();
+            self.reset_focus = true;
+        }
+        cx.notify();
     }
 
     pub fn done(&self) -> bool {
@@ -115,6 +158,7 @@ impl VaultRequestView {
                     Ok(()) => {
                         view.done = true;
                         view.feed.resolve(&view.id);
+                        cx.emit(Done);
                     }
                     Err(e) => view.form.error = Some(e),
                 }
@@ -164,7 +208,11 @@ impl VaultRequestView {
         match event {
             FormEvent::Save => return self.save(cx),
             FormEvent::Cancel => return self.cancel(cx),
-            FormEvent::Focus(field) => self.form.focus = field,
+            FormEvent::Focus(field) => {
+                self.form.focus = field;
+                self.typing = true;
+                self.want_focus = true;
+            }
             FormEvent::Kind(kind) => self.form.set_kind(kind),
             FormEvent::ToggleAsk => self.form.ask = !self.form.ask,
             FormEvent::ToggleAdvanced => self.form.advanced = !self.form.advanced,
@@ -176,6 +224,9 @@ impl VaultRequestView {
     }
 
     fn key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if !self.typing {
+            return;
+        }
         let k = &event.keystroke;
         if k.key == "escape" {
             self.cancel(cx);
@@ -207,12 +258,21 @@ impl Focusable for VaultRequestView {
 impl Render for VaultRequestView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if self.presence.takes_focus()
+        if self.reset_focus {
+            self.reset_focus = false;
+            if self.focus.is_focused(window) {
+                window.blur();
+            }
+        }
+        let asked = std::mem::take(&mut self.want_focus) && self.visible;
+        if (asked || self.presence.takes_focus() && self.visible)
             && !self.focus.is_focused(window)
             && self.fixed_today.is_none()
         {
             window.focus(&self.focus);
         }
+        self.form.keyboard =
+            self.fixed_today.is_some() || (self.typing && self.focus.is_focused(window));
         if self.done {
             return match self.presence {
                 Presence::Window => div().size_full().fill(Ink::Window, a).into_any_element(),
@@ -227,7 +287,11 @@ impl Render for VaultRequestView {
             .track_focus(&self.focus)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, _| window.focus(&this.focus)),
+                cx.listener(|this, _, window, _| {
+                    if this.presence.takes_focus() {
+                        window.focus(&this.focus);
+                    }
+                }),
             )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)));
         let body = form_body(&self.form, self.today(), a, cx, on);
@@ -265,6 +329,13 @@ impl Render for VaultRequestView {
                             |this: &mut Self, _, cx| this.cancel(cx),
                         )),
                 )
+                .children(self.requested_by.as_deref().map(|r| {
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING))
+                        .pt(px(8.0))
+                        .child(label(r, TypeRole::Meta, Ink::TextMuted, a))
+                }))
                 .child(scrollable(body))
                 .child(footer)
                 .into_any_element(),
@@ -296,6 +367,13 @@ impl Render for VaultRequestView {
                             |this: &mut Self, _, cx| this.cancel(cx),
                         )),
                 )
+                .children(self.requested_by.as_deref().map(|r| {
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING))
+                        .pt(px(8.0))
+                        .child(label(r, TypeRole::Meta, Ink::TextMuted, a))
+                }))
                 .child(scrollable(body.flex_none().max_h(px(CARD_BODY_MAX))))
                 .child(footer)
                 .into_any_element(),
@@ -311,6 +389,13 @@ impl Render for VaultRequestView {
                     cx,
                     |this: &mut Self, _, cx| this.cancel(cx),
                 ))
+                .children(self.requested_by.as_deref().map(|r| {
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING))
+                        .pt(px(8.0))
+                        .child(label(r, TypeRole::Meta, Ink::TextMuted, a))
+                }))
                 .child(scrollable(body))
                 .child(footer)
                 .into_any_element(),

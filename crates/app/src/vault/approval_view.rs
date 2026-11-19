@@ -13,7 +13,7 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::approval::{ApprovalModel, ALWAYS, COMMAND, DENY, FOLDER, ONCE, WINDOW_TITLE};
-use super::presence::Presence;
+use super::presence::{Done, Presence};
 use super::store::Vault;
 use super::wire::{Approval, Decision};
 use crate::mac::gate;
@@ -33,9 +33,13 @@ pub struct VaultApprovalView {
     fixed: bool,
     presence: Presence,
     visible: bool,
+    active: bool,
+    reset_focus: bool,
     focus: FocusHandle,
     _activation: Option<Subscription>,
 }
+
+impl gpui::EventEmitter<Done> for VaultApprovalView {}
 
 impl VaultApprovalView {
     pub fn live(
@@ -45,30 +49,35 @@ impl VaultApprovalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut model = ApprovalModel::new(approval);
-        model.shown(now_ms());
+        Self::live_in(approval, feed, vault, Presence::Window, window, cx)
+    }
+
+    pub fn live_in(
+        approval: &Approval,
+        feed: Arc<SwitchFeed>,
+        vault: Arc<Vault>,
+        presence: Presence,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let model = ApprovalModel::new(approval);
         let activation = cx.observe_window_activation(window, |view, window, cx| {
-            if window.is_window_active() {
-                if view.visible {
-                    view.model.shown(now_ms());
-                    view.redraw_when_armed(cx);
-                }
-            } else {
-                view.model.hidden();
-            }
-            cx.notify();
+            view.active = window.is_window_active();
+            view.refresh_arming(cx);
         });
-        let view = VaultApprovalView {
+        let mut view = VaultApprovalView {
             feed,
             vault,
             model,
             fixed: false,
-            presence: Presence::Window,
-            visible: true,
+            presence,
+            visible: !presence.embedded(),
+            active: window.is_window_active(),
+            reset_focus: false,
             focus: cx.focus_handle(),
             _activation: Some(activation),
         };
-        view.redraw_when_armed(cx);
+        view.refresh_arming(cx);
         view
     }
 
@@ -86,30 +95,43 @@ impl VaultApprovalView {
             fixed: true,
             presence,
             visible: true,
+            active: true,
+            reset_focus: false,
             focus: cx.focus_handle(),
             _activation: None,
         }
     }
 
     pub fn set_presence(&mut self, presence: Presence, cx: &mut Context<Self>) {
-        if self.presence != presence {
-            self.presence = presence;
-            cx.notify();
-        }
-    }
-
-    pub fn set_visible(&mut self, visible: bool, active: bool, cx: &mut Context<Self>) {
-        if visible == self.visible {
+        if self.presence == presence {
             return;
         }
-        self.visible = visible;
-        if !visible {
-            self.model.hidden();
-        } else if active {
-            self.model.shown(now_ms());
-            self.redraw_when_armed(cx);
+        self.presence = presence;
+        self.reset_focus = true;
+        if !self.fixed {
+            self.model.rearm(false, 0);
         }
+        self.refresh_arming(cx);
         cx.notify();
+    }
+
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.visible = visible;
+        self.refresh_arming(cx);
+    }
+
+    fn refresh_arming(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let exposed = self.visible && self.active;
+        let changed = self.model.expose(exposed, now_ms());
+        if changed {
+            if exposed {
+                self.redraw_when_armed(cx);
+            }
+            cx.notify();
+        }
     }
 
     pub fn id(&self) -> &str {
@@ -161,6 +183,9 @@ impl VaultApprovalView {
                     view.feed.resolve(&id);
                 }
                 view.model.finished(result);
+                if view.model.resolved {
+                    cx.emit(Done);
+                }
                 cx.notify();
             })
             .ok();
@@ -212,7 +237,17 @@ fn mono(text: &str, ink: Ink, a: Appearance) -> Div {
 impl Render for VaultApprovalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if !self.fixed && self.presence.takes_focus() && !self.focus.is_focused(window) {
+        if self.reset_focus {
+            self.reset_focus = false;
+            if self.focus.is_focused(window) {
+                window.blur();
+            }
+        }
+        if !self.fixed
+            && self.presence.takes_focus()
+            && self.visible
+            && !self.focus.is_focused(window)
+        {
             window.focus(&self.focus);
         }
         let prompt = self.model.prompt.clone();
@@ -378,14 +413,24 @@ impl Render for VaultApprovalView {
                     cx,
                     |this: &mut Self, _, cx| this.answer(Decision::Deny, cx),
                 ))
-                .child(
+                .child(scrollable(
                     div()
+                        .id(SharedString::from(prompt.element("vault-approval-body")))
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .overflow_y_scroll()
                         .flex()
                         .flex_col()
                         .gap(px(12.0))
                         .p(px(SIDE_PADDING + 4.0))
                         .child(title)
-                        .child(details)
+                        .child(details),
+                ))
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING + 4.0))
+                        .pb(px(SIDE_PADDING + 4.0))
                         .child(tail),
                 ),
         }

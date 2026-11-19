@@ -39,10 +39,59 @@ pub fn tickets(approvals: &[Value], requests: &[Value]) -> Vec<Ticket> {
 }
 
 pub fn row_for(sessions: &[Session], session: &str) -> Option<String> {
-    sessions
-        .iter()
-        .find(|s| s.agent.id == session || s.agent.session_id().as_deref() == Some(session))
-        .map(|s| s.agent.id.clone())
+    let mut rows = sessions.iter().filter(|s| {
+        s.agent.session_id().as_deref() == Some(session)
+            || s.transcript
+                .as_deref()
+                .and_then(|p| p.file_stem())
+                .and_then(|stem| stem.to_str())
+                == Some(session)
+    });
+    let first = rows.next()?;
+    rows.next().is_none().then(|| first.agent.id.clone())
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Covers {
+    pub active: bool,
+    pub sheet: bool,
+    pub inbox: bool,
+    pub phone: bool,
+    pub subagent: bool,
+    pub terminal: bool,
+    pub vault_sheet: bool,
+}
+
+pub fn visible(
+    placement: &Placement,
+    selected: Option<&str>,
+    front: bool,
+    covers: &Covers,
+) -> bool {
+    if !front || !covers.active || covers.inbox || covers.phone {
+        return false;
+    }
+    match placement {
+        Placement::Sheet => true,
+        Placement::Card(row) => {
+            selected == Some(row.as_str())
+                && !covers.sheet
+                && !covers.subagent
+                && !covers.terminal
+                && !covers.vault_sheet
+        }
+    }
+}
+
+pub fn pick(ids: &[&str], raised: Option<&str>) -> Option<usize> {
+    if ids.is_empty() {
+        return None;
+    }
+    Some(
+        raised
+            .and_then(|r| ids.iter().position(|id| *id == r))
+            .unwrap_or(0),
+    )
 }
 
 pub fn place(ticket: &Ticket, sessions: &[Session]) -> Placement {

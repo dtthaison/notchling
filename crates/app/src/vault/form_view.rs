@@ -101,7 +101,7 @@ fn text_field<V: 'static>(
     } else {
         form.text(which).to_owned()
     };
-    let focused = form.focus == which;
+    let focused = form.keyboard && form.focus == which;
     let handler = on.clone();
     let mut element = field(&text, placeholder, focused, a).w_full();
     if which.multiline() {

@@ -79,7 +79,10 @@ pub struct VaultOps {
     timing: VaultTiming,
     processes: Arc<dyn Processes>,
     inbox: Option<Arc<InboxOps>>,
+    sessions: Option<TrustedSession>,
 }
+
+pub type TrustedSession = Arc<dyn Fn(u32) -> Option<String> + Send + Sync>;
 
 fn failed(message: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::Failed, message)
@@ -102,6 +105,7 @@ impl VaultOps {
             timing: VaultTiming::default(),
             processes: Arc::new(SystemProcesses),
             inbox: None,
+            sessions: None,
         };
         let hook = ops.off_hook();
         ops.switch.subscribe(move |on| {
@@ -141,6 +145,20 @@ impl VaultOps {
         )
         .with_events(events)
         .with_inbox(inbox)
+        .with_sessions(crate::caller_session::trusted_in(
+            layout.roots(),
+            Arc::new(SystemProcesses),
+        ))
+    }
+
+    pub fn with_sessions(mut self, sessions: TrustedSession) -> VaultOps {
+        self.sessions = Some(sessions);
+        self
+    }
+
+    fn trusted_session(&self, caller: &Caller) -> Option<String> {
+        let pid = caller.pid?;
+        self.sessions.as_ref().and_then(|find| find(pid))
     }
 
     pub fn set_worker(&self, worker: Arc<dyn WorkerUse>) {
@@ -202,7 +220,7 @@ impl VaultOps {
         match op {
             ops::VAULT_FIND => self.find(args),
             ops::VAULT_USE => self.use_secrets(caller, args),
-            ops::VAULT_REQUEST => self.request(args),
+            ops::VAULT_REQUEST => self.request(caller, args),
             ops::VAULT_LIST => self.entries().map(|e| json!({"entries": e})),
             ops::VAULT_SAVE => self.save(caller, args),
             ops::VAULT_REMOVE => self.remove(args),

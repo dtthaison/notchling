@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use notchling_locale as t;
 
-use super::wire::{Approval, Decision};
+use super::wire::{Approval, Decision, Verified};
 
 pub const WINDOW_TITLE: &str = "Use a Secret";
 pub const EXPLANATION: &str = "The command gets the values as environment variables; its output comes back with them hidden. Deny it if the command would print, send or save a value somewhere you don't expect.";
@@ -73,9 +73,7 @@ impl Prompt {
             folder: real.clone().unwrap_or_else(|| claimed.clone()),
             claimed_folder: (mismatch || real.as_deref().is_some_and(|r| r != claimed))
                 .then(|| format!("It names {claimed}")),
-            requested_by: verified
-                .filter(|v| !v.parents.is_empty())
-                .map(|v| format!("Requested by {}", v.parents.join(" ← "))),
+            requested_by: requested_by(verified),
             command: visible(&a.command),
             command_size: command_size(&a.command),
             explanation: EXPLANATION,
@@ -93,6 +91,12 @@ impl Prompt {
 fn hidden(c: char) -> bool {
     (c.is_control() && c != '\n' && c != '\t')
         || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
+pub fn requested_by(verified: Option<&Verified>) -> Option<String> {
+    verified
+        .filter(|v| !v.parents.is_empty())
+        .map(|v| format!("Requested by {}", v.parents.join(" ← ")))
 }
 
 pub fn visible(command: &str) -> String {
@@ -150,6 +154,23 @@ impl ApprovalModel {
 
     pub fn is_shown(&self) -> bool {
         self.shown_at.is_some()
+    }
+
+    pub fn expose(&mut self, exposed: bool, now_ms: i64) -> bool {
+        if !exposed {
+            let was = self.shown_at.is_some();
+            self.shown_at = None;
+            return was;
+        }
+        if self.shown_at.is_some() {
+            return false;
+        }
+        self.shown_at = Some(now_ms);
+        true
+    }
+
+    pub fn rearm(&mut self, exposed: bool, now_ms: i64) {
+        self.shown_at = exposed.then_some(now_ms);
     }
 
     pub fn armed(&self, now_ms: i64) -> bool {

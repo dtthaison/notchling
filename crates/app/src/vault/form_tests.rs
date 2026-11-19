@@ -173,6 +173,7 @@ fn an_agents_request_shows_its_reason_and_marks_what_it_changed() {
         },
         request,
         session: None,
+        verified: None,
     };
     let f = Form::request(&pending);
     assert_eq!(f.title(), "Secret Vault");

@@ -98,6 +98,16 @@ pub(super) fn setup_with(
     inbox: Option<Arc<crate::inbox_ops::InboxOps>>,
     timing: Option<VaultTiming>,
 ) -> Setup {
+    setup_full(tag, on, inbox, timing, None)
+}
+
+pub(super) fn setup_full(
+    tag: &str,
+    on: bool,
+    inbox: Option<Arc<crate::inbox_ops::InboxOps>>,
+    timing: Option<VaultTiming>,
+    sessions: Option<TrustedSession>,
+) -> Setup {
     let dir = std::env::temp_dir().join(format!("nl-vault-ops-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -118,6 +128,9 @@ pub(super) fn setup_with(
         .with_processes(Arc::new(super::pending_tests::FakeProcesses));
     if let Some(inbox) = inbox {
         ops = ops.with_inbox(inbox);
+    }
+    if let Some(sessions) = sessions {
+        ops = ops.with_sessions(sessions);
     }
     Setup {
         ops: Arc::new(ops),

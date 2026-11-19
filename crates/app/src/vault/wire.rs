@@ -106,7 +106,7 @@ pub struct Verified {
 }
 
 impl Verified {
-    fn from_value(v: &Value) -> Option<Verified> {
+    pub fn from_value(v: &Value) -> Option<Verified> {
         v.as_object()?;
         let text = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
         Some(Verified {
@@ -190,6 +190,7 @@ pub struct PendingRequest {
     pub existing: bool,
     pub changes: PrefillChanges,
     pub session: Option<String>,
+    pub verified: Option<Verified>,
 }
 
 impl PendingRequest {
@@ -217,6 +218,7 @@ impl PendingRequest {
                 .unwrap_or(false),
             changes,
             session: session_of(data),
+            verified: data.get("verified").and_then(Verified::from_value),
         })
     }
 }

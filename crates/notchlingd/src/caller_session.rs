@@ -29,6 +29,25 @@ impl CallerSession {
     }
 }
 
+pub const CLAUDE_PROCESS: &str = "claude";
+
+pub fn is_claude(procs: &dyn Processes, hit: &SessionHit) -> bool {
+    procs.name(hit.claude_pid).as_deref() == Some(CLAUDE_PROCESS)
+}
+
+pub fn trusted_in(
+    roots: Roots,
+    procs: Arc<dyn Processes>,
+) -> Arc<dyn Fn(u32) -> Option<String> + Send + Sync> {
+    let finder = CallerSession::new(roots, procs.clone());
+    Arc::new(move |pid| {
+        finder
+            .session_of(pid)
+            .filter(|hit| is_claude(procs.as_ref(), hit))
+            .map(|hit| hit.session_id)
+    })
+}
+
 pub(crate) fn find_session(
     roots: &Roots,
     parent_of: &dyn Fn(u32) -> Option<u32>,

@@ -1300,9 +1300,11 @@ daemon stops. Always Allow turns ask-first off for those entries. A denial is `n
 ("The user didn't allow it."), which `notchling secret` exits 3 on.
 
 **Requests.** `vault.request` publishes `vault.request.pending {id, request, entry, existing,
-changes, session?}` (the form, filled in: an existing entry with the passed fields laid over it, and what
+changes, verified, session?}` (the form, filled in: an existing entry with the passed fields laid over it, and what
 that changed) and waits up to [`REQUEST_WAIT`] for the app's `vault.save {…, request: id}` or
 `vault.request.cancel {id}`. A cancel is `needs_approval` ("The user cancelled.").
+
+`session` is the Claude Code session id of the asking process and is present only when the daemon can vouch for it: the caller's process tree holds a Claude process, `sessions/<pid>.json` names that process, and nothing else (a file planted for a shell or any other process is ignored). The app puts a card in that session's Chat only when exactly one row carries the id; any other ticket opens the sheet. `verified` is the same kernel lineage as on approvals and the app shows it on both.
 
 `session` is the Claude Code session id the asking process runs under, found the way `ask` finds it; it is left out when no session is known (a job's grant, a machine's sudo step, a shell), and the app then shows the prompt as a sheet instead of a card in that session.
 
