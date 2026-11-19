@@ -253,3 +253,104 @@ fn a_row_marked_as_sent_leaves_a_sent_bubble() {
     assert!(shown.apply(&removed("a", "sent"), 20_000));
     assert_eq!(statuses(&shown), vec![Status::Sent]);
 }
+
+fn texts_of(rows: &[crate::chat::rows::Row]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|row| match row {
+            crate::chat::rows::Row::User { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_oldest_row_is_the_first_bubble_whatever_order_the_daemon_tells_it() {
+    let mut told_late = OutboxFeed::default();
+    for (id, n) in [("c", 3), ("a", 1), ("b", 2)] {
+        let event = Event {
+            event: topics::OUTBOX_CHANGED.into(),
+            data: json!({"row": wire(id, n, "queued", None, id)}),
+        };
+        assert!(told_late.apply(&event, 0));
+    }
+    let ids: Vec<String> = told_late
+        .bubbles(SESSION)
+        .into_iter()
+        .map(|bubble| bubble.id)
+        .collect();
+    assert_eq!(ids, ["a", "b", "c"]);
+    let seeded = feed(vec![
+        wire("c", 3, "queued", None, "c"),
+        wire("b", 2, "queued", None, "b"),
+        wire("a", 1, "queued", None, "a"),
+    ]);
+    let ids: Vec<String> = seeded
+        .bubbles(SESSION)
+        .into_iter()
+        .map(|bubble| bubble.id)
+        .collect();
+    assert_eq!(ids, ["a", "b", "c"]);
+}
+
+#[test]
+fn the_tail_draws_claude_codes_own_queue_first_then_the_mailbox_oldest_first_then_sends_in_flight()
+{
+    let mailbox = feed(vec![
+        holding(500_000),
+        wire("b", 2, "queued", None, "second"),
+        wire("c", 3, "queued", None, "third"),
+    ])
+    .bubbles(SESSION);
+    let tail = crate::chat::rows::tail_rows(
+        &["typed in the terminal".to_owned()],
+        None,
+        &mailbox,
+        &["just sent".to_owned()],
+        true,
+    );
+    assert_eq!(
+        texts_of(&tail),
+        [
+            "typed in the terminal",
+            "first",
+            "second",
+            "third",
+            "just sent"
+        ]
+    );
+}
+
+#[test]
+fn the_render_states_show_the_head_first_and_nothing_from_the_fixtures_own_queue() {
+    for state in [
+        "aside_sending",
+        "wait_unsure",
+        "two_behind_unsure",
+        "editing",
+    ] {
+        let shown = crate::chat::renders::outbox_preview(state).unwrap_or_default();
+        assert!(shown.len() >= 2, "{state}");
+        assert!(
+            matches!(
+                shown[0].status,
+                Status::MayBeIn | Status::MayBeInHolding(_) | Status::Editing
+            ),
+            "{state}: the head is the first bubble, not {:?}",
+            shown[0].status
+        );
+    }
+    let aside = crate::chat::renders::outbox_preview("aside_sending").unwrap_or_default();
+    assert_eq!(aside[0].status, Status::MayBeIn);
+    assert_eq!(aside[1].status, Status::Sending);
+    let alone = crate::chat::renders::outbox_preview("aside").unwrap_or_default();
+    assert_eq!(alone.len(), 1);
+}
+
+#[test]
+fn the_joined_render_carries_as_many_texts_as_it_says() {
+    let shown = crate::chat::renders::outbox_preview("joined").unwrap_or_default();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].joined, 3);
+    assert_eq!(shown[0].text.split("\n\n").count(), 3);
+    assert_eq!(bubble_line(&shown[0], 0), "3 messages · Sending…");
+}

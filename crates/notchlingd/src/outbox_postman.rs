@@ -652,17 +652,17 @@ impl Postman {
         }
         let joined = store.join_behind(&taken.id, now).unwrap_or_default();
         if !joined.is_empty() {
-            for row in &joined {
-                self.inner
-                    .ops
-                    .publish_joined(&row.id, &row.session, &taken.id);
-                self.inner.ops.emit_then(row, OutboxThen::Joined);
-            }
             if let Ok(Some(carrier)) = store.get(&taken.id) {
                 taken = carrier;
             }
         }
         self.inner.ops.publish_changed(&taken);
+        for row in &joined {
+            self.inner
+                .ops
+                .publish_joined(&row.id, &row.session, &taken.id);
+            self.inner.ops.emit_then(row, OutboxThen::Joined);
+        }
         let courier = self.courier();
         let verifies = courier.verifies();
         let before = if verifies {

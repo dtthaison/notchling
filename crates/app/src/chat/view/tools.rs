@@ -232,8 +232,13 @@ impl ChatView {
         let outboxed = self
             .selected_session()
             .is_some_and(|s| !is_draft(&s.agent.id));
+        let queue: &[String] = if self.outbox_preview.is_some() {
+            &[]
+        } else {
+            &shown.queued
+        };
         let mut tail = tail_rows(
-            &shown.queued,
+            queue,
             hidden,
             &self.outbox_bubbles(),
             &self.outgoing_texts(),

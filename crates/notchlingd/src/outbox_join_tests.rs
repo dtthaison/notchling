@@ -275,3 +275,37 @@ fn rows_of_another_session_are_not_joined() {
     assert!(!r.typed().contains("one\n\nelsewhere"), "{}", r.typed());
     assert!(r.row(&other.id).is_some());
 }
+
+#[test]
+fn the_head_carrying_the_joined_text_is_announced_before_the_rows_inside_it_leave() {
+    let r = rig();
+    let one = r.send("job-idle", "one");
+    let two = r.send("job-idle", "two");
+    let three = r.send("job-idle", "three");
+    let mut p = r.postmen.postman(IDLE);
+    p.pass(r.at(T0));
+    let events = r.room.events.lock().unwrap();
+    let carried = events
+        .iter()
+        .position(|(name, data)| {
+            name == "outbox.changed"
+                && data["row"]["id"] == json!(one.id)
+                && data["row"]["joined"] == json!(3)
+                && data["row"]["text"] == json!("one\n\ntwo\n\nthree")
+        })
+        .expect("the head is announced with all three texts");
+    for inside in [&two.id, &three.id] {
+        let left = events
+            .iter()
+            .position(|(name, data)| {
+                name == "outbox.removed"
+                    && data["id"] == json!(inside)
+                    && data["why"] == json!("joined")
+            })
+            .expect("the joined row leaves");
+        assert!(
+            carried < left,
+            "a row leaves only after the head shows its words"
+        );
+    }
+}

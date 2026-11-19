@@ -14,7 +14,7 @@ pub const VIEWS: [ViewSpec; 2] = [
     },
 ];
 
-pub const OUTBOX_STATES: [&str; 19] = [
+pub const OUTBOX_STATES: [&str; 20] = [
     "queued",
     "retry",
     "dialog",
@@ -32,6 +32,7 @@ pub const OUTBOX_STATES: [&str; 19] = [
     "editing",
     "holding",
     "aside",
+    "aside_sending",
     "joined",
     "two_behind_unsure",
 ];
@@ -155,13 +156,26 @@ pub fn outbox_preview(how: &str) -> Option<Vec<Bubble>> {
         "aside" => {
             let mut wire = preview_wire("preview-aside", "unsure", Some("not_found"), text, 1);
             wire["asideMs"] = serde_json::json!(now_ms() - 5_000);
+            preview_feed(vec![wire])
+        }
+        "aside_sending" => {
+            let mut wire = preview_wire("preview-aside", "unsure", Some("not_found"), text, 1);
+            wire["asideMs"] = serde_json::json!(now_ms() - 5_000);
             preview_feed(vec![
                 wire,
-                preview_wire("preview-after", "sending", None, "and then push", 2),
+                preview_wire(
+                    "preview-after",
+                    "sending",
+                    None,
+                    "and tell me what changed",
+                    2,
+                ),
             ])
         }
         "joined" => {
-            let mut wire = preview_wire("preview-joined", "sending", None, text, 1);
+            let words =
+                "Please run the whole suite again\n\nand then push\n\nand tell me what changed";
+            let mut wire = preview_wire("preview-joined", "sending", None, words, 1);
             wire["joined"] = serde_json::json!(3);
             preview_feed(vec![wire])
         }
