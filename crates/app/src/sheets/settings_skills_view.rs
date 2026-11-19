@@ -12,6 +12,7 @@ use super::skills_rows::{beside_button, SkillLine, SkillState, SkillsShown, Tool
 #[derive(Clone)]
 pub struct SkillsHandlers {
     pub reinstall: Click,
+    pub refresh_models: Click,
     pub open_override: Click,
     pub reload: Click,
 }
@@ -21,6 +22,8 @@ pub struct SkillsPageState<'a> {
     pub models: &'a ModelsShown,
     pub busy: bool,
     pub result: Option<&'a (String, bool)>,
+    pub refreshing: bool,
+    pub refresh_result: Option<&'a (String, bool)>,
 }
 
 fn section(title: &str, a: Appearance) -> Div {
@@ -200,7 +203,7 @@ fn role_row(role: &RoleLine, first: bool, a: Appearance) -> Div {
     row.children(role.choices.iter().map(|c| choice_row(c, a)))
 }
 
-fn models_section(page: &SkillsPageState, a: Appearance, cx: &App) -> Div {
+fn models_section(page: &SkillsPageState, h: &SkillsHandlers, a: Appearance, cx: &App) -> Div {
     let mut out = section(t::settings::models_title(), a);
     if let Some(status) = page.models.status() {
         out = out.child(status_line(&status, a));
@@ -215,7 +218,30 @@ fn models_section(page: &SkillsPageState, a: Appearance, cx: &App) -> Div {
             ),
         );
     }
-    out.child(note(t::settings::models_footer(), a))
+    let title = if page.refreshing {
+        t::settings::models_refreshing()
+    } else {
+        t::settings::models_refresh()
+    };
+    let mut refresh = div()
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(div().flex().child(action(
+            "models-refresh",
+            title,
+            ButtonKind::Secondary,
+            !page.refreshing,
+            &h.refresh_models,
+            a,
+        )));
+    if let Some((text, failed)) = page.refresh_result {
+        let ink = if *failed { Ink::Needs } else { Ink::TextMuted };
+        refresh = refresh.child(label(text, TypeRole::Meta, ink, a));
+    }
+    out.child(refresh)
+        .child(note(t::settings::models_refresh_footer(), a))
+        .child(note(t::settings::models_footer(), a))
         .part("Models by Job", a, cx)
 }
 
@@ -274,7 +300,7 @@ pub fn skills_page(
         .gap(px(14.0))
         .child(how_section(a, cx))
         .child(skills_section(page, handlers, a, cx))
-        .child(models_section(page, a, cx))
+        .child(models_section(page, handlers, a, cx))
         .child(override_section(page, handlers, a, cx))
         .part("Skills and Models Page", a, cx)
 }

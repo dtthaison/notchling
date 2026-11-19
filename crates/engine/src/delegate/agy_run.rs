@@ -409,21 +409,29 @@ fn configure(
     if options.write {
         steps.push(("mode", "--write", "accept-edits".into()));
     }
-    for (id, flag, value) in &steps {
-        let Some(option) = find(id) else {
-            continue;
-        };
-        let offered = if *id == "model" {
+    let refused = |config: &[ConfigOption], id: &str, flag: &str, value: &str| {
+        let option = config.iter().find(|c| c.id == id)?;
+        let offered = if id == "model" {
             agy_pick::accepted(value, None, &models)
         } else {
-            option.values.iter().any(|v| &v.value == value)
+            option.values.iter().any(|v| v.value == value)
         };
-        if !offered {
+        (!offered).then(|| {
             let choices: Vec<&str> = option.values.iter().map(|v| v.value.as_str()).collect();
-            return Err(Stop::Error(format!(
+            Stop::Error(format!(
                 "{flag} {value} isn't offered. Choices: {}.",
                 choices.join(", ")
-            )));
+            ))
+        })
+    };
+    let moves_level = steps.iter().any(|(id, _, _)| *id == "model");
+    for (id, flag, value) in &steps {
+        let later = *id == "thought_level" && moves_level;
+        if later && find(id).is_some_and(|o| !o.values.iter().any(|v| &v.value == value)) {
+            continue;
+        }
+        if let Some(stop) = refused(config, id, flag, value) {
+            return Err(stop);
         }
     }
     let current = |id: &str| {
@@ -433,16 +441,29 @@ fn configure(
     };
     o.model = model.or_else(|| current("model"));
     o.effort = level.or_else(|| current("thought_level"));
-    for (id, _, value) in steps {
-        run.call(
-            "session/set_config_option",
-            json!({"sessionId": session, "configId": id, "value": value}),
-            false,
-        )
-        .map_err(|stop| match stop {
-            Stop::Error(e) => Stop::Error(format!("Couldn't set {id}: {e}")),
-            other => other,
-        })?;
+    let mut config = config.to_vec();
+    for (id, flag, value) in steps {
+        if id == "thought_level" {
+            if let Some(stop) = refused(&config, id, flag, &value) {
+                return Err(stop);
+            }
+        }
+        let answer = run
+            .call(
+                "session/set_config_option",
+                json!({"sessionId": session, "configId": id, "value": value}),
+                false,
+            )
+            .map_err(|stop| match stop {
+                Stop::Error(e) => Stop::Error(format!("Couldn't set {id}: {e}")),
+                other => other,
+            })?;
+        if id == "model" {
+            let fresh = ConfigOption::parse(answer.get("configOptions"));
+            if !fresh.is_empty() {
+                config = fresh;
+            }
+        }
     }
     Ok(())
 }

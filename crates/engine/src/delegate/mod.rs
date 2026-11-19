@@ -7,6 +7,8 @@ pub mod command;
 pub mod deps;
 pub mod family;
 pub mod media;
+pub mod models_skill;
+pub mod models_update;
 pub mod options;
 pub mod outcome;
 pub mod progress;

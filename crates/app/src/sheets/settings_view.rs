@@ -23,6 +23,7 @@ use super::banner::Banners;
 use super::client_model::{self, ClientPart};
 use super::client_view::ClientHandlers;
 use super::hook_rows::HooksShown;
+use super::models_refresh;
 use super::models_rows::ModelsShown;
 use super::settings::{
     change, sections, shared_agent_sections, tool_sections, Daemon, Field, Row, Section,
@@ -56,6 +57,8 @@ pub struct SettingsView {
     models: ModelsShown,
     skills_busy: bool,
     skills_result: Option<(String, bool)>,
+    models_refreshing: bool,
+    models_result: Option<(String, bool)>,
     client: Option<ClientPart>,
     watching: bool,
     confirming_back: bool,
@@ -95,6 +98,8 @@ impl SettingsView {
             models: ModelsShown::Checking,
             skills_busy: false,
             skills_result: None,
+            models_refreshing: false,
+            models_result: None,
             client: None,
             watching: false,
             confirming_back: false,
@@ -123,6 +128,11 @@ impl SettingsView {
     pub fn with_skills(mut self, skills: SkillsShown, models: ModelsShown) -> SettingsView {
         self.skills = skills;
         self.models = models;
+        self
+    }
+
+    pub fn with_models_result(mut self, result: Option<(String, bool)>) -> SettingsView {
+        self.models_result = result;
         self
     }
 
@@ -351,6 +361,29 @@ impl SettingsView {
         cx.notify();
     }
 
+    fn refresh_models(&mut self, cx: &mut Context<Self>) {
+        if self.models_refreshing {
+            return;
+        }
+        self.models_refreshing = true;
+        self.models_result = None;
+        let actions = self.acts.actions.clone();
+        cx.spawn(async move |this, cx| {
+            let reply = cx
+                .background_executor()
+                .spawn(async move { skills_models::refresh_models(&actions) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.models_refreshing = false;
+                view.models_result = Some(models_refresh::summary(reply));
+                view.ask_skills(cx);
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn open_override(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.models.file().and_then(|f| f.path.clone()) else {
             return;
@@ -374,6 +407,7 @@ impl SettingsView {
     fn skills_handlers(&self, cx: &mut Context<Self>) -> SkillsHandlers {
         SkillsHandlers {
             reinstall: Rc::new(cx.listener(|this, _, _, cx| this.reinstall_skills(cx))),
+            refresh_models: Rc::new(cx.listener(|this, _, _, cx| this.refresh_models(cx))),
             open_override: Rc::new(cx.listener(|this, _, _, cx| this.open_override(cx))),
             reload: Rc::new(cx.listener(|this, _, _, cx| {
                 this.skills_result = None;
@@ -773,6 +807,8 @@ impl Render for SettingsView {
                 models: &self.models,
                 busy: self.skills_busy,
                 result: self.skills_result.as_ref(),
+                refreshing: self.models_refreshing,
+                refresh_result: self.models_result.as_ref(),
             };
             list = list.child(skills_page(&state, &handlers, a, cx));
         }

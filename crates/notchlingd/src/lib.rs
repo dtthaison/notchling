@@ -155,6 +155,8 @@ pub mod log_queue;
 pub mod log_retention;
 pub mod log_rotate;
 pub mod log_start;
+pub mod models_cli;
+pub mod models_ops;
 pub mod op_group;
 pub mod op_kinds;
 pub mod organizations_ops;
@@ -397,6 +399,8 @@ mod log_ops_tests;
 #[cfg(test)]
 mod log_retention_tests;
 #[cfg(test)]
+mod models_ops_tests;
+#[cfg(test)]
 mod organizations_ops_tests;
 #[cfg(test)]
 mod outbox_testkit;
@@ -500,6 +504,7 @@ pub fn run(command: Command) -> i32 {
         Command::Providers { json } => providers_cli::run(json, &mut std::io::stdout()),
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
+        Command::Models { args } => models_cli::run(&args),
         Command::Secrets { args } => vault_cli::secrets(&args),
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),

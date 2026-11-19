@@ -488,3 +488,127 @@ fn agy_options_seen_are_cached_and_announced() {
     r.service.record_agy_options(&[]);
     assert_eq!(ids(&r.get("antigravity").unwrap()), ["m1", "m2"]);
 }
+
+#[test]
+fn agy_options_seen_keep_the_efforts_a_models_listing_gave() {
+    let r = rig("agy-merge", false, &live_login(None));
+    r.service.store_live(
+        Tool::Antigravity,
+        &[
+            LiveModel {
+                id: "m1".into(),
+                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
+                ..LiveModel::default()
+            },
+            LiveModel {
+                id: "m2".into(),
+                efforts: vec!["low".into(), "medium".into(), "high".into()],
+                ..LiveModel::default()
+            },
+        ],
+    );
+    let options = ConfigOption::parse(Some(&json!([
+        {"id": "model", "name": "Model", "type": "select", "currentValue": "m1",
+         "options": [{"value": "m1", "name": "One"}, {"value": "m2", "name": "Two"}, {"value": "m3", "name": "Three"}]},
+        {"id": "thought_level", "name": "Thinking Level", "type": "select", "currentValue": "medium",
+         "options": [{"value": "low", "name": "Low"}, {"value": "medium", "name": "Medium"}, {"value": "high", "name": "High"}]},
+    ])));
+    r.service.record_agy_options(&options);
+    let reply = r.get("antigravity").unwrap();
+    assert_eq!(
+        reply["models"][0]["efforts"],
+        json!(["low", "medium", "high", "xhigh"]),
+        "a session's shorter list does not drop xhigh"
+    );
+    assert_eq!(
+        reply["models"][1]["efforts"],
+        json!(["low", "medium", "high"])
+    );
+    assert_eq!(
+        reply["models"][2]["efforts"],
+        json!(["low", "medium", "high"]),
+        "a model never listed takes the session's levels"
+    );
+}
+
+pub(crate) fn claude_catalog(
+    tag: &str,
+    body: &str,
+) -> (
+    Arc<CatalogService>,
+    Arc<ScriptedHttp>,
+    Box<dyn std::any::Any>,
+) {
+    let r = rig(tag, true, &live_login(None));
+    r.http.answer(MODELS_URL, 200, body);
+    let (service, http) = (r.service.clone(), r.http.clone());
+    (service, http, Box::new(r))
+}
+
+#[test]
+fn an_empty_claude_list_is_an_error_and_keeps_the_cache() {
+    let r = rig("claude-empty", true, &live_login(None));
+    let kept = [LiveModel {
+        id: "claude-kept".into(),
+        ..LiveModel::default()
+    }];
+    r.service.store_live(Tool::Claude, &kept);
+    r.http.answer(MODELS_URL, 200, r#"{"data":[]}"#);
+    assert_eq!(
+        r.service.read_claude_now().unwrap_err(),
+        "Anthropic listed no models"
+    );
+    assert_eq!(r.service.live_models(Tool::Claude), kept);
+
+    r.at(NOW + 2.0 * 86_400.0);
+    r.http.answer(MODELS_URL, 200, r#"{"data":[]}"#);
+    r.try_claude();
+    assert_eq!(
+        r.service.live_models(Tool::Claude),
+        kept,
+        "the background fetch keeps it too"
+    );
+    assert!(r
+        .logs
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|l| l.contains("Anthropic listed no models")));
+}
+
+#[test]
+fn claude_is_asked_only_for_its_models_at_anthropics_host_and_not_in_a_loop() {
+    let r = rig("claude-rate", true, &live_login(None));
+    r.http.answer(MODELS_URL, 200, MODELS_LIST);
+    let first = r.service.read_claude_now().unwrap();
+    assert!(!first.is_empty());
+    let again = r.service.read_claude_now().unwrap_err();
+    assert!(again.contains("less than a minute"), "{again}");
+    assert_eq!(r.model_requests().len(), 1, "the second call never left");
+
+    r.at(NOW + 61.0);
+    r.http.answer(MODELS_URL, 200, MODELS_LIST);
+    r.service.read_claude_now().unwrap();
+    assert_eq!(r.model_requests().len(), 2);
+    for (url, _) in r.http.seen() {
+        if url != PROFILE_URL {
+            assert!(url.starts_with("https://api.anthropic.com/"), "{url}");
+        }
+    }
+}
+
+#[test]
+fn a_refused_login_is_not_asked_again_by_a_manual_read_either() {
+    let r = rig("claude-refused", true, &live_login(None));
+    r.http.answer(MODELS_URL, 403, "{}");
+    let why = r.service.read_claude_now().unwrap_err();
+    assert!(why.contains("403"), "{why}");
+    r.at(NOW + 120.0);
+    let why = r.service.read_claude_now().unwrap_err();
+    assert!(why.contains("refused"), "{why}");
+    assert_eq!(r.model_requests().len(), 1);
+    r.at(NOW + 2.0 * 86_400.0);
+    r.http.answer(MODELS_URL, 403, "{}");
+    r.try_claude();
+    assert_eq!(r.model_requests().len(), 2, "a day later it asks again");
+}

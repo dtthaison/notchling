@@ -103,6 +103,8 @@ pub mod ops {
 
     pub const CATALOG_GET: &str = "catalog.get";
     pub const CATALOG_ROLES: &str = "catalog.roles";
+    pub const MODELS_CHECK: &str = "models.check";
+    pub const MODELS_UPDATE: &str = "models.update";
 
     pub const INBOX_LIST: &str = "inbox.list";
     pub const INBOX_ANSWER: &str = "inbox.answer";

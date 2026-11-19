@@ -280,12 +280,33 @@ fn plan_skill(name: &str, tool: &str, action: &str, reason: Option<&str>) -> Val
         "path": "/Users/me/.claude/skills/x", "error": null})
 }
 
+pub fn models_refreshed(shown: Shown) -> Option<(String, bool)> {
+    if shown != Shown::SettingsSkills {
+        return None;
+    }
+    let tool = |id: &str, read: bool, added: &[&str], efforts: usize, unpriced: &[&str]| {
+        json!({"tool": id, "read": read, "added": added, "removed": [],
+            "efforts": vec![json!({"model": "gemini-4-hydrogen", "added": ["xhigh"], "removed": []}); efforts],
+            "unpriced": unpriced})
+    };
+    let report = json!({
+        "tools": [
+            tool("claude", false, &[], 0, &[]),
+            tool("codex", true, &["gpt-6.2-sol", "gpt-6.2-astra"], 0, &["gpt-6.2-sol", "gpt-6.2-astra"]),
+            tool("antigravity", true, &["gemini-4-neon"], 2, &["gemini-4-neon"]),
+        ],
+        "suggestions": ["review-final: codex gpt-6-astra: newer in family: gpt-6.2-astra"],
+    });
+    Some(super::models_refresh::summary(Ok(report)))
+}
+
 pub fn skills_models(shown: Shown) -> Option<(SkillsShown, ModelsShown)> {
     if shown != Shown::SettingsSkills {
         return None;
     }
     let plan = json!({"on": true, "applied": false, "plan": {"skills": [
         plan_skill("notchling-delegate", "claude", "unchanged", None),
+        plan_skill("notchling-models", "claude", "write", None),
         plan_skill("notchling-pages", "claude", "update", None),
         plan_skill("notchling-settings", "claude", "write", None),
         plan_skill("notchling-delegate", "codex", "unchanged", None),
@@ -524,7 +545,11 @@ mod tests {
         assert!(sidecar(Shown::SettingsAgentsAntigravity).is_some());
         assert!(sidecar(Shown::SettingsAgentsCodex).is_none());
         let (skills, models) = skills_models(Shown::SettingsSkills).unwrap();
-        assert_eq!(skills.names().len(), 3);
+        assert_eq!(skills.names().len(), 4);
+        let (text, failed) = models_refreshed(Shown::SettingsSkills).unwrap();
+        assert!(!failed);
+        assert!(text.starts_with("Model lists updated: 3 new models, 2 models with new efforts."));
+        assert!(models_refreshed(Shown::Settings).is_none());
         assert!(models.file().is_some());
         assert!(skills_models(Shown::Settings).is_none());
         assert_eq!(

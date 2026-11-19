@@ -52,6 +52,9 @@ pub enum Command {
     DelegateModels {
         args: Vec<String>,
     },
+    Models {
+        args: Vec<String>,
+    },
     Secrets {
         args: Vec<String>,
     },
@@ -105,6 +108,7 @@ pub fn usage() -> &'static str {
      \u{20}                                           the same on another machine of your cluster (read-only)\n  \
      notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers, with what each is for\n  \
      notchling delegate-models --for <role>  the tool, model and effort for review, review-final, review-secrets or spec-check\n  \
+     notchling models [check|update] [--json]  read each tool's models and efforts; update writes Notchling's copy (--force accepts a list that shrank)\n  \
      notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
      notchling secret <name>[,<name>…] -- <command> [args…]\n  \
      \u{20}                                           run a command with secrets, its output hidden\n  \
@@ -173,6 +177,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "delegate-models" => {
             return Ok(Command::DelegateModels {
+                args: args.collect(),
+            })
+        }
+        "models" => {
+            return Ok(Command::Models {
                 args: args.collect(),
             })
         }
@@ -458,6 +467,12 @@ mod tests {
                 args: vec!["--json".into()]
             })
         );
+        assert_eq!(
+            p(&["models", "update", "--json"]),
+            Ok(Command::Models {
+                args: vec!["update".into(), "--json".into()]
+            })
+        );
         let text = usage();
         assert!(
             text.contains("notchling delegate <codex|agy>") && text.contains("delegate-models")
@@ -537,6 +552,7 @@ mod tests {
             "pages",
             "page",
             "delegate-models",
+            "models",
             "secrets",
         ] {
             let line = lines

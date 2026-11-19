@@ -150,7 +150,7 @@ fn a_plan_works_with_the_switch_off_and_reads_only() {
         .unwrap()
         .contains("add PreToolUse (AskUserQuestion)"));
     let skills = plan["skills"].as_array().unwrap();
-    assert_eq!(skills.len(), 9);
+    assert_eq!(skills.len(), 12);
     assert!(skills.iter().all(|s| s["action"] == "write"));
     assert_eq!(dir.tree(), before);
     assert_eq!(settings_text(&dir), USER_SETTINGS);
@@ -258,6 +258,9 @@ fn with_the_switch_on_apply_installs_hooks_and_skills_and_remove_undoes_it() {
         (".claude", "notchling-ask"),
         (".codex", "notchling-ask"),
         (".gemini/config", "notchling-ask"),
+        (".claude", "notchling-models"),
+        (".codex", "notchling-models"),
+        (".gemini/config", "notchling-models"),
     ] {
         let skill = dir.path(&format!("home/{tool}/skills/{name}"));
         assert!(skill.join("SKILL.md").is_file(), "{tool} {name}");
@@ -522,6 +525,7 @@ fn the_layout_puts_every_tool_where_the_swift_app_looked() {
         names,
         vec![
             ("notchling-delegate", 3),
+            ("notchling-models", 3),
             ("notchling-pages", 1),
             ("notchling-settings", 2),
             ("notchling-ask", 3)

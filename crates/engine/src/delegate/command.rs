@@ -72,6 +72,11 @@ pub fn run(
             agy_run::run(&options, &deps, err)
         }
     };
+    if outcome.error.is_none() && !outcome.timed_out {
+        if let Some(message) = said_out(&options, &outcome, &deps) {
+            outcome.error = Some(message);
+        }
+    }
     if let (Some(dir), false) = (&options.out, outcome.media.is_empty()) {
         let files: Vec<PathBuf> = outcome.media.iter().map(PathBuf::from).collect();
         match media::copy_to(&files, Path::new(dir)) {
@@ -110,6 +115,17 @@ fn quota_refusal(options: &options::Options, deps: &Deps) -> Option<String> {
     }
 }
 
+fn said_out(options: &options::Options, outcome: &Outcome, deps: &Deps) -> Option<String> {
+    let found = quota::detect(&outcome.reply)?;
+    let now = deps.quota.as_ref().map_or_else(now_secs, |s| s.now());
+    let model = options.model.as_deref().or(outcome.model.as_deref());
+    let out = quota::out_of(options.tool, model, &found, now);
+    if let Some(source) = &deps.quota {
+        quota::mark_out(source, options.tool, model, &found);
+    }
+    Some(quota::refusal(options.tool, model, &out, now))
+}
+
 fn trust_folder(folder: &str, deps: &Deps, err: &mut dyn Write) {
     let Some(files) = &deps.agy_trust else {
         return;
@@ -146,7 +162,7 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
     let mut lines: Vec<String> = Vec::new();
     if only != Some(Tool::Agy) {
         lines.push("codex (--model <slug> --effort <level>):".into());
-        let known = models::load(&deps.codex_home);
+        let known = models::load_with(&deps.codex_home, deps.codex_snapshot().as_deref());
         if known.is_empty() {
             lines.push("  (Codex hasn't cached its model list yet; run codex once)".into());
         }
@@ -165,7 +181,7 @@ pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 
         lines.extend(role_models::effort_lines(roles.tool("codex")));
     }
     if only != Some(Tool::Codex) {
-        lines.push("agy (--model <model> --effort low|medium|high):".into());
+        lines.push("agy (--model <model> --effort <level>):".into());
         let listing = deps
             .agy_binary
             .as_deref()
@@ -198,25 +214,26 @@ pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) ->
     let roles = Roles::load(deps.catalog_file.as_deref());
     let mut root = serde_json::Map::new();
     if only != Some(Tool::Agy) {
-        let models: Vec<serde_json::Value> = models::load(&deps.codex_home)
-            .into_iter()
-            .map(|m| {
-                let mut v = serde_json::json!({
-                    "slug": m.slug,
-                    "name": m.name,
-                    "summary": m.summary,
-                    "efforts": m.efforts,
-                });
-                if let Some(d) = m.default_effort {
-                    v["defaultEffort"] = d.into();
-                }
-                if let Some(w) = m.context_window {
-                    v["contextWindow"] = w.into();
-                }
-                role_models::json_fields(roles.tool("codex"), &m.slug, &mut v);
-                v
-            })
-            .collect();
+        let models: Vec<serde_json::Value> =
+            models::load_with(&deps.codex_home, deps.codex_snapshot().as_deref())
+                .into_iter()
+                .map(|m| {
+                    let mut v = serde_json::json!({
+                        "slug": m.slug,
+                        "name": m.name,
+                        "summary": m.summary,
+                        "efforts": m.efforts,
+                    });
+                    if let Some(d) = m.default_effort {
+                        v["defaultEffort"] = d.into();
+                    }
+                    if let Some(w) = m.context_window {
+                        v["contextWindow"] = w.into();
+                    }
+                    role_models::json_fields(roles.tool("codex"), &m.slug, &mut v);
+                    v
+                })
+                .collect();
         root.insert(
             "codex".into(),
             serde_json::json!({ "models": models, "notForEfforts": role_models::efforts_json(roles.tool("codex")) }),

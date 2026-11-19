@@ -262,11 +262,11 @@ fn delegate_models_lists_both_tools() {
     });
     assert_eq!(
         listing(&rig, &[]),
-        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
+        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort <level>):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
     );
     assert_eq!(
         listing(&rig, &["agy"]),
-        "agy (--model <model> --effort low|medium|high):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
+        "agy (--model <model> --effort <level>):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
     );
     assert!(listing(&rig, &["codex"]).starts_with("codex ("));
     assert!(!listing(&rig, &["Codex"]).contains("agy ("));
@@ -277,7 +277,7 @@ fn delegate_models_says_so_when_a_tool_has_nothing_to_list() {
     let rig = rig(AcpFake::new());
     assert_eq!(
         listing(&rig, &[]),
-        "codex (--model <slug> --effort <level>):\n  (Codex hasn't cached its model list yet; run codex once)\nagy (--model <model> --effort low|medium|high):\n  (couldn't run agy models)"
+        "codex (--model <slug> --effort <level>):\n  (Codex hasn't cached its model list yet; run codex once)\nagy (--model <model> --effort <level>):\n  (couldn't run agy models)"
     );
 }
 
@@ -535,5 +535,124 @@ mod quota_gate {
         let plain = gated();
         plain.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
         assert_eq!(delegate(&plain, &["codex", "--", "hi"], None).code, 0);
+    }
+}
+
+#[test]
+fn delegate_models_shows_xhigh_only_for_the_models_that_list_it() {
+    let mut rig = rig(AcpFake::new());
+    rig.deps.capture = Arc::new(|_, _| {
+        Some("Fetching available models...\ngemini-4-neon-high\tH\ngemini-4-neon-xhigh\tX\ngemini-4-neon-low\tL\ngemini-4-argon-high\tH\ngemini-4-argon-medium\tM\n".into())
+    });
+    let mut out = Vec::new();
+    assert_eq!(models_listing(&["agy".to_string()], &rig.deps, &mut out), 0);
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("  gemini-4-neon  efforts: low, high, xhigh"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  gemini-4-argon  efforts: medium, high"),
+        "{text}"
+    );
+    assert!(!text.contains("argon  efforts: medium, high, xhigh"));
+
+    let mut out = Vec::new();
+    assert_eq!(
+        models_listing_json(&["agy".to_string()], &rig.deps, &mut out),
+        0
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        v["agy"]["models"][0]["efforts"],
+        serde_json::json!(["low", "high", "xhigh"])
+    );
+}
+
+mod said_out {
+    use super::*;
+    use crate::delegate::quota::{self, Source};
+
+    const NOW: f64 = 1_794_400_000.0;
+    const LINE: &str = "\u{26a0} Individual quota reached. Please upgrade your subscription\u{2026} Resets in 134h28m59s";
+
+    fn clock() -> f64 {
+        NOW
+    }
+
+    fn quota_agent() -> crate::tools::acp::fake::Responder {
+        Arc::new(|m: &Value, h: &crate::tools::acp::fake::FakeHandle| {
+            let id = m["id"].clone();
+            let reply =
+                |result: Value| h.push(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+            let config = json!([
+                {"id": "model", "name": "Model", "type": "select", "currentValue": "gemini-4-hydrogen",
+                 "options": [{"value": "gemini-4-hydrogen", "name": "H"}]},
+                {"id": "thought_level", "name": "Thinking", "type": "select", "currentValue": "medium",
+                 "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+            ]);
+            match m.get("method").and_then(Value::as_str) {
+                Some("initialize") => reply(json!({})),
+                Some("session/new") => reply(json!({"sessionId": "s1", "configOptions": config})),
+                Some("session/set_config_option") => reply(json!({})),
+                Some("session/prompt") => {
+                    h.push(
+                        &json!({"jsonrpc": "2.0", "method": "session/update", "params": {"update":
+                        {"sessionUpdate": "agent_message_chunk", "content": {"text": LINE}}}}),
+                    );
+                    reply(json!({"stopReason": "end_turn"}));
+                }
+                _ => {}
+            }
+        })
+    }
+
+    #[test]
+    fn an_antigravity_quota_line_fails_the_job_and_marks_the_pool_used_up() {
+        let mut rig = rig(AcpFake::with_responder(quota_agent()));
+        rig.deps.quota = Some(Source {
+            dir: rig.root.join("quota"),
+            clock,
+        });
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-hydrogen", "--", "review", "it"],
+            None,
+        );
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.out.contains("failed in "), "{}", ran.out);
+        assert!(
+            ran.out.contains(
+                "Error: gemini-4-hydrogen can't run now. Gemini Models: individual quota used up, resets in 5d 14h."
+            ),
+            "{}",
+            ran.out
+        );
+        assert!(!ran.out.contains(": done"), "{}", ran.out);
+        let saved = quota::load(&rig.root.join("quota"), Tool::Agy).expect("the pool is marked");
+        assert!(matches!(
+            quota::verdict(Some(&saved), Tool::Agy, "gemini-4-hydrogen", NOW),
+            quota::Verdict::Out(_)
+        ));
+
+        let again = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-hydrogen", "--", "review", "it"],
+            None,
+        );
+        assert_eq!(again.code, 1);
+        assert_eq!(
+            rig.agy.spawned().len(),
+            1,
+            "the second call never started agy"
+        );
+    }
+
+    #[test]
+    fn json_and_a_run_without_a_quota_folder_still_fail() {
+        let rig = rig(AcpFake::with_responder(quota_agent()));
+        let ran = delegate(&rig, &["agy", "--json", "--", "review", "it"], None);
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.out.contains("can't run now"), "{}", ran.out);
     }
 }
