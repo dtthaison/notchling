@@ -11,6 +11,7 @@ const MENU_WAIT_MS: u64 = 5_000;
 const CLOSE_WAIT_MS: u64 = 3_000;
 const RECONNECT_WAIT_MS: u64 = 25_000;
 const MOVE_MAX: usize = 8;
+const LIST_ROWS_ABOVE: usize = 14;
 const SPINNERS: [char; 8] = ['✻', '✽', '✶', '✳', '✢', '·', '✦', '*'];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +41,7 @@ pub enum Refusal {
     Starting,
     NoInput,
     Unavailable,
+    NotListed,
     Stuck,
     Pty(String),
 }
@@ -53,6 +55,7 @@ impl std::fmt::Display for Refusal {
             Refusal::Starting => write!(f, "The session didn't open in time."),
             Refusal::NoInput => write!(f, "The session's terminal isn't at its prompt."),
             Refusal::Unavailable => write!(f, "This Claude Code has no /chrome command."),
+            Refusal::NotListed => write!(f, "Couldn't open Claude Code's /chrome menu."),
             Refusal::Stuck => write!(f, "The terminal didn't show the Chrome menu."),
             Refusal::Pty(why) => write!(f, "Couldn't type into the session's terminal: {why}"),
         }
@@ -176,13 +179,47 @@ fn ready(pty: &mut dyn Pty) -> Result<(), Refusal> {
     }
 }
 
-fn lists_command(lines: &[String]) -> bool {
+struct Row {
+    selected: bool,
+    name: String,
+    line: String,
+}
+
+fn command_row(line: &str) -> Option<Row> {
+    let text = line.replace('\u{a0}', " ");
+    let trimmed = text.trim_start();
+    let selected = trimmed.starts_with('❯');
+    let body = trimmed.trim_start_matches('❯').trim_start();
+    if !body.starts_with('/') {
+        return None;
+    }
+    let name = body.split_whitespace().next()?;
+    body[name.len()..].starts_with("  ").then(|| Row {
+        selected,
+        name: name.to_string(),
+        line: text.clone(),
+    })
+}
+
+fn command_rows(lines: &[String]) -> Vec<Row> {
     let Some((top, _)) = input_box::span(lines) else {
-        return false;
+        return Vec::new();
     };
-    lines[top..]
+    lines[top.saturating_sub(LIST_ROWS_ABOVE)..]
         .iter()
-        .any(|l| l.contains(menu::COMMAND_HINT) && l.trim_start().starts_with('❯'))
+        .filter_map(|l| command_row(l))
+        .collect()
+}
+
+fn lists_command(lines: &[String]) -> bool {
+    command_rows(lines)
+        .iter()
+        .any(|r| r.selected && r.name == COMMAND && r.line.contains(menu::COMMAND_HINT))
+}
+
+fn list_without_command(lines: &[String]) -> bool {
+    let rows = command_rows(lines);
+    !rows.is_empty() && rows.iter().all(|r| r.name != COMMAND)
 }
 
 fn ours_only(pty: &mut dyn Pty) -> bool {
@@ -225,7 +262,11 @@ fn type_command(pty: &mut dyn Pty) -> Result<(), Refusal> {
         }
     }
     if ours_only(pty) {
-        return Err(Refusal::Unavailable);
+        return Err(if list_without_command(&pty.screen()) {
+            Refusal::Unavailable
+        } else {
+            Refusal::NotListed
+        });
     }
     Err(Refusal::BoxHasText)
 }

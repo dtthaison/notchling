@@ -731,3 +731,18 @@ fn a_superseded_restart_does_nothing_before_and_after_waiting_for_the_typing_loc
     assert!(launcher.commands().is_empty());
     assert_eq!(status::read_flags(&state).unwrap(), ["--no-chrome"]);
 }
+
+#[test]
+fn the_flags_in_the_session_file_say_whether_chrome_was_chosen() {
+    for (flags, want) in [
+        (r#"["--no-chrome","--model","m"]"#, Some(false)),
+        (r#"["--chrome"]"#, Some(true)),
+        (r#"["--model","m"]"#, None),
+    ] {
+        let launcher = Arc::new(FakeLauncher::new());
+        let (_d, ops, _state) = live("flagask", launcher, flags);
+        let hosts = LiveHosts::new(&ops);
+        let mut host = hosts.host(&job_a(&ops));
+        assert_eq!(host.chrome_flag(), want, "{flags}");
+    }
+}

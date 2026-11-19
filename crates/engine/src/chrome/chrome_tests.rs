@@ -8,13 +8,13 @@ use crate::sessions::testutil::TempDir;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-const MENU_ON: &str = include_str!("../../tests/fixtures/chrome/menu-on.txt");
-const MENU_OFF: &str = include_str!("../../tests/fixtures/chrome/menu-off.txt");
+pub(super) const MENU_ON: &str = include_str!("../../tests/fixtures/chrome/menu-on.txt");
+pub(super) const MENU_OFF: &str = include_str!("../../tests/fixtures/chrome/menu-off.txt");
 const MENU_OFF_RECONNECT: &str = include_str!("../../tests/fixtures/chrome/menu-off-reconnect.txt");
-const OFF_ATTACH: &str = include_str!("../../tests/fixtures/chrome/off-attach.txt");
-const ON_ATTACH: &str = include_str!("../../tests/fixtures/chrome/on-attach.txt");
-const TYPED: &str = include_str!("../../tests/fixtures/chrome/typed-slash.txt");
-const CLOSED: &str = include_str!("../../tests/fixtures/chrome/closed-box-empty.txt");
+pub(super) const OFF_ATTACH: &str = include_str!("../../tests/fixtures/chrome/off-attach.txt");
+pub(super) const ON_ATTACH: &str = include_str!("../../tests/fixtures/chrome/on-attach.txt");
+pub(super) const TYPED: &str = include_str!("../../tests/fixtures/chrome/typed-slash.txt");
+pub(super) const CLOSED: &str = include_str!("../../tests/fixtures/chrome/closed-box-empty.txt");
 const BOX_TEXT: &str = include_str!("../../tests/fixtures/input-box/typed.txt");
 const WORKING: &str = include_str!("../../tests/fixtures/input-box/working-after-send.txt");
 const PERMISSION: &str = include_str!("../../tests/fixtures/permission-made-up/bash.txt");
@@ -40,16 +40,16 @@ fn shot(text: &str) -> Shot {
     }
 }
 
-struct Fake {
-    state: usize,
+pub(super) struct Fake {
+    pub(super) state: usize,
     shots: Vec<Shot>,
-    next: fn(usize, &str) -> usize,
-    writes: Vec<String>,
-    clock: u64,
+    pub(super) next: fn(usize, &str) -> usize,
+    pub(super) writes: Vec<String>,
+    pub(super) clock: u64,
 }
 
 impl Fake {
-    fn new(shots: &[&str], next: fn(usize, &str) -> usize) -> Fake {
+    pub(super) fn new(shots: &[&str], next: fn(usize, &str) -> usize) -> Fake {
         Fake {
             state: 0,
             shots: shots.iter().map(|t| shot(t)).collect(),
@@ -85,7 +85,7 @@ impl Pty for Fake {
     }
 }
 
-fn chrome_walk(state: usize, write: &str) -> usize {
+pub(super) fn chrome_walk(state: usize, write: &str) -> usize {
     match (state, write) {
         (0, "/chrome") => 1,
         (1, "\r") => 2,
@@ -196,21 +196,6 @@ fn nothing_is_typed_over_a_dialog_or_an_open_menu() {
     let mut open = Fake::new(&[MENU_ON], chrome_walk);
     assert_eq!(drive::run(&mut open, Goal::Read), Err(Refusal::Dialog));
     assert!(open.writes.is_empty());
-}
-
-#[test]
-fn a_claude_code_without_the_command_leaves_nothing_typed() {
-    let without = TYPED.replace(menu::COMMAND_HINT, "Something else");
-    let mut pty = Fake::new(&[OFF_ATTACH, &without], |state, write| {
-        match (state, write) {
-            (0, "/chrome") => 1,
-            (s, _) => s,
-        }
-    });
-    assert_eq!(drive::run(&mut pty, Goal::Read), Err(Refusal::Unavailable));
-    assert_eq!(pty.writes[0], "/chrome");
-    assert!(pty.writes.iter().any(|w| w.starts_with('\x7f')));
-    assert!(!pty.writes.iter().any(|w| w == "\r"));
 }
 
 #[test]
@@ -366,27 +351,28 @@ fn the_session_file_keeps_everything_but_the_flag() {
     );
 }
 
-struct Script {
-    turns: VecDeque<bool>,
-    looks: VecDeque<Result<menu::Menu, Refusal>>,
-    tasks: Option<u32>,
-    sleeps: Vec<u64>,
-    restarts: Vec<bool>,
-    restart_error: Option<String>,
-    goals: Vec<Goal>,
-    clock: u64,
-    cancel: bool,
-    cancel_after_ms: Option<u64>,
+pub(super) struct Script {
+    pub(super) turns: VecDeque<bool>,
+    pub(super) looks: VecDeque<Result<menu::Menu, Refusal>>,
+    pub(super) tasks: Option<u32>,
+    pub(super) sleeps: Vec<u64>,
+    pub(super) restarts: Vec<bool>,
+    pub(super) restart_error: Option<String>,
+    pub(super) goals: Vec<Goal>,
+    pub(super) clock: u64,
+    pub(super) cancel: bool,
+    pub(super) cancel_after_ms: Option<u64>,
+    pub(super) flag: Option<bool>,
 }
 
-fn menu_with(link: Link, extension: Extension) -> menu::Menu {
+pub(super) fn menu_with(link: Link, extension: Extension) -> menu::Menu {
     let mut menu = menu::read(&menu_lines(MENU_ON)).unwrap();
     menu.link = link;
     menu.extension = extension;
     menu
 }
 
-fn script(looks: Vec<Result<menu::Menu, Refusal>>) -> Script {
+pub(super) fn script(looks: Vec<Result<menu::Menu, Refusal>>) -> Script {
     Script {
         turns: VecDeque::new(),
         looks: looks.into(),
@@ -398,6 +384,7 @@ fn script(looks: Vec<Result<menu::Menu, Refusal>>) -> Script {
         clock: 0,
         cancel: false,
         cancel_after_ms: None,
+        flag: None,
     }
 }
 
@@ -407,6 +394,9 @@ impl Host for Script {
     }
     fn tasks_in_flight(&mut self) -> Option<u32> {
         self.tasks
+    }
+    fn chrome_flag(&mut self) -> Option<bool> {
+        self.flag
     }
     fn look(&mut self, goal: Goal) -> Result<drive::Report, Refusal> {
         self.goals.push(goal);
@@ -443,7 +433,7 @@ impl Host for Script {
     }
 }
 
-fn go(host: &mut Script, on: bool, force: bool) -> (Phase, Vec<Phase>) {
+pub(super) fn go(host: &mut Script, on: bool, force: bool) -> (Phase, Vec<Phase>) {
     let mut seen = Vec::new();
     let end = flow::run(host, Options { on, force }, &mut |p| seen.push(p));
     (end, seen)
@@ -751,7 +741,7 @@ fn a_line_above_the_box_does_not_count_as_the_commands_list() {
         (0, "/chrome") => 1,
         (s, _) => s,
     });
-    assert_eq!(drive::run(&mut pty, Goal::Read), Err(Refusal::Unavailable));
+    assert_eq!(drive::run(&mut pty, Goal::Read), Err(Refusal::NotListed));
     assert!(!pty.writes.iter().any(|w| w == "\r"));
 }
 
