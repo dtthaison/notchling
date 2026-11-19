@@ -492,3 +492,20 @@ mod delegate_quota {
         assert!(read(&rig).is_none());
     }
 }
+
+#[test]
+fn removing_an_account_forgets_its_shadow() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let rig = Rig::new("remove-shadow", FakeApps::new());
+    rig.set_live(&fake_login("1", "a@example.com", "ta"));
+    rig.store.sync(false);
+    let orgs = Organizations::new(&rig.root);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Antigravity, "1", "acme")
+        .unwrap();
+    rig.store.remove("1");
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc.shadow.accounts.contains_key("antigravity:1"));
+}

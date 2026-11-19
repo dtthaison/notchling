@@ -33,6 +33,8 @@ says what agents may do.
 - The accounts those tools use: saving them, switching, limits and cost.
 - Tools agents use alongside a session: the Secret Vault, local copies of Artifacts, handing a job to
   another tool, and Machines, which sets up the computers that run the overnight worker.
+- Organizations: every machine, account and secret belongs to one organization you name (Personal, or
+  a company), and Notchling keeps each organization's apart.
 - Setting up the agent tools themselves: the hooks, skills and rules Notchling adds to each, and
   which model each kind of work gets ([decision 0019](decisions/0019-agent-instructions-per-tool.md)).
 
@@ -55,6 +57,8 @@ Goal 1 needs the agent setup (Phase 5) and goal 5 the release pipeline (Phase 6)
 - App Store or Google Play releases. For now people build the phone app themselves.
 - A website.
 - Replacing the sd worker. The design changes how it authenticates and labels work, not what it does.
+- Sharing one machine, account or secret between organizations. A value two organizations need is saved
+  once in each.
 
 ## Anti-goals
 
@@ -77,8 +81,11 @@ The app:
 - Send anything to a server of its own. There is none. There is no telemetry today; crash reports,
   if they come, are opt-in only. [policies/privacy.md](policies/privacy.md) lists every call the app
   makes.
-- Send an account's login anywhere except the service it belongs to, or a machine you set up in
-  Machines.
+- Send an account's login or a secret anywhere except the service it belongs to, or a machine you set
+  up in Machines in the same organization.
+- Switch to another organization's account on its own. Limit switching stays inside the organization
+  of the account in use.
+- Give an agent a machine, secret or account of another organization than its session's folder.
 - Renew the login a tool is using. Refresh tokens rotate, so renewing Claude Code's or Codex's live
   login would sign it out.
 - Change more of your config than its own part: in `~/.claude/settings.json` only Notchling's hook
@@ -126,3 +133,10 @@ carry over.
   Windows input methods are unverified (decision 0001).
 - **No notch.** Linux and Windows get a tray icon and a panel at the top of the screen instead of the
   notch and the menu bar. This is the designer's call and open to change.
+
+## Weaker than it looks
+
+- **One login per tool on a Mac.** Claude Code, Codex and Antigravity each have one login for the whole
+  Mac. A session in a company's folder uses whatever account is signed in; Notchling warns and offers
+  to switch, and a lane can hold the company's account, but it can't make a terminal session use
+  another account.

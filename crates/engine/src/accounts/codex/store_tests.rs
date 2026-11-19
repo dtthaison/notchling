@@ -293,6 +293,7 @@ fn a_saved_account_that_is_not_live_is_read_from_its_saved_copy() {
         id: "user-2:ws-2".into(),
         email: "b@example.com".into(),
         plan: None,
+        organization: None,
     });
     crate::accounts::book::write_accounts(&file, &book);
     let rig2 = Rig::at(
@@ -551,4 +552,21 @@ fn switching_account_never_leaves_the_old_accounts_quota_for_the_delegate_comman
         after.is_none_or(|q| q.reached.is_none()),
         "the credits of the account switched away from are gone"
     );
+}
+
+#[test]
+fn removing_an_account_forgets_its_shadow() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let rig = Rig::new("remove-shadow", FakeProcs::new(), FakeApps::new());
+    two_accounts(&rig);
+    rig.store.sync(false);
+    let orgs = Organizations::new(&rig.root);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Codex, "user-1:ws-1", "acme")
+        .unwrap();
+    rig.store.remove("user-1:ws-1");
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc.shadow.accounts.contains_key("codex:user-1:ws-1"));
 }

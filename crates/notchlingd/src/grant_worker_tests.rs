@@ -345,6 +345,7 @@ fn token(name: &str) -> VaultEntry {
         kind: Kind::Token,
         name: name.to_string(),
         note: String::new(),
+        organization: None,
         secret_var: "TOKEN".to_string(),
         updated: String::new(),
         url: None,

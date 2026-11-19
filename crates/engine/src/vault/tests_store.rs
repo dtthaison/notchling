@@ -347,3 +347,106 @@ fn remove_never_touches_a_value_the_daemons_list_doesnt_name() {
     assert!(store.remove("gh").unwrap());
     assert_eq!(item.values(), theirs);
 }
+
+#[test]
+fn a_save_or_rename_made_from_a_stale_entry_keeps_the_organization_set_since() {
+    use crate::organizations::{Kind as OrgKind, Organizations};
+    let (temp, _item, store) = store("organization");
+    let entry = VaultEntry::new("npm", Kind::Token);
+    store
+        .save(&entry, Some(value("fake-npm-0001")), None, "t")
+        .unwrap();
+    let orgs = Organizations::new(&temp.0);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Vault, "npm", "acme")
+        .unwrap();
+    let stale = store.entry("npm").unwrap().unwrap();
+    assert_eq!(stale.organization.as_deref(), Some("acme"));
+    orgs.create("Other", None, None).unwrap();
+    orgs.set_organization(OrgKind::Vault, "npm", "other")
+        .unwrap();
+    let saved = store.save(&stale, None, Some(&stale), "t2").unwrap();
+    assert_eq!(saved.entry.organization.as_deref(), Some("other"));
+    assert_eq!(
+        store.entry("npm").unwrap().unwrap().organization.as_deref(),
+        Some("other")
+    );
+    let renamed = store.rename(&stale, "npm-two", "t3").unwrap();
+    assert_eq!(renamed.entry.organization.as_deref(), Some("other"));
+    let shadow = match orgs.state() {
+        crate::organizations::State::Loaded(doc) => doc.shadow.vault,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(shadow.get("npm-two").map(String::as_str), Some("other"));
+    assert!(!shadow.contains_key("npm"));
+}
+
+#[test]
+fn a_rename_moves_the_shadow_in_the_same_write_and_onto_an_existing_name_changes_nothing() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let (temp, _item, store) = store("rename-shadow");
+    for name in ["alpha", "beta"] {
+        store
+            .save(
+                &VaultEntry::new(name, Kind::Token),
+                Some(value("fake-0001")),
+                None,
+                "t",
+            )
+            .unwrap();
+    }
+    let orgs = Organizations::new(&temp.0);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Vault, "alpha", "acme")
+        .unwrap();
+    let before = temp.text();
+    let org_before = crate::store::doc(&temp.0, crate::organizations::DOC).unwrap();
+    let alpha = store.entry("alpha").unwrap().unwrap();
+    assert!(store.rename(&alpha, "beta", "t2").is_err());
+    assert_eq!(temp.text(), before);
+    assert_eq!(
+        crate::store::doc(&temp.0, crate::organizations::DOC).unwrap(),
+        org_before
+    );
+    store.rename(&alpha, "gamma", "t3").unwrap();
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert_eq!(
+        doc.shadow.vault.get("gamma").map(String::as_str),
+        Some("acme")
+    );
+    assert!(!doc.shadow.vault.contains_key("alpha"));
+}
+
+#[test]
+fn removing_a_secret_forgets_its_shadow() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let (temp, _item, store) = store("remove-shadow");
+    store
+        .save(
+            &VaultEntry::new("alpha", Kind::Token),
+            Some(value("fake-0001")),
+            None,
+            "t",
+        )
+        .unwrap();
+    let orgs = Organizations::new(&temp.0);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Vault, "alpha", "acme")
+        .unwrap();
+    assert!(store.remove("alpha").unwrap());
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc.shadow.vault.contains_key("alpha"));
+    store
+        .save(
+            &VaultEntry::new("alpha", Kind::Token),
+            Some(value("fake-0002")),
+            None,
+            "t",
+        )
+        .unwrap();
+    assert_eq!(orgs.resolve(OrgKind::Vault, "alpha").id, "personal");
+}

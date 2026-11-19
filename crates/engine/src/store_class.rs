@@ -24,6 +24,7 @@ pub fn doc_class(name: &str) -> Option<Class> {
         | "accounts/antigravity-usage"
         | "machines/pending-updates"
         | "machines/registry"
+        | "organizations"
         | "daemon/vault" => Some(Class::Node),
         _ => None,
     }

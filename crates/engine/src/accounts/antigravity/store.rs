@@ -223,6 +223,7 @@ impl AntigravityStore {
                     id: known.id.clone(),
                     email: known.email.clone(),
                     plan: None,
+                    organization: known.organization.clone(),
                 };
             }
         }
@@ -464,6 +465,8 @@ impl AccountProvider for AntigravityStore {
         inner.accounts.retain(|a| a.id != id);
         let accounts = inner.accounts.clone();
         self.save_book(&accounts);
+        let _ = crate::organizations::Organizations::new(&self.paths.data_dir)
+            .forget(crate::organizations::Kind::Antigravity, id);
     }
 
     fn switch_confirmation(&self, _id: &str) -> Option<Confirmation> {

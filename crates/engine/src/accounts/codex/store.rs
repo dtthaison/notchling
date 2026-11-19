@@ -194,6 +194,7 @@ impl CodexStore {
                 id: who.id.clone(),
                 email: who.email.clone(),
                 plan: who.plan.clone(),
+                organization: None,
             }),
         }
         inner.active = Some(who.id.clone());
@@ -325,13 +326,17 @@ impl CodexStore {
             )));
         }
         let mut inner = lock(&self.inner);
-        let account = Saved {
+        let mut account = Saved {
             id: who.id,
             email: who.email,
             plan: who.plan,
+            organization: None,
         };
         match inner.accounts.iter_mut().find(|a| a.id == account.id) {
-            Some(existing) => *existing = account,
+            Some(existing) => {
+                account.organization = existing.organization.take();
+                *existing = account;
+            }
             None => inner.accounts.push(account),
         }
         let accounts = inner.accounts.clone();
@@ -522,6 +527,8 @@ impl AccountProvider for CodexStore {
         inner.standing.remove(id);
         let accounts = inner.accounts.clone();
         self.save_book(&accounts);
+        let _ = crate::organizations::Organizations::new(&self.paths.data_dir)
+            .forget(crate::organizations::Kind::Codex, id);
     }
 
     fn switch_confirmation(&self, _id: &str) -> Option<Confirmation> {

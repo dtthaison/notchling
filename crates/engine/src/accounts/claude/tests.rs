@@ -38,6 +38,7 @@ fn the_old_list_file_is_read_then_moved_into_the_database_by_the_first_save() {
             email: email(5),
             plan: "Pro".into(),
             needs_login: false,
+            organization: None,
         }])
         .unwrap(),
     );
@@ -65,6 +66,7 @@ fn two_stores_saving_at_once_leave_one_readable_list() {
             email: email(n),
             plan: "Pro".into(),
             needs_login: false,
+            organization: None,
         }]
     };
     std::thread::scope(|scope| {
@@ -360,4 +362,73 @@ fn no_error_or_snapshot_carries_a_token() {
             "{text}"
         );
     }
+}
+
+#[test]
+fn a_sync_that_saves_the_account_again_keeps_its_organization() {
+    let w = World::new("acc-org-kept");
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    w.store.sync().unwrap();
+    let orgs = crate::organizations::Organizations::new(&w.tmp.path("data"));
+    orgs.create("AptusFIT", None, None).unwrap();
+    orgs.set_organization(crate::organizations::Kind::Claude, &id(1), "aptusfit")
+        .unwrap();
+
+    w.signed_in(1, 2);
+    w.answers_profile(1);
+    let snap = w.store.sync().unwrap();
+    assert_eq!(snap.accounts.len(), 1);
+    assert_eq!(snap.accounts[0].organization.as_deref(), Some("aptusfit"));
+    assert_eq!(
+        w.store.saved_list()[0].organization.as_deref(),
+        Some("aptusfit")
+    );
+}
+
+#[test]
+fn a_list_read_before_an_organization_was_set_does_not_undo_it() {
+    use crate::organizations::{Kind as OrgKind, Organizations};
+    let w = World::new("acc-organization");
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    let stale = w.store.sync().unwrap().accounts;
+    let data = w.tmp.path("data");
+    let orgs = Organizations::new(&data);
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Claude, &id(1), "acme")
+        .unwrap();
+    w.store.save_list(&stale).unwrap();
+    assert_eq!(
+        w.store.saved_list()[0].organization.as_deref(),
+        Some("acme")
+    );
+    w.store.sync().unwrap();
+    assert_eq!(
+        w.store.saved_list()[0].organization.as_deref(),
+        Some("acme")
+    );
+}
+
+#[test]
+fn removing_an_account_forgets_its_shadow_so_a_re_added_one_starts_in_personal() {
+    use crate::organizations::{Kind as OrgKind, Organizations, State};
+    let w = World::new("acc-remove-shadow");
+    w.signed_in(1, 1);
+    w.answers_profile(1);
+    w.saved(2, 1, LATER);
+    w.store.sync().unwrap();
+    let orgs = Organizations::new(&w.tmp.path("data"));
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_organization(OrgKind::Claude, &id(2), "acme")
+        .unwrap();
+    w.store.remove(&id(2)).unwrap();
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("loaded");
+    };
+    assert!(!doc
+        .shadow
+        .accounts
+        .contains_key(&format!("claude:{}", id(2))));
+    assert_eq!(orgs.resolve(OrgKind::Claude, &id(2)).id, "personal");
 }

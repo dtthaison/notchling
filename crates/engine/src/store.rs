@@ -356,6 +356,51 @@ pub fn update_doc(
     Ok(new)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DocChange {
+    Keep,
+    Set(String),
+    Remove,
+}
+
+pub fn update_docs(
+    data_dir: &Path,
+    names: &[&str],
+    change: impl FnOnce(&[Option<String>]) -> Result<Vec<DocChange>, String>,
+) -> Result<(), String> {
+    let mut db = open(data_dir)?;
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let mut old = Vec::with_capacity(names.len());
+    for name in names {
+        let row: Option<String> = tx
+            .query_row("SELECT value FROM docs WHERE name = ?1", [name], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(|e| e.to_string())?;
+        old.push(row);
+    }
+    let changes = change(&old)?;
+    if changes.len() != names.len() {
+        return Err("a change for every document is needed".into());
+    }
+    for (name, change) in names.iter().zip(&changes) {
+        match change {
+            DocChange::Keep => Ok(0),
+            DocChange::Set(v) => tx.execute(
+                "INSERT INTO docs (name, value) VALUES (?1, ?2)
+                 ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+                params![name, v],
+            ),
+            DocChange::Remove => tx.execute("DELETE FROM docs WHERE name = ?1", [name]),
+        }
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
 pub fn import_file(
     data_dir: &Path,
     name: &str,

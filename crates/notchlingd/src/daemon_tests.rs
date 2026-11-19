@@ -46,7 +46,16 @@ struct Running {
 }
 
 impl Running {
-    fn start(tag: &str, mut options: DaemonOptions, held: bool) -> Running {
+    fn start(tag: &str, options: DaemonOptions, held: bool) -> Running {
+        Running::start_prepared(tag, options, held, &|_| {})
+    }
+
+    fn start_prepared(
+        tag: &str,
+        mut options: DaemonOptions,
+        held: bool,
+        prepare: &dyn Fn(&Layout),
+    ) -> Running {
         let root = PathBuf::from(format!("/tmp/nl-dt-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         copy_tree(
@@ -55,6 +64,7 @@ impl Running {
         );
         let socket = root.join("s/notchlingd.sock");
         let layout = Layout::resolve(Some(&socket), Some(root.as_os_str()), || None).unwrap();
+        prepare(&layout);
         let release = held.then(|| {
             let (before_scan, release) = hold();
             options.before_scan = Some(before_scan);
@@ -238,4 +248,39 @@ fn the_socket_answers_while_the_keychain_is_blocked() {
     let verified = client.call(ops::LOG_VERIFY, json!({})).unwrap();
     assert!(verified["sealing"].is_string(), "{verified}");
     assert!(began.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn the_first_start_makes_the_personal_organization_and_a_second_start_changes_nothing() {
+    use notchling_engine::organizations::{Organizations, State, PERSONAL_ID};
+    let daemon = Running::start("orgs", DaemonOptions::default(), false);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    let orgs = Organizations::new(&daemon.layout.data_dir);
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("no organizations document after the first start");
+    };
+    assert_eq!(doc.organizations.len(), 1);
+    assert_eq!(doc.organizations[0].id, PERSONAL_ID);
+    let text = notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap();
+    assert!(super::daemon::migrate_organizations(&daemon.layout).is_ok());
+    assert_eq!(
+        notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap(),
+        text
+    );
+}
+
+#[test]
+fn a_start_goes_on_when_the_organizations_document_cannot_be_read() {
+    let daemon =
+        Running::start_prepared("orgs-broken", DaemonOptions::default(), false, &|layout| {
+            notchling_engine::store::put_doc(&layout.data_dir, "organizations", "{").unwrap();
+        });
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    assert!(daemon.client().status().is_ok());
+    assert_eq!(
+        notchling_engine::store::doc(&daemon.layout.data_dir, "organizations")
+            .unwrap()
+            .as_deref(),
+        Some("{")
+    );
 }

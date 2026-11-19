@@ -41,6 +41,8 @@ pub struct ClaudeAccount {
     pub plan: String,
     #[serde(rename = "needsLogin", default)]
     pub needs_login: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -176,12 +178,26 @@ impl ClaudeAccounts {
     }
 
     fn save_list(&self, list: &[ClaudeAccount]) -> Result<(), AccountError> {
-        let text = serde_json::to_string(list).map_err(|e| err(e.to_string()))?;
         self.list_doc()
-            .put(
+            .update(
                 |old| serde_json::from_str::<Vec<ClaudeAccount>>(old).is_ok(),
-                &text,
+                |stored| {
+                    let current: Vec<ClaudeAccount> = stored
+                        .as_deref()
+                        .and_then(|text| serde_json::from_str(text).ok())
+                        .unwrap_or_default();
+                    let mut next = list.to_vec();
+                    for account in &mut next {
+                        if let Some(old) = current.iter().find(|a| a.id == account.id) {
+                            account.organization = old.organization.clone();
+                        }
+                    }
+                    serde_json::to_string(&next)
+                        .map(Some)
+                        .map_err(|e| e.to_string())
+                },
             )
+            .map(|_| ())
             .map_err(|e| err(format!("Couldn't save the accounts list: {e}")))
     }
 
@@ -272,6 +288,7 @@ impl ClaudeAccounts {
             email: info.str("emailAddress").unwrap_or("Unknown").to_string(),
             plan: plan_name(&info, &login),
             needs_login: false,
+            organization: None,
         };
         upsert(&mut list, account.clone());
         self.save_list(&list)?;
@@ -297,6 +314,8 @@ impl ClaudeAccounts {
         let mut list = self.saved_list();
         list.retain(|a| a.id != id);
         self.save_list(&list)?;
+        let _ = crate::organizations::Organizations::new(&self.env.data_dir)
+            .forget(crate::organizations::Kind::Claude, id);
         Ok(Snapshot {
             accounts: list,
             active: state.active.clone(),
@@ -361,6 +380,7 @@ impl ClaudeAccounts {
                 email: info.str("emailAddress").unwrap_or("Unknown").to_string(),
                 plan: plan_name(&info, &oauth),
                 needs_login: false,
+                organization: None,
             },
         );
         Ok(())
@@ -457,7 +477,13 @@ pub fn account_value(account: &ClaudeAccount) -> serde_json::Value {
 
 fn upsert(list: &mut Vec<ClaudeAccount>, account: ClaudeAccount) {
     match list.iter_mut().find(|a| a.id == account.id) {
-        Some(slot) => *slot = account,
+        Some(slot) => {
+            let organization = slot.organization.take();
+            *slot = account;
+            if slot.organization.is_none() {
+                slot.organization = organization;
+            }
+        }
         None => list.push(account),
     }
 }

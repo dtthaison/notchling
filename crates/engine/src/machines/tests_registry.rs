@@ -166,7 +166,7 @@ fn v1_migrates_every_field_and_keeps_a_byte_identical_backup() {
         V1_TEXT.as_bytes()
     );
     let text = doc(&reg).unwrap();
-    assert!(text.contains("\"version\": 2"), "{text}");
+    assert!(text.contains("\"version\": 3"), "{text}");
     assert!(
         !reg.old_own.exists(),
         "the old file moved into the database"
@@ -289,7 +289,7 @@ fn an_unreadable_registry_is_never_overwritten() {
 fn unknown_version_or_job_kind_is_unreadable() {
     let dir = TempDir::new("reg");
     let cases = [
-        ("v3", r#"{"version":3,"machines":[]}"#),
+        ("v4", r#"{"version":4,"machines":[]}"#),
         (
             "kind",
             r#"{"version":2,"machines":[{"name":"m","host":"m","user":"u","jobs":[{"kind":"triage-bot"}]}]}"#,
@@ -357,7 +357,7 @@ fn v2_fields_may_be_missing_except_name_host_user() {
 }
 
 #[test]
-fn save_writes_when_missing_and_round_trips_v2() {
+fn save_writes_when_missing_and_round_trips_v3() {
     let dir = TempDir::new("reg");
     let reg = registry(&dir, "data");
     let mut worker = SdWorkerSettings::new("vps-sing-1");
@@ -396,7 +396,7 @@ fn save_writes_when_missing_and_round_trips_v2() {
     assert_eq!(reg.all(), vec![m.clone()]);
     assert_eq!(m.python(), "/usr/bin/python3.12");
     let text = doc(&reg).unwrap();
-    assert!(text.contains("\"version\": 2"));
+    assert!(text.contains("\"version\": 3"));
     assert!(text.find("\"admin\"").unwrap() < text.find("\"claudeSecret\"").unwrap());
     assert!(
         text.contains("\"root-ssh\"")
@@ -587,7 +587,7 @@ fn two_first_loads_of_a_v1_registry_migrate_it_once() {
         };
         assert_eq!(machine_names(machines), vec!["m1", "vps-sing-1"]);
     }
-    assert!(doc(&reg).unwrap().contains("\"version\": 2"));
+    assert!(doc(&reg).unwrap().contains("\"version\": 3"));
     assert_eq!(
         std::fs::read(backup_path(&reg.old_own)).unwrap(),
         V1_TEXT.as_bytes()
@@ -624,4 +624,41 @@ fn the_vault_entry_for_the_admin_password_round_trips_and_an_old_file_loads_with
     let m4 = empty.machine("m4").unwrap();
     assert!(empty.save(std::slice::from_ref(&m4)));
     assert!(!doc(&empty).unwrap().contains("adminSecret"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_version_2_backup_and_its_folder_are_private_and_a_second_adoption_writes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("reg");
+    let reg = with_old_file(&dir, "data", OLD_V2);
+    std::fs::set_permissions(dir.join("data"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(reg.adopt_organizations(), Ok(1));
+    let backup = backup_path_v2(&reg.old_own);
+    assert_eq!(std::fs::read(&backup).unwrap(), OLD_V2.as_bytes());
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&backup), 0o600);
+    assert_eq!(mode(backup.parent().unwrap()), 0o700);
+    assert_eq!(
+        mode(&dir.join("data")),
+        0o755,
+        "the data folder is left as it was"
+    );
+    let after = doc(&reg);
+    assert_eq!(reg.adopt_organizations(), Ok(0));
+    assert_eq!(doc(&reg), after);
+}
+
+#[test]
+fn a_blank_organization_counts_as_none_when_the_registry_adopts() {
+    let dir = TempDir::new("reg");
+    let reg = registry(&dir, "data");
+    let mut m = machine("m1", "sondoan", "python3", "/opt/sd/sd.py", false);
+    m.organization = Some("  ".into());
+    assert!(reg.save(&[m]));
+    assert_eq!(reg.adopt_organizations(), Ok(1));
+    assert_eq!(
+        reg.all()[0].organization.as_deref(),
+        Some(crate::organizations::PERSONAL_ID)
+    );
 }

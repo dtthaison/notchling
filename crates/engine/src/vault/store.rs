@@ -1,5 +1,5 @@
 use super::entry::{Kind, VaultEntry, VaultValue};
-use super::list::{self, IndexError, VaultIndex};
+use super::list::{self, IndexError, ShadowEdit, VaultIndex};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 
@@ -230,11 +230,29 @@ impl VaultStore {
         self.store(generation, values)?;
         let mut saved = entry.clone();
         saved.updated = now.to_string();
-        self.index.update(|mut list| {
-            list.retain(|e| e.id() != id && Some(e.id()) != old_id);
-            list.push(saved.clone());
-            Ok(list)
-        })?;
+        let shadow = old_id
+            .clone()
+            .filter(|o| *o != id)
+            .map(|from| ShadowEdit::Move {
+                from,
+                to: id.clone(),
+            });
+        self.index.update_shadow(
+            |mut list| {
+                let current = list
+                    .iter()
+                    .find(|e| Some(e.id()) == old_id)
+                    .or_else(|| list.iter().find(|e| e.id() == id))
+                    .map(|e| e.organization.clone());
+                if let Some(organization) = current {
+                    saved.organization = organization;
+                }
+                list.retain(|e| e.id() != id && Some(e.id()) != old_id);
+                list.push(saved.clone());
+                Ok(list)
+            },
+            shadow,
+        )?;
         Ok(Saved {
             entry: saved,
             value_changed: changed(before.as_ref(), &stored),
@@ -257,8 +275,10 @@ impl VaultStore {
         if values.remove(&id).is_some() {
             self.store(generation, values)?;
         }
-        self.index
-            .update(|list| Ok(list.into_iter().filter(|e| e.id() != id).collect()))?;
+        self.index.update_shadow(
+            |list| Ok(list.into_iter().filter(|e| e.id() != id).collect()),
+            Some(ShadowEdit::Remove(id.clone())),
+        )?;
         Ok(true)
     }
 
