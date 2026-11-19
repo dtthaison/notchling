@@ -58,12 +58,12 @@ pub fn pick_block<V: 'static>(
         block = block.child(label(&using_line(name), TypeRole::Meta, Ink::TextMuted, a));
     }
     if pick.is_open() {
-        block = block.child(list(key, pick, chosen, can_new, a, cx, handler));
+        block = block.child(pick_list(key, pick, chosen, can_new, a, cx, handler));
     }
     block
 }
 
-fn list<V: 'static>(
+pub fn pick_list<V: 'static>(
     key: &str,
     pick: &VaultPick,
     chosen: Option<&str>,

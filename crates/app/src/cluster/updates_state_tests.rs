@@ -1,16 +1,27 @@
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
-use notchling_engine::machines::engine_plan::{AdminAnswer, ApprovedStep};
+use notchling_engine::machines::engine_plan::AdminAnswer;
 use notchling_engine::machines::node_updates::{UpdateRow, UpdateState};
 use notchling_engine::machines::registry::{Machine, MachineOs, NodeSettings};
-use notchling_engine::machines::step::{FixOutcome, StepId};
+use notchling_engine::machines::step::FixOutcome;
 
 use super::add_rig_tests::Rig;
-use super::add_sheet::AddPassword;
 use super::feed::ClusterFeed;
 use super::model::ClusterModel;
-use super::updates_state::{Offered, UpdateSession};
+use super::updates_state::Offered;
+
+fn sync(
+    offered: &mut Offered,
+    engine: &notchling_engine::machines::engine::SetupEngine,
+    rows: &[UpdateRow],
+    anyway: &BTreeSet<String>,
+) -> bool {
+    let names = notchling_engine::machines::node_updates::runnable(
+        rows,
+        &anyway.iter().cloned().collect::<Vec<_>>(),
+    );
+    offered.sync_names(engine, names)
+}
 
 fn row(machine: &str, state: UpdateState) -> UpdateRow {
     UpdateRow {
@@ -31,34 +42,6 @@ fn world(names: &[&str]) -> Rig {
             })
             .collect(),
     )
-}
-
-fn step() -> ApprovedStep {
-    ApprovedStep {
-        id: StepId::NODE_BINARY,
-        title: "m1".into(),
-        display: "sudo true".into(),
-        waiting: false,
-        needs_admin: true,
-    }
-}
-
-fn asking(session: &UpdateSession) -> std::thread::JoinHandle<AdminAnswer> {
-    let asks = session.asks();
-    let handle = std::thread::spawn(move || asks.ask("m1", &step()));
-    for _ in 0..400 {
-        if session.asks().waiting() > 0 {
-            return handle;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    panic!("nobody asked");
-}
-
-fn typed(text: &str) -> AddPassword {
-    let mut password = AddPassword::default();
-    password.field().push_str(text);
-    password
 }
 
 #[test]
@@ -93,66 +76,6 @@ fn reopening_mid_run_keeps_the_run_and_refuses_a_second() {
 }
 
 #[test]
-fn an_admin_question_survives_the_sheet_and_waits_to_be_answered() {
-    let session = Arc::new(UpdateSession::default());
-    assert!(session.begin());
-    let asked = asking(&session);
-    assert_eq!(session.pull(), (true, true));
-    assert_eq!(session.pending_target().as_deref(), Some("m1"));
-    assert_eq!(session.pull(), (true, false));
-    let mut password = typed("pw");
-    assert!(session.answer(true, &mut password));
-    let AdminAnswer::Password(secret) = asked.join().unwrap() else {
-        panic!("the password was not sent")
-    };
-    assert_eq!(secret.expose(), "pw");
-    assert_eq!(session.pending_target(), None);
-}
-
-#[test]
-fn choosing_a_vault_entry_answers_the_question_without_a_typed_password() {
-    let session = UpdateSession::default();
-    assert!(session.begin());
-    let asked = asking(&session);
-    session.pull();
-    assert_eq!(session.pending_machine().as_deref(), Some("m1"));
-    let mut partly = typed("partial");
-    assert!(
-        !session.answer_vault("m2", "m2-admin", &mut partly),
-        "another machine's choice never answers this prompt"
-    );
-    assert_eq!(partly.len(), 7, "a refused choice keeps what was typed");
-    assert!(session.answer_vault("m1", "m1-admin", &mut partly));
-    assert!(partly.is_empty(), "choosing an entry drops the typed text");
-    let AdminAnswer::Vault(entry) = asked.join().unwrap() else {
-        panic!("not the Vault")
-    };
-    assert_eq!(entry, "m1-admin");
-    assert!(
-        !session.answer_vault("m1", "m1-admin", &mut partly),
-        "nothing left to answer"
-    );
-}
-
-#[test]
-fn return_in_an_empty_password_field_asks_nothing_and_cancel_still_cancels() {
-    let session = UpdateSession::default();
-    assert!(session.begin());
-    let asked = asking(&session);
-    session.pull();
-    let mut empty = AddPassword::default();
-    assert!(!session.answer(true, &mut empty), "Continue is disabled");
-    assert_eq!(
-        session.pending_target().as_deref(),
-        Some("m1"),
-        "still asking"
-    );
-    assert!(session.answer(false, &mut empty));
-    assert!(matches!(asked.join().unwrap(), AdminAnswer::None));
-    assert!(!session.answer(true, &mut typed("pw")), "nothing to answer");
-}
-
-#[test]
 fn the_plan_follows_the_rows_that_can_run() {
     let rig = world(&["m1", "m2"]);
     let anyway = BTreeSet::new();
@@ -161,31 +84,40 @@ fn the_plan_follows_the_rows_that_can_run() {
         row("m1", UpdateState::Ready),
         row("m2", UpdateState::Busy("1 shell job(s) running".into())),
     ];
-    assert!(offered.sync(&rig.engine, &rows, &anyway));
+    assert!(sync(&mut offered, &rig.engine, &rows, &anyway));
     assert_eq!(offered.shown().unwrap().steps.len(), 1);
-    assert_eq!(offered.button(), ("Update 1 Machine".into(), true));
+    assert_eq!(offered.button(), ("Update m1".into(), true));
     assert!(
-        !offered.sync(&rig.engine, &rows, &anyway),
+        !sync(&mut offered, &rig.engine, &rows, &anyway),
         "nothing changed"
     );
 
     rows[1].state = UpdateState::Ready;
-    assert!(offered.sync(&rig.engine, &rows, &anyway), "m2 turned Ready");
+    assert!(
+        sync(&mut offered, &rig.engine, &rows, &anyway),
+        "m2 turned Ready"
+    );
     assert_eq!(offered.shown().unwrap().steps.len(), 2);
     assert_eq!(offered.button(), ("Update 2 Machines".into(), true));
 
     rows[0].state = UpdateState::Busy("a move to another primary is running".into());
-    assert!(offered.sync(&rig.engine, &rows, &anyway), "m1 turned Busy");
+    assert!(
+        sync(&mut offered, &rig.engine, &rows, &anyway),
+        "m1 turned Busy"
+    );
     assert_eq!(offered.shown().unwrap().steps.len(), 1);
-    assert_eq!(offered.button(), ("Update 1 Machine".into(), true));
+    assert_eq!(offered.button(), ("Update m2".into(), true));
 
     rows[1].state = UpdateState::Busy("x".into());
-    assert!(offered.sync(&rig.engine, &rows, &anyway));
+    assert!(sync(&mut offered, &rig.engine, &rows, &anyway));
     assert!(offered.shown().is_none());
     assert!(!offered.button().1, "nothing can run");
     let chosen: BTreeSet<String> = ["m1".to_owned()].into();
-    assert!(offered.sync(&rig.engine, &rows, &chosen), "Update Anyway");
-    assert_eq!(offered.button(), ("Update 1 Machine".into(), true));
+    assert!(
+        sync(&mut offered, &rig.engine, &rows, &chosen),
+        "Update Anyway"
+    );
+    assert_eq!(offered.button(), ("Update m1".into(), true));
 }
 
 #[test]
@@ -194,17 +126,43 @@ fn a_replaced_plan_is_cancelled_and_reset_forgets_it() {
     let anyway = BTreeSet::new();
     let mut offered = Offered::default();
     let mut rows = vec![row("m1", UpdateState::Ready)];
-    offered.sync(&rig.engine, &rows, &anyway);
+    sync(&mut offered, &rig.engine, &rows, &anyway);
     let old = offered.shown().unwrap().id;
     rows.push(row("m2", UpdateState::Ready));
-    offered.sync(&rig.engine, &rows, &anyway);
+    sync(&mut offered, &rig.engine, &rows, &anyway);
     assert!(
         rig.engine.confirm(old, AdminAnswer::None).is_err(),
         "the old plan was cancelled"
     );
     offered.reset(Some(&rig.engine));
     assert!(offered.shown().is_none());
-    assert!(offered.sync(&rig.engine, &rows, &anyway), "planned afresh");
+    assert!(
+        sync(&mut offered, &rig.engine, &rows, &anyway),
+        "planned afresh"
+    );
     assert!(offered.take().is_some());
     assert!(offered.shown().is_none());
+}
+
+#[test]
+fn nothing_selected_gives_a_reason_and_no_plan() {
+    let rig = world(&["m1"]);
+    let mut offered = Offered::default();
+    assert!(offered.sync_names(&rig.engine, Vec::new()));
+    assert!(offered.shown().is_none());
+    assert_eq!(offered.error(), Some("No machine can be updated now."));
+    assert!(offered.names().is_empty());
+    assert!(offered.sync_names(&rig.engine, vec!["m1".to_owned()]));
+    assert_eq!(offered.error(), None);
+    assert_eq!(offered.names(), ["m1"]);
+    assert!(!offered.sync_names(&rig.engine, vec!["m1".to_owned()]));
+}
+
+#[test]
+fn a_machine_the_registry_lacks_gets_the_engines_reason() {
+    let rig = world(&["m1"]);
+    let mut offered = Offered::default();
+    offered.sync_names(&rig.engine, vec!["ghost".to_owned()]);
+    assert!(offered.shown().is_none());
+    assert!(offered.error().is_some_and(|e| e.contains("ghost")));
 }

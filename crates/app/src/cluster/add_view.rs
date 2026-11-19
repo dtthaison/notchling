@@ -8,9 +8,9 @@ use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SPACE, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, card, hsla, icon, label, spinner, KitPart, TextEditor, TextEditorEvent,
+    button, card, hsla, icon, icon_button, label, spinner, KitPart, TextEditor, TextEditorEvent,
 };
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::add::AddFlow;
@@ -26,6 +26,7 @@ use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
 use super::view::{field_box, ClusterSheetView};
+use crate::mac::gate;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
 use crate::sheets::view::Dismiss;
@@ -557,14 +558,19 @@ impl ClusterSheetView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let busy = self.busy;
-        button(
-            "cluster-add-machine",
-            t::cluster::add_machine(),
-            ButtonKind::Secondary,
-            self.state_for_add(),
+        let plus = gate::tip_text(
+            icon_button(
+                "cluster-add-machine",
+                Icon::Plus,
+                IconSize::Button.points(),
+                ButtonKind::Ghost,
+                self.state_for_add(),
+                a,
+            ),
+            t::cluster::add_tip().into(),
             a,
-        )
-        .when(!busy, |b| {
+        );
+        plus.when(!busy, |b| {
             b.on_click(cx.listener(|this, _, _, cx| this.open_add(cx)))
         })
     }

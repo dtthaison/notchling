@@ -1,28 +1,22 @@
-use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard};
 
 use notchling_engine::machines::engine::SetupEngine;
-use notchling_engine::machines::engine_plan::{AdminAnswer, PlanKind, ShownPlan};
-use notchling_engine::machines::node_updates::{runnable, UpdateRow};
+use notchling_engine::machines::engine_plan::{PlanKind, ShownPlan};
 use notchling_engine::machines::step::FixOutcome;
 use notchling_locale as t;
 
-use super::add_sheet::AddPassword;
-use super::updates::{plan, NotNow};
-use crate::machines::runs::{AdminAsks, PendingAdmin};
+use super::updates::NotNow;
 
 #[derive(Default)]
 struct Inner {
     hidden: NotNow,
     running: bool,
     outcome: Option<FixOutcome>,
-    pending: Option<PendingAdmin>,
 }
 
 #[derive(Default)]
 pub struct UpdateSession {
     inner: Mutex<Inner>,
-    asks: AdminAsks,
 }
 
 impl UpdateSession {
@@ -46,10 +40,6 @@ impl UpdateSession {
         self.inner().outcome.clone()
     }
 
-    pub fn asks(&self) -> AdminAsks {
-        self.asks.clone()
-    }
-
     pub fn dismissed(&self) {
         let mut inner = self.inner();
         if !inner.running {
@@ -64,66 +54,13 @@ impl UpdateSession {
         }
         inner.running = true;
         inner.outcome = None;
-        inner.pending = None;
         true
     }
 
     pub fn finish(&self, outcome: FixOutcome) {
         let mut inner = self.inner();
         inner.running = false;
-        inner.pending = None;
         inner.outcome = Some(outcome);
-    }
-
-    pub fn pull(&self) -> (bool, bool) {
-        let mut inner = self.inner();
-        if !inner.running {
-            return (false, false);
-        }
-        if inner.pending.is_none() {
-            if let Some(pending) = self.asks.take() {
-                inner.pending = Some(pending);
-                return (true, true);
-            }
-        }
-        (true, false)
-    }
-
-    pub fn pending_target(&self) -> Option<String> {
-        self.inner().pending.as_ref().map(|p| p.step.title.clone())
-    }
-
-    pub fn pending_machine(&self) -> Option<String> {
-        self.inner().pending.as_ref().map(|p| p.machine.clone())
-    }
-
-    pub fn answer_vault(&self, machine: &str, entry: &str, password: &mut AddPassword) -> bool {
-        let mut inner = self.inner();
-        if inner.pending.as_ref().is_none_or(|p| p.machine != machine) {
-            return false;
-        }
-        let Some(pending) = inner.pending.take() else {
-            return false;
-        };
-        password.clear();
-        pending.answer(AdminAnswer::Vault(entry.to_owned()));
-        true
-    }
-
-    pub fn answer(&self, go: bool, password: &mut AddPassword) -> bool {
-        let mut inner = self.inner();
-        if inner.pending.is_none() || (go && password.is_empty()) {
-            return false;
-        }
-        let Some(pending) = inner.pending.take() else {
-            return false;
-        };
-        let answer = match (go, password.take()) {
-            (true, Some(secret)) => AdminAnswer::Password(secret),
-            _ => AdminAnswer::None,
-        };
-        pending.answer(answer);
-        true
     }
 }
 
@@ -131,23 +68,59 @@ impl UpdateSession {
 pub struct Offered {
     names: Option<Vec<String>>,
     shown: Option<ShownPlan>,
+    error: Option<String>,
 }
 
 impl Offered {
-    pub fn sync(
-        &mut self,
-        engine: &SetupEngine,
-        rows: &[UpdateRow],
-        anyway: &BTreeSet<String>,
-    ) -> bool {
-        let names = runnable(rows, &anyway.iter().cloned().collect::<Vec<_>>());
+    pub fn sync_names(&mut self, engine: &SetupEngine, names: Vec<String>) -> bool {
         if self.names.as_ref() == Some(&names) {
             return false;
         }
         self.cancel(engine);
-        self.shown = plan(engine, rows, anyway).ok();
+        let planned = if names.is_empty() {
+            Err(t::cluster::update_nothing().to_owned())
+        } else {
+            engine.plan("", PlanKind::UpdateNotchling(names.clone()))
+        };
+        match planned {
+            Ok(shown) => {
+                self.shown = Some(shown);
+                self.error = None;
+            }
+            Err(why) => {
+                self.shown = None;
+                self.error = Some(why);
+            }
+        }
         self.names = Some(names);
         true
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        match self.shown.as_ref().map(|p| &p.kind) {
+            Some(PlanKind::UpdateNotchling(names)) => names.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn admin_machines(&self) -> Vec<String> {
+        match &self.shown {
+            Some(ShownPlan {
+                kind: PlanKind::UpdateNotchling(names),
+                steps,
+                ..
+            }) => names
+                .iter()
+                .zip(steps)
+                .filter(|(_, step)| step.needs_admin)
+                .map(|(name, _)| name.clone())
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     pub fn reset(&mut self, engine: Option<&SetupEngine>) {
@@ -156,6 +129,7 @@ impl Offered {
             None => self.shown = None,
         }
         self.names = None;
+        self.error = None;
     }
 
     pub fn cancel(&mut self, engine: &SetupEngine) {
@@ -172,11 +146,13 @@ impl Offered {
         self.shown.as_ref()
     }
 
+    #[cfg(test)]
     pub fn button(&self) -> (String, bool) {
-        let count = match self.shown.as_ref().map(|p| &p.kind) {
-            Some(PlanKind::UpdateNotchling(names)) => names.len(),
-            _ => 0,
-        };
-        (t::cluster::update_button_run(count), self.shown.is_some())
+        let names = self.names();
+        let first = names.first().map(String::as_str).unwrap_or_default();
+        (
+            t::cluster::update_button_run(names.len(), first),
+            self.shown.is_some(),
+        )
     }
 }

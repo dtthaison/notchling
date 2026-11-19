@@ -1,0 +1,27 @@
+{
+  "machines": [
+    {
+      "admin": "sudo",
+      "claudeSecret": "claude-worker",
+      "fileVault": true,
+      "host": "m1.tail1234.ts.net",
+      "jobs": [],
+      "name": "m1",
+      "node": {},
+      "os": "macos",
+      "user": "worker"
+    },
+    {
+      "admin": "sudo",
+      "claudeSecret": "claude-worker",
+      "fileVault": true,
+      "host": "m2.tail1234.ts.net",
+      "jobs": [],
+      "name": "m2",
+      "node": {},
+      "os": "macos",
+      "user": "worker"
+    }
+  ],
+  "version": 2
+}
