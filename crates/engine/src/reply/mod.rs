@@ -22,3 +22,5 @@ mod exec_send_tests;
 mod exec_tests;
 #[cfg(test)]
 mod pin_tests;
+#[cfg(test)]
+mod plan_clean_tests;

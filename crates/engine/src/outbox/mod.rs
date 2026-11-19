@@ -16,6 +16,7 @@ pub const GONE_RECHECK_MS: i64 = 10_000;
 pub const DIALOG_RECHECK_MS: i64 = 30_000;
 pub const REPLY_WAIT_MS: i64 = 50_000;
 pub const POSTMEN_MAX: usize = 32;
+pub const UNSURE_HOLD_MS: i64 = 120_000;
 
 pub use gate::{gate, Facts, Gate, Job};
 pub use model::{

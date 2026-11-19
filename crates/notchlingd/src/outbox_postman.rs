@@ -757,5 +757,11 @@ impl Postman {
 }
 
 #[cfg(test)]
+#[path = "outbox_aside_tests.rs"]
+mod aside_tests;
+#[cfg(test)]
+#[path = "outbox_join_tests.rs"]
+mod join_tests;
+#[cfg(test)]
 #[path = "outbox_postman_tests.rs"]
 mod tests;

@@ -401,5 +401,8 @@ mod human_tests;
 #[path = "sent_invisible_tests.rs"]
 mod invisible_tests;
 #[cfg(test)]
+#[path = "sent_pictures_tests.rs"]
+mod pictures_tests;
+#[cfg(test)]
 #[path = "sent_tests.rs"]
 mod tests;
