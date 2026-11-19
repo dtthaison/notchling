@@ -1,4 +1,4 @@
-use notchling_engine::tools::agy::elsewhere;
+use notchling_engine::tools::agy::elsewhere::{self, Source};
 use notchling_engine::transcript::model::Conversation;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -32,14 +32,20 @@ type Read = Arc<(Conversation, usize)>;
 
 pub(crate) struct LogReads {
     root: PathBuf,
+    source: Source,
     kept: Mutex<HashMap<String, (Stamp, Read)>>,
     reads: AtomicUsize,
 }
 
 impl LogReads {
     pub fn new(root: PathBuf) -> LogReads {
+        LogReads::of(root, Source::Cli)
+    }
+
+    pub fn of(root: PathBuf, source: Source) -> LogReads {
         LogReads {
             root,
+            source,
             kept: Mutex::new(HashMap::new()),
             reads: AtomicUsize::new(0),
         }
@@ -56,7 +62,7 @@ impl LogReads {
         }
         self.reads.fetch_add(1, Ordering::SeqCst);
         let path = elsewhere::log_path(&self.root, session);
-        let (conversation, _) = elsewhere::from_log_file(&path, None);
+        let (conversation, _) = elsewhere::from_log_file_in(&path, None, self.source);
         let made = Arc::new(conversation.bounded(max_bytes));
         let mut kept = lock(&self.kept);
         if kept.len() >= KEEP {

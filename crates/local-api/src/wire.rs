@@ -42,6 +42,11 @@ pub mod ops {
     pub const AGY_CANCEL: &str = "agy.cancel";
     pub const AGY_SET_OPTION: &str = "agy.set_option";
     pub const AGY_PERMISSION: &str = "agy.permission";
+    pub const AGY_SIDECAR_TAKE: &str = "agy.sidecar.take";
+    pub const AGY_SIDECAR_REPORT: &str = "agy.sidecar.report";
+    pub const AGY_SIDECAR_STATUS: &str = "agy.sidecar.status";
+    pub const AGY_SIDECAR_SETUP: &str = "agy.sidecar.setup";
+    pub const AGY_HOOK: &str = "agy.hook";
 
     pub const BRIDGE_SET: &str = "bridge.set";
     pub const BRIDGE_STATUS: &str = "bridge.status";

@@ -19,14 +19,20 @@ pub enum Ability {
     Start,
     Phone,
     Stop,
+    SoftStop,
+    Approve,
+    Answer,
 }
 
 impl Ability {
-    pub const ALL: [Ability; 4] = [
+    pub const ALL: [Ability; 7] = [
         Ability::Reply,
         Ability::Start,
         Ability::Phone,
         Ability::Stop,
+        Ability::SoftStop,
+        Ability::Approve,
+        Ability::Answer,
     ];
 
     pub fn verb(self) -> &'static str {
@@ -35,6 +41,9 @@ impl Ability {
             Ability::Start => "start sessions",
             Ability::Phone => "be used from the phone",
             Ability::Stop => "be stopped from Notchling",
+            Ability::SoftStop => "be asked to stop at its next step",
+            Ability::Approve => "have its permission prompts answered from Notchling",
+            Ability::Answer => "have its questions answered from Notchling",
         }
     }
 
@@ -42,7 +51,9 @@ impl Ability {
         match self {
             Ability::Reply => Some(Capability::TurnSend),
             Ability::Start => Some(Capability::SessionNew),
-            Ability::Stop => Some(Capability::TurnInterrupt),
+            Ability::Stop | Ability::SoftStop => Some(Capability::TurnInterrupt),
+            Ability::Approve => Some(Capability::PromptPermission),
+            Ability::Answer => Some(Capability::PromptQuestion),
             Ability::Phone => None,
         }
     }
@@ -54,6 +65,9 @@ pub struct Abilities {
     pub start: bool,
     pub phone: bool,
     pub stop: bool,
+    pub soft_stop: bool,
+    pub approve: bool,
+    pub answer: bool,
 }
 
 impl Abilities {
@@ -62,7 +76,24 @@ impl Abilities {
         start: true,
         phone: true,
         stop: true,
+        soft_stop: true,
+        approve: true,
+        answer: true,
     };
+
+    pub const NONE: Abilities = Abilities {
+        reply: false,
+        start: false,
+        phone: false,
+        stop: false,
+        soft_stop: false,
+        approve: false,
+        answer: false,
+    };
+
+    pub fn missing(self) -> Vec<Ability> {
+        Ability::ALL.into_iter().filter(|a| !self.has(*a)).collect()
+    }
 
     pub fn has(self, ability: Ability) -> bool {
         match ability {
@@ -70,6 +101,9 @@ impl Abilities {
             Ability::Start => self.start,
             Ability::Phone => self.phone,
             Ability::Stop => self.stop,
+            Ability::SoftStop => self.soft_stop,
+            Ability::Approve => self.approve,
+            Ability::Answer => self.answer,
         }
     }
 }
@@ -84,6 +118,10 @@ pub trait Channel: Sync {
     fn mode(&self) -> Mode;
 
     fn abilities(&self) -> Abilities;
+
+    fn gap_notes(&self) -> &'static [(Ability, &'static str)] {
+        &[]
+    }
 }
 
 pub trait Opener {

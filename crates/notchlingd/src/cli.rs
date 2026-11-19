@@ -29,6 +29,10 @@ pub enum Command {
         socket: Option<PathBuf>,
     },
     HookFence,
+    AgySidecar,
+    AgyHook {
+        event: String,
+    },
     Pages {
         query: String,
         json: bool,
@@ -119,6 +123,8 @@ pub fn usage() -> &'static str {
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling hook --fence                      Claude Code's PreToolUse hook for cluster sessions: reads the fence file only\n  \
+     notchling agy-sidecar                       Antigravity's sidecar: carries the messages you write in Notchling into Antigravity conversations\n  \
+     notchling agy-hook pre-tool|pre-invocation  Antigravity's hooks for the sidecar channel: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
      NOTCHLING_DATA_ROOT=<dir> reads <dir>/claude and <dir>/notchling instead of your own folders.\n\
      service install writes the file and prints the command that loads it; it never loads it."
@@ -135,6 +141,20 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
     let args: Vec<String> = args.into_iter().collect();
     if args == ["hook", "--fence"] {
         return Ok(Command::HookFence);
+    }
+    if args == ["agy-sidecar"] {
+        return Ok(Command::AgySidecar);
+    }
+    if let [name, event] = args.as_slice() {
+        if name == "agy-hook" {
+            return if crate::agy_hook_run::known(event) {
+                Ok(Command::AgyHook {
+                    event: event.clone(),
+                })
+            } else {
+                Err("agy-hook takes pre-tool or pre-invocation".into())
+            };
+        }
     }
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
@@ -326,6 +346,33 @@ mod tests {
         );
         assert!(p(&["hook", "--json"]).is_err());
         assert!(usage().contains("notchling hook"));
+    }
+
+    #[test]
+    fn the_antigravity_sidecar_and_hooks_are_commands_of_their_own() {
+        assert_eq!(p(&["agy-sidecar"]), Ok(Command::AgySidecar));
+        assert!(p(&["agy-sidecar", "--socket", "/tmp/s.sock"]).is_err());
+        assert_eq!(
+            p(&["agy-hook", "pre-tool"]),
+            Ok(Command::AgyHook {
+                event: "pre-tool".into()
+            })
+        );
+        assert_eq!(
+            p(&["agy-hook", "pre-invocation"]),
+            Ok(Command::AgyHook {
+                event: "pre-invocation".into()
+            })
+        );
+        for bad in [
+            vec!["agy-hook"],
+            vec!["agy-hook", "post-tool"],
+            vec!["agy-hook", "pre-tool", "--x"],
+        ] {
+            assert!(p(&bad).is_err(), "{bad:?}");
+        }
+        assert!(usage().contains("notchling agy-sidecar"));
+        assert!(usage().contains("notchling agy-hook"));
     }
 
     #[test]

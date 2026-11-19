@@ -909,14 +909,14 @@ impl ChatView {
     fn read_agy(&mut self, id: String, number: u64, cx: &mut Context<Self>) {
         let actions = self.acts(cx).actions;
         let asked = id.clone();
-        let log = crate::tools::agy_context::log_path(&self.root.home, &id);
+        let home = self.root.home.clone();
         cx.spawn(async move |this, cx| {
             let (conversation, state, context) = cx
                 .background_executor()
                 .spawn(async move {
                     let conversation = actions.read(&agy_conversation(&id, false)).ok();
                     let state = actions.read(&agy_state(&id)).ok();
-                    let context = log
+                    let context = crate::tools::agy_context::found_log(&home, &id)
                         .as_deref()
                         .and_then(crate::tools::agy_context::context_tokens);
                     (conversation, state, context)

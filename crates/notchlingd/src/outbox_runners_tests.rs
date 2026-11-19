@@ -480,3 +480,6 @@ mod dispatch;
 
 #[path = "outbox_runners_channel_tests.rs"]
 mod channel;
+
+#[path = "outbox_runners_sidecar_tests.rs"]
+mod sidecar;

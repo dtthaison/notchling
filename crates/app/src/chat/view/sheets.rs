@@ -255,6 +255,7 @@ impl ChatView {
         entity.update(cx, |view, cx| {
             view.ask_hooks(hooks, cx);
             view.ask_client(cx);
+            view.ask_sidecar(cx);
             view.watch_cluster(cx);
         });
         self.show(entity, cx);

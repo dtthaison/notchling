@@ -7,7 +7,7 @@ pub(crate) mod render;
 pub mod skills;
 pub mod toml_edit;
 
-pub use command::{classify, hook_command, summary, Origin};
+pub use command::{agy_hook_command, agy_hook_event, classify, hook_command, summary, Origin};
 pub use file::{apply, load, plan, Applied, FileError, FilePlan, State};
 pub use hooks::{
     detect, plan_hooks, Category, Found, HookPlan, Refused, Slot, Want, Wanted, SLOTS,

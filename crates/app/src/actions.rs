@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use notchling_engine::tools::agy_sidecar::deliver::START_CALL_WITHIN;
 use notchling_local_api::{
     ops as api_ops, Client, ClientError, ClientKind, ConnectOptions, CALL_TIMEOUT, SOCKET_NAME,
 };
@@ -34,6 +35,9 @@ pub fn call_timeout_for(op: &str, args: &Value) -> Duration {
         .and_then(|field| args.get(field)?.as_str())
         .is_some_and(|id| notchling_engine::cluster::Qualified::parse(id).is_some());
     let own = call_timeout(op);
+    if op == api_ops::AGY_SEND && args.get("id").is_none() {
+        return own.max(START_CALL_WITHIN);
+    }
     if forwarded {
         own.max(SESSION_CALL_TIMEOUT)
     } else {
@@ -354,6 +358,20 @@ mod tests {
             call_timeout_for(api_ops::CLUSTER_DISPATCH, &remote),
             CODE_CALL_TIMEOUT
         );
+    }
+
+    #[test]
+    fn a_new_antigravity_conversation_waits_longer_than_the_sidecar_can_take() {
+        let start = serde_json::json!({"draft_folder": "/tmp/x", "text": "hi"});
+        let reply =
+            serde_json::json!({"id": "agy:457369a9-35a1-40f8-92b9-26b6398b78a1", "text": "hi"});
+        assert_eq!(
+            call_timeout_for(api_ops::AGY_SEND, &start),
+            START_CALL_WITHIN
+        );
+        assert!(START_CALL_WITHIN > Duration::from_secs(200));
+        assert_eq!(call_timeout_for(api_ops::AGY_SEND, &reply), CALL_TIMEOUT);
+        assert_eq!(call_timeout(api_ops::AGY_SEND), CALL_TIMEOUT);
     }
 
     #[test]
