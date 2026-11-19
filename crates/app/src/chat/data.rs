@@ -114,6 +114,13 @@ impl DataRoot {
         }
     }
 
+    pub fn task_tmp(&self) -> PathBuf {
+        match &self.fixture {
+            Some(root) => root.join("tmp"),
+            None => PathBuf::from("/tmp"),
+        }
+    }
+
     pub fn app_dir(&self) -> PathBuf {
         self.data_dir.join(APP_DIR)
     }

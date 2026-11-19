@@ -6,7 +6,7 @@ use notchling_engine::transcript::shells::parse_writers_by_name;
 
 use super::now_ms;
 use super::ChatView;
-use crate::chat::shell_list::{lsof_calls, probe_paths, PROBE_CHUNK};
+use crate::chat::shell_list::{lsof_calls, probe_paths_with_fan, PROBE_CHUNK};
 
 const EVERY_MS: i64 = 3000;
 const LSOF: &str = "/usr/sbin/lsof";
@@ -89,9 +89,12 @@ pub fn tick(view: &mut ChatView, cx: &mut Context<ChatView>) {
     if now.saturating_sub(view.shell_probe.last_ms) < EVERY_MS {
         return;
     }
-    let paths = probe_paths(&view.conversation, &view.shells, &|path| {
-        view.shell_probe.writing(path)
-    });
+    let paths = probe_paths_with_fan(
+        &view.conversation,
+        &view.fan_shells,
+        &view.shells,
+        &|path| view.shell_probe.writing(path),
+    );
     if paths.is_empty() {
         return;
     }

@@ -13,6 +13,7 @@ pub struct Listing {
     pub ids: Vec<String>,
     pub counts: Counts,
     pub waiting: bool,
+    pub idle: Vec<String>,
 }
 
 struct Entry<'a> {
@@ -75,16 +76,15 @@ impl ShellPage {
         let all = merged(conversation, fan);
         let entries: Vec<Entry> = all
             .iter()
-            .map(|(shell, from_fan)| Entry {
+            .map(|(shell, _)| Entry {
                 id: &shell.id,
-                unfinished: *from_fan || (!ended(conversation, shell) && !idle(shell, writing)),
+                unfinished: !ended(conversation, shell) && !idle(shell, writing),
             })
             .collect();
         let waiting = !self.page.begun(session)
-            && conversation
-                .shells
+            && all
                 .iter()
-                .any(|shell| unprobed(conversation, shell, writing));
+                .any(|(shell, _)| unprobed(conversation, shell, writing));
         let shown = if waiting {
             Page::default().show(session, &entries, 0)
         } else {
@@ -103,6 +103,11 @@ impl ShellPage {
                 ..shown.counts
             },
             waiting,
+            idle: all
+                .iter()
+                .filter(|(shell, from_fan)| *from_fan && idle(shell, writing))
+                .map(|(shell, _)| shell.id.clone())
+                .collect(),
         }
     }
 }
@@ -112,12 +117,21 @@ pub fn probe_paths(
     listing: &Listing,
     writing: &dyn Fn(&str) -> Option<bool>,
 ) -> Vec<String> {
+    probe_paths_with_fan(conversation, &[], listing, writing)
+}
+
+pub fn probe_paths_with_fan(
+    conversation: &Conversation,
+    fan: &[BackgroundShell],
+    listing: &Listing,
+    writing: &dyn Fn(&str) -> Option<bool>,
+) -> Vec<String> {
     let shown: HashSet<&str> = listing.ids.iter().map(String::as_str).collect();
     let mut seen = HashSet::new();
-    conversation
-        .shells
-        .iter()
+    merged(conversation, fan)
+        .into_iter()
         .rev()
+        .map(|(shell, _)| shell)
         .filter(|s| listing.waiting || shown.contains(s.id.as_str()))
         .filter(|s| !ended(conversation, s))
         .filter(|s| {
