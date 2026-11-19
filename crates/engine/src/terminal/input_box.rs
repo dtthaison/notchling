@@ -1,3 +1,4 @@
+use crate::transcript::message::is_picture_name;
 use crate::transcript::stored::{as_stored, is_dropped};
 
 pub const RULE: char = '─';
@@ -61,7 +62,6 @@ fn strip_chips(text: &str) -> (String, usize) {
     (out, chips)
 }
 
-const PICTURE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const PICTURES_MAX: usize = 8;
 
 fn path_shaped(path: &str) -> bool {
@@ -112,8 +112,7 @@ fn path_line(line: &str) -> Option<Vec<String>> {
 }
 
 fn is_picture(path: &str) -> bool {
-    let path = path.to_ascii_lowercase();
-    PICTURE_EXTENSIONS.iter().any(|ext| path.ends_with(ext))
+    is_picture_name(path)
 }
 
 struct Piece {

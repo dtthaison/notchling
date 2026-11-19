@@ -898,6 +898,3 @@ fn no_text_in_events() {
         assert!(text(event, "chars").is_some());
     }
 }
-
-#[path = "outbox_combine_tests.rs"]
-mod combine;

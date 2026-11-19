@@ -13,7 +13,7 @@ use notchling_engine::contract::Tool as RowTool;
 use notchling_engine::control::slash::opens_menu;
 use notchling_engine::outbox::{
     verdict, Change, InsertError, New, OutboxStore, Row, State, Tool, Verdict, Via, Why,
-    BEING_SENT, CHANGED, IN_QUEUE, MAX_TEXT, NO_MESSAGE, VERIFY_LOOK_MS,
+    BEING_SENT, CHANGED, HOLD_LEASE_MS, IN_QUEUE, MAX_TEXT, NO_MESSAGE, VERIFY_LOOK_MS,
 };
 use notchling_engine::sessions::{fresh, Agent, Probes, Roots};
 use notchling_engine::tools::codex::plan::valid_session_id;
@@ -25,7 +25,7 @@ use notchling_events::spec::Outcome;
 use notchling_events::{scope, Event, Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 pub type Wake = Arc<dyn Fn(&str) + Send + Sync>;
@@ -44,6 +44,7 @@ const EMPTY: &str = "Type a message first.";
 const TOO_LONG: &str = "That message is over 100 KB.";
 const NO_SESSION: &str = "No such session.";
 const MENU: &str = "That command opens a menu; open the session's terminal.";
+const NOT_UNSURE: &str = "Only a message that may already be in the session can be marked as sent.";
 
 pub struct SendArgs {
     pub id: String,
@@ -66,7 +67,6 @@ pub struct OutboxOps {
     room: Arc<dyn Room>,
     events: Option<Events>,
     notes: Mutex<HashMap<String, String>>,
-    apart: Mutex<HashSet<String>>,
     wake: Mutex<Option<Wake>>,
     forget: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
@@ -160,7 +160,6 @@ impl OutboxOps {
             room,
             events,
             notes: Mutex::new(HashMap::new()),
-            apart: Mutex::new(HashSet::new()),
             wake: Mutex::new(None),
             forget: Mutex::new(None),
             resume: Mutex::new(None),
@@ -358,8 +357,26 @@ impl OutboxOps {
         self.settle.bump();
     }
 
+    pub fn publish_joined(&self, id: &str, session: &str, into: &str) {
+        self.settle.removed(id, "joined");
+        self.set_note(id, None);
+        let forget = lock(&self.forget).clone();
+        if let Some(forget) = forget {
+            forget(id);
+        }
+        self.room.publish(
+            topics::OUTBOX,
+            topics::OUTBOX_REMOVED,
+            &json!({"id": id, "session": session, "why": "joined", "into": into}),
+        );
+        self.tell_peers(
+            topics::OUTBOX_REMOVED,
+            &json!({"id": id, "session": session, "why": "joined"}),
+        );
+        self.settle.bump();
+    }
+
     pub fn publish_removed(&self, id: &str, session: &str, why: &str) {
-        lock(&self.apart).remove(id);
         self.settle.removed(id, why);
         self.set_note(id, None);
         let forget = lock(&self.forget).clone();
@@ -479,14 +496,6 @@ impl OutboxOps {
     }
 
     pub fn send(&self, args: &SendArgs) -> Result<Row, ApiError> {
-        self.save(args, false).map(|(row, _)| row)
-    }
-
-    pub fn send_combining(&self, args: &SendArgs) -> Result<(Row, bool), ApiError> {
-        self.save(args, true)
-    }
-
-    fn save(&self, args: &SendArgs, combine: bool) -> Result<(Row, bool), ApiError> {
         check_text(&args.text)?;
         let target = self.target(&args.id, &args.text)?;
         if target.tool == Tool::Antigravity {
@@ -505,36 +514,16 @@ impl OutboxOps {
             via: args.via,
             clear_box: args.clear_box,
         };
-        if combine {
-            let joined = self
-                .store
-                .combine_except(&new, now_ms(), &|id| lock(&self.apart).contains(id))
-                .map_err(|_| save_failed())?;
-            if let Some(row) = joined {
-                self.publish_changed(&row);
-                self.emit_chars(
-                    &row,
-                    OutboxThen::Combined,
-                    args.text.chars().count(),
-                    args.via,
-                );
-                self.wake_session(&row.session);
-                return Ok((row, true));
-            }
-        }
         let row = self.store.insert(&new, now_ms()).map_err(|e| match e {
             InsertError::Empty => bad(EMPTY),
             InsertError::TooLong => bad(TOO_LONG),
             InsertError::Full => failed("200 messages are already waiting for this session."),
             InsertError::Db(_) => save_failed(),
         })?;
-        if !combine {
-            lock(&self.apart).insert(row.id.clone());
-        }
         self.publish_changed(&row);
         self.emit_then(&row, OutboxThen::Queued);
         self.wake_session(&row.session);
-        Ok((row, false))
+        Ok(row)
     }
 
     fn send_op(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -550,18 +539,14 @@ impl OutboxOps {
             options: args.get("options").filter(|o| o.is_object()).cloned(),
             via,
         };
-        let (row, combined) = self.send_combining(&send)?;
+        let row = self.send(&send)?;
         let position = self.position(&row);
-        let mut sent = json!({
+        Ok(json!({
             "outboxId": row.id,
             "session": row.session,
             "state": "queued",
             "position": position,
-        });
-        if combined {
-            sent["combined"] = json!(true);
-        }
-        Ok(sent)
+        }))
     }
 
     fn list(&self, args: &Value) -> Result<Value, ApiError> {
@@ -632,16 +617,52 @@ impl OutboxOps {
         Ok(json!({"edited": true}))
     }
 
+    fn hold(&self, args: &Value) -> Result<Value, ApiError> {
+        let row = self.row(args)?;
+        let on = flag(args, "on");
+        let now = self.now();
+        let until = on.then_some(now + HOLD_LEASE_MS);
+        match self
+            .store
+            .hold(&row.id, until, now)
+            .map_err(|_| save_failed())?
+        {
+            Change::Done => {}
+            Change::Busy => return Err(self.busy_refusal(&row.id)),
+            Change::Missing => return Err(bad(NO_MESSAGE)),
+            Change::Stale => return Err(failed(CHANGED)),
+        }
+        if let Ok(Some(held)) = self.store.get(&row.id) {
+            self.publish_changed(&held);
+        }
+        self.wake_session(&row.session);
+        Ok(json!({"held": on}))
+    }
+
     fn remove(&self, args: &Value) -> Result<Value, ApiError> {
         let row = self.row(args)?;
-        match self.store.remove(&row.id).map_err(|_| save_failed())? {
+        let marked = flag(args, "sent");
+        if marked && row.state != State::Unsure {
+            return Err(bad(NOT_UNSURE));
+        }
+        let only = marked.then_some(State::Unsure);
+        match self
+            .store
+            .remove_when(&row.id, only)
+            .map_err(|_| save_failed())?
+        {
             (Change::Done, _) => {}
             (Change::Busy, _) => return Err(self.busy_refusal(&row.id)),
             (Change::Missing, _) => return Err(bad(NO_MESSAGE)),
             (Change::Stale, _) => return Err(failed(CHANGED)),
         }
-        self.publish_removed(&row.id, &row.session, "removed");
-        self.emit_then(&row, OutboxThen::Removed);
+        if marked {
+            self.publish_removed(&row.id, &row.session, "sent");
+            self.emit_then(&row, OutboxThen::MarkedSent);
+        } else {
+            self.publish_removed(&row.id, &row.session, "removed");
+            self.emit_then(&row, OutboxThen::Removed);
+        }
         self.wake_session(&row.session);
         Ok(json!({"removed": true}))
     }
@@ -745,6 +766,7 @@ impl OpGroup for OutboxOps {
                 | ops::OUTBOX_LIST
                 | ops::OUTBOX_EDIT
                 | ops::OUTBOX_REMOVE
+                | ops::OUTBOX_HOLD
                 | ops::OUTBOX_RESEND
                 | ops::OUTBOX_DISCARD
         )
@@ -762,6 +784,7 @@ impl OpGroup for OutboxOps {
             ops::SESSION_SEND => self.send_op(caller, args),
             ops::OUTBOX_EDIT => self.edit(args),
             ops::OUTBOX_REMOVE => self.remove(args),
+            ops::OUTBOX_HOLD => self.hold(args),
             ops::OUTBOX_RESEND => self.resend(args),
             ops::OUTBOX_DISCARD => self.discard(args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),

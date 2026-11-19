@@ -177,12 +177,29 @@ fn every_status_has_words_and_every_button_a_label_and_an_id() {
         (Status::Queued, "Queued"),
         (
             Status::QueuedRetry,
-            "Queued · couldn't reach the terminal, trying again",
+            "Couldn't reach the session, trying again",
         ),
-        (Status::WaitingDialog, "Waiting: dialog open"),
-        (Status::WaitsForTurn, "Waits for the current turn"),
-        (Status::Sending, "Sending"),
-        (Status::QueuedInSession, "Queued in the session"),
+        (Status::WaitingDialog, "Waiting for a dialog"),
+        (Status::WaitsForTurn, "Waiting for the turn to end"),
+        (
+            Status::WaitsForQueue(Tool::Claude),
+            "Waiting for Claude Code to read the message before",
+        ),
+        (
+            Status::WaitsForQueue(Tool::Codex),
+            "Waiting for Codex to read the message before",
+        ),
+        (Status::WaitsForPrevious, "Waiting for the message before"),
+        (Status::Editing, "Editing"),
+        (Status::Sending, "Sending…"),
+        (
+            Status::QueuedInSession(Tool::Claude),
+            "In Claude Code's queue",
+        ),
+        (
+            Status::QueuedInSession(Tool::Antigravity),
+            "In Antigravity's queue",
+        ),
         (Status::Sent, "Sent"),
         (Status::MayBeIn, "May already be in the session"),
         (
@@ -198,8 +215,8 @@ fn every_status_has_words_and_every_button_a_label_and_an_id() {
     let labels = [
         (Button::Edit, "Edit"),
         (Button::Remove, "Remove"),
-        (Button::SendAgain, "Send Again"),
-        (Button::Drop, "Drop"),
+        (Button::Retry, "Retry"),
+        (Button::MarkAsSent, "Mark as Sent"),
         (Button::ClearBoxAndSend, "Clear Box and Send"),
         (Button::ResumeAndSend, "Resume and Send"),
     ];

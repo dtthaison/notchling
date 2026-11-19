@@ -149,6 +149,7 @@ fn waiting_bubble(id: &str, text: &str, status: Status) -> Bubble {
         text: text.into(),
         status,
         buttons: Vec::new(),
+        joined: 1,
     }
 }
 
@@ -375,7 +376,11 @@ fn an_outbox_row_measures_its_row_again_when_its_state_changes() {
 fn the_queued_entry_an_outbox_row_stands_for_is_not_drawn_twice() {
     let mut shown = Conversation::clone(&conv(0..3));
     shown.queued = vec!["first".into(), "ok then".into()];
-    let bubbles = vec![waiting_bubble("o1", "ok  then", Status::QueuedInSession)];
+    let bubbles = vec![waiting_bubble(
+        "o1",
+        "ok  then",
+        Status::QueuedInSession(notchling_engine::outbox::Tool::Claude),
+    )];
     let tail = tail_rows(&shown.queued, Some(1), &bubbles, &[], false);
     assert_eq!(tail.len(), 2);
     let mut input = input(Arc::new(shown));
@@ -385,7 +390,7 @@ fn the_queued_entry_an_outbox_row_stands_for_is_not_drawn_twice() {
     );
     assert!(matches!(
         row_at(&input, 4),
-        Some(Row::User { outbox: Some(b), .. }) if b.status == Status::QueuedInSession
+        Some(Row::User { outbox: Some(b), .. }) if b.status == Status::QueuedInSession(notchling_engine::outbox::Tool::Claude)
     ));
     assert_eq!(row_at(&input, 5), None);
 }

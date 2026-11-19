@@ -270,6 +270,7 @@ pub fn tail_rows(
                 text: text.clone(),
                 status: Status::Queued,
                 buttons: Vec::new(),
+                joined: 1,
             };
             queued_user(text, false, Some(bubble))
         } else {

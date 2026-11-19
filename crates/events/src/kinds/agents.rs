@@ -45,6 +45,9 @@ log_choice! {
         RestoredUnsure = "restored_unsure",
         Noticed = "noticed",
         Combined = "combined",
+        Aside = "aside",
+        MarkedSent = "marked_sent",
+        Joined = "joined",
     }
 }
 

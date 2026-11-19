@@ -49,13 +49,15 @@ pub fn cut_chips(text: &str) -> String {
     out
 }
 
-const IMAGE_KINDS: [&str; 8] = [
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tiff", ".bmp",
-];
+const PICTURE_KINDS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+
+pub fn is_picture_name(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    PICTURE_KINDS.iter().any(|kind| lower.ends_with(kind))
+}
 
 pub fn is_image(path: &Path) -> bool {
-    let lower = path.to_string_lossy().to_lowercase();
-    IMAGE_KINDS.iter().any(|k| lower.ends_with(k))
+    is_picture_name(&path.to_string_lossy())
 }
 
 pub fn image_spans(text: &str) -> Vec<(std::ops::Range<usize>, PathBuf)> {

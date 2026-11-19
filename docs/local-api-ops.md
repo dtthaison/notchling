@@ -1023,10 +1023,11 @@ The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](
 
 | Op | Args | Reply |
 | --- | --- | --- |
-| `session.send` | `{id, text, clear_box?: bool, options?: {model?, effort?}, via?}` | `{"outboxId", "session", "state": "queued", "position": n}`; `position` is 1 for the head of the session's mailbox; when the session's last row was still `queued` and the same kind of message (a prompt, same tool and options, no `clear_box`, under 100 KB together), the text is added to that row after a blank line and the reply is that row's own, with `"combined": true` |
+| `session.send` | `{id, text, clear_box?: bool, options?: {model?, effort?}, via?}` | `{"outboxId", "session", "state": "queued", "position": n}`; `position` is 1 for the head of the session's mailbox. Rows are never joined at save time: each send is its own row, and rows still `queued` right behind a head when it is taken go with it as one message (see below)` |
 | `outbox.list` | `{session?}` | `[row...]` in order, every session or one; on a client node whose app follows the `outbox` topic, a list of every session (or of a qualified remote `session`, when it is not forwarded) also holds the remote rows the daemon already knows, after the local ones, each with `session` qualified `<node>/<session>` and in the owner's queue order |
 | `outbox.edit` | `{id, text}` | `{"edited": true}` |
-| `outbox.remove` | `{id}` | `{"removed": true}` |
+| `outbox.remove` | `{id, sent?: bool}` | `{"removed": true}`; `sent: true` is Mark as Sent and is only for an `unsure` row |
+| `outbox.hold` | `{id, on: bool}` | `{"held": bool}`; `on: true` keeps a `queued` or `waiting` row from being typed for 10 minutes (Edit holds a row while it is open), `on: false` lets it go |
 | `outbox.resend` | `{id, clear_box?: bool, resume?: bool}` | `{"state": "queued"}` |
 | `outbox.discard` | `{session}` | `{"discarded": n}`: how many rows it removed |
 
@@ -1051,17 +1052,22 @@ The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](
 
 `outbox.discard` removes every row of the session except one that is `sending`, `in_queue` ones included.
 
-A row on the wire: `{id, session, tool, kind, text, state, position, queuedMs, updatedMs, via, why?, attemptMs?, box?, error?}`.
+Joining at the take. When the head of a session is taken to be typed, the rows right behind it that are still `queued` (or `waiting` for the queue, the turn or a dialog), never tried and not held by `outbox.hold`, go with it as one message, a blank line between them, and are deleted (`outbox.removed` with `why` `joined` and `into` the head's id; `session.outbox` `then` is `joined`). It stops at the first row that is a command, a shell line (`!...`), `clear_box`, of another kind or with other options, one that was put back by Retry, and at 100 KB. The head keeps its id and its row says how many messages it carries (`joined`).
+
+An unsure head holds its session's mailbox for at most two minutes (`asideAtMs` says when). Then it steps aside (`asideMs`, `session.outbox` `then` `aside`): the rows behind it go on, nothing is typed again by itself, its buttons stay (Retry is `outbox.resend`, Mark as Sent is `outbox.remove {sent: true}`) and the daemon still looks for it in the transcript for 10 minutes. A second `unsure` row in a row in the same session holds the mailbox with no timer, and a message that is found or sent in between ends the run.
+
+A row on the wire: `{id, session, tool, kind, text, state, position, queuedMs, updatedMs, via, why?, attemptMs?, asideAtMs?, asideMs?, heldUntilMs?, joined?, box?, error?}`.
 
 - `tool` is `claude`, `codex` or `antigravity`; `kind` is `prompt` or `command` (a Claude Code message that starts with `/`); `via` is as above; `position` counts from 1 within its session.
 - `state` is `queued`, `waiting`, `sending`, `in_queue` (in Claude Code's own queue; the model has not read it yet), `unsure` (may already be in; the person decides), `box` (the session's input box holds other text), `stopped` or `gone`.
 - `why` is a code for `waiting` (`dialog`, `queue`, `turn`, `retry`), `unsure` (`not_found`, `restart`, `dropped`), `box` (`not_cleared`, `mixed`); there is none for `in_queue`.
+- `asideAtMs` (an `unsure` head that holds the mailbox) is when it steps aside; `asideMs` (an `unsure` row that has) is when it did; `heldUntilMs` is the end of an `outbox.hold` lease; `joined` is how many messages a row carries when more than one.
 - `attemptMs` (an `unsure` row only) is when its last attempt began; Chat hides the row's bubble once the transcript holds the message dated at or after it. The daemon looks at an `unsure` row's transcript again every 5 s for 10 minutes and, when the message turns up, settles the row as sent (never sends it again).
 - `box` (a `box` row only) is the text the input box holds and `error` (a Codex or Antigravity `retry` row only) is what went wrong. Both live in the daemon's memory, so a restart drops them, and neither is ever written to a log, an event or the audit.
 
 Sent, removed, discarded and dropped rows are deleted, not listed. A row never expires by age; one that has waited 7 days is raised once in the Inbox (kind `outbox_unsent`, Send and Discard).
 
-Topic `outbox` (app tier, so an agent never reads message text): `outbox.changed {row}` after every insert or change, and `outbox.removed {id, session, why}` with `why` `sent`, `removed`, `discarded` or `session_removed`. A client reads the list once and follows the topic. Events, audit and Activity carry `session.outbox` with the row's change, its length and `via`, never its text.
+Topic `outbox` (app tier, so an agent never reads message text): `outbox.changed {row}` after every insert or change, and `outbox.removed {id, session, why}` with `why` `sent`, `removed`, `discarded`, `joined` (with `into`) or `session_removed`. A client reads the list once and follows the topic. Events, audit and Activity carry `session.outbox` with the row's change, its length and `via`, never its text.
 
 Cluster. A session belongs to the node that runs it and its mailbox stays there. `session.send` with a qualified id (`<node>/<job>`), and `outbox.edit`, `.remove`, `.resend`, `.discard` and `.list` with a qualified `session` argument, are forwarded to that node, which runs them on its own Outbox (`policy.rs`: `session.send` by `id`, the others by `session`). The row id of `outbox.edit`, `.remove` and `.resend` names no node, so the app adds the row's qualified `session` beside it and the daemon ignores it on the node that owns the row. Only the app, from a client or home node, may forward; a Worker may not. A node tells its peers `outbox.changed` (with no data) and `outbox.removed {id, session, why}` and never message text; a client node whose app follows the topic asks the owner for its list and publishes the rows with `session` qualified as `<node>/<session>`, and only the difference from the last list, in the owner's queue order. That list is also what `outbox.list` adds to its answer (so an app that reconnects, or a second app, is seeded without waiting for a row to change). A list answer that was started before a peer event arrived is dropped and asked again at once, so a `sent` removal is never undone by an older list; a failed ask is tried again after 5 s, not 30.
 

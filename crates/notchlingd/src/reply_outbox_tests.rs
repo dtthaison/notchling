@@ -81,7 +81,7 @@ fn a_reply_types_the_plan_into_the_jobs_attach_terminal() {
         *r.writes.lock().unwrap(),
         vec![
             notchling_engine::reply::keys::clear_input(),
-            "\x1b[200~hi[201~\r1\x1b[201~".to_string(),
+            "\x1b[200~hi[201~ 1\x1b[201~".to_string(),
             "\r".to_string()
         ]
     );

@@ -318,6 +318,7 @@ impl ChatView {
         {
             self.redraw_chrome(cx);
         }
+        self.outbox_clock(cx);
         self.inbox_tick(cx);
         self.cluster_tick(cx);
         let dot = self.bridge_on();

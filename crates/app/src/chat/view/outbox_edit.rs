@@ -28,7 +28,7 @@ impl ChatView {
         {
             self.cancel_edit(cx);
         }
-        if matches!(button, Button::Remove | Button::Drop) {
+        if matches!(button, Button::Remove | Button::MarkAsSent) {
             self.tools.forget_outbox(id);
         }
         self.spawn_send(
@@ -60,6 +60,10 @@ impl ChatView {
             _ => self.tools.draft(&chat_row).to_owned(),
         };
         self.tools.edit_round += 1;
+        if let Some(open) = self.tools.editing.clone() {
+            self.hold_row(&open.outbox_id, &open.session, false, cx);
+        }
+        self.hold_row(&row.id, &row.session, true, cx);
         self.tools.editing = Some(Editing {
             chat_row: chat_row.clone(),
             outbox_id: row.id,
@@ -77,8 +81,32 @@ impl ChatView {
         let Some(editing) = self.tools.editing.take() else {
             return;
         };
+        self.hold_row(&editing.outbox_id, &editing.session, false, cx);
         self.put_draft(&editing.chat_row, editing.cancelled(), cx);
         cx.notify();
+    }
+
+    fn hold_row(&mut self, id: &str, session: &str, on: bool, cx: &mut Context<Self>) {
+        let actions = self.acts(cx).actions;
+        let request = Request::outbox_hold(id, session, on);
+        cx.background_executor()
+            .spawn(async move {
+                let _ = actions.send_full(&request);
+            })
+            .detach();
+    }
+
+    pub(super) fn outbox_clock(&mut self, cx: &mut Context<Self>) {
+        let holding = self
+            .selected_session()
+            .and_then(|session| self.source.outbox_holding_until(&session.agent));
+        let second = holding.map(|_| super::now_ms().div_euclid(1000));
+        if second != self.outbox_second {
+            self.outbox_second = second;
+            if second.is_some() {
+                cx.notify();
+            }
+        }
     }
 
     pub(super) fn editing_here(&self) -> bool {

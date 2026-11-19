@@ -109,7 +109,9 @@ fn a_shell_line_row_is_not_joined_into_a_message() {
     let mut p = r.postmen.postman(IDLE);
     p.pass(r.at(T0));
     assert!(!r.typed().contains("one\n\n!ls"), "{}", r.typed());
-    assert_eq!(r.row(&shell.id).map(|row| row.text), Some("!ls".into()));
+    assert!(r.typed().contains("!ls"), "{}", r.typed());
+    assert_eq!(r.returns(), 2, "a shell line is its own message");
+    assert_eq!(r.row(&shell.id), None);
 }
 
 #[test]
@@ -129,7 +131,8 @@ fn a_row_with_other_options_stops_the_join() {
     let mut p = r.postmen.postman(IDLE);
     p.pass(r.at(T0));
     assert!(!r.typed().contains("one\n\ntwo"), "{}", r.typed());
-    assert_eq!(r.row(&other.id).unwrap().text, "two");
+    assert!(r.typed().contains("two"), "{}", r.typed());
+    assert_eq!(r.row(&other.id), None);
 }
 
 #[test]
@@ -140,7 +143,8 @@ fn a_clear_box_row_stops_the_join() {
     let mut p = r.postmen.postman(IDLE);
     p.pass(r.at(T0));
     assert!(!r.typed().contains("one\n\ntwo"), "{}", r.typed());
-    assert_eq!(r.row(&clearing.id).unwrap().text, "two");
+    assert!(r.typed().contains("two"), "{}", r.typed());
+    assert_eq!(r.row(&clearing.id), None);
 }
 
 #[test]
@@ -177,10 +181,14 @@ fn the_join_stops_before_the_size_limit() {
     let next = r.send("job-idle", "this will not fit");
     let mut p = r.postmen.postman(IDLE);
     p.pass(r.at(T0));
-    assert_eq!(
-        r.row(&next.id).map(|row| row.text),
-        Some("this will not fit".into())
+    assert!(
+        !r.typed().contains("x\n\nthis will not fit"),
+        "{}",
+        r.typed()
     );
+    assert!(r.typed().contains("this will not fit"), "{}", r.typed());
+    assert_eq!(r.returns(), 2, "the second text is its own message");
+    assert_eq!(r.row(&next.id), None);
 }
 
 #[test]

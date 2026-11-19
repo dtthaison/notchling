@@ -21,6 +21,19 @@ pub(crate) fn wire(row: &Row, position: usize, note: Option<&str>) -> Value {
     if let (State::Unsure, Some(attempt)) = (row.state, row.attempt_ms) {
         out["attemptMs"] = json!(attempt);
     }
+    if row.state == State::Unsure {
+        match (row.aside_ms, row.aside_at_ms) {
+            (Some(aside), _) => out["asideMs"] = json!(aside),
+            (None, Some(at)) => out["asideAtMs"] = json!(at),
+            (None, None) => {}
+        }
+    }
+    if let Some(until) = row.hold_ms {
+        out["heldUntilMs"] = json!(until);
+    }
+    if row.joined > 1 {
+        out["joined"] = json!(row.joined);
+    }
     if let Some(note) = note {
         if row.state == State::Box {
             out["box"] = json!(note);

@@ -322,6 +322,7 @@ mod tests {
             ops::OUTBOX_LIST,
             ops::OUTBOX_EDIT,
             ops::OUTBOX_REMOVE,
+            ops::OUTBOX_HOLD,
             ops::OUTBOX_RESEND,
             ops::OUTBOX_DISCARD,
         ] {
@@ -375,6 +376,7 @@ mod tests {
             ops::OUTBOX_LIST,
             ops::OUTBOX_EDIT,
             ops::OUTBOX_REMOVE,
+            ops::OUTBOX_HOLD,
             ops::OUTBOX_RESEND,
             ops::OUTBOX_DISCARD,
             api_ops::ASK_ANSWER,

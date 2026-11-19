@@ -286,7 +286,7 @@ fn nothing_by_30s_is_unsure() {
 fn second_identical_row_needs_its_own_line() {
     let e = env();
     let one = e.r.send("job-idle", "ok");
-    let two = e.r.send("job-idle", "ok");
+    let two = e.r.send_with("job-idle", "ok", true);
     e.later(1_000, vec![user(1_000, "ok")]);
     e.pass(0);
     assert_eq!(e.r.row(&one.id), None);

@@ -215,13 +215,30 @@ chat-messages-wait = { $count ->
 }
 # The status lines under a message Notchling keeps until the session takes it.
 chat-outbox-queued = Queued
-chat-outbox-retry = Queued · couldn't reach the terminal, trying again
-chat-outbox-dialog = Waiting: dialog open
-chat-outbox-turn = Waits for the current turn
-chat-outbox-sending = Sending
-chat-outbox-in-queue = Queued in the session
+chat-outbox-retry = Couldn't reach the session, trying again
+chat-outbox-dialog = Waiting for a dialog
+chat-outbox-turn = Waiting for the turn to end
+# $tool is the tool's name (Claude Code, Codex or Antigravity).
+chat-outbox-wait-queue = Waiting for { $tool } to read the message before
+# A message behind one that is unsure, in the box, held by Edit, or in the tool's queue.
+chat-outbox-wait-unsure = Waiting for the message before
+# The message is open in the reply box and the postman will not take it.
+chat-outbox-editing-row = Editing
+chat-outbox-sending = Sending…
+# $tool is the tool's name.
+chat-outbox-in-queue = In { $tool }'s queue
 chat-outbox-sent = Sent
 chat-outbox-maybe = May already be in the session
+# $time is minutes and seconds, such as 1:42: when the messages behind an unsure one go on.
+chat-outbox-hold-left = Next messages go in { $time }
+# $count is how many messages Notchling joined into one before sending.
+chat-outbox-joined = { $count ->
+    [one] { $count } message
+   *[other] { $count } messages
+}
+chat-outbox-tool-claude = { -brand-claude-code }
+chat-outbox-tool-codex = { -brand-codex }
+chat-outbox-tool-antigravity = { -brand-antigravity }
 # $text is what the session's terminal box holds, on one line and cut when long.
 chat-outbox-box = Box has other text: { $text }
 # The session's terminal box already holds this very message, typed earlier and not sent.
@@ -231,8 +248,8 @@ chat-outbox-gone = Session not found
 # The buttons on those messages.
 chat-outbox-edit = Edit
 chat-outbox-remove = Remove
-chat-outbox-send-again = Send Again
-chat-outbox-drop = Drop
+chat-outbox-retry-send = Retry
+chat-outbox-mark-sent = Mark as Sent
 # The button that deletes the text in the session's terminal box, then sends the message.
 chat-outbox-clear-send = Clear Box and Send
 chat-outbox-resume-send = Resume and Send

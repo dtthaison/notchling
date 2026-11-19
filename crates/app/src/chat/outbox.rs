@@ -29,6 +29,10 @@ pub struct OutboxRow {
     pub queued_ms: i64,
     pub updated_ms: i64,
     pub attempt_ms: Option<i64>,
+    pub aside_at_ms: Option<i64>,
+    pub aside_ms: Option<i64>,
+    pub held_until_ms: Option<i64>,
+    pub joined: u32,
     pub via: Via,
 }
 
@@ -55,6 +59,13 @@ impl OutboxRow {
             queued_ms: value.get("queuedMs").and_then(Value::as_i64).unwrap_or(0),
             updated_ms: value.get("updatedMs").and_then(Value::as_i64).unwrap_or(0),
             attempt_ms: value.get("attemptMs").and_then(Value::as_i64),
+            aside_at_ms: value.get("asideAtMs").and_then(Value::as_i64),
+            aside_ms: value.get("asideMs").and_then(Value::as_i64),
+            held_until_ms: value.get("heldUntilMs").and_then(Value::as_i64),
+            joined: value
+                .get("joined")
+                .and_then(Value::as_u64)
+                .map_or(1, |n| u32::try_from(n).unwrap_or(1)),
             via: Via::parse(word(value, "via").unwrap_or("chat")).unwrap_or(Via::Chat),
         })
     }
@@ -66,10 +77,14 @@ pub enum Status {
     QueuedRetry,
     WaitingDialog,
     WaitsForTurn,
+    WaitsForQueue(Tool),
+    WaitsForPrevious,
+    Editing,
     Sending,
-    QueuedInSession,
+    QueuedInSession(Tool),
     Sent,
     MayBeIn,
+    MayBeInHolding(i64),
     BoxHasText(String),
     BoxHoldsThis,
     Stopped,
@@ -80,8 +95,8 @@ pub enum Status {
 pub enum Button {
     Edit,
     Remove,
-    SendAgain,
-    Drop,
+    Retry,
+    MarkAsSent,
     ClearBoxAndSend,
     ResumeAndSend,
 }
@@ -90,8 +105,9 @@ impl Button {
     pub fn request(self, id: &str, session: &str) -> Option<Request> {
         match self {
             Button::Edit => None,
-            Button::Remove | Button::Drop => Some(Request::outbox_remove(id, session)),
-            Button::SendAgain => Some(Request::outbox_resend(id, session, false, false)),
+            Button::Remove => Some(Request::outbox_remove(id, session)),
+            Button::MarkAsSent => Some(Request::outbox_mark_sent(id, session)),
+            Button::Retry => Some(Request::outbox_resend(id, session, false, false)),
             Button::ClearBoxAndSend => Some(Request::outbox_resend(id, session, true, false)),
             Button::ResumeAndSend => Some(Request::outbox_resend(id, session, false, true)),
         }
@@ -104,6 +120,7 @@ pub struct Bubble {
     pub text: String,
     pub status: Status,
     pub buttons: Vec<Button>,
+    pub joined: u32,
 }
 
 fn collapsed(text: &str) -> String {
@@ -112,19 +129,29 @@ fn collapsed(text: &str) -> String {
 
 pub fn bubble(row: &OutboxRow) -> Bubble {
     let (status, buttons) = match row.state {
+        State::Queued | State::Waiting if row.held_until_ms.is_some() => {
+            (Status::Editing, Vec::new())
+        }
         State::Queued => (Status::Queued, vec![Button::Edit, Button::Remove]),
         State::Waiting => {
             let status = match row.why {
                 Some(Why::Retry) => Status::QueuedRetry,
                 Some(Why::Dialog) => Status::WaitingDialog,
                 Some(Why::Turn) => Status::WaitsForTurn,
+                Some(Why::Queue) => Status::WaitsForQueue(row.tool),
                 _ => Status::Queued,
             };
             (status, vec![Button::Edit, Button::Remove])
         }
         State::Sending => (Status::Sending, Vec::new()),
-        State::InQueue => (Status::QueuedInSession, Vec::new()),
-        State::Unsure => (Status::MayBeIn, vec![Button::SendAgain, Button::Drop]),
+        State::InQueue => (Status::QueuedInSession(row.tool), Vec::new()),
+        State::Unsure => {
+            let status = match (row.aside_ms, row.aside_at_ms) {
+                (None, Some(at)) => Status::MayBeInHolding(at),
+                _ => Status::MayBeIn,
+            };
+            (status, vec![Button::Retry, Button::MarkAsSent])
+        }
         State::Box => {
             let boxed = row.boxed.as_deref().unwrap_or_default();
             let shown = collapsed(boxed);
@@ -150,6 +177,16 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         text: row.text.clone(),
         status,
         buttons,
+        joined: row.joined,
+    }
+}
+
+fn blocks_next(row: &OutboxRow) -> bool {
+    match row.state {
+        State::Unsure => row.aside_ms.is_none(),
+        State::Box | State::Stopped | State::Gone | State::InQueue => true,
+        State::Queued | State::Waiting => row.held_until_ms.is_some(),
+        State::Sending => false,
     }
 }
 
@@ -308,6 +345,13 @@ impl OutboxFeed {
         self.rows(&agent.outbox_key())
     }
 
+    pub fn holding_until(&self, agent: &Agent) -> Option<i64> {
+        self.rows_for(agent)
+            .iter()
+            .find(|row| row.state == State::Unsure && row.aside_ms.is_none())
+            .and_then(|row| row.aside_at_ms)
+    }
+
     pub fn needs_you(&self, agent: &Agent) -> bool {
         head_needs_you(self.rows_for(agent))
     }
@@ -424,14 +468,21 @@ impl OutboxFeed {
                 text: kept.row.text.clone(),
                 status: Status::Sent,
                 buttons: Vec::new(),
+                joined: kept.row.joined,
             });
         }
-        out.extend(
-            self.rows(session)
-                .iter()
-                .filter(|row| !shown_by_transcript(row, &mut turns))
-                .map(bubble),
-        );
+        let mut blocked = false;
+        for row in self.rows(session) {
+            if shown_by_transcript(row, &mut turns) {
+                continue;
+            }
+            let mut shown = bubble(row);
+            if blocked && shown.status == Status::Queued {
+                shown.status = Status::WaitsForPrevious;
+            }
+            blocked |= blocks_next(row);
+            out.push(shown);
+        }
         out
     }
 

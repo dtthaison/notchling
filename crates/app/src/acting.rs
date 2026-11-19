@@ -32,6 +32,7 @@ pub mod ops {
     pub const OUTBOX_LIST: &str = "outbox.list";
     pub const OUTBOX_EDIT: &str = "outbox.edit";
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
+    pub const OUTBOX_HOLD: &str = "outbox.hold";
     pub const OUTBOX_RESEND: &str = "outbox.resend";
     pub const OUTBOX_DISCARD: &str = "outbox.discard";
 }
@@ -209,6 +210,20 @@ impl Request {
 
     pub fn outbox_remove(id: &str, session: &str) -> Request {
         Request::new(ops::OUTBOX_REMOVE, json!({ "id": id, "session": session }))
+    }
+
+    pub fn outbox_mark_sent(id: &str, session: &str) -> Request {
+        Request::new(
+            ops::OUTBOX_REMOVE,
+            json!({ "id": id, "session": session, "sent": true }),
+        )
+    }
+
+    pub fn outbox_hold(id: &str, session: &str, on: bool) -> Request {
+        Request::new(
+            ops::OUTBOX_HOLD,
+            json!({ "id": id, "session": session, "on": on }),
+        )
     }
 
     pub fn outbox_resend(id: &str, session: &str, clear_box: bool, resume: bool) -> Request {

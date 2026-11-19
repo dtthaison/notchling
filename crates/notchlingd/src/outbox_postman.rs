@@ -337,6 +337,13 @@ enum Owed {
     Moved(Move),
 }
 
+fn earliest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 struct Move {
     row: Row,
     from: State,
@@ -354,7 +361,8 @@ pub(crate) struct Postman {
     courier: Option<Arc<dyn Courier>>,
     owed: Option<Owed>,
     cut_short: Option<String>,
-    looked: Option<(String, i64, i64)>,
+    looked: HashMap<String, (i64, i64)>,
+    aside_timer: Option<i64>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -375,7 +383,8 @@ impl Postman {
             courier: None,
             owed: None,
             cut_short: None,
-            looked: None,
+            looked: HashMap::new(),
+            aside_timer: None,
         }
     }
 
@@ -389,6 +398,9 @@ impl Postman {
                     return self.rest(now, Some(now + TICK_MS));
                 }
             }
+            let holds = self.release_holds(now);
+            let aside = self.look_aside(now);
+            self.aside_timer = earliest(holds, aside);
             let row = match self.inner.ops.store().head(&self.session) {
                 Ok(Some(row)) => row,
                 Ok(None) => return self.rest(now, None),
@@ -399,15 +411,26 @@ impl Postman {
                 State::Sending if self.cut_short.as_deref() != Some(row.id.as_str()) => {
                     self.orphan(&row, now)
                 }
-                State::Unsure => match self.look_again(&row, now) {
-                    Again::Landed => None,
-                    Again::At(at) => Some(at),
-                    Again::Never => return self.rest(now, None),
-                },
+                State::Unsure => {
+                    if self.step_aside(&row, now) {
+                        continue;
+                    }
+                    match self.look_again(&row, now) {
+                        Again::Landed => None,
+                        Again::At(at) => Some(earliest(Some(at), row.aside_at_ms).unwrap_or(at)),
+                        Again::Never => match row.aside_at_ms {
+                            Some(at) => Some(at),
+                            None => return self.rest(now, None),
+                        },
+                    }
+                }
                 State::Box | State::Stopped | State::Sending => return self.rest(now, None),
                 State::Gone => self.recheck_gone(&row, now),
                 State::InQueue => self.watch(&row, now),
-                State::Queued | State::Waiting => self.gate(&row, now),
+                State::Queued | State::Waiting => match row.hold_ms.filter(|until| *until > now) {
+                    Some(until) => return self.rest(now, Some(until)),
+                    None => self.gate(&row, now),
+                },
             };
             if let Some(at) = timer {
                 return self.rest(now, Some(at));
@@ -439,7 +462,7 @@ impl Postman {
     }
 
     fn rest(&mut self, now: i64, timer: Option<i64>) -> Next {
-        let mut next = timer;
+        let mut next = earliest(timer, self.aside_timer);
         if let Some(until) = self.attach_until {
             if now >= until {
                 self.close_attach();
@@ -459,6 +482,43 @@ impl Postman {
             .unwrap_or_else(|| self.inner.couriers.claude.clone())
     }
 
+    fn release_holds(&mut self, now: i64) -> Option<i64> {
+        let store = self.inner.ops.store();
+        let (released, next) = store.release_holds(&self.session, now).ok()?;
+        for id in released {
+            self.publish(&id);
+        }
+        next
+    }
+
+    fn step_aside(&mut self, row: &Row, now: i64) -> bool {
+        if !row.aside_at_ms.is_some_and(|at| now >= at) {
+            return false;
+        }
+        match self.inner.ops.store().step_aside(&row.id, now) {
+            Ok(true) => {
+                self.publish(&row.id);
+                self.inner.ops.emit_then(row, OutboxThen::Aside);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn look_aside(&mut self, now: i64) -> Option<i64> {
+        if !self.inner.verifier.looks_again() {
+            return None;
+        }
+        let rows = self.inner.ops.store().aside(&self.session).ok()?;
+        let mut timer: Option<i64> = None;
+        for row in rows {
+            if let Again::At(at) = self.look_again(&row, now) {
+                timer = earliest(timer, Some(at));
+            }
+        }
+        timer
+    }
+
     fn look_again(&mut self, row: &Row, now: i64) -> Again {
         if !self.inner.verifier.looks_again()
             || row.seen_before.is_none()
@@ -468,9 +528,9 @@ impl Postman {
         }
         let last = self
             .looked
-            .as_ref()
-            .filter(|(id, updated, _)| *id == row.id && *updated == row.updated_ms)
-            .map(|(_, _, at)| *at);
+            .get(&row.id)
+            .filter(|(updated, _)| *updated == row.updated_ms)
+            .map(|(_, at)| *at);
         let due = last.unwrap_or(row.updated_ms) + UNSURE_LOOK_EVERY_MS;
         if now < due {
             return Again::At(due);
@@ -478,7 +538,7 @@ impl Postman {
         if last.is_some() && now - row.updated_ms >= UNSURE_LOOK_FOR_MS {
             return Again::Never;
         }
-        self.looked = Some((row.id.clone(), row.updated_ms, now));
+        self.looked.insert(row.id.clone(), (row.updated_ms, now));
         if !self.inner.verifier.found_late(row, baseline(row)) {
             return Again::At(now + UNSURE_LOOK_EVERY_MS);
         }
@@ -589,6 +649,18 @@ impl Postman {
                 }
                 Err(_) => Some(now + TICK_MS),
             };
+        }
+        let joined = store.join_behind(&taken.id, now).unwrap_or_default();
+        if !joined.is_empty() {
+            for row in &joined {
+                self.inner
+                    .ops
+                    .publish_joined(&row.id, &row.session, &taken.id);
+                self.inner.ops.emit_then(row, OutboxThen::Joined);
+            }
+            if let Ok(Some(carrier)) = store.get(&taken.id) {
+                taken = carrier;
+            }
         }
         self.inner.ops.publish_changed(&taken);
         let courier = self.courier();

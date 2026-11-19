@@ -60,6 +60,91 @@ fn changes(c: char) -> bool {
     is_dropped(c) || is_line_break(c)
 }
 
+const FLAG_NAMES: [&str; 3] = ["gbeng", "gbsct", "gbwls"];
+const FLAG_BASE: char = '\u{1F3F4}';
+const TAG_LAST: u32 = 0xE007F;
+
+fn kept_when_typed(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x034F
+            | 0x061C
+            | 0x17B4..=0x17B5
+            | 0x180B..=0x180F
+            | 0x200C..=0x200F
+            | 0xFE00..=0xFE0F
+            | 0x1107F
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0xE0100..=0xE01EF
+    )
+}
+
+fn removed_when_typed(c: char) -> bool {
+    is_dropped(c) && !kept_when_typed(c)
+}
+
+fn needs_script_spaces(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0E00..=0x0EFF | 0x1000..=0x109F | 0x1780..=0x17FF | 0x19E0..=0x19FF | 0xA9E0..=0xA9FF | 0xAA60..=0xAA7F
+    )
+}
+
+fn flag_end(chars: &[char], at: usize) -> Option<usize> {
+    let mut name = String::new();
+    for (index, c) in chars.iter().enumerate().skip(at + 1).take(6) {
+        let n = *c as u32;
+        if n == TAG_LAST {
+            return FLAG_NAMES.contains(&name.as_str()).then_some(index);
+        }
+        if !(0xE0061..=0xE007A).contains(&n) {
+            return None;
+        }
+        name.push(char::from_u32(n - 0xE0000)?);
+    }
+    None
+}
+
+pub fn precleaned(text: &str) -> Cow<'_, str> {
+    if is_plain_ascii(text)
+        || !text
+            .chars()
+            .any(|c| removed_when_typed(c) || is_line_break(c))
+    {
+        return Cow::Borrowed(text);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let spaced = chars.iter().any(|c| needs_script_spaces(*c));
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while at < chars.len() {
+        let c = chars[at];
+        if c == FLAG_BASE {
+            if let Some(end) = flag_end(&chars, at) {
+                out.extend(&chars[at..=end]);
+                at = end + 1;
+                continue;
+            }
+        }
+        if c == '\r' && chars.get(at + 1) == Some(&'\n') {
+            at += 1;
+            continue;
+        }
+        if is_line_break(c) {
+            out.push(' ');
+        } else if c == '\u{200B}' {
+            if spaced {
+                out.push(c);
+            }
+        } else if !removed_when_typed(c) {
+            out.push(c);
+        }
+        at += 1;
+    }
+    Cow::Owned(out)
+}
+
 fn is_plain_ascii(text: &str) -> bool {
     text.bytes()
         .all(|b| matches!(b, 0x20..=0x7e | b'\t' | b'\n'))

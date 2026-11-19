@@ -382,6 +382,11 @@ impl SessionSource {
         state.outbox.covers(id)
     }
 
+    pub fn outbox_holding_until(&self, agent: &Agent) -> Option<i64> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.outbox.holding_until(agent)
+    }
+
     pub fn outbox_rows(&self, agent: &Agent) -> Vec<OutboxRow> {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.outbox.rows_for(agent).to_vec()

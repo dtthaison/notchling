@@ -1,10 +1,10 @@
 use super::*;
 use crate::outbox_courier::Courier;
 use crate::outbox_ops::OutboxOps;
-use crate::outbox_postman::{Couriers, Next, Postmen};
+use crate::outbox_postman::{Couriers, Postmen};
 use crate::outbox_testkit::{rig, Rig, IDLE, T0};
 use notchling_engine::bridge::net::files::iso8601;
-use notchling_engine::outbox::{New, OutboxStore, State, Tool, Via, Why};
+use notchling_engine::outbox::{New, OutboxStore, State, Tool, Via, Why, UNSURE_HOLD_MS};
 use notchling_engine::sessions::Roots;
 use serde_json::json;
 use std::path::PathBuf;
@@ -252,10 +252,34 @@ fn an_unsure_picture_message_with_zero_width_spaces_is_sent_when_its_turn_appear
 }
 
 #[test]
+fn a_late_proof_settles_a_row_that_stepped_aside_and_it_is_never_typed_again() {
+    let e = env();
+    let row = e.r.send("job-idle", &e.picture_message());
+    let mut postman = e.postmen.postman(IDLE);
+    postman.pass(e.r.at(T0));
+    assert_eq!(e.state(&row.id), Some((State::Unsure, Some(Why::NotFound))));
+    let aside_at = T0 + 2 * UNSURE_HOLD_MS;
+    postman.pass(e.r.at(aside_at));
+    assert!(e
+        .r
+        .row(&row.id)
+        .is_some_and(|row| row.aside_ms.is_some() && row.state == State::Unsure));
+    append(
+        &e.path,
+        &e.the_turn(&e.stored(), 2 * UNSURE_HOLD_MS + 1_000),
+    );
+    postman.pass(e.r.at(aside_at + 10_000));
+    assert_eq!(e.state(&row.id), None, "the late look finds the turn");
+    let gone = e.r.room.named("outbox.removed");
+    assert_eq!(gone.last().unwrap()["why"], "sent");
+    assert_eq!(e.r.returns(), 1, "never typed again");
+}
+
+#[test]
 fn the_next_message_goes_once_the_one_before_it_is_found() {
     let e = env();
     let first = e.r.send("job-idle", &e.picture_message());
-    let second = e.r.send("job-idle", "and then the next one");
+    let second = e.r.send_with("job-idle", "and then the next one", true);
     e.turn_at(3_000, &e.stored());
     e.postmen.postman(IDLE).pass(e.r.at(T0));
     assert_eq!(e.state(&first.id), None);
@@ -268,10 +292,10 @@ fn the_next_message_goes_once_the_one_before_it_is_found() {
 }
 
 #[test]
-fn a_turn_with_other_visible_words_leaves_the_row_unsure_and_the_next_one_waiting() {
+fn a_turn_with_other_visible_words_leaves_the_row_unsure_and_holds_the_next_one_for_two_minutes() {
     let e = env();
     let first = e.r.send("job-idle", &e.picture_message());
-    let second = e.r.send("job-idle", "and then the next one");
+    let second = e.r.send_with("job-idle", "and then the next one", true);
     let other_words = format!("[Image #2]why this lamp \n{}", "carry the blue lamp");
     e.turn_at(3_000, &other_words);
     let mut postman = e.postmen.postman(IDLE);
@@ -287,8 +311,16 @@ fn a_turn_with_other_visible_words_leaves_the_row_unsure_and_the_next_one_waitin
         1,
         "an unsure head holds the session's mailbox"
     );
-    assert!(matches!(postman.pass(e.r.at(T0 + 700_000)), Next::Done));
-    assert_eq!(e.state(&second.id), Some((State::Queued, None)));
+    postman.pass(e.r.at(T0 + 2 * UNSURE_HOLD_MS));
+    assert!(e
+        .r
+        .row(&first.id)
+        .is_some_and(|row| row.state == State::Unsure && row.aside_ms.is_some()));
+    assert_eq!(
+        e.state(&second.id),
+        Some((State::Waiting, Some(Why::Turn))),
+        "the head stepped aside, so the next is judged by its own gate"
+    );
 }
 
 fn absorbed(ms: i64, text: &str) -> Vec<String> {

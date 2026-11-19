@@ -147,6 +147,7 @@ pub mod ops {
     pub const OUTBOX_LIST: &str = "outbox.list";
     pub const OUTBOX_EDIT: &str = "outbox.edit";
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
+    pub const OUTBOX_HOLD: &str = "outbox.hold";
     pub const OUTBOX_RESEND: &str = "outbox.resend";
     pub const OUTBOX_DISCARD: &str = "outbox.discard";
 
@@ -432,6 +433,7 @@ mod tests {
         assert_eq!(ops::OUTBOX_REMOVE, "outbox.remove");
         assert_eq!(ops::OUTBOX_RESEND, "outbox.resend");
         assert_eq!(ops::OUTBOX_DISCARD, "outbox.discard");
+        assert_eq!(ops::OUTBOX_HOLD, "outbox.hold");
         assert_eq!(topics::OUTBOX, "outbox");
         assert_eq!(topics::OUTBOX_CHANGED, "outbox.changed");
         assert_eq!(topics::OUTBOX_REMOVED, "outbox.removed");

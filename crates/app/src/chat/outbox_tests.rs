@@ -68,7 +68,7 @@ fn every_state_maps_to_words_and_buttons() {
         ),
         (
             row("a", "waiting", Some("queue"), "x"),
-            Status::Queued,
+            Status::WaitsForQueue(Tool::Claude),
             vec![Edit, Remove],
         ),
         (
@@ -89,13 +89,13 @@ fn every_state_maps_to_words_and_buttons() {
         (row("a", "sending", None, "x"), Status::Sending, vec![]),
         (
             row("a", "in_queue", None, "x"),
-            Status::QueuedInSession,
+            Status::QueuedInSession(Tool::Claude),
             vec![],
         ),
         (
             row("a", "unsure", Some("not_found"), "x"),
             Status::MayBeIn,
-            vec![SendAgain, Drop],
+            vec![Retry, MarkAsSent],
         ),
         (
             row("a", "stopped", None, "x"),
@@ -141,10 +141,10 @@ fn buttons_that_act_without_text_make_their_request() {
         json!({"id": "o1", "session": "ab12"})
     );
     assert_eq!(
-        Button::Drop.request("o1", "ab12").unwrap().op,
-        "outbox.remove"
+        Button::MarkAsSent.request("o1", "ab12").unwrap().args,
+        json!({"id": "o1", "session": "ab12", "sent": true})
     );
-    let again = Button::SendAgain.request("o1", "ab12").unwrap();
+    let again = Button::Retry.request("o1", "ab12").unwrap();
     assert_eq!(
         (again.op, again.args),
         ("outbox.resend", json!({"id": "o1", "session": "ab12"}))
