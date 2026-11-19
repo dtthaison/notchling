@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use notchling_engine::machines::engine::SetupEngine;
 use notchling_engine::machines::registry::{AdminAccess, Machine, MachineOs};
 use notchling_engine::machines::step::{CheckResult, StepId};
@@ -10,8 +12,11 @@ use super::add_plan::unsupported;
 use super::add_register::learn;
 use super::add_sheet::{parse_draft, Draft};
 use super::model::ClusterModel;
+use super::not_joined::not_joined;
 use crate::machines::model::MachinesModel;
 use crate::machines::pieces::DraftCheck;
+
+static ROUNDS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -52,6 +57,12 @@ pub struct Answer {
 }
 
 impl Probe {
+    #[cfg(test)]
+    pub fn with_existing(mut self, existing: &[&str]) -> Probe {
+        self.existing = existing.iter().map(|n| (*n).to_owned()).collect();
+        self
+    }
+
     pub fn run(&self, engine: &SetupEngine) -> Answer {
         Answer {
             round: self.round,
@@ -105,7 +116,7 @@ impl MachineAdd {
             .split_once('@')
             .map(|(u, h)| (u.to_owned(), h.to_owned()))
             .ok_or_else(|| t::cluster::add_not_now().to_owned())?;
-        self.round += 1;
+        self.round = ROUNDS.fetch_add(1, Ordering::SeqCst) + 1;
         self.phase = Phase::Checking;
         self.target = Some(Target {
             name: parsed.name.clone(),
@@ -131,13 +142,15 @@ impl MachineAdd {
         };
         let check = answer.check;
         if !check.reachable {
-            let text = check
-                .lines
-                .first()
-                .map(|l| l.state.text().to_owned())
-                .or_else(|| check.problems.first().cloned())
-                .unwrap_or_else(|| t::cluster::add_no_answer().to_owned());
-            self.phase = Phase::Stopped(unreachable_stop(&target.user, &target.host, &text));
+            self.phase = Phase::Stopped(match check.lines.first() {
+                Some(line) => unreachable_stop(&target.user, &target.host, line.state.text()),
+                None => match check.problems.first() {
+                    Some(problem) => Stop::new(problem.clone(), false),
+                    None => {
+                        unreachable_stop(&target.user, &target.host, t::cluster::add_no_answer())
+                    }
+                },
+            });
             return false;
         }
         match save(parts, &target, &check) {
@@ -181,11 +194,14 @@ fn save(parts: &AddParts, target: &Target, check: &DraftCheck) -> Result<(), Str
 }
 
 pub fn remove(parts: &AddParts, model: &ClusterModel, name: &str) -> Result<(), String> {
-    let member = model
-        .rows()
-        .into_iter()
-        .any(|r| !r.removed && r.name == name);
-    if member {
+    if !model.is_loaded() {
+        return Err(t::cluster::machine_remove_unread().to_owned());
+    }
+    let machines = parts.registry.all();
+    let joined = |n: &str| parts.engine.results(n).get(&StepId::NODE_JOINED).cloned();
+    let outside = not_joined(&machines, &joined, model);
+    let known = machines.iter().any(|m| m.name == name);
+    if known && !outside.iter().any(|m| m.name == name) {
         return Err(t::cluster::machine_remove_member(name));
     }
     commit(&*parts.registry, |list| {

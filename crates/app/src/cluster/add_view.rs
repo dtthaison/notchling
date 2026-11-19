@@ -17,8 +17,8 @@ use super::add::AddFlow;
 use super::add_parts::AddParts;
 use super::add_runs::Snap;
 use super::add_sheet::{
-    derived_name, install, machine_view, may_open, sign_in_target, view, AddPassword, AddView,
-    Button, Draft,
+    derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, AddPassword,
+    AddView, Button, Draft,
 };
 use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
@@ -43,6 +43,7 @@ pub(super) struct AddSheet {
     pub(super) touched: bool,
     pub(super) machine: MachineAdd,
     pub(super) flow: Option<String>,
+    pub(super) joining: bool,
     pub(super) parts: Option<AddParts>,
     pub(super) user: String,
     pub(super) names: Vec<String>,
@@ -120,6 +121,7 @@ impl AddSheet {
             name,
             touched: false,
             machine: MachineAdd::new(),
+            joining: flow.is_some(),
             flow,
             parts,
             user,
@@ -250,6 +252,9 @@ impl ClusterSheetView {
         let sheet = self.add.sheet.as_ref()?;
         let snap = sheet.flow.as_deref().and_then(|n| self.feed.adds().get(n));
         let draft = self.add_draft(cx);
+        if snap.is_none() && sheet.joining {
+            return Some(refused_view());
+        }
         if snap.is_none() {
             return Some(machine_view(
                 sheet.machine.phase(),

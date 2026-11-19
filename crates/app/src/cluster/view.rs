@@ -661,7 +661,7 @@ impl Render for ClusterSheetView {
                 .child(text)
         };
         let mut machines = false;
-        if !self.feed.is_live() && !model.is_loaded() {
+        if (!self.feed.is_live() || self.feed.is_down()) && !model.is_loaded() {
             body = body.child(section(
                 self,
                 div().child(label(

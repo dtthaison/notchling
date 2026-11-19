@@ -256,3 +256,19 @@ fn an_event_keeps_the_readiness_and_set_facts_it_does_not_carry() {
     let fresh = carried(&Value::Null, &event);
     assert!(fresh.get("replication").is_none());
 }
+
+#[test]
+fn a_feed_with_no_daemon_says_it_is_down_and_recovers_when_one_answers() {
+    let scratch = Scratch::new("cf-down");
+    let socket = scratch.path().join(SOCKET_NAME);
+    let feed = start(&socket);
+    assert!(feed.is_live());
+    wait_until("the feed to notice no daemon", || feed.is_down());
+    assert!(!feed.snapshot().is_loaded());
+    let calls: Calls = Arc::default();
+    let (handle, thread) = serve(&socket, &calls);
+    wait_until("the status", || feed.snapshot().is_loaded());
+    assert!(!feed.is_down());
+    handle.shutdown();
+    thread.join().expect("the server ends").ok();
+}

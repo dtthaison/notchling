@@ -546,6 +546,10 @@ cluster-machine-remove-note = { $name } leaves Machines with its settings. Nothi
 cluster-machine-remove-confirm = Remove
 # Refusal when a machine that is in the cluster is picked for removal from Machines; $name is the machine's name.
 cluster-machine-remove-member = { $name } is in the cluster. Choose Leave Cluster… on it first.
+# Refusal when a machine is picked for removal while its Join Cluster… run is still going; $name is the machine's name.
+cluster-machine-remove-busy = { $name } is being set up. Wait for it to finish first.
+# Refusal when a machine is picked for removal while the Cluster has not been read yet.
+cluster-machine-remove-unread = The Cluster is not read yet. Try again when the sheet shows it.
 
 ## Update Machines
 

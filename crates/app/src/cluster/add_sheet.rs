@@ -255,6 +255,12 @@ pub fn view(
     view
 }
 
+pub fn refused_view() -> AddView {
+    let mut view = AddView::empty(t::cluster::add_title().to_owned());
+    view.actions = vec![Action::on(Button::Close)];
+    view
+}
+
 pub fn machine_view(
     phase: &MachinePhase,
     draft: &Draft,

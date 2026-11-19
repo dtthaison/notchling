@@ -3,7 +3,8 @@ use notchling_engine::machines::registry::{AdminAccess, Machine, MachineOs};
 use notchling_engine::machines::step::{CheckResult, StepId};
 
 use super::add::{AddFlow, Phase as FlowPhase};
-use super::add_rig_tests::{lock, sd_machine, status, Rig, T0};
+use super::add_rig_tests::{lock, sd_machine, status, Rig, NODE, T0};
+use super::add_runs::AddRuns;
 use super::add_sheet::Draft;
 use super::add_source::AddSource;
 use super::machine_add::{remove, MachineAdd, Phase};
@@ -373,4 +374,112 @@ fn no_local_api_op_changes_machines() {
         bad.is_empty(),
         "saving, removing and joining are the app's own: {bad:?}"
     );
+}
+
+#[test]
+fn remove_refuses_while_the_cluster_is_not_read() {
+    let rig = Rig::new(vec![]);
+    added(&rig, "deploy@app-1.example", None);
+    let why = remove(&rig.parts(), &ClusterModel::default(), "app-1").expect_err("unread");
+    assert!(why.contains("not read"), "{why}");
+    assert!(rig.saved("app-1").is_some());
+}
+
+#[test]
+fn remove_refuses_a_member_known_by_its_node_id_under_another_name() {
+    let rig = Rig::new(vec![]);
+    added(&rig, "deploy@app-1.example", None);
+    let mut flow = AddFlow::for_machine(rig.parts(), "app-1").expect("registered");
+    rig.world.set_done(&["binary", "service"]);
+    rig.check(&mut flow);
+    let renamed = model(&[(NODE, "kitchen-mac", "active", true)]);
+    let why = remove(&rig.parts(), &renamed, "app-1").expect_err("a member by id");
+    assert!(why.contains("Leave Cluster"), "{why}");
+    assert!(rig.saved("app-1").is_some());
+    let elsewhere = model(&[("ffffffffffffffff", "kitchen-mac", "active", true)]);
+    remove(&rig.parts(), &elsewhere, "app-1").expect("not a member");
+}
+
+#[test]
+fn remove_refuses_a_machine_the_checks_say_has_joined() {
+    let rig = Rig::new(vec![]);
+    added(&rig, "deploy@app-1.example", None);
+    let mut flow = AddFlow::for_machine(rig.parts(), "app-1").expect("registered");
+    rig.world.set_done(&["binary", "service", "joined"]);
+    rig.check(&mut flow);
+    let why = remove(&rig.parts(), &model(&[]), "app-1").expect_err("joined");
+    assert!(why.contains("Leave Cluster"), "{why}");
+}
+
+#[test]
+fn a_probe_from_a_closed_sheet_never_lands_on_the_next_one() {
+    let rig = Rig::new(vec![]);
+    let mut first = MachineAdd::new();
+    let old = first
+        .begin(&rig.parts(), &draft("deploy@app-1.example", ""), None)
+        .expect("a good address");
+    let mut second = MachineAdd::new();
+    let fresh = second
+        .begin(&rig.parts(), &draft("ci@build-2.example", ""), None)
+        .expect("a good address");
+    let late = old.run(&rig.engine);
+    assert!(!second.answered(&rig.parts(), late));
+    assert_eq!(second.phase(), &Phase::Checking);
+    assert!(rig.saved("app-1").is_none());
+    assert!(rig.saved("build-2").is_none());
+    let own = fresh.run(&rig.engine);
+    assert!(second.answered(&rig.parts(), own));
+    assert!(rig.saved("build-2").is_some());
+}
+
+#[test]
+fn a_check_after_a_removal_stamps_nothing_and_forget_drops_the_stamp() {
+    let rig = Rig::new(vec![]);
+    added(&rig, "deploy@app-1.example", None);
+    let source = AddSource::over(rig.parts()).with_checked("app-1", 1_800_000_000);
+    remove(&rig.parts(), &model(&[]), "app-1").expect("removed");
+    source.forget("app-1");
+    source.check("app-1");
+    added(&rig, "deploy@app-1.example", None);
+    assert_eq!(source.not_joined(&model(&[]))[0].checked_s, None);
+}
+
+#[test]
+fn a_stopped_join_row_goes_with_the_machine_and_a_running_one_holds_it() {
+    let rig = Rig::new(vec![]);
+    added(&rig, "deploy@app-1.example", None);
+    let runs = AddRuns::default();
+    let flow = AddFlow::for_machine(rig.parts(), "app-1").expect("registered");
+    assert!(runs.begin(flow));
+    assert!(runs.busy("app-1"), "a check in flight holds the machine");
+    assert!(!runs.busy("build-2"));
+    for _ in 0..500 {
+        if !runs.busy("app-1") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!runs.busy("app-1"));
+    remove(&rig.parts(), &model(&[]), "app-1").expect("removed");
+    runs.dismiss("app-1");
+    assert!(runs.get("app-1").is_none());
+}
+
+#[test]
+fn a_refusal_without_a_check_is_plain_and_has_no_check_again() {
+    let rig = Rig::new(vec![]);
+    let mut add = MachineAdd::new();
+    let probe = add
+        .begin(&rig.parts(), &draft("deploy@app-1.example", ""), None)
+        .expect("a good address")
+        .with_existing(&["app-1"]);
+    let answer = probe.run(&rig.engine);
+    assert!(!add.answered(&rig.parts(), answer));
+    let Phase::Stopped(stop) = add.phase() else {
+        panic!("{:?}", add.phase());
+    };
+    assert!(stop.reason.contains("app-1"), "{stop:?}");
+    assert!(stop.howto.is_none(), "{stop:?}");
+    assert!(!stop.check_again, "{stop:?}");
+    assert!(rig.saved("app-1").is_none());
 }

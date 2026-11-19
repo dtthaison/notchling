@@ -69,7 +69,16 @@ impl AddSource {
             return;
         };
         parts.engine.refresh(Some(&[name.to_owned()]), true);
-        self.note_checked(name);
+        if parts.registry.all().iter().any(|m| m.name == name) {
+            self.note_checked(name);
+        }
+    }
+
+    pub fn forget(&self, name: &str) {
+        self.checked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(name);
     }
 
     pub fn over(parts: AddParts) -> AddSource {

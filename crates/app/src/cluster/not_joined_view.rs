@@ -123,9 +123,19 @@ impl ClusterSheetView {
         let Some(parts) = self.feed.add_source().parts() else {
             return;
         };
+        let runs = self.feed.adds();
+        if runs.busy(name) {
+            self.note = Some((t::cluster::machine_remove_busy(name), true));
+            cx.notify();
+            return;
+        }
         let model = self.feed.snapshot();
         self.note = match remove(&parts, &model, name) {
-            Ok(()) => None,
+            Ok(()) => {
+                runs.dismiss(name);
+                self.feed.add_source().forget(name);
+                None
+            }
             Err(why) => Some((why, true)),
         };
         self.add.forget_list();

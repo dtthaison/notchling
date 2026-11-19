@@ -250,6 +250,10 @@ impl AddRuns {
         self.bump();
     }
 
+    pub fn busy(&self, name: &str) -> bool {
+        self.flows().get(name).is_some_and(|f| active(f.phase()))
+    }
+
     pub fn dismiss(&self, name: &str) {
         let mut flows = self.flows();
         if flows.get(name).is_some_and(|f| !active(f.phase())) {
