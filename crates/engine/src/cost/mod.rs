@@ -1,5 +1,7 @@
 pub mod account_log;
 pub mod cache;
+pub mod check;
+pub mod ledger;
 pub mod other;
 pub mod paths;
 pub mod prices;
@@ -11,6 +13,10 @@ pub mod tracker;
 mod account_log_tests;
 #[cfg(test)]
 mod fork_tests;
+#[cfg(test)]
+mod ledger_testkit;
+#[cfg(test)]
+mod ledger_tests;
 #[cfg(test)]
 mod sources_tests;
 #[cfg(test)]

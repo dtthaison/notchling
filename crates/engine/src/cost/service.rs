@@ -1,9 +1,21 @@
+use super::check::{analyse, Options, Report};
+use super::ledger::Ledger;
 use super::summary::Window;
 use super::tracker::{Ranged, Tracker};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 pub const SCAN_EVERY: f64 = 20.0;
+pub const LEDGER_SLICE: Duration = Duration::from_secs(3);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checked {
+    pub report: Report,
+    pub complete: bool,
+    pub scanned: Option<f64>,
+    pub calls: u64,
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Snapshot {
@@ -20,6 +32,7 @@ impl Snapshot {
 
 pub struct CostService {
     tracker: Mutex<Tracker>,
+    ledger: Mutex<Option<Ledger>>,
     published: Mutex<(Option<f64>, Ranged)>,
     scanning: AtomicBool,
     last_started: Mutex<Option<f64>>,
@@ -39,8 +52,13 @@ impl Drop for Scanning<'_> {
 
 impl CostService {
     pub fn new(tracker: Tracker) -> Arc<CostService> {
+        CostService::with_ledger(tracker, None)
+    }
+
+    pub fn with_ledger(tracker: Tracker, ledger: Option<Ledger>) -> Arc<CostService> {
         Arc::new(CostService {
             tracker: Mutex::new(tracker),
+            ledger: Mutex::new(ledger),
             published: Mutex::new((None, Ranged::default())),
             scanning: AtomicBool::new(false),
             last_started: Mutex::new(None),
@@ -78,6 +96,33 @@ impl CostService {
         let ranged = tracker.ranged(now);
         drop(tracker);
         *lock(&self.published) = (Some(now), ranged);
+        self.fill_ledger(now);
+    }
+
+    fn fill_ledger(&self, now: f64) {
+        loop {
+            let progress = match lock(&self.ledger).as_mut() {
+                Some(ledger) => ledger.refresh(now, Some(LEDGER_SLICE)),
+                None => return,
+            };
+            if progress.complete() {
+                return;
+            }
+        }
+    }
+
+    pub fn check(&self, options: Options, budget: Duration) -> Option<Checked> {
+        let mut guard = lock(&self.ledger);
+        let ledger = guard.as_mut()?;
+        let progress = ledger.refresh(options.now, Some(budget));
+        let from = options.now - f64::from(options.days) * 86_400.0;
+        let window = ledger.calls_since(from);
+        Some(Checked {
+            report: analyse(&window, ledger.catalog(), &options),
+            complete: progress.complete(),
+            scanned: ledger.scanned(),
+            calls: ledger.call_count(),
+        })
     }
 
     pub fn save(&self, now: f64) {
