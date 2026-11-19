@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use notchling_engine::machines::dist_manifest::DistManifest;
 use notchling_engine::machines::node_updates::UpdateState;
@@ -8,9 +8,8 @@ use serde_json::{json, Value};
 use super::add_rig_tests::Rig;
 use super::model::ClusterModel;
 use super::updates::{
-    banner, execute, lines, machines_of, members, plan, rows_for, run_button, Kind, NotNow,
+    banner, execute, idle_lines, lines, members, plan, rows_for, run_label, selected, Kind, NotNow,
 };
-use crate::machines::runs::AdminAsks;
 
 const ME: &str = "a1b2c3d4e5f60718";
 const OURS: &str = "a1b2c3d";
@@ -152,8 +151,7 @@ fn needs_build_row_says_build_nodes_first() {
     assert_eq!(shown[0].kind, Kind::Skipped);
     assert!(shown[0].text.contains("tools/build-node.sh"));
     assert!(!shown[0].offers_anyway());
-    let (title, enabled) = run_button(&got, &BTreeSet::new());
-    assert!(!enabled, "{title}");
+    assert!(selected(&got, &BTreeSet::new(), &BTreeSet::new()).is_empty());
 
     let listed = rows_for(
         Some(OURS),
@@ -181,14 +179,13 @@ fn busy_row_offers_update_anyway() {
     assert_eq!(shown[0].kind, Kind::Busy);
     assert!(shown[0].offers_anyway());
     assert!(shown[0].text.contains("1 shell job"));
-    assert!(!run_button(&got, &anyway).1);
+    assert!(selected(&got, &anyway, &BTreeSet::new()).is_empty());
 
     anyway.insert("m1".to_owned());
     let chosen = lines(&got, &anyway);
     assert_eq!(chosen[0].kind, Kind::Chosen);
-    let (title, enabled) = run_button(&got, &anyway);
-    assert!(enabled);
-    assert_eq!(title, "Update 1 Machine");
+    let names = selected(&got, &anyway, &BTreeSet::new());
+    assert_eq!(run_label(&names), "Update m1");
 }
 
 #[test]
@@ -310,7 +307,7 @@ fn run_goes_one_at_a_time_and_stops_at_failure() {
     let rows = ready_rows(&rig, &["m1", "m2", "m3"]);
     let shown = plan(&rig.engine, &rows, &BTreeSet::new()).expect("one plan for all three");
     assert_eq!(shown.steps.len(), 3);
-    let done = execute(&rig.engine, &shown, &AdminAsks::default());
+    let done = execute(&rig.engine, &shown, &BTreeMap::new());
     assert!(done.ok, "{}", done.message);
     assert_eq!(rig.world.fixed(), ["binary", "binary", "binary"]);
 
@@ -318,7 +315,7 @@ fn run_goes_one_at_a_time_and_stops_at_failure() {
     rig.world.fails.lock().unwrap().insert("binary".into());
     let rows = ready_rows(&rig, &["m1", "m2", "m3"]);
     let shown = plan(&rig.engine, &rows, &BTreeSet::new()).unwrap();
-    let stopped = execute(&rig.engine, &shown, &AdminAsks::default());
+    let stopped = execute(&rig.engine, &shown, &BTreeMap::new());
     assert!(!stopped.ok);
     assert!(stopped.message.contains("m1"), "{}", stopped.message);
     assert!(stopped.message.contains("0 machine(s) updated"));
@@ -351,39 +348,52 @@ fn a_busy_machine_runs_only_after_update_anyway() {
 }
 
 #[test]
-fn an_admin_question_in_an_update_names_the_machine_not_the_step_title() {
-    use super::updates_state::UpdateSession;
+fn the_button_names_the_machine_or_counts_them() {
+    assert_eq!(run_label(&["m1".to_owned()]), "Update m1");
+    assert_eq!(
+        run_label(&["m1".to_owned(), "m2".to_owned()]),
+        "Update 2 Machines"
+    );
+}
+
+#[test]
+fn a_machine_taken_off_the_list_is_not_selected() {
     let rig = world(&["m1", "m2"]);
     let rows = ready_rows(&rig, &["m1", "m2"]);
-    let shown = plan(&rig.engine, &rows, &BTreeSet::new()).expect("a plan");
-    let who = machines_of(&shown);
-    assert_eq!(who.len(), 2);
-    let step = shown.steps[1].clone();
-    assert!(
-        step.title.starts_with("Update Notchling on"),
-        "{}",
-        step.title
+    let off: BTreeSet<String> = ["m1".to_owned()].into();
+    assert_eq!(selected(&rows, &BTreeSet::new(), &off), ["m2"]);
+}
+
+#[test]
+fn machines_that_need_nothing_are_listed_dimmed_with_the_reason() {
+    let machines = [node("m1", MachineOs::MacOs)];
+    let both = model(
+        vec![
+            member(M1, "m1", "macos", "aarch64", Some(OURS)),
+            member(VPS, "vps-sing-1", "linux", "x86_64", Some(OURS)),
+        ],
+        json!([]),
     );
-    let session = UpdateSession::default();
-    assert!(session.begin());
-    let asks = session.asks();
-    let machine = who[&step.title].clone();
-    let asked = std::thread::spawn(move || asks.ask(&machine, &step));
-    for _ in 0..400 {
-        if session.pull().1 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    assert_eq!(session.pending_machine().as_deref(), Some("m2"));
-    assert!(session
-        .pending_target()
-        .unwrap()
-        .starts_with("Update Notchling on"));
-    let mut typed = super::add_sheet::AddPassword::default();
-    assert!(session.answer_vault("m2", "m2-admin", &mut typed));
-    assert!(matches!(
-        asked.join().unwrap(),
-        notchling_engine::machines::engine_plan::AdminAnswer::Vault(e) if e == "m2-admin"
-    ));
+    let got = rows(&both, &machines);
+    assert!(got.is_empty());
+    let idle = idle_lines(&both, &got);
+    let by: BTreeMap<&str, (&str, Kind)> = idle
+        .iter()
+        .map(|l| (l.machine.as_str(), (l.text.as_str(), l.kind)))
+        .collect();
+    assert_eq!(
+        by["m5"],
+        ("This Mac. The others are updated from it.", Kind::Idle)
+    );
+    assert_eq!(by["m1"], ("Already up to date.", Kind::Idle));
+    assert_eq!(by["vps-sing-1"], ("Already up to date.", Kind::Idle));
+
+    let old = model(
+        vec![member(M1, "m1", "macos", "aarch64", Some(OTHER))],
+        json!([]),
+    );
+    let got = rows(&old, &machines);
+    let idle = idle_lines(&old, &got);
+    assert!(idle.iter().all(|l| l.machine != "m1"), "m1 is a real row");
+    assert!(idle.iter().any(|l| l.machine == "m5"));
 }

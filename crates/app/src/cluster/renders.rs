@@ -138,7 +138,7 @@ pub const VIEWS: [ViewSpec; 26] = [
     ViewSpec {
         name: "cluster-update",
         size: (WIDTH, 720.0),
-        about: "the cluster sheet offering Update 3 Machines, with its sheet open: one machine ready, one waiting for the Linux build, one busy with Update Anyway (made-up data)",
+        about: "the cluster sheet offering an update, with its sheet open: one machine ready with its admin password typed, one waiting for the Linux build, one busy with Update Anyway; NOTCHLING_RENDER_UPDATE=linked|two|running|nothing shows the other states (made-up data)",
     },
     ViewSpec {
         name: "cluster-secrets",
@@ -609,7 +609,7 @@ pub fn updating() -> Value {
     set_member(&mut status, WORKER, "name", json!("vps-sing-1"));
     let mut third = member(
         STUDIO,
-        "m3",
+        "m2",
         "worker",
         false,
         true,

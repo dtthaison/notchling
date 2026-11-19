@@ -84,16 +84,26 @@ fn from_tailscale(existing: Vec<notchling_engine::machines::registry::Machine>) 
     model
 }
 
+pub(in crate::cluster) fn update_state() -> String {
+    std::env::var("NOTCHLING_RENDER_UPDATE").unwrap_or_default()
+}
+
 fn offer() -> Offer {
     let busy = "2 shell job(s) running; the update restarts the daemon";
-    let rows = [
-        ("m1", UpdateState::Ready),
-        (
-            "vps-sing-1",
-            UpdateState::NeedsBuild("Build the Linux nodes first: tools/build-node.sh".into()),
-        ),
-        ("m3", UpdateState::Busy(busy.into())),
-    ];
+    let ready = |name: &'static str| (name, UpdateState::Ready);
+    let rows = match update_state().as_str() {
+        "linked" => vec![ready("m1")],
+        "two" | "running" => vec![ready("m1"), ready("m2")],
+        "nothing" => Vec::new(),
+        _ => vec![
+            ready("m1"),
+            (
+                "vps-sing-1",
+                UpdateState::NeedsBuild("Build the Linux nodes first: tools/build-node.sh".into()),
+            ),
+            ("m2", UpdateState::Busy(busy.into())),
+        ],
+    };
     let rows = rows
         .into_iter()
         .map(|(machine, state)| UpdateRow {
@@ -109,7 +119,11 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
         return ClusterFeed::fixed(model);
     }
     if which == Shown::Update {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/machines-node");
+        let fixture = match update_state().as_str() {
+            "linked" | "two" | "running" => "fixtures/machines-update-linked",
+            _ => "fixtures/machines-update",
+        };
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fixture);
         let parts = AddParts::live(&Setup::for_render(Some(&dir)));
         let source = AddSource::over(parts).with_offer(offer());
         return ClusterFeed::fixed_adding(model, source, AddRuns::fixed(Vec::new()));

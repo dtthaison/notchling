@@ -1,4 +1,4 @@
-use gpui::{deferred, div, prelude::*, px, Context, Div, SharedString};
+use gpui::{deferred, div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
@@ -16,17 +16,23 @@ use super::view::ClusterSheetView;
 use crate::mac::gate;
 
 impl ClusterSheetView {
-    pub(super) fn dot(row: &NodeRow, a: Appearance) -> Div {
-        let ink = if row.online && !row.removed {
+    pub(super) fn dot(row: &NodeRow, a: Appearance) -> Stateful<Div> {
+        let ink = if row.removed {
+            Ink::TextFaint
+        } else if row.pending {
+            Ink::Needs
+        } else if row.online {
             Ink::Done
         } else {
-            Ink::TextFaint
+            Ink::Expired
         };
-        div()
+        let dot = div()
+            .id(SharedString::from(format!("node-dot-{}", row.id)))
             .flex_shrink_0()
             .size(px(SPACE[1]))
             .rounded_full()
-            .fill(ink, a)
+            .fill(ink, a);
+        gate::tip_text(dot, row.state_word().into(), a)
     }
 
     pub(super) fn pill(text: &str, ink: Ink, wash: Ink, a: Appearance) -> Div {
@@ -213,7 +219,6 @@ impl ClusterSheetView {
             .items_center()
             .gap(px(SPACE[1]))
             .child(div().flex_1().min_w(px(0.0)).child(title));
-        head = head.child(label(row.state_word(), TypeRole::Meta, Ink::TextMuted, a));
         if self.feed_offers_take_back(&row.id) {
             head = head.child(
                 button(

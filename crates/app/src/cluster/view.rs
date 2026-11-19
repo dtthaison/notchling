@@ -535,11 +535,6 @@ impl ClusterSheetView {
         block
     }
 
-    fn add_row(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
-        self.feed.add_source().parts()?;
-        Some(div().flex().child(self.add_machine_button(a, cx)))
-    }
-
     fn state(&self) -> PartState {
         if self.busy {
             PartState::Disabled
@@ -727,9 +722,8 @@ impl Render for ClusterSheetView {
                 a,
             ));
         }
-        if machines {
-            body = body.children(self.add_row(a, cx));
-        }
+        let can_add =
+            machines && self.editing.is_none() && self.feed.add_source().parts().is_some();
         let done = button(
             "cluster-done",
             t::cluster::done(),
@@ -738,6 +732,13 @@ impl Render for ClusterSheetView {
             a,
         )
         .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
+        let header_end = div()
+            .id("cluster-header-end")
+            .flex()
+            .items_center()
+            .gap(px(SPACE[0]))
+            .children(can_add.then(|| self.add_machine_button(a, cx)))
+            .child(done);
         let alert = self.remove_alert(&model, a, cx);
         let machine_alert = self.machine_remove_alert(a, cx);
         let switch_alert = self.switch_alert(a, cx);
@@ -788,12 +789,7 @@ impl Render for ClusterSheetView {
             .flex_col()
             .fill(Ink::Window, a)
             .overflow_hidden()
-            .child(sheet_header(
-                Icon::Server,
-                &title,
-                div().id("cluster-header-end").child(done),
-                a,
-            ))
+            .child(sheet_header(Icon::Server, &title, header_end, a))
             .child(content)
             .children(footer)
             .children(alert)

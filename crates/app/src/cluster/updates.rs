@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use notchling_engine::accounts::Secret;
 use notchling_engine::machines::dist_manifest::DistManifest;
 use notchling_engine::machines::engine::SetupEngine;
 use notchling_engine::machines::engine_plan::{AdminAnswer, PlanKind, ShownPlan};
@@ -11,7 +12,6 @@ use notchling_engine::machines::step::FixOutcome;
 use notchling_locale as t;
 
 use super::model::{ClusterModel, NodeRow};
-use crate::machines::runs::AdminAsks;
 
 pub(super) fn machine_of<'a>(
     row: &NodeRow,
@@ -133,6 +133,7 @@ pub enum Kind {
     Skipped,
     Busy,
     Chosen,
+    Idle,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,9 +173,37 @@ pub fn lines(rows: &[UpdateRow], anyway: &BTreeSet<String>) -> Vec<Line> {
         .collect()
 }
 
-pub fn run_button(rows: &[UpdateRow], anyway: &BTreeSet<String>) -> (String, bool) {
-    let count = runnable(rows, &anyway.iter().cloned().collect::<Vec<_>>()).len();
-    (t::cluster::update_button_run(count), count > 0)
+pub fn idle_lines(model: &ClusterModel, rows: &[UpdateRow]) -> Vec<Line> {
+    model
+        .rows()
+        .iter()
+        .filter(|row| row.active && !row.removed)
+        .filter(|row| row.me || !rows.iter().any(|r| r.machine == row.name))
+        .map(|row| Line {
+            machine: row.name.clone(),
+            text: if row.me {
+                t::cluster::update_this_mac().to_owned()
+            } else {
+                t::cluster::update_up_to_date().to_owned()
+            },
+            kind: Kind::Idle,
+        })
+        .collect()
+}
+
+pub fn selected(
+    rows: &[UpdateRow],
+    anyway: &BTreeSet<String>,
+    deselected: &BTreeSet<String>,
+) -> Vec<String> {
+    runnable(rows, &anyway.iter().cloned().collect::<Vec<_>>())
+        .into_iter()
+        .filter(|name| !deselected.contains(name))
+        .collect()
+}
+
+pub fn run_label(names: &[String]) -> String {
+    t::cluster::update_button_run(names.len(), names.first().map_or("", String::as_str))
 }
 
 pub fn plan(
@@ -208,7 +237,11 @@ pub fn machines_of(plan: &ShownPlan) -> BTreeMap<String, String> {
     }
 }
 
-pub fn execute(engine: &SetupEngine, plan: &ShownPlan, asks: &AdminAsks) -> FixOutcome {
+pub fn execute(
+    engine: &SetupEngine,
+    plan: &ShownPlan,
+    typed: &BTreeMap<String, Secret>,
+) -> FixOutcome {
     if let PlanKind::UpdateNotchling(names) = &plan.kind {
         engine.refresh(Some(names), true);
     }
@@ -216,7 +249,10 @@ pub fn execute(engine: &SetupEngine, plan: &ShownPlan, asks: &AdminAsks) -> FixO
     match engine.confirm(plan.id, AdminAnswer::None) {
         Ok(confirmed) => engine.run_with(confirmed, &|step| {
             let machine = machines.get(&step.title).unwrap_or(&step.title);
-            asks.ask(machine, step)
+            match typed.get(machine) {
+                Some(secret) => AdminAnswer::Password(secret.clone()),
+                None => AdminAnswer::None,
+            }
         }),
         Err(why) => FixOutcome::fail(why),
     }

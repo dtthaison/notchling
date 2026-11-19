@@ -11,6 +11,8 @@ cluster-section-cluster = Cluster
 # Heading above the machines that are members of the cluster.
 cluster-section-members = In the Cluster
 cluster-done = Done
+# Tooltip of the + button in the Machines sheet header; it opens Add Machine.
+cluster-add-tip = Add Machine
 # Shown on the sheet when the app has no connection to the daemon.
 cluster-detached = The daemon isn't running, so the cluster can't be read.
 # Shown on the sheet before the daemon has answered.
@@ -562,9 +564,9 @@ cluster-update-button-open = { $count ->
     [one] Update { $count } Machine…
    *[other] Update { $count } Machines…
 }
-# Button that runs the update; $count is how many machines will be updated.
+# Button that runs the update; $count is how many machines will be updated, $name the machine when there is one.
 cluster-update-button-run = { $count ->
-    [one] Update { $count } Machine
+    [one] Update { $name }
    *[other] Update { $count } Machines
 }
 cluster-update-not-now = Not Now
@@ -578,10 +580,35 @@ cluster-update-anyway-chosen = { $why }. It will update anyway.
 cluster-update-not-in-machines = { $name } isn't in Machines, so it can't be updated from here.
 cluster-update-nothing = No machine can be updated now.
 cluster-update-running = Updating…
-cluster-update-continue = Continue
-# Asks for the admin password of a step; $step is the step's title.
-cluster-update-password-for = Admin password for { $step }
+# Dimmed line for a machine that already runs this Mac's build.
+cluster-update-up-to-date = Already up to date.
+# Dimmed line for this Mac in the update list.
+cluster-update-this-mac = This Mac. The others are updated from it.
+# Asks for the admin password of a machine; $machine is its name.
+cluster-update-password-for = Admin password for { $machine }
 cluster-update-password-placeholder = Admin password
+# Under a machine whose admin password is in the Vault; $name is the Vault item.
+cluster-update-saved-in = Saved in Vault · { $name }
+# Button that picks another Vault item for the machine.
+cluster-update-change = Change…
+# Button that opens the list of Vault items for the machine.
+cluster-update-choose = Choose Existing…
+# Under the password field; $name is the Vault item Notchling will create.
+cluster-update-will-save = Saved in the Vault as { $name }, so it isn't asked again.
+# Under the password field when the Vault can't be used.
+cluster-update-vault-off = The Vault isn't available. The password is used once and not saved.
+# Under the password field when the machine's Vault item was deleted; $name is that item.
+cluster-update-link-gone = The Vault item { $name } is gone. Type the password again.
+# Note of the Vault item Notchling creates; $machine is the machine's name.
+cluster-update-item-note = macOS admin password for { $machine }, used by Notchling updates
+# Shown in place of the list of Vault items while it is read.
+cluster-update-reading = Reading the Vault…
+# Reason the update can't start yet; $names are the machines that need a password.
+cluster-update-needs-password = Type the admin password for { $names } to update.
+# Reason when every machine is switched off.
+cluster-update-pick-one = Choose a machine to update.
+# Shown when saving the password in the Vault failed; $error is the reason.
+cluster-update-save-failed = Couldn't save the password in the Vault: { $error }. Nothing was changed.
 # Second sentence of the update line in the Machines window.
 cluster-update-from-cluster = Update them from the Machines sheet in Notchling.
 

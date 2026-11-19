@@ -45,6 +45,7 @@ pub mod tool_updates;
 #[cfg(target_os = "macos")]
 mod tool_updates_view;
 pub mod updates;
+mod updates_admin;
 mod updates_state;
 #[cfg(target_os = "macos")]
 mod updates_view;
