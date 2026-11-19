@@ -115,6 +115,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::VERSIONS_LATEST, Home::Quiet),
     (ops::VERSIONS_UPDATE_LOCAL, Home::Called),
     (ops::AWAKE_STATE, Home::Quiet),
+    (ops::TAILSCALE_SWITCH, Home::Called),
     (ops::CLUSTER_STATUS, Home::Called),
     (ops::CLUSTER_CREATE, Home::Called),
     (ops::CLUSTER_JOIN_TOKEN, Home::Called),

@@ -6,6 +6,7 @@ use super::actions_util::{branch_source, failure, failure_of};
 pub use super::actions_util::{destination, is_plain_image_name};
 use super::merge::{refused_issue, worktree_url, MergeOutcome, MergePlan};
 use super::morning::{MorningEntry, MorningItem};
+use super::reach::Router;
 use super::registry::{Machine, MachineRepo};
 use super::runner::{argv, Call, Runner};
 use super::shell;
@@ -37,6 +38,7 @@ pub struct MorningActions {
     undo_fn: Option<MergeFunction>,
     cache_root: PathBuf,
     state: Mutex<State>,
+    router: Arc<Router>,
 }
 
 fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
@@ -69,7 +71,13 @@ impl MorningActions {
             undo_fn: None,
             cache_root,
             state: Mutex::new(State::default()),
+            router: Arc::new(Router::off()),
         }
+    }
+
+    pub fn with_router(mut self, router: Arc<Router>) -> MorningActions {
+        self.router = router;
+        self
     }
 
     pub fn plan(&self) -> &MergePlan {
@@ -270,7 +278,7 @@ impl MorningActions {
                     &["fetch", "--no-tags", &url, &refspec],
                     120,
                 )
-                .env("GIT_SSH_COMMAND", shell::GIT_SSH_COMMAND),
+                .env("GIT_SSH_COMMAND", &shell::git_ssh_command(&machine)),
         );
         if fetch.code != 0 {
             return failure(&fetch, "git fetch");
@@ -336,26 +344,28 @@ impl MorningActions {
             } else {
                 format!("{}/{name}", entry.evidence_dir)
             };
-            let call = Call::secs(
-                argv(&[
-                    "/usr/bin/scp",
-                    "-O",
-                    "-q",
-                    "-o",
-                    "BatchMode=yes",
-                    "-o",
-                    "ConnectTimeout=8",
-                    "--",
-                    &format!(
-                        "{}@{}:{}",
-                        machine.user,
-                        machine.host,
-                        crate::lanes::quote(&remote)
-                    ),
-                    &target.to_string_lossy(),
-                ]),
-                60,
-            );
+            let route = machine.route();
+            let mut copy = argv(&[
+                "/usr/bin/scp",
+                "-O",
+                "-q",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=8",
+            ]);
+            copy.extend(route.scp_options());
+            copy.extend([
+                "--".to_owned(),
+                format!(
+                    "{}@{}:{}",
+                    route.user,
+                    route.host,
+                    crate::lanes::quote(&remote)
+                ),
+                target.to_string_lossy().into_owned(),
+            ]);
+            let call = Call::secs(copy, 60);
             if self.runner.run(&call).code == 0 {
                 copied.push(target);
             }
@@ -447,9 +457,9 @@ impl MorningActions {
     }
 
     fn lookup(&self, item: &MorningItem) -> Option<(Machine, MachineRepo)> {
-        let machine = (self.machines)()
-            .into_iter()
-            .find(|m| m.name == item.machine)?;
+        let all = (self.machines)();
+        let found = all.iter().find(|m| m.name == item.machine)?;
+        let machine = self.router.reached(found, &all);
         let repo = machine
             .repos()
             .iter()

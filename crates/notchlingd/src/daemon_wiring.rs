@@ -8,6 +8,7 @@ use crate::ask_ops::AskOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
 use crate::awake_ops::AwakeOps;
+use crate::tailscale_ops::TailscaleOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
@@ -921,6 +922,10 @@ impl Wired {
             .with_remote_prompts(self.cluster.prompts.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
+            .with_group(Arc::new(TailscaleOps::new(
+                Arc::new(notchling_engine::machines::process::ProcessRunner),
+                &notchling_engine::machines::tailscale::default_cli(),
+            )))
             .with_group(self.codex_children.clone())
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {

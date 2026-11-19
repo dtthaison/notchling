@@ -1185,6 +1185,16 @@ Agents read and change Notchling's settings ([decision 0020](decisions/0020-agen
 
 A write goes to `notchling.db` (the limit keys `limitMode`, `codexLimitMode`, `antigravityLimitMode` and `limitSwitchAt` first to the daemon's `LimitConfig`, as `limits.set_mode` does), then out on `settings` as `settings.changed {key, value, by: "agent" | "app", ask?: id}`, set or not. The app reads the key back from the store on that event, so an older event never undoes a newer write. The Settings sheet writes the store itself and applies its own change in place; it doesn't go through this op, so it isn't on the topic. Every `settings.set` from the agent tier is a `settings.agent` event (committed to the Audit before the write) with result `set`, `asked`, `allowed`, `denied`, `expired`, `withdrawn`, `failed`, `refused`, `bad_value`, `unknown_key`, `no_app` or `full`, and the key (a hash for an unknown key), the value's length and its hash, never the value. Reads are not recorded.
 
+## `tailscale_ops.rs`
+
+The one op that changes which Tailscale network this Mac is on. It is app tier only: an agent or the `notchling` command line gets `forbidden`, and the group checks the caller's tier again itself. The app sends it only from the Switch Network button, after a confirm that says the other network drops. Nothing switches by itself.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `tailscale.switch` | app | `{tailnet}` | `{switched, tailnet}`: `switched` is false when that network is already the active one |
+
+`tailnet` is the Tailnet or Account column of `tailscale switch --list`. The daemon reads that list, finds the network, and runs `tailscale switch <id>` (the CLI is the Tailscale app's own, or `tailscale` on PATH). A network that isn't in the list is `bad_request`; a refusal by the CLI is `failed` with its first line.
+
 ## `vault_ops.rs`
 
 E9 in the daemon: the Secret Vault as a service of its own, behind the `vault` switch

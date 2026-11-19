@@ -289,7 +289,7 @@ fn an_unreadable_registry_is_never_overwritten() {
 fn unknown_version_or_job_kind_is_unreadable() {
     let dir = TempDir::new("reg");
     let cases = [
-        ("v4", r#"{"version":4,"machines":[]}"#),
+        ("v5", r#"{"version":5,"machines":[]}"#),
         (
             "kind",
             r#"{"version":2,"machines":[{"name":"m","host":"m","user":"u","jobs":[{"kind":"triage-bot"}]}]}"#,

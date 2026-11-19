@@ -122,6 +122,7 @@ pub struct World {
     pub clock: Arc<Mutex<f64>>,
     pub answers: Answers,
     pub engine: SetupEngine,
+    pub router: Arc<super::reach::Router>,
 }
 
 pub struct Setup {
@@ -134,6 +135,7 @@ pub struct Setup {
     pub audit: Option<PathBuf>,
     pub runner: ScriptedRunner,
     pub toggle: Option<super::engine::ToggleScript>,
+    pub routed: bool,
 }
 
 impl Setup {
@@ -150,6 +152,7 @@ impl Setup {
             audit: None,
             runner: ScriptedRunner::new(),
             toggle: None,
+            routed: false,
         }
     }
 
@@ -180,6 +183,16 @@ impl Setup {
         let secrets = Arc::new(self.secrets);
         let clock = Arc::new(Mutex::new(T0));
         let c = clock.clone();
+        let router = if self.routed {
+            let c2 = clock.clone();
+            Arc::new(super::reach::Router::new(
+                runner.clone(),
+                super::tailscale::Tailscale::new(runner.clone(), "tailscale-fake"),
+                Arc::new(move || *lock(&c2)),
+            ))
+        } else {
+            Arc::new(super::reach::Router::off())
+        };
         let deps = Deps {
             runner: runner.clone(),
             secrets: secrets.clone(),
@@ -213,7 +226,8 @@ impl Setup {
             secrets,
             clock,
             answers,
-            engine: SetupEngine::new(deps, catalog),
+            engine: SetupEngine::new(deps, catalog).with_router(router.clone()),
+            router,
         }
     }
 }

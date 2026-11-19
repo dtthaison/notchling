@@ -190,6 +190,7 @@ mod snap_restore_fs;
 pub mod snap_run;
 pub mod snap_send;
 pub mod switches;
+pub mod tailscale_ops;
 mod turn_gate;
 pub mod typing_locks;
 pub mod vault_args;

@@ -1,3 +1,4 @@
+use super::addresses::Route;
 use super::registry::{AdminAccess, Machine, MachineOs};
 use crate::lanes::quote;
 
@@ -19,24 +20,29 @@ pub const PRODUCTION_SERVICES: [&str; 7] = [
     "caddy",
 ];
 
-fn ssh_head(login: String) -> Vec<String> {
+pub const CONNECT_SECS: u64 = 8;
+
+pub fn ssh_prefix(route: &Route, connect_secs: u64) -> Vec<String> {
     let mut v: Vec<String> = [
-        "/usr/bin/ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=8",
-        "--",
+        "/usr/bin/ssh".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        format!("ConnectTimeout={connect_secs}"),
     ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    v.push(login);
+    .to_vec();
+    v.extend(route.ssh_options());
+    v.push("--".to_string());
+    v.push(route.login());
     v
 }
 
+fn ssh_head(route: &Route) -> Vec<String> {
+    ssh_prefix(route, CONNECT_SECS)
+}
+
 pub fn ssh_argv(m: &Machine, remote: &[&str]) -> Vec<String> {
-    let mut v = ssh_head(format!("{}@{}", m.user, m.host));
+    let mut v = ssh_head(&m.route());
     v.push(
         remote
             .iter()
@@ -48,7 +54,7 @@ pub fn ssh_argv(m: &Machine, remote: &[&str]) -> Vec<String> {
 }
 
 pub fn ssh_script(m: &Machine, script: &str) -> Vec<String> {
-    let mut v = ssh_head(format!("{}@{}", m.user, m.host));
+    let mut v = ssh_head(&m.route());
     v.push(format!(
         "/bin/sh -c {}",
         quote(&format!("{}{script}", prelude()))
@@ -83,20 +89,26 @@ pub fn ssh_admin(m: &Machine, script: &str, as_root: bool) -> Vec<String> {
     } else {
         format!("/usr/bin/sudo -S -k -p '' {fixed}")
     };
-    let mut v = ssh_head(format!("{user}@{}", m.host));
+    let mut v = ssh_head(&m.route().as_user(user));
     v.push(format!("/bin/sh -c {}", quote(&remote)));
     v
 }
 
 pub const GIT_SSH_COMMAND: &str = "ssh -o BatchMode=yes -o ConnectTimeout=8";
 
+pub fn git_ssh_command(m: &Machine) -> String {
+    match m.route().jump_chain() {
+        Some(chain) => format!("{GIT_SSH_COMMAND} -J {}", quote(&chain)),
+        None => GIT_SSH_COMMAND.to_owned(),
+    }
+}
+
 pub fn not_absolute(path: &str) -> String {
     format!("the machine's worktree path \"{path}\" is not an absolute path")
 }
 
 pub fn git_url(m: &Machine, path: &str) -> Option<String> {
-    path.starts_with('/')
-        .then(|| format!("ssh://{}@{}{path}", m.user, m.host))
+    path.starts_with('/').then(|| m.route().git_url(path))
 }
 
 pub fn service_path(home: &str) -> String {
