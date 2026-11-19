@@ -1,6 +1,7 @@
 use crate::layout::Layout;
 use notchling_local_api::{ops, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -233,24 +234,32 @@ pub fn shown(args: &Args, reply: &Value) -> String {
     out.trim_end().to_string()
 }
 
+fn say_err(text: &str) {
+    let _ = writeln!(std::io::stderr(), "{text}");
+}
+
+fn say_out(text: &str) {
+    let _ = writeln!(std::io::stdout(), "{text}");
+}
+
 pub fn run(args: &[String]) -> i32 {
     let parsed = match parse(args) {
         Ok(p) => p,
         Err(message) => {
-            eprintln!("{message}");
+            say_err(&message);
             return TROUBLE;
         }
     };
     let writes = !matches!(parsed.job, Job::Setup { apply: false } | Job::Check);
     let Some(layout) = Layout::from_env(parsed.socket.as_deref()) else {
-        eprintln!("{}", message_of(ClientError::Unsupported, writes));
+        say_err(&message_of(ClientError::Unsupported, writes));
         return TROUBLE;
     };
     let mut client =
         match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("{}", message_of(e, writes));
+                say_err(&message_of(e, writes));
                 return TROUBLE;
             }
         };
@@ -258,12 +267,12 @@ pub fn run(args: &[String]) -> i32 {
     let (op, body) = request(&parsed);
     match client.call(op, body) {
         Ok(reply) => {
-            println!("{}", shown(&parsed, &reply));
+            say_out(&shown(&parsed, &reply));
             DONE
         }
         Err(e) => {
             let code = code_of(&e);
-            eprintln!("{}", message_of(e, writes));
+            say_err(&message_of(e, writes));
             code
         }
     }
