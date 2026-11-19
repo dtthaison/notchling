@@ -267,3 +267,187 @@ fn codex_and_antigravity_rows_come_from_the_same_sources() {
     assert_eq!(agy[0].model, "Gemini 4 Argon");
     assert!(agy.iter().all(|c| c.write_1h == 0 && !c.split));
 }
+
+fn service_over(world: &World) -> std::sync::Arc<super::service::CostService> {
+    use super::tracker::Tracker;
+    let tracker = Tracker::new(
+        world.roots(),
+        None,
+        None,
+        std::sync::Arc::new(crate::catalog::Catalog::built_in()),
+    )
+    .with_zone(super::ledger_testkit::utc);
+    super::service::CostService::with_ledger(tracker, Some(world.ledger()))
+}
+
+fn stored(service: &super::service::CostService) -> u64 {
+    let options = super::check::Options::new(NOW);
+    service
+        .check(options, Duration::ZERO)
+        .expect("ledger")
+        .calls
+}
+
+#[test]
+fn the_scan_does_not_fill_the_ledger_and_one_slice_does() {
+    let world = World::new("ledger-service");
+    world.main(
+        "s1",
+        &line("m1", NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), ""),
+    );
+    let service = service_over(&world);
+    service.refresh(NOW);
+    assert_eq!(
+        stored(&service),
+        0,
+        "the scan thread never reads transcripts for the ledger"
+    );
+    assert!(service.fill_slice(NOW), "one slice finishes a small fill");
+    assert_eq!(stored(&service), 1);
+}
+
+#[test]
+fn a_file_rewritten_to_the_same_size_is_read_again() {
+    let world = World::new("ledger-same-size");
+    let rel = "projects/-tmp-demo/s1.jsonl";
+    world.append(
+        rel,
+        &line("m1", NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), ""),
+    );
+    let mut ledger = world.ledger();
+    assert_eq!(ledger.refresh(NOW, None).added, 1);
+    world.overwrite(
+        rel,
+        &line("m2", NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), ""),
+    );
+    assert_eq!(ledger.refresh(NOW, None).added, 1);
+    assert_eq!(ledger.calls_since(0.0).len(), 2);
+}
+
+#[test]
+fn a_file_rewritten_longer_starts_over_instead_of_resuming_mid_line() {
+    let world = World::new("ledger-rewrite");
+    let rel = "projects/-tmp-demo/s1.jsonl";
+    let at = |n: &str| line(n, NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), "");
+    world.append(rel, &(at("m1") + &at("m2")));
+    let mut ledger = world.ledger();
+    assert_eq!(ledger.refresh(NOW, None).added, 2);
+    world.overwrite(rel, &(at("m3") + &at("m4") + &at("m5") + &at("m6")));
+    assert_eq!(ledger.refresh(NOW, None).added, 4);
+    assert_eq!(ledger.calls_since(0.0).len(), 6);
+}
+
+#[test]
+fn a_file_cut_back_into_its_unfinished_last_line_starts_over() {
+    let world = World::new("ledger-truncate");
+    let rel = "projects/-tmp-demo/s1.jsonl";
+    let at = |n: &str| line(n, NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), "");
+    let partial = format!(r#"{{"type":"assistant","pad":"{}"#, "x".repeat(5_000));
+    world.append(rel, &(at("m1") + &partial));
+    let mut ledger = world.ledger();
+    assert_eq!(ledger.refresh(NOW, None).added, 1);
+    world.overwrite(rel, &(at("m8") + &at("m9")));
+    assert_eq!(ledger.refresh(NOW, None).added, 2);
+    assert_eq!(ledger.calls_since(0.0).len(), 3);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_that_cannot_be_read_is_not_marked_done_and_is_tried_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let world = World::new("ledger-unreadable");
+    let path = world.main(
+        "s1",
+        &line("m1", NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), ""),
+    );
+    let mut ledger = world.ledger();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+    let blocked = ledger.refresh(NOW, None);
+    assert_eq!((blocked.left, blocked.complete()), (1, false));
+    assert_eq!(ledger.scanned(), None, "an unfinished pass is not a scan");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+    let retried = ledger.refresh(NOW, None);
+    assert!(retried.complete());
+    assert_eq!(retried.added, 1);
+}
+
+#[test]
+fn an_existing_database_is_not_rebuilt_on_every_open() {
+    let world = World::new("ledger-reopen");
+    let path = world.tmp.path("data/daemon/usage.db");
+    drop(world.file_ledger());
+    {
+        let ledger = world.file_ledger();
+        ledger.db.execute_batch("DROP TABLE meta").expect("drop");
+    }
+    let ledger = world.file_ledger();
+    let tables: i64 = ledger
+        .db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'meta'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(tables, 0, "the schema runs only when the version is behind");
+    let busy: i64 = ledger
+        .db
+        .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+        .expect("busy");
+    assert_eq!(busy, 2_000);
+    assert!(path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_database_and_its_wal_files_stay_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let world = World::new("ledger-modes");
+    let path = world.tmp.path("data/daemon/usage.db");
+    world.main(
+        "s1",
+        &line("m1", NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), ""),
+    );
+    let mut ledger = world.file_ledger();
+    ledger.refresh(NOW, None);
+    let side = |suffix: &str| {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        std::path::PathBuf::from(name)
+    };
+    for file in [path.clone(), side("-wal"), side("-shm")] {
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+    }
+    let reopened = world.file_ledger();
+    for file in [path.clone(), side("-wal"), side("-shm")] {
+        let mode = std::fs::metadata(&file).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{}", file.display());
+    }
+    drop(reopened);
+}
+
+#[test]
+fn an_empty_cache_creation_object_is_not_a_split() {
+    let world = World::new("ledger-empty-split");
+    let mut u = use_of(1, 1, 1, 90_000, 0);
+    u.split = false;
+    let text = line("m1", NOW - HOUR, OPUS, u, "").replace(
+        r#""cache_creation_input_tokens":90000"#,
+        r#""cache_creation_input_tokens":90000,"cache_creation":{}"#,
+    );
+    assert!(text.contains(r#""cache_creation":{}"#));
+    world.main("s1", &text);
+    let found = rows(&world);
+    assert!(!found[0].split);
+    assert_eq!(found[0].write_5m, 90_000);
+}
+
+#[test]
+fn a_usage_object_written_with_a_space_is_still_read() {
+    let world = World::new("ledger-spaced");
+    let text = line("m1", NOW - HOUR, OPUS, use_of(1, 1, 1, 1, 0), "")
+        .replace(r#""usage":{"#, r#""usage": {"#);
+    assert!(text.contains(r#""usage": {"#));
+    world.main("s1", &text);
+    assert_eq!(rows(&world).len(), 1);
+}

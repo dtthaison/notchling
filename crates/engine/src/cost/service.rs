@@ -37,6 +37,7 @@ pub struct CostService {
     published: Mutex<(Option<f64>, Ranged)>,
     scanning: AtomicBool,
     filling: AtomicBool,
+    settled: AtomicBool,
     last_started: Mutex<Option<f64>>,
     last_kept: Mutex<Option<f64>>,
 }
@@ -65,6 +66,7 @@ impl CostService {
             published: Mutex::new((None, Ranged::default())),
             scanning: AtomicBool::new(false),
             filling: AtomicBool::new(false),
+            settled: AtomicBool::new(false),
             last_started: Mutex::new(None),
             last_kept: Mutex::new(None),
         })
@@ -101,12 +103,11 @@ impl CostService {
         let ranged = tracker.ranged(now);
         drop(tracker);
         *lock(&self.published) = (Some(now), ranged);
-        drop(_scanning);
-        self.fill_ledger(now);
     }
 
     pub fn keep(self: &Arc<Self>, now: f64) {
-        let due = lock(&self.last_kept).is_none_or(|t| now - t >= LEDGER_EVERY);
+        let settled = self.settled.load(Ordering::SeqCst);
+        let due = !settled || lock(&self.last_kept).is_none_or(|t| now - t >= LEDGER_EVERY);
         if !due || self.filling.load(Ordering::SeqCst) {
             return;
         }
@@ -114,23 +115,24 @@ impl CostService {
         let service = self.clone();
         let _ = std::thread::Builder::new()
             .name("notchling-usage".into())
-            .spawn(move || service.fill_ledger(now));
+            .spawn(move || {
+                service.fill_slice(now);
+            });
     }
 
-    fn fill_ledger(&self, now: f64) {
+    pub fn fill_slice(&self, now: f64) -> bool {
         if self.filling.swap(true, Ordering::SeqCst) {
-            return;
+            return false;
         }
         let _filling = Scanning(&self.filling);
-        loop {
-            let progress = match lock(&self.ledger).as_mut() {
-                Some(ledger) => ledger.refresh(now, Some(LEDGER_SLICE)),
-                None => return,
-            };
-            if progress.complete() {
-                return;
-            }
-        }
+        let Some(complete) = lock(&self.ledger)
+            .as_mut()
+            .map(|ledger| ledger.refresh(now, Some(LEDGER_SLICE)).complete())
+        else {
+            return true;
+        };
+        self.settled.store(complete, Ordering::SeqCst);
+        complete
     }
 
     pub fn check(&self, options: Options, budget: Duration) -> Option<Checked> {

@@ -743,3 +743,147 @@ fn a_saving_is_unknown_only_when_a_price_is_missing() {
     assert_eq!(long.saving, None);
     assert!(report.unknown.iter().any(|u| u.id == "price"));
 }
+
+fn assert_close(a: f64, b: f64) {
+    assert!((a - b).abs() < 1e-9, "{a} vs {b}");
+}
+
+#[test]
+fn a_mixed_stream_uses_the_cache_time_of_the_write_before_the_gap() {
+    let main = main_of(SONNET);
+    let hour_then_five = vec![
+        call(&main, NOW - 5_000.0, 0, 0, 200_000),
+        call(&main, NOW - 4_940.0, 0, 60_000, 0),
+        call(&main, NOW - 4_340.0, 0, 60_000, 0),
+    ];
+    let report = run(&hour_then_five);
+    let cold = finding(&report, "cold_resumes").expect("a 5-minute write went cold");
+    assert_eq!(cold.count("main_rebuilds"), 1.0);
+    let five_then_hour = vec![
+        call(&main, NOW - 5_000.0, 0, 300_000, 0),
+        call(&main, NOW - 4_940.0, 0, 0, 60_000),
+        call(&main, NOW - 4_340.0, 0, 0, 60_000),
+    ];
+    assert!(finding(&run(&five_then_hour), "cold_resumes").is_none());
+}
+
+#[test]
+fn the_helper_cache_weighs_the_same_streams_on_both_sides() {
+    let measured = sub_of("a1", SONNET);
+    let mut calls = vec![
+        call(&measured, NOW - 9_000.0, 0, 10_000, 0),
+        call(&measured, NOW - 8_990.0, 0, 10_000, 0),
+    ];
+    let unread = sub_of("a2", SONNET);
+    for (at, writes) in [(NOW - 5_000.0, 10_000), (NOW - 4_000.0, 100_000)] {
+        let mut c = call(&unread, at, 0, writes, 0);
+        c.split = false;
+        calls.push(c);
+    }
+    let report = run(&calls);
+    let cold = finding(&report, "cold_resumes").expect("the rebuild counts");
+    assert!(cold.count("sub_rebuilds") >= 1.0);
+    assert_close(cold.count("ttl1h_saved_usd"), 0.0);
+}
+
+#[test]
+fn avoided_tokens_never_exceed_what_the_call_read_from_the_cache() {
+    let helper = sub_of("a1", SONNET);
+    let calls: Vec<Call> = (0..250u64)
+        .map(|i| {
+            let read = if i < 150 { 40_000 + i * 1_000 } else { 1_000 };
+            call(&helper, NOW - 20_000.0 + i as f64 * 20.0, read, 0, 0)
+        })
+        .collect();
+    let report = run(&calls);
+    let f = finding(&report, "long_runs").expect("finding");
+    let avoid = 50.0 * 85_000.0 + 50.0 * 1_000.0;
+    assert_eq!(f.tokens_avoided, Some((avoid * 0.6) as u64));
+}
+
+#[test]
+fn a_review_that_ran_once_has_no_saving() {
+    let mut reviewer = sub_of("r1", SONNET);
+    reviewer.agent_type = Some("code-reviewer");
+    let calls: Vec<Call> = (0..3)
+        .map(|i| call(&reviewer, NOW - 900.0 + i as f64, 10_000, 0, 0))
+        .collect();
+    let report = run(&calls);
+    assert!(report.findings.iter().all(|f| f.id != "repeated_reviews"));
+    let f = report
+        .not_worth
+        .iter()
+        .find(|f| f.id == "repeated_reviews")
+        .expect("measured");
+    assert_eq!(f.saving, None);
+}
+
+#[test]
+fn unpriced_calls_leave_a_saving_unknown_in_every_lever() {
+    let mystery = "claude-mystery-9";
+    let mut reviewer_a = sub_of("r1", mystery);
+    reviewer_a.agent_type = Some("code-reviewer");
+    let mut reviewer_b = sub_of("r2", mystery);
+    reviewer_b.agent_type = Some("code-reviewer");
+    let mut calls = Vec::new();
+    for (n, spec) in [reviewer_a, reviewer_b].iter().enumerate() {
+        for i in 0..3 {
+            calls.push(call(
+                spec,
+                NOW - 5_000.0 + n as f64 * 600.0 + i as f64,
+                10_000,
+                0,
+                0,
+            ));
+        }
+    }
+    let report = run(&calls);
+    let reviews = report
+        .findings
+        .iter()
+        .find(|f| f.id == "repeated_reviews")
+        .expect("raised, not hidden");
+    assert_eq!(reviews.saving, None);
+
+    let mut crowd = Vec::new();
+    for n in 0..6 {
+        let spec = sub_of(["b0", "b1", "b2", "b3", "b4", "b5"][n], mystery);
+        crowd.push(call(&spec, NOW - 400.0 + n as f64, 10_000, 0, 0));
+    }
+    let report = run(&crowd);
+    let builders = report
+        .findings
+        .iter()
+        .find(|f| f.id == "many_builders")
+        .expect("raised, not hidden");
+    assert_eq!(builders.saving, None);
+
+    let main = main_of(mystery);
+    let cold = vec![
+        call(&main, NOW - 3_000.0, 0, 60_000, 0),
+        call(&main, NOW - 2_000.0, 0, 60_000, 0),
+    ];
+    let report = run(&cold);
+    let resumed = report
+        .findings
+        .iter()
+        .find(|f| f.id == "cold_resumes")
+        .expect("unpriced rebuilds still count");
+    assert_eq!(resumed.count("main_rebuilds"), 1.0);
+    assert_eq!(resumed.saving, None);
+
+    let a = main_of("claude-mystery-1");
+    let b = main_of("claude-mystery-2");
+    let switched = vec![
+        call(&a, NOW - 3_000.0, 0, 60_000, 0),
+        call(&b, NOW - 2_940.0, 0, 60_000, 0),
+    ];
+    let report = run(&switched);
+    let switch = report
+        .findings
+        .iter()
+        .find(|f| f.id == "model_switches")
+        .expect("unpriced switches still count");
+    assert_eq!(switch.count("switches"), 1.0);
+    assert_eq!(switch.saving, None);
+}

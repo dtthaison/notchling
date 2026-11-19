@@ -75,6 +75,7 @@ pub fn repeated_reviews(data: &mut Data) -> Finding {
     }
     let (mut total, mut total_cost, mut again, mut again_cost) = (0.0, 0.0, 0.0, 0.0);
     let (mut saving, mut tokens, mut worst, mut sessions) = (0.0, 0.0, 0.0f64, 0.0);
+    let mut unpriced = false;
     let mut claim = Vec::new();
     for streams in by_session.values_mut() {
         streams.sort_by(|a, b| {
@@ -94,6 +95,7 @@ pub fn repeated_reviews(data: &mut Data) -> Finding {
                     continue;
                 }
                 again_cost += call.cost.unwrap_or(0.0);
+                unpriced |= call.cost.is_none();
                 if !data.is_claimed(index) {
                     saving += call.cost.unwrap_or(0.0) * ADVICE;
                     tokens += call.tokens() as f64 * ADVICE;
@@ -114,7 +116,7 @@ pub fn repeated_reviews(data: &mut Data) -> Finding {
     finding.ev("repeat_cost_usd", again_cost);
     finding.ev("sessions_repeating", sessions);
     finding.ev("most_in_a_session", worst);
-    if total > 0.0 {
+    if again > 0.0 && !(unpriced && saving == 0.0) {
         finding.saving = Some(saving);
         finding.tokens_avoided = Some(tokens as u64);
     }
@@ -166,7 +168,7 @@ pub fn long_runs(data: &mut Data) -> Finding {
             if i < LONG_RUN || data.is_claimed(index) {
                 continue;
             }
-            let avoid = start.max(0.0);
+            let avoid = start.max(0.0).min(call.cache_read as f64);
             match data.price(call) {
                 Some(price) => saving += avoid * price.cache_read / 1_000_000.0,
                 None => unpriced = true,
@@ -217,6 +219,7 @@ pub fn many_builders(data: &mut Data) -> Finding {
     let peak = buckets.values().map(&subs).max().unwrap_or(0);
     let bucket_of = |ts: f64| (ts / super::BUCKET).floor() as i64;
     let (mut over_cost, mut crowded_cost, mut saving, mut tokens) = (0.0, 0.0, 0.0, 0.0);
+    let mut unpriced = false;
     let mut claim = Vec::new();
     for index in 0..data.calls.len() {
         let call = data.calls[index];
@@ -227,6 +230,7 @@ pub fn many_builders(data: &mut Data) -> Finding {
         }
         if over.contains(&bucket) {
             over_cost += cost;
+            unpriced |= call.cost.is_none();
             if !data.is_claimed(index) {
                 saving += cost * CAP_FACTOR;
                 tokens += call.tokens() as f64 * CAP_FACTOR;
@@ -249,7 +253,7 @@ pub fn many_builders(data: &mut Data) -> Finding {
             0.0
         },
     );
-    if !over.is_empty() {
+    if !over.is_empty() && !(unpriced && saving == 0.0) {
         finding.saving = Some(saving);
         finding.tokens_avoided = Some(tokens as u64);
     }

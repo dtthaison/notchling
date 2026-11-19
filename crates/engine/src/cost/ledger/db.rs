@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 const BUSY: Duration = Duration::from_secs(2);
 
 const SCHEMA_SQL: &str = "
@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS rollups (
   cache_read INTEGER NOT NULL, write_5m INTEGER NOT NULL, write_1h INTEGER NOT NULL,
   cost REAL NOT NULL, unpriced INTEGER NOT NULL, PRIMARY KEY (day, tool, sub, model));
 CREATE TABLE IF NOT EXISTS files (
-  path TEXT PRIMARY KEY, size INTEGER NOT NULL, off INTEGER NOT NULL, state TEXT NOT NULL);
+  path TEXT PRIMARY KEY, size INTEGER NOT NULL, off INTEGER NOT NULL, state TEXT NOT NULL,
+  fp TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ";
 
@@ -38,9 +39,33 @@ fn start(db: &Connection) -> Result<(), LedgerError> {
     if version > SCHEMA {
         return Err(LedgerError("usage.db is from a newer Notchling".into()));
     }
+    if version == SCHEMA {
+        return Ok(());
+    }
     db.execute_batch(SCHEMA_SQL)?;
+    let has_fp = db.prepare("SELECT fp FROM files LIMIT 0").is_ok();
+    if !has_fp {
+        db.execute_batch("ALTER TABLE files ADD COLUMN fp TEXT NOT NULL DEFAULT ''")?;
+    }
     db.pragma_update(None, "user_version", SCHEMA)?;
     Ok(())
+}
+
+fn sidecars(path: &Path) -> [std::path::PathBuf; 3] {
+    let with = |suffix: &str| {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        std::path::PathBuf::from(name)
+    };
+    [path.to_path_buf(), with("-wal"), with("-shm")]
+}
+
+fn private_all(path: &Path) {
+    for file in sidecars(path) {
+        if file.exists() {
+            private(&file);
+        }
+    }
 }
 
 pub fn open_file(path: &Path) -> Result<Connection, LedgerError> {
@@ -55,17 +80,15 @@ pub fn open_file(path: &Path) -> Result<Connection, LedgerError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let fresh = !path.exists();
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | OpenFlags::SQLITE_OPEN_CREATE
         | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let db = Connection::open_with_flags(path, flags)?;
+    db.busy_timeout(BUSY)?;
     let _ = db.pragma_update(None, "journal_mode", "WAL");
     db.pragma_update(None, "synchronous", "NORMAL")?;
     start(&db)?;
-    if fresh {
-        private(path);
-    }
+    private_all(path);
     Ok(db)
 }
 
@@ -194,16 +217,24 @@ pub fn call_count(db: &Connection) -> u64 {
         .map_or(0, |n| n as u64)
 }
 
-pub fn mark(db: &Connection, path: &str) -> Option<(u64, u64, String)> {
+pub struct Mark {
+    pub size: u64,
+    pub off: u64,
+    pub state: String,
+    pub fp: String,
+}
+
+pub fn mark(db: &Connection, path: &str) -> Option<Mark> {
     db.query_row(
-        "SELECT size, off, state FROM files WHERE path = ?1",
+        "SELECT size, off, state, fp FROM files WHERE path = ?1",
         [path],
         |r| {
-            Ok((
-                r.get::<_, i64>(0)? as u64,
-                r.get::<_, i64>(1)? as u64,
-                r.get(2)?,
-            ))
+            Ok(Mark {
+                size: r.get::<_, i64>(0)? as u64,
+                off: r.get::<_, i64>(1)? as u64,
+                state: r.get(2)?,
+                fp: r.get(3)?,
+            })
         },
     )
     .optional()
@@ -217,11 +248,12 @@ pub fn set_mark(
     size: u64,
     offset: u64,
     state: &str,
+    fp: &str,
 ) -> rusqlite::Result<()> {
     db.execute(
-        "INSERT INTO files (path, size, off, state) VALUES (?1,?2,?3,?4)
-         ON CONFLICT(path) DO UPDATE SET size = ?2, off = ?3, state = ?4",
-        params![path, size as i64, offset as i64, state],
+        "INSERT INTO files (path, size, off, state, fp) VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(path) DO UPDATE SET size = ?2, off = ?3, state = ?4, fp = ?5",
+        params![path, size as i64, offset as i64, state, fp],
     )?;
     Ok(())
 }

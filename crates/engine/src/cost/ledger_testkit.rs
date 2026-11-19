@@ -95,6 +95,18 @@ impl World {
         path
     }
 
+    pub fn overwrite(&self, rel: &str, text: &str) -> PathBuf {
+        let path = self.tmp.path(rel);
+        std::fs::write(&path, text).expect("write");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open");
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs_f64(NOW);
+        file.set_modified(at).expect("mtime");
+        path
+    }
+
     pub fn roots(&self) -> Vec<Root> {
         vec![
             Root {

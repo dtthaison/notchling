@@ -183,8 +183,21 @@ impl<'a> Data<'a> {
         self.claimed[index] = true;
     }
 
-    pub fn ttl_secs(&self, stream: usize) -> Option<f64> {
-        self.secs[stream]
+    pub fn gap_secs(&self, stream: usize, index: usize) -> Option<f64> {
+        let fallback = self.secs[stream];
+        if self.ttl[stream] != Ttl::Mixed {
+            return fallback;
+        }
+        let start = self.streams[stream].start;
+        let wrote = self.calls[start..index]
+            .iter()
+            .rev()
+            .find(|c| c.split && c.writes() > 0);
+        match wrote {
+            Some(c) if c.write_1h >= c.write_5m => Some(3_600.0),
+            Some(_) => Some(300.0),
+            None => fallback,
+        }
     }
 
     pub fn buckets(&self) -> BTreeMap<i64, HashSet<usize>> {

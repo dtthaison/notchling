@@ -1,5 +1,5 @@
 use super::other::{antigravity_call, antigravity_ctx, codex_call, codex_ctx, Reading};
-use super::{claude, db, Call, Ledger, Progress, ROW_DAYS};
+use super::{claude, db, Call, Ledger, LedgerError, Progress, ROW_DAYS};
 use crate::cost::paths::{contains, file_id, walk};
 use crate::cost::summary::day_key;
 use crate::cost::tracker::{Tracker, ANTIGRAVITY, CODEX};
@@ -63,26 +63,81 @@ fn first_line(path: &Path) -> Option<Value> {
     serde_json::from_str(line.trim()).ok()
 }
 
+const HEAD_BYTES: u64 = 4096;
+const TAIL_BYTES: u64 = 256;
+
+fn fnv(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+#[cfg(unix)]
+fn inode_of(path: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).map_or(0, |m| m.ino())
+}
+
+#[cfg(not(unix))]
+fn inode_of(_path: &Path) -> u64 {
+    0
+}
+
+fn bytes_at(file: &mut File, at: u64, len: u64) -> Option<Vec<u8>> {
+    file.seek(SeekFrom::Start(at)).ok()?;
+    let mut bytes = vec![0u8; len as usize];
+    file.read_exact(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+fn fingerprint_with(path: &Path, at: u64, head: u64, tail: u64) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let first = fnv(&bytes_at(&mut file, 0, head)?);
+    let last = fnv(&bytes_at(&mut file, at, tail)?);
+    Some(format!(
+        "{}:{head}:{first:x}:{at}:{tail}:{last:x}",
+        inode_of(path)
+    ))
+}
+
+fn fingerprint(path: &Path, offset: u64) -> String {
+    let tail = offset.min(TAIL_BYTES);
+    fingerprint_with(path, offset - tail, offset.min(HEAD_BYTES), tail).unwrap_or_default()
+}
+
+fn same_file(path: &Path, stored: &str) -> bool {
+    let parts: Vec<&str> = stored.split(':').collect();
+    let [_, head, _, at, tail, _] = parts[..] else {
+        return false;
+    };
+    let (Ok(head), Ok(at), Ok(tail)) =
+        (head.parse::<u64>(), at.parse::<u64>(), tail.parse::<u64>())
+    else {
+        return false;
+    };
+    fingerprint_with(path, at, head, tail).is_some_and(|now| now == stored)
+}
+
 fn read_lines(
     path: &Path,
     offset: u64,
     deadline: Option<Instant>,
     mut each: impl FnMut(&[u8]),
-) -> (u64, bool) {
-    let Ok(mut file) = File::open(path) else {
-        return (offset, true);
+) -> Result<(u64, bool), LedgerError> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((offset, true)),
+        Err(e) => return Err(e.into()),
     };
-    if file.seek(SeekFrom::Start(offset)).is_err() {
-        return (offset, true);
-    }
+    file.seek(SeekFrom::Start(offset))?;
     let mut at = offset;
     let mut carry: Vec<u8> = Vec::new();
     let mut buf = vec![0u8; CHUNK];
     loop {
-        let n = match file.read(&mut buf) {
-            Ok(0) | Err(_) => return (at, true),
-            Ok(n) => n,
-        };
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            return Ok((at, true));
+        }
         carry.extend_from_slice(&buf[..n]);
         let mut start = 0;
         while let Some(rel) = carry[start..].iter().position(|&b| b == b'\n') {
@@ -95,7 +150,7 @@ fn read_lines(
         at += start as u64;
         carry.drain(..start);
         if deadline.is_some_and(|d| Instant::now() >= d) {
-            return (at, false);
+            return Ok((at, false));
         }
     }
 }
@@ -104,6 +159,7 @@ struct Sink<'a> {
     ledger: &'a Ledger,
     cutoff: f64,
     added: u64,
+    failed: Option<LedgerError>,
 }
 
 impl Sink<'_> {
@@ -111,12 +167,14 @@ impl Sink<'_> {
         let Some((key, call)) = found else {
             return;
         };
-        if call.ts < self.cutoff {
+        if call.ts < self.cutoff || self.failed.is_some() {
             return;
         }
         let day = day_key(self.ledger.day_number(call.ts));
-        if db::insert(&self.ledger.db, key, &call, &day).unwrap_or(false) {
-            self.added += 1;
+        match db::insert(&self.ledger.db, key, &call, &day) {
+            Ok(true) => self.added += 1,
+            Ok(false) => {}
+            Err(e) => self.failed = Some(e.into()),
         }
     }
 }
@@ -126,12 +184,14 @@ fn update(
     item: &Candidate,
     cutoff: f64,
     deadline: Option<Instant>,
-) -> (u64, bool) {
+) -> Result<(u64, bool), LedgerError> {
     let text = item.path.to_string_lossy().into_owned();
     let (mut offset, mut state) = match db::mark(&ledger.db, &text) {
-        Some((size, _, _)) if size == item.size => return (0, true),
-        Some((_, off, _)) if item.size < off => (0, String::new()),
-        Some((_, off, state)) => (off, state),
+        Some(m) if !same_file(&item.path, &m.fp) || item.size < m.size || item.size < m.off => {
+            (0, String::new())
+        }
+        Some(m) if m.size == item.size => return Ok((0, true)),
+        Some(m) => (m.off, m.state),
         None => (0, String::new()),
     };
     let id = file_id(&text);
@@ -140,10 +200,9 @@ fn update(
         ledger,
         cutoff,
         added: 0,
+        failed: None,
     };
-    let Ok(tx) = ledger.db.unchecked_transaction() else {
-        return (0, true);
-    };
+    let tx = ledger.db.unchecked_transaction()?;
     let mut reading = Reading::load(&state);
     let done;
     match item.channel {
@@ -162,7 +221,7 @@ fn update(
                     .ok()
                     .and_then(|o| codex_call(&o, &ctx, &mut reading, catalog));
                 sink.put(found);
-            });
+            })?;
             state = reading.save();
         }
         ANTIGRAVITY => {
@@ -175,29 +234,31 @@ fn update(
                     .ok()
                     .and_then(|o| antigravity_call(&o, &ctx, &mut reading, catalog));
                 sink.put(found);
-            });
+            })?;
             state = reading.save();
         }
         _ => {
             let ctx = claude::ctx_of(&item.path);
             (offset, done) = read_lines(&item.path, offset, deadline, |line| {
-                if !contains(line, br#""usage":{"#) {
+                if !contains(line, br#""usage""#) {
                     return;
                 }
                 let found = serde_json::from_slice::<Value>(line)
                     .ok()
                     .and_then(|o| claude::parse(&o, &ctx, catalog));
                 sink.put(found);
-            });
+            })?;
         }
+    }
+    if let Some(e) = sink.failed.take() {
+        return Err(e);
     }
     let added = sink.added;
     let size = if done { item.size } else { 0 };
-    let marked = db::set_mark(&ledger.db, &text, size, offset, &state);
-    if marked.is_err() || tx.commit().is_err() {
-        return (0, true);
-    }
-    (added, done)
+    let fp = fingerprint(&item.path, offset);
+    db::set_mark(&ledger.db, &text, size, offset, &state, &fp)?;
+    tx.commit()?;
+    Ok((added, done))
 }
 
 pub fn refresh(ledger: &mut Ledger, now: f64, budget: Option<Duration>) -> Progress {
@@ -211,14 +272,17 @@ pub fn refresh(ledger: &mut Ledger, now: f64, budget: Option<Duration>) -> Progr
     };
     for (i, item) in items.iter().enumerate() {
         if deadline.is_some_and(|d| Instant::now() >= d) {
-            progress.left = items.len() - i;
+            progress.left += items.len() - i;
             break;
         }
-        let (added, done) = update(ledger, item, cutoff, deadline);
-        progress.added += added;
-        if !done {
-            progress.left = items.len() - i;
-            break;
+        match update(ledger, item, cutoff, deadline) {
+            Ok((added, true)) => progress.added += added,
+            Ok((added, false)) => {
+                progress.added += added;
+                progress.left += items.len() - i;
+                break;
+            }
+            Err(_) => progress.left += 1,
         }
     }
     if progress.complete() {

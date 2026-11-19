@@ -109,7 +109,10 @@ pub fn parse(object: &Value, ctx: &Ctx, catalog: &Catalog) -> Option<(u64, Call)
             cache_read: read as u64,
             write_5m: w5 as u64,
             write_1h: w1 as u64,
-            split: usage.get("cache_creation").is_some_and(Value::is_object),
+            split: usage.get("cache_creation").is_some_and(|c| {
+                c.get("ephemeral_5m_input_tokens").is_some()
+                    || c.get("ephemeral_1h_input_tokens").is_some()
+            }),
             cost,
         },
     ))
