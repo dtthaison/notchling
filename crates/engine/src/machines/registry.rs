@@ -168,6 +168,8 @@ pub struct Machine {
     pub claude_secret: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub addresses: Vec<MachineAddress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -196,6 +198,7 @@ impl Machine {
             admin_secret: None,
             claude_secret: claude_worker(),
             organization: None,
+            ssh_key: None,
             addresses: Vec::new(),
             abilities: None,
             jobs: Vec::new(),
@@ -250,14 +253,30 @@ impl Machine {
     }
 
     pub fn route(&self) -> Route {
-        if self.refused.is_some() {
-            return Route::direct(REFUSED_HOST, &self.user);
-        }
-        match &self.route {
-            Some(route) => route.clone(),
-            None if self.has_addresses() => Route::direct(REFUSED_HOST, &self.user),
-            None => Route::direct(&self.host, &self.user),
-        }
+        let route = if self.refused.is_some() {
+            Route::direct(REFUSED_HOST, &self.user)
+        } else {
+            match &self.route {
+                Some(route) => route.clone(),
+                None if self.has_addresses() => Route::direct(REFUSED_HOST, &self.user),
+                None => Route::direct(&self.host, &self.user),
+            }
+        };
+        route.with_key(self.ssh_key())
+    }
+
+    pub fn ssh_key(&self) -> Option<&str> {
+        self.ssh_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+    }
+
+    pub fn set_ssh_key(&mut self, key: Option<&str>) {
+        self.ssh_key = key
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_owned);
     }
 
     fn sync_host(&mut self) {
@@ -300,6 +319,8 @@ impl Machine {
         if self.admin_secret.as_deref().is_some_and(str::is_empty) {
             self.admin_secret = None;
         }
+        let key = self.ssh_key.take();
+        self.set_ssh_key(key.as_deref());
         let name = self.name.clone();
         for job in &mut self.jobs {
             if let Some(s) = &mut job.sd_worker {

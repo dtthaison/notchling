@@ -14,11 +14,13 @@ use crate::cluster::add_runs::{AddRuns, Snap};
 use crate::cluster::add_source::{AddSource, Offer};
 use crate::cluster::addresses_form::RowMeta;
 use crate::cluster::feed::ClusterFeed;
-use crate::cluster::from_tailscale::FromTailscale;
+use crate::cluster::from_tailscale::{FromTailscale, TestState};
 use crate::cluster::model::ClusterModel;
 use crate::cluster::renders::{Shown, RENDER_NOW};
 use crate::cluster::view::ClusterSheetView;
 use crate::machines::data::Setup;
+use notchling_engine::machines::ssh_key::{KeyIssue, KeyStatus};
+use notchling_engine::machines::ssh_test::SshTest;
 
 const HOST: &str = "m2.tail1234.ts.net";
 const USER: &str = "sondoan";
@@ -36,6 +38,8 @@ pub(in crate::cluster) fn adds(which: Shown) -> bool {
             | Shown::MachinesAdd
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
+            | Shown::MachinesTest
+            | Shown::MachinesEdit
             | Shown::MachinesOrganization
             | Shown::MachinesNetwork
     )
@@ -74,6 +78,61 @@ const TAILSCALE_STATUS: &str = r#"{
 }"#;
 
 const TAILSCALE_LIST: &str = "ID    Tailnet              Account\na1b2  person@example.com   person@example.com*\nc3d4  work.example         work@example.com\n";
+
+fn preview_tests(model: &mut FromTailscale) {
+    let usable = KeyStatus {
+        issue: None,
+        public: false,
+    };
+    for host in [
+        "edge-3.tail1234.ts.net",
+        "nas-4.tail1234.ts.net",
+        "pi-6.tail1234.ts.net",
+    ] {
+        model.toggle(host);
+    }
+    model.set_key(
+        "build-box.tail1234.ts.net",
+        Some("~/.ssh/id_ci"),
+        Some(usable),
+    );
+    model.set_key(
+        "edge-3.tail1234.ts.net",
+        Some("~/.ssh/id_edge.pub"),
+        Some(KeyStatus {
+            issue: None,
+            public: true,
+        }),
+    );
+    model.set_key(
+        "nas-4.tail1234.ts.net",
+        Some("~/keys/nas"),
+        Some(KeyStatus {
+            issue: Some(KeyIssue::Missing),
+            public: false,
+        }),
+    );
+    let done = |model: &mut FromTailscale, host: &str, result: SshTest| {
+        model.tests.insert(host.to_owned(), TestState::Done(result));
+    };
+    done(
+        model,
+        "mini-2.tail1234.ts.net",
+        SshTest::Connected {
+            user: "sondoan".into(),
+        },
+    );
+    done(model, "build-box.tail1234.ts.net", SshTest::Denied);
+    done(
+        model,
+        "edge-3.tail1234.ts.net",
+        SshTest::NewHost {
+            user: "sondoan".into(),
+        },
+    );
+    model.request_test("nas-4.tail1234.ts.net");
+    model.request_test("pi-6.tail1234.ts.net");
+}
 
 fn from_tailscale(existing: Vec<notchling_engine::machines::registry::Machine>) -> FromTailscale {
     let mut model = FromTailscale::new(USER, existing);
@@ -120,6 +179,8 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
             | Shown::MachinesAdd
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
+            | Shown::MachinesTest
+            | Shown::MachinesEdit
             | Shown::MachinesOrganization
             | Shown::MachinesNetwork
     ) {
@@ -296,13 +357,19 @@ impl ClusterSheetView {
             | Shown::MachinesAdd
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
+            | Shown::MachinesTest
+            | Shown::MachinesEdit
             | Shown::MachinesOrganization => None,
             Shown::AddPlan | Shown::AddRunning | Shown::AddStopped => Some("m2".to_owned()),
             _ => return,
         };
+        if which == Shown::MachinesEdit {
+            self.preview_edit(cx);
+            return;
+        }
         if matches!(
             which,
-            Shown::MachinesTailscale | Shown::MachinesOrganization
+            Shown::MachinesTailscale | Shown::MachinesTest | Shown::MachinesOrganization
         ) {
             let mut existing = parts.as_ref().map(|p| p.registry.all()).unwrap_or_default();
             existing.push(notchling_engine::machines::registry::Machine::new(
@@ -310,6 +377,17 @@ impl ClusterSheetView {
                 "oracle-sg.tail1234.ts.net",
                 USER,
             ));
+            if which == Shown::MachinesTest {
+                for host in [
+                    "app-1.tail1234.ts.net",
+                    "dev-7.tail1234.ts.net",
+                    "lab-5.tail1234.ts.net",
+                ] {
+                    existing.push(notchling_engine::machines::registry::Machine::new(
+                        host, host, USER,
+                    ));
+                }
+            }
             let mut model = from_tailscale(existing);
             model.toggle("mini-2.tail1234.ts.net");
             model.toggle("build-box.tail1234.ts.net");
@@ -323,6 +401,9 @@ impl ClusterSheetView {
                     "colors": ["grey"]
                 })));
                 model.next_organization();
+            }
+            if which == Shown::MachinesTest {
+                preview_tests(&mut model);
             }
             self.start_tailscale(model, None, cx);
             self.tailscale_preview_users(cx);
@@ -363,6 +444,52 @@ impl ClusterSheetView {
             if let Some(sheet) = self.add.sheet.as_mut() {
                 sheet.password.field().push_str("xxxxxxxxxx");
             }
+        }
+    }
+
+    fn preview_edit(&mut self, cx: &mut gpui::Context<Self>) {
+        use crate::cluster::address_rows_view::Rows;
+        use crate::cluster::edit_key::EditTest;
+        use notchling_engine::machines::ssh_test::Why;
+        self.open_edit_addresses("app-1", cx);
+        self.tailnets = vec!["person@example.com".into(), "work.example".into()];
+        let more = [
+            ("192.168.1.20", AddressKind::Lan, None),
+            ("10.0.0.7:2222", AddressKind::Public, None),
+        ];
+        let mut made = Vec::new();
+        for (text, kind, via) in more {
+            let meta = RowMeta {
+                kind: Some(kind),
+                tailnet: None,
+                via: via.map(str::to_owned),
+            };
+            made.push(self.row_new(Rows::Edit, text, meta, cx));
+        }
+        if let Some(sheet) = self.edit.as_mut() {
+            sheet.rows.extend(made);
+            sheet
+                .key
+                .update(cx, |editor, cx| editor.set_text("~/.ssh/id_deploy", cx));
+            sheet.test = EditTest::Done(
+                1,
+                vec![
+                    (
+                        "app-1.example".into(),
+                        SshTest::WrongNetwork {
+                            wanted: "work.example".into(),
+                            active: "person@example.com".into(),
+                        },
+                    ),
+                    (
+                        "192.168.1.20".into(),
+                        SshTest::Connected {
+                            user: "deploy".into(),
+                        },
+                    ),
+                    ("10.0.0.7:2222".into(), SshTest::Unreachable(Why::TimedOut)),
+                ],
+            );
         }
     }
 

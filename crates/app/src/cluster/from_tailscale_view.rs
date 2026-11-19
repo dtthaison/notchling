@@ -1,6 +1,12 @@
 use std::collections::BTreeMap;
 
-use gpui::{div, prelude::*, px, Context, Div, Entity, SharedString, Subscription, Window};
+use gpui::{
+    div, prelude::*, px, Context, Div, Entity, PathPromptOptions, SharedString, Subscription,
+    Window,
+};
+use notchling_engine::machines::addresses::Route;
+use notchling_engine::machines::ssh_key::{inspect, tidy};
+use notchling_engine::machines::ssh_test::{run as run_ssh_test, SshTest};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
@@ -11,11 +17,13 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::add_parts::AddParts;
-use super::from_tailscale::{import_machines, FromTailscale, Read};
+use super::from_tailscale::{import_machines, FromTailscale, PeerRow, Read, TestState};
+use super::ssh_text::{key_note, key_title, test_ink, test_text};
 use super::view::{field_box, ClusterSheetView};
 
 const SHEET_WIDTH: f32 = 600.0;
 const SHEET_MARGIN: f32 = 60.0;
+const CHECK_INDENT: f32 = 34.0;
 
 #[derive(Default)]
 pub(super) struct TailscaleUi {
@@ -158,6 +166,131 @@ impl ClusterSheetView {
         cx.notify();
     }
 
+    fn tailscale_home(&self) -> std::path::PathBuf {
+        self.tailscale
+            .parts
+            .as_ref()
+            .map(|p| std::path::PathBuf::from(&p.this.home))
+            .unwrap_or_default()
+    }
+
+    fn tailscale_set_key(&mut self, host: &str, key: Option<&str>, cx: &mut Context<Self>) {
+        let home = self.tailscale_home();
+        let Some(model) = self.tailscale.model.as_mut() else {
+            return;
+        };
+        match key.map(|k| tidy(k, &home)) {
+            Some(key) => {
+                let status = inspect(&key, &home);
+                model.set_key(host, Some(&key), Some(status));
+            }
+            None => model.set_key(host, None, None),
+        }
+        cx.notify();
+    }
+
+    fn tailscale_choose_key(&mut self, host: &str, cx: &mut Context<Self>) {
+        let ssh = self.tailscale_home().join(".ssh");
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(t::cluster::ssh_key_picker_prompt().into()),
+            directory: Some(ssh),
+        });
+        let host = host.to_owned();
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picked.await {
+                if let Some(path) = paths.first() {
+                    let text = path.to_string_lossy().into_owned();
+                    this.update(cx, |view, cx| {
+                        view.tailscale_set_key(&host, Some(&text), cx)
+                    })
+                    .ok();
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn tailscale_test(&mut self, host: Option<&str>, cx: &mut Context<Self>) {
+        let Some(model) = self.tailscale.model.as_mut() else {
+            return;
+        };
+        match host {
+            Some(host) => model.request_test(host),
+            None => model.request_selected() > 0,
+        };
+        self.tailscale_start_lanes(cx);
+        cx.notify();
+    }
+
+    fn tailscale_start_lanes(&mut self, cx: &mut Context<Self>) {
+        let Some(parts) = self.tailscale.parts.clone() else {
+            return;
+        };
+        let Some(model) = self.tailscale.model.as_mut() else {
+            return;
+        };
+        let start = model.lanes_to_start();
+        model.lanes += start;
+        for _ in 0..start {
+            let runner = parts.engine.runner().clone();
+            let tailscale = parts.engine.router().tailscale().cloned();
+            let home = std::path::PathBuf::from(&parts.this.home);
+            cx.spawn(async move |this, cx| loop {
+                let job = this
+                    .update(cx, |view, _| {
+                        view.tailscale.model.as_mut().and_then(|m| m.next_job())
+                    })
+                    .ok()
+                    .flatten();
+                let Some(job) = job else {
+                    this.update(cx, |view, _| {
+                        if let Some(model) = view.tailscale.model.as_mut() {
+                            model.lanes = model.lanes.saturating_sub(1);
+                        }
+                    })
+                    .ok();
+                    break;
+                };
+                let work = job.clone();
+                let (runner, tailscale, home) = (runner.clone(), tailscale.clone(), home.clone());
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let on_other = tailscale
+                            .as_ref()
+                            .filter(|_| !work.tailnet.is_empty())
+                            .and_then(|t| t.active())
+                            .filter(|n| !n.is(&work.tailnet));
+                        if let Some(active) = on_other {
+                            return SshTest::WrongNetwork {
+                                wanted: work.tailnet.clone(),
+                                active: active.tailnet,
+                            };
+                        }
+                        let route =
+                            Route::direct(&work.host, &work.user).with_key(work.key.as_deref());
+                        run_ssh_test(&*runner, &route, &home)
+                    })
+                    .await;
+                let alive = this
+                    .update(cx, |view, cx| {
+                        if let Some(model) = view.tailscale.model.as_mut() {
+                            model.finish_test(&job.host, job.round, result);
+                        }
+                        cx.notify();
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+            })
+            .detach();
+        }
+    }
+
     fn tailscale_cycle_os(&mut self, cx: &mut Context<Self>) {
         let Some(model) = self.tailscale.model.as_mut() else {
             return;
@@ -265,11 +398,26 @@ impl ClusterSheetView {
         } else {
             PartState::Disabled
         };
+        let test_state = if model.can_test() {
+            PartState::Rest
+        } else {
+            PartState::Disabled
+        };
         let buttons = div()
             .pt(px(SPACE[1]))
             .flex()
-            .justify_end()
             .gap(px(SPACE[1]))
+            .child(
+                button(
+                    "tailscale-test-selected",
+                    t::cluster::ssh_test_selected(),
+                    ButtonKind::Secondary,
+                    test_state,
+                    a,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.tailscale_test(None, cx))),
+            )
+            .child(div().flex_1())
             .child(
                 button(
                     "tailscale-close",
@@ -298,11 +446,12 @@ impl ClusterSheetView {
                 .flex()
                 .items_center()
                 .justify_center()
+                .py(px(SHEET_MARGIN / 2.0))
                 .bg(hsla(Ink::Shadow.color(a)))
                 .child(
                     card(a)
                         .w(px(SHEET_WIDTH))
-                        .max_h(px(super::HEIGHT - SHEET_MARGIN))
+                        .max_h_full()
                         .p(px(SPACE[3]))
                         .flex()
                         .flex_col()
@@ -506,8 +655,97 @@ impl ClusterSheetView {
                         .child(field_box(editor, focused, a)),
                 );
             }
-            inner = inner.child(line);
+            let mut block = div().flex().flex_col().gap(px(SPACE[0])).child(line);
+            if row.chosen {
+                block = block.child(self.tailscale_row_tools(i, row, a, cx));
+                if let Some(extra) = Self::tailscale_row_result(row, a) {
+                    block = block.child(extra);
+                }
+            }
+            inner = inner.child(block);
         }
         (head, inner)
+    }
+
+    fn tailscale_row_tools(
+        &self,
+        i: usize,
+        row: &PeerRow,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let (choose_host, clear_host, test_host) =
+            (row.host.clone(), row.host.clone(), row.host.clone());
+        let running = matches!(row.test, Some(TestState::Running(_)));
+        let mut tools = div()
+            .pl(px(CHECK_INDENT))
+            .flex()
+            .items_center()
+            .gap(px(SPACE[0]))
+            .child(
+                button(
+                    SharedString::from(format!("tailscale-key-{i}")),
+                    &key_title(row.key.as_deref()),
+                    ButtonKind::Secondary,
+                    PartState::Rest,
+                    a,
+                )
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.tailscale_choose_key(&choose_host, cx)),
+                ),
+            );
+        if row.key.is_some() {
+            tools =
+                tools.child(
+                    button(
+                        SharedString::from(format!("tailscale-key-clear-{i}")),
+                        t::cluster::ssh_key_clear(),
+                        ButtonKind::Ghost,
+                        PartState::Rest,
+                        a,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.tailscale_set_key(&clear_host, None, cx)
+                    })),
+                );
+        }
+        tools.child(div().flex_1()).child(
+            button(
+                SharedString::from(format!("tailscale-test-{i}")),
+                if running {
+                    t::cluster::ssh_testing()
+                } else {
+                    t::cluster::ssh_test()
+                },
+                ButtonKind::Secondary,
+                if running {
+                    PartState::Disabled
+                } else {
+                    PartState::Rest
+                },
+                a,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.tailscale_test(Some(&test_host), cx))),
+        )
+    }
+
+    fn tailscale_row_result(row: &PeerRow, a: Appearance) -> Option<Div> {
+        let mut lines = div().pl(px(CHECK_INDENT)).flex().flex_col().gap(px(2.0));
+        let mut any = false;
+        if let Some((text, ink)) = key_note(row.key.as_deref(), row.key_issue) {
+            lines = lines.child(label(&text, TypeRole::Meta, ink, a));
+            any = true;
+        }
+        if let Some(TestState::Done(result)) = row.test.as_ref().filter(|_| row.key_issue.is_none())
+        {
+            lines = lines.child(label(
+                &test_text(result),
+                TypeRole::Meta,
+                test_ink(result),
+                a,
+            ));
+            any = true;
+        }
+        any.then_some(lines)
     }
 }

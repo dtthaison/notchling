@@ -3,7 +3,10 @@ use notchling_engine::machines::registry::Machine;
 use notchling_engine::machines::tailscale::{parse_networks, parse_status};
 
 use super::add_rig_tests::Rig;
-use super::from_tailscale::{import_machines, FromTailscale, Read};
+use notchling_engine::machines::ssh_key::{KeyIssue, KeyStatus};
+use notchling_engine::machines::ssh_test::SshTest;
+
+use super::from_tailscale::{import_machines, FromTailscale, Read, TestState};
 
 const LIST: &str = "ID    Tailnet              Account\na1b2  person@example.com   person@example.com*\nc3d4  work.example         work@example.com\n";
 
@@ -202,4 +205,166 @@ fn an_import_that_adds_nothing_says_so() {
     let mut model = ready(vec![]);
     model.imported(0);
     assert_eq!(model.done, Some(0));
+}
+
+const M1: &str = "m1.tail0a1b2.ts.net";
+const ORACLE: &str = "oracle-sg.tail0a1b2.ts.net";
+
+fn usable() -> KeyStatus {
+    KeyStatus {
+        issue: None,
+        public: false,
+    }
+}
+
+fn running_round(model: &FromTailscale, host: &str) -> u64 {
+    match model.tests.get(host) {
+        Some(TestState::Running(round)) => *round,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn only_a_chosen_row_can_be_tested_and_it_waits_for_a_lane() {
+    let mut model = ready(vec![]);
+    assert!(!model.request_test(M1));
+    model.toggle(M1);
+    assert!(model.request_test(M1));
+    assert!(!model.request_test(M1), "one test of a row at a time");
+    assert_eq!(model.lanes_to_start(), 1);
+    let job = model.next_job().expect("a job");
+    assert_eq!((job.host.as_str(), job.user.as_str()), (M1, "me"));
+    assert_eq!(job.key, None);
+    assert_eq!(job.tailnet, "person@example.com");
+    assert!(model.next_job().is_none());
+    model.finish_test(M1, job.round, SshTest::Connected { user: "me".into() });
+    assert!(matches!(
+        model.rows()[0].test,
+        Some(TestState::Done(SshTest::Connected { .. }))
+    ));
+}
+
+#[test]
+fn test_selected_queues_every_checked_row_and_runs_at_most_four_at_once() {
+    let mut model = ready(vec![]);
+    assert!(!model.can_test());
+    model.select_all();
+    assert!(model.can_test());
+    assert_eq!(model.request_selected(), 3);
+    assert_eq!(model.lanes_to_start(), 3);
+    model.lanes = 4;
+    assert_eq!(model.lanes_to_start(), 0);
+    model.lanes = 2;
+    assert_eq!(model.lanes_to_start(), 2);
+    assert_eq!(
+        model.request_selected(),
+        0,
+        "rows already running are left alone"
+    );
+}
+
+#[test]
+fn a_changed_user_or_key_throws_the_old_result_away() {
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.request_test(M1);
+    let round = running_round(&model, M1);
+    model.set_user(M1, "deploy");
+    assert!(model.tests.is_empty());
+    model.finish_test(M1, round, SshTest::Denied);
+    assert!(
+        model.tests.is_empty(),
+        "a late answer for the old user is dropped"
+    );
+    model.request_test(M1);
+    let job = model.next_job().unwrap();
+    assert_eq!(job.user, "deploy");
+    model.finish_test(M1, job.round, SshTest::Denied);
+    model.set_key(M1, Some("~/.ssh/id_work"), Some(usable()));
+    assert!(model.tests.is_empty());
+    model.request_test(M1);
+    assert_eq!(
+        model.next_job().unwrap().key.as_deref(),
+        Some("~/.ssh/id_work")
+    );
+}
+
+#[test]
+fn unchecking_a_row_forgets_its_key_test_and_place_in_line() {
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.set_key(M1, Some("~/.ssh/id_work"), Some(usable()));
+    model.request_test(M1);
+    model.toggle(M1);
+    assert!(model.keys.is_empty() && model.tests.is_empty() && model.waiting.is_empty());
+    assert!(model.next_job().is_none());
+}
+
+#[test]
+fn a_bad_key_stops_the_test_and_the_import() {
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.set_key(
+        M1,
+        Some("~/.ssh/nope"),
+        Some(KeyStatus {
+            issue: Some(KeyIssue::Missing),
+            public: false,
+        }),
+    );
+    assert!(!model.can_import());
+    assert_eq!(model.key_issue(), Some((M1.to_owned(), KeyIssue::Missing)));
+    assert_eq!(model.rows()[0].key_issue, Some(KeyIssue::Missing));
+    assert!(!model.request_test(M1));
+    assert!(matches!(
+        model.tests.get(M1),
+        Some(TestState::Done(SshTest::Key(KeyIssue::Missing)))
+    ));
+    assert!(model.next_job().is_none());
+    model.set_key(M1, None, None);
+    assert!(model.can_import());
+    model.set_key(M1, Some("relative"), None);
+    assert!(!model.can_import());
+    assert_eq!(model.rows()[0].key_issue, Some(KeyIssue::BadShape));
+}
+
+#[test]
+fn a_public_key_only_warns() {
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.set_key(
+        M1,
+        Some("~/.ssh/id_work.pub"),
+        Some(KeyStatus {
+            issue: None,
+            public: true,
+        }),
+    );
+    assert!(model.can_import());
+    assert!(model.rows()[0].key_status.unwrap().public);
+}
+
+#[test]
+fn an_import_saves_each_rows_key_and_leaves_the_rest_without_one() {
+    let rig = Rig::new(vec![]);
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.toggle(ORACLE);
+    model.set_key(ORACLE, Some("~/.ssh/id_oracle"), Some(usable()));
+    import_machines(&rig.parts(), &model.status, &model.picked(), None).unwrap();
+    assert_eq!(rig.saved("m1").unwrap().ssh_key, None);
+    assert_eq!(
+        rig.saved("oracle-sg").unwrap().ssh_key.as_deref(),
+        Some("~/.ssh/id_oracle")
+    );
+}
+
+#[test]
+fn the_results_and_keys_are_gone_after_an_import() {
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.set_key(M1, Some("~/.ssh/id_work"), Some(usable()));
+    model.request_test(M1);
+    model.imported(1);
+    assert!(model.keys.is_empty() && model.tests.is_empty() && model.waiting.is_empty());
 }

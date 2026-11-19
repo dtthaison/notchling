@@ -221,6 +221,10 @@ impl SetupEngine {
         self
     }
 
+    pub fn runner(&self) -> &Arc<dyn Runner> {
+        &self.deps.runner
+    }
+
     pub fn router(&self) -> &Arc<Router> {
         &self.router
     }

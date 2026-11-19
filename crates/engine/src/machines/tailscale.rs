@@ -427,6 +427,7 @@ fn tailscale(kind: AddressKind, host: &str, tailnet: &str) -> MachineAddress {
 pub struct Picked {
     pub host: String,
     pub user: String,
+    pub key: Option<String>,
 }
 
 pub fn import(
@@ -453,7 +454,19 @@ pub fn import(
         if !super::forms::is_user(&pick.user) {
             return Err(format!("{}: {}", peer.short(), super::forms::USER_PROBLEM));
         }
-        let machine = machine_for(peer, &pick.user, &status.tailnet, &taken, organization);
+        if pick
+            .key
+            .as_deref()
+            .is_some_and(|k| !super::ssh_key::shape_ok(k))
+        {
+            return Err(format!(
+                "{}: {}",
+                peer.short(),
+                super::ssh_key::SHAPE_PROBLEM
+            ));
+        }
+        let mut machine = machine_for(peer, &pick.user, &status.tailnet, &taken, organization);
+        machine.set_ssh_key(pick.key.as_deref());
         if let Some(why) = list_problems(&machine.addresses, &machine.name)
             .into_iter()
             .chain(super::forms::machine_problems(

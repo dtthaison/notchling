@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use notchling_engine::machines::forms::is_user;
 use notchling_engine::machines::registry::Machine;
+use notchling_engine::machines::ssh_key::{shape_ok, KeyIssue, KeyStatus};
+use notchling_engine::machines::ssh_test::{SshTest, TEST_PARALLEL};
 use notchling_engine::machines::tailscale::{
     available, import, other_networks, Network, Peer, PeerFilter, Picked, Status,
 };
@@ -21,6 +23,21 @@ pub enum Read {
     Ready,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestState {
+    Running(u64),
+    Done(SshTest),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestJob {
+    pub host: String,
+    pub user: String,
+    pub key: Option<String>,
+    pub tailnet: String,
+    pub round: u64,
+}
+
 #[derive(Clone, Debug)]
 pub struct FromTailscale {
     pub read: Read,
@@ -34,6 +51,12 @@ pub struct FromTailscale {
     pub done: Option<usize>,
     pub organizations: Vec<(String, String)>,
     pub organization: String,
+    pub keys: BTreeMap<String, String>,
+    pub key_status: BTreeMap<String, KeyStatus>,
+    pub tests: BTreeMap<String, TestState>,
+    pub waiting: VecDeque<String>,
+    pub lanes: usize,
+    round: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +68,10 @@ pub struct PeerRow {
     pub online: bool,
     pub chosen: bool,
     pub user: String,
+    pub key: Option<String>,
+    pub key_status: Option<KeyStatus>,
+    pub key_issue: Option<KeyIssue>,
+    pub test: Option<TestState>,
 }
 
 impl FromTailscale {
@@ -65,6 +92,12 @@ impl FromTailscale {
             done: None,
             organizations: Vec::new(),
             organization: PERSONAL_ID.to_owned(),
+            keys: BTreeMap::new(),
+            key_status: BTreeMap::new(),
+            tests: BTreeMap::new(),
+            waiting: VecDeque::new(),
+            lanes: 0,
+            round: 0,
         }
     }
 
@@ -174,6 +207,10 @@ impl FromTailscale {
                     .get(p.host())
                     .cloned()
                     .unwrap_or_else(|| self.default_user.clone()),
+                key: self.keys.get(p.host()).cloned(),
+                key_status: self.key_status.get(p.host()).copied(),
+                key_issue: self.key_issue_of(p.host()),
+                test: self.tests.get(p.host()).cloned(),
             })
             .collect()
     }
@@ -182,8 +219,17 @@ impl FromTailscale {
         if self.chosen.remove(host).is_none() {
             self.chosen
                 .insert(host.to_owned(), self.default_user.clone());
+        } else {
+            self.forget_host(host);
         }
         self.error = None;
+    }
+
+    fn forget_host(&mut self, host: &str) {
+        self.keys.remove(host);
+        self.key_status.remove(host);
+        self.tests.remove(host);
+        self.waiting.retain(|h| h != host);
     }
 
     pub fn all_chosen(&self) -> bool {
@@ -196,6 +242,7 @@ impl FromTailscale {
         if self.all_chosen() {
             for host in hosts {
                 self.chosen.remove(&host);
+                self.forget_host(&host);
             }
         } else {
             for host in hosts {
@@ -208,9 +255,113 @@ impl FromTailscale {
 
     pub fn set_user(&mut self, host: &str, user: &str) {
         if let Some(slot) = self.chosen.get_mut(host) {
-            *slot = user.trim().to_owned();
+            let user = user.trim().to_owned();
+            if *slot != user {
+                *slot = user;
+                self.tests.remove(host);
+                self.waiting.retain(|h| h != host);
+            }
         }
         self.error = None;
+    }
+
+    pub fn set_key(&mut self, host: &str, key: Option<&str>, status: Option<KeyStatus>) {
+        if !self.chosen.contains_key(host) {
+            return;
+        }
+        match key.map(str::trim).filter(|k| !k.is_empty()) {
+            Some(key) => {
+                self.keys.insert(host.to_owned(), key.to_owned());
+                match status {
+                    Some(status) => self.key_status.insert(host.to_owned(), status),
+                    None => self.key_status.remove(host),
+                };
+            }
+            None => {
+                self.keys.remove(host);
+                self.key_status.remove(host);
+            }
+        }
+        self.tests.remove(host);
+        self.waiting.retain(|h| h != host);
+        self.error = None;
+    }
+
+    fn key_issue_of(&self, host: &str) -> Option<KeyIssue> {
+        match self.keys.get(host) {
+            Some(key) if !shape_ok(key) => Some(KeyIssue::BadShape),
+            Some(_) => self.key_status.get(host).and_then(|s| s.issue),
+            None => None,
+        }
+    }
+
+    pub fn key_issue(&self) -> Option<(String, KeyIssue)> {
+        self.chosen
+            .keys()
+            .find_map(|host| self.key_issue_of(host).map(|i| (host.clone(), i)))
+    }
+
+    pub fn request_test(&mut self, host: &str) -> bool {
+        if !self.chosen.contains_key(host) || self.read != Read::Ready {
+            return false;
+        }
+        if matches!(self.tests.get(host), Some(TestState::Running(_))) {
+            return false;
+        }
+        let user = self.chosen.get(host).cloned().unwrap_or_default();
+        if !is_user(&user) {
+            return false;
+        }
+        if let Some((_, issue)) = self.key_issue().filter(|(h, _)| h == host) {
+            self.tests
+                .insert(host.to_owned(), TestState::Done(SshTest::Key(issue)));
+            return false;
+        }
+        self.round += 1;
+        self.tests
+            .insert(host.to_owned(), TestState::Running(self.round));
+        self.waiting.push_back(host.to_owned());
+        true
+    }
+
+    pub fn request_selected(&mut self) -> usize {
+        let hosts: Vec<String> = self.chosen.keys().cloned().collect();
+        hosts.iter().filter(|h| self.request_test(h)).count()
+    }
+
+    pub fn can_test(&self) -> bool {
+        self.read == Read::Ready && !self.chosen.is_empty()
+    }
+
+    pub fn lanes_to_start(&self) -> usize {
+        TEST_PARALLEL
+            .saturating_sub(self.lanes)
+            .min(self.waiting.len())
+    }
+
+    pub fn next_job(&mut self) -> Option<TestJob> {
+        while let Some(host) = self.waiting.pop_front() {
+            let Some(TestState::Running(round)) = self.tests.get(&host).cloned() else {
+                continue;
+            };
+            let Some(user) = self.chosen.get(&host).cloned() else {
+                continue;
+            };
+            return Some(TestJob {
+                key: self.keys.get(&host).cloned(),
+                tailnet: self.network_name(),
+                host,
+                user,
+                round,
+            });
+        }
+        None
+    }
+
+    pub fn finish_test(&mut self, host: &str, round: u64, result: SshTest) {
+        if self.tests.get(host) == Some(&TestState::Running(round)) {
+            self.tests.insert(host.to_owned(), TestState::Done(result));
+        }
     }
 
     pub fn picked(&self) -> Vec<Picked> {
@@ -219,6 +370,7 @@ impl FromTailscale {
             .map(|(host, user)| Picked {
                 host: host.clone(),
                 user: user.clone(),
+                key: self.keys.get(host).cloned(),
             })
             .collect()
     }
@@ -227,6 +379,7 @@ impl FromTailscale {
         self.read == Read::Ready
             && !self.chosen.is_empty()
             && self.chosen.values().all(|u| is_user(u))
+            && self.key_issue().is_none()
     }
 
     pub fn other_networks_note(&self) -> Option<String> {
@@ -243,6 +396,10 @@ impl FromTailscale {
     pub fn imported(&mut self, count: usize) {
         self.done = Some(count);
         self.chosen.clear();
+        self.keys.clear();
+        self.key_status.clear();
+        self.tests.clear();
+        self.waiting.clear();
     }
 }
 

@@ -31,6 +31,8 @@ pub mod roots;
 pub mod runner;
 pub mod service_files;
 pub mod shell;
+pub mod ssh_key;
+pub mod ssh_test;
 pub mod status;
 pub mod step;
 mod steps_git;
@@ -193,6 +195,10 @@ mod tests_secrets;
 mod tests_selfupdate;
 #[cfg(test)]
 mod tests_shell;
+#[cfg(test)]
+mod tests_ssh_key;
+#[cfg(test)]
+mod tests_ssh_test;
 #[cfg(test)]
 mod tests_status;
 #[cfg(test)]

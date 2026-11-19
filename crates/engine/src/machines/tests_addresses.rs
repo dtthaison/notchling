@@ -143,12 +143,14 @@ fn a_port_and_a_jump_become_ssh_options() {
         user: "hop".into(),
         port: Some(2200),
         jump: None,
+        key: None,
     };
     let route = Route {
         host: "10.0.0.5".into(),
         user: "agent".into(),
         port: Some(2222),
         jump: Some(Box::new(inner.clone())),
+        key: None,
     };
     assert_eq!(
         route.ssh_options(),
@@ -162,6 +164,7 @@ fn a_port_and_a_jump_become_ssh_options() {
     let chained = Route {
         jump: Some(Box::new(Route {
             jump: Some(Box::new(outer)),
+            key: None,
             ..inner
         })),
         ..route
@@ -175,9 +178,11 @@ fn a_port_and_a_jump_become_ssh_options() {
         user: "u".into(),
         port: Some(22),
         jump: None,
+        key: None,
     };
     let behind = Route {
         jump: Some(Box::new(v6)),
+        key: None,
         ..Route::direct("h", "agent")
     };
     assert_eq!(behind.jump_chain().unwrap(), "u@[fd00::1]:22");
@@ -192,6 +197,7 @@ fn ssh_keeps_its_options_and_the_double_dash_with_a_route() {
         user: "agent".into(),
         port: Some(2222),
         jump: Some(Box::new(Route::direct("gw.example", "hop"))),
+        key: None,
     });
     let argv = ssh_script(&m, "echo hi");
     assert_eq!(
@@ -240,6 +246,7 @@ fn git_goes_to_the_picked_address() {
         user: "agent".into(),
         port: Some(2222),
         jump: Some(Box::new(Route::direct("gw.example", "hop"))),
+        key: None,
     });
     assert_eq!(
         git_url(&m, "/work/tree").unwrap(),

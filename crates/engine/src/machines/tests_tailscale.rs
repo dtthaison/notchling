@@ -161,10 +161,12 @@ fn an_import_saves_names_and_ips_on_the_active_network_with_no_node() {
         Picked {
             host: "m1.tail0a1b2.ts.net".into(),
             user: "sondoan".into(),
+            key: None,
         },
         Picked {
             host: "oracle-sg.tail0a1b2.ts.net".into(),
             user: "agent".into(),
+            key: None,
         },
     ];
     let made = import(&s, &picked, &[], None).unwrap();
@@ -205,14 +207,17 @@ fn an_import_picks_free_names_and_skips_what_is_already_there() {
         Picked {
             host: "m1.tail0a1b2.ts.net".into(),
             user: "agent".into(),
+            key: None,
         },
         Picked {
             host: "phone-12.tail0a1b2.ts.net".into(),
             user: "agent".into(),
+            key: None,
         },
         Picked {
             host: "winbox.tail0a1b2.ts.net".into(),
             user: "agent".into(),
+            key: None,
         },
     ];
     let made = import(&s, &picked, &existing, Some("work")).unwrap();
@@ -228,11 +233,13 @@ fn an_import_refuses_a_bad_user_and_a_machine_that_left() {
     let bad = vec![Picked {
         host: "m1.tail0a1b2.ts.net".into(),
         user: "Root".into(),
+        key: None,
     }];
     assert!(import(&s, &bad, &[], None).is_err());
     let gone = vec![Picked {
         host: "gone.tail0a1b2.ts.net".into(),
         user: "agent".into(),
+        key: None,
     }];
     assert!(import(&s, &gone, &[], None)
         .unwrap_err()
@@ -247,6 +254,7 @@ fn a_name_that_cannot_be_a_machine_name_is_made_into_one() {
         &[Picked {
             host: "phone-12.tail0a1b2.ts.net".into(),
             user: "agent".into(),
+            key: None,
         }],
         &[],
         None,
@@ -346,6 +354,7 @@ fn a_peer_with_an_unsafe_name_is_not_offered_or_imported() {
     let bad = Picked {
         host: s.peers[0].host().to_owned(),
         user: "me".to_owned(),
+        key: None,
     };
     assert!(import(&s, &[bad], &[], None).is_err());
 }
@@ -357,6 +366,7 @@ fn a_network_name_with_option_characters_is_refused_on_import() {
     let pick = Picked {
         host: "m1.tail0a1b2.ts.net".to_owned(),
         user: "me".to_owned(),
+        key: None,
     };
     assert!(import(&s, &[pick], &[], None).is_err());
 }

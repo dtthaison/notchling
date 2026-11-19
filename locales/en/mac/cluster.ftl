@@ -825,3 +825,39 @@ cluster-tailscale-organization = Organization: { $name }
 cluster-tailscale-personal = Personal
 # Title of a machine in Add from Tailscale; $name is its name and $state is Online or Offline.
 cluster-tailscale-row-title = { $name } · { $state }
+
+cluster-ssh-key-label = SSH Key
+# Button on a machine's row that opens the key picker; $name is the key file's name.
+cluster-ssh-key-named = Key: { $name }
+cluster-ssh-key-default = Key: Default
+cluster-ssh-key-choose = Choose…
+cluster-ssh-key-clear = Clear
+cluster-ssh-key-placeholder = Default keys and the agent
+cluster-ssh-key-picker-prompt = Use as SSH Key
+# Line under an SSH Key field.
+cluster-ssh-key-note = Empty uses ssh's normal keys and the agent. Only the path is saved, never the key.
+cluster-ssh-key-shape = SSH Key: use the full path of a key file, or one starting with ~/
+cluster-ssh-key-missing = The key file isn't there.
+cluster-ssh-key-not-file = That isn't a file.
+cluster-ssh-key-too-open = Other users can read the key file. Run chmod 600 on it.
+cluster-ssh-key-unreadable = The key file can't be read.
+cluster-ssh-key-public = That is a public key (.pub). ssh needs the private key file, unless the agent holds it.
+cluster-ssh-test = Test
+cluster-ssh-test-selected = Test Selected
+cluster-ssh-testing = Testing…
+# Result of Test; $user is the account ssh logged in as.
+cluster-ssh-test-connected = Connected as { $user }
+# Result of Test when the host's key isn't in known_hosts; $user is the account ssh logged in as.
+cluster-ssh-test-new-host = Connected as { $user }. The host's key isn't in known_hosts yet, and nothing was saved.
+cluster-ssh-test-denied = Wrong user or key (permission denied)
+cluster-ssh-test-host-key-changed = Host key changed
+cluster-ssh-test-timed-out = Can't reach: timed out
+cluster-ssh-test-refused = Can't reach: connection refused
+cluster-ssh-test-no-name = Can't reach: name not found
+cluster-ssh-test-no-route = Can't reach: no route
+cluster-ssh-test-no-answer = Can't reach: no answer
+cluster-ssh-test-wrong-network = Not on this Tailscale network
+# Result of Test on a machine's address; $wanted is the network the address is on, $active the one this Mac is on.
+cluster-ssh-test-wrong-network-named = Not on this Tailscale network: the address is on { $wanted }, and this Mac is on { $active }
+# One line of the Edit Addresses sheet's test; $address is the address tested, $result what happened.
+cluster-ssh-test-address = { $address }: { $result }

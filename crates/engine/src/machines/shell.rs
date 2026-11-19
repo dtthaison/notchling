@@ -98,10 +98,19 @@ pub fn ssh_admin(m: &Machine, script: &str, as_root: bool) -> Vec<String> {
 pub const GIT_SSH_COMMAND: &str = "ssh -o BatchMode=yes -o ConnectTimeout=8";
 
 pub fn git_ssh_command(m: &Machine) -> String {
-    match m.route().jump_chain() {
-        Some(chain) => format!("{GIT_SSH_COMMAND} -J {}", quote(&chain)),
-        None => GIT_SSH_COMMAND.to_owned(),
+    let route = m.route();
+    let mut command = GIT_SSH_COMMAND.to_owned();
+    let mut options = route.identity_options();
+    options.extend(route.jump_options());
+    for option in options {
+        command.push(' ');
+        if matches!(option.as_str(), "-i" | "-o" | "-J") {
+            command.push_str(&option);
+        } else {
+            command.push_str(&quote(&option));
+        }
     }
+    command
 }
 
 pub fn not_absolute(path: &str) -> String {

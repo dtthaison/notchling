@@ -218,6 +218,7 @@ pub struct Route {
     pub user: String,
     pub port: Option<u16>,
     pub jump: Option<Box<Route>>,
+    pub key: Option<String>,
 }
 
 impl Route {
@@ -227,7 +228,16 @@ impl Route {
             user: user.into(),
             port: None,
             jump: None,
+            key: None,
         }
+    }
+
+    pub fn with_key(mut self, key: Option<&str>) -> Route {
+        self.key = key
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_owned);
+        self
     }
 
     pub fn as_user(&self, user: &str) -> Route {
@@ -279,11 +289,62 @@ impl Route {
             out.push(port_flag.to_owned());
             out.push(port.to_string());
         }
-        if let Some(chain) = self.jump_chain() {
-            out.push("-J".to_owned());
-            out.push(chain);
-        }
+        out.extend(self.identity_options());
+        out.extend(self.jump_options());
         out
+    }
+
+    pub fn identity_options(&self) -> Vec<String> {
+        match &self.key {
+            Some(key) => vec![
+                "-i".to_owned(),
+                key.clone(),
+                "-o".to_owned(),
+                "IdentitiesOnly=yes".to_owned(),
+            ],
+            None => Vec::new(),
+        }
+    }
+
+    fn chain_has_key(&self) -> bool {
+        self.key.is_some() || self.jump.as_deref().is_some_and(Route::chain_has_key)
+    }
+
+    pub fn jump_options(&self) -> Vec<String> {
+        let Some(jump) = self.jump.as_deref() else {
+            return Vec::new();
+        };
+        if jump.chain_has_key() {
+            return vec![
+                "-o".to_owned(),
+                format!("ProxyCommand={}", jump.proxy_command()),
+            ];
+        }
+        match self.jump_chain() {
+            Some(chain) => vec!["-J".to_owned(), chain],
+            None => Vec::new(),
+        }
+    }
+
+    fn proxy_command(&self) -> String {
+        let mut words: Vec<String> = [
+            "/usr/bin/ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=8",
+        ]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .collect();
+        words.extend(self.options("-p"));
+        words.extend(["-W", "%h:%p", "--"].map(str::to_owned));
+        words.push(self.login());
+        words
+            .iter()
+            .map(|w| crate::lanes::quote(w))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn scp_host(&self) -> String {

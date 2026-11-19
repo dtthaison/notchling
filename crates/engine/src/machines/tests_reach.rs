@@ -128,6 +128,7 @@ fn addresses_are_tried_in_order_and_the_first_that_answers_wins() {
             user: "agent".into(),
             port: Some(2222),
             jump: None,
+            key: None,
         }
     );
     let probes = rig.probes();
