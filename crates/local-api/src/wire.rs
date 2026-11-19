@@ -163,6 +163,14 @@ pub mod ops {
     pub const ASK_ANSWER: &str = "ask.answer";
     pub const ASK_DISMISS: &str = "ask.dismiss";
     pub const ASK_LIST: &str = "ask.list";
+
+    pub const ORGANIZATIONS_LIST: &str = "organizations.list";
+    pub const ORGANIZATIONS_CREATE: &str = "organizations.create";
+    pub const ORGANIZATIONS_RENAME: &str = "organizations.rename";
+    pub const ORGANIZATIONS_COLOR_SET: &str = "organizations.color.set";
+    pub const ORGANIZATIONS_FOLDERS_SET: &str = "organizations.folders.set";
+    pub const ORGANIZATIONS_FOLDERS_PREVIEW: &str = "organizations.folders.preview";
+    pub const ORGANIZATIONS_DELETE: &str = "organizations.delete";
 }
 
 pub mod topics {

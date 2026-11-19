@@ -1024,6 +1024,43 @@ that reads or writes a login sits behind the traits in
 - Every message the watchers say goes out as `limits.notice {"at", "text"}` on the `limits`
   topic (app tier), for the app to show.
 
+## `organizations_ops.rs`
+
+What Settings > Organizations shows and changes, over `notchling_engine::organizations` (the `organizations`
+document in `notchling.db`). Every op is app tier, so an agent can't list folders, create, change or delete an
+organization (the design's reduced agent-tier `organizations.list` waits for the phase that needs it). No
+switch. The two reads are `OpSpec::APP_QUIET` (the page asks on open, after each edit and while a folder is
+typed); the five edits are `OpSpec::APP` and recorded as `op.called`. The registry is opened read only here, so
+no op migrates a machines file.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `organizations.list` | app, quiet | `{}` | `{organizations: [{id, name, githubOwner, color, folders, personal, counts: {accounts, secrets, machines}}], colors, onlyPersonal, unreadable}` |
+| `organizations.create` | app | `{name, color?, githubOwner?}` | `{id}`; with only Personal it first marks every account and secret as Personal's (machines without a mark already count as Personal) |
+| `organizations.rename` | app | `{id, name}` | `{}` |
+| `organizations.color.set` | app | `{id, color}` | `{}` |
+| `organizations.folders.set` | app | `{id, folders: [path]}` | `{folders}`, the folders as stored |
+| `organizations.folders.preview` | app, quiet | `{id, folders: [path]}` | `{folders, problem, problemText, overlaps: [{folder, organization, other, relation}], moved: [{folder, from, to}]}`; writes nothing |
+| `organizations.delete` | app | `{id}` | `{}` |
+
+- Personal first, then the others in their `order`. `colors` is the closed list a colour must come from
+  (`organizations::COLORS`: grey, orange, yellow, lime, teal, blue, purple, pink, red); a colour already stored
+  that isn't in it still reads, and only a new choice is checked. `unreadable` is `null`, or why the document
+  can't be read: the list then shows Personal alone and every edit answers `failed` with `data.kind` `unreadable`
+  and writes nothing.
+- A refused edit is `bad_request` with a plain `message` and `data: {problems: [{kind, ...}]}`; `kind` is one of
+  `name_empty`, `name_too_long`, `name_taken {name}`, `id_unknown {id}`, `color_invalid {color}`,
+  `folder_invalid {folder}`, `folder_taken {folder, by}`, `personal_not_deletable` and
+  `not_empty {counts: {accounts, secrets, machines}}`. The app words these from its own messages, never from
+  `message`.
+- `folders` are full paths or start with `~/`; they are normalized (`~/work/./x/` is `~/work/x`), a folder can
+  belong to one organization only (same real folder, case folded where the disk folds it), and a folder inside
+  another organization's folder is allowed: the longest match wins. The preview's `overlaps` say `inside` (the
+  folder lies in the other's) or `contains`; `moved` lists the sessions the daemon knows whose organization
+  would change, with the organization ids before and after.
+- Delete is refused for Personal and for an organization that still holds an account, a secret or a machine,
+  counted inside one transaction with the removal.
+
 ## `outbox_ops.rs`
 
 The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](decisions/XXXX-outbox.md)): a message to a session is saved in the daemon's `outbox` table first and a postman per session types or starts it as soon as the session can take it, in order. App tier, served by `OutboxOps`. Every op but `outbox.list` is refused with `forbidden` and [`ACTING_OFF`] while the `acting` switch is off (messages already saved wait); `outbox.list` only reads.

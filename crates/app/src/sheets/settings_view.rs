@@ -34,6 +34,7 @@ use super::view::{sheet_header, Acts, Dismiss};
 use crate::accounts::view_rows::{segmented_full, Handler};
 use crate::activity::view::ActivityView;
 mod cluster;
+mod organizations;
 mod shortcut;
 mod sidecar;
 use crate::mac::shell::{AppAccounts, AppActions, AppBridge, AppSwitchFeed};
@@ -63,6 +64,7 @@ pub struct SettingsView {
     shortcut: shortcut::ShortcutState,
     cluster: Option<Arc<crate::cluster::feed::ClusterFeed>>,
     sidecar: sidecar::SidecarUi,
+    organizations: Option<Entity<crate::organizations::view::OrganizationsView>>,
 }
 
 pub struct SettingChanged {
@@ -101,6 +103,7 @@ impl SettingsView {
             shortcut: shortcut::ShortcutState::default(),
             cluster: None,
             sidecar: sidecar::SidecarUi::default(),
+            organizations: None,
         }
     }
 
@@ -163,6 +166,9 @@ impl SettingsView {
         }
         if page == Page::Skills {
             self.ask_skills(cx);
+        }
+        if page == Page::Organizations {
+            self.show_organizations(cx);
         }
         if page == Page::Activity {
             match &self.activity {
@@ -732,6 +738,7 @@ impl Render for SettingsView {
                 list = list.children(self.cluster_section(a, cx));
             }
         }
+        list = list.children(self.organizations_page());
         if self.page == Page::Agents {
             for section in shared_agent_sections(&read) {
                 list = list.child(self.section_view(&section, &mut n, a, cx));

@@ -32,6 +32,7 @@ use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
 use crate::op_group::OpGroup;
 use crate::op_kinds;
+use crate::organizations_ops::OrganizationsOps;
 use crate::outbox_inbox::OutboxNotice;
 use crate::outbox_ops::OutboxOps;
 use crate::outbox_postman::Postmen;
@@ -855,7 +856,7 @@ impl Wired {
             Arc::new(SandboxedLauncher::new(Arc::new(RealLauncher::with_claude(
                 claude,
             )))),
-            folders,
+            folders.clone(),
         );
         let listed = sessions.clone();
         self.versions.checks().set_self_test(Arc::new(move || {
@@ -898,6 +899,7 @@ impl Wired {
             .with_remote_prompts(self.cluster.prompts.clone())
             .with_group(Arc::new(git))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
+            .with_group(Arc::new(OrganizationsOps::for_daemon(layout, folders)))
             .with_group(self.codex_children.clone())
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {

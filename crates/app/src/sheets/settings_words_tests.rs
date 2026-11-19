@@ -149,6 +149,7 @@ fn section_titles_and_footers_come_from_messages() {
 #[test]
 fn pages_and_hooks_use_messages() {
     assert_eq!(Page::General.title(), t::settings::page_general());
+    assert_eq!(Page::Organizations.title(), t::organizations::page());
     assert_eq!(Page::Agents.title(), t::settings::page_agents());
     assert_eq!(Page::Skills.title(), t::settings::page_skills());
     assert_eq!(Page::Activity.title(), t::settings::page_activity());
@@ -163,7 +164,7 @@ fn pages_and_hooks_use_messages() {
     );
     assert_eq!(
         Page::ALL.map(Page::id),
-        ["general", "agents", "skills", "activity"],
+        ["general", "organizations", "agents", "skills", "activity"],
         "an element id never changes with the language"
     );
     let installed = HookState::Installed.word();

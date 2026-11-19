@@ -156,6 +156,7 @@ pub mod log_rotate;
 pub mod log_start;
 pub mod op_group;
 pub mod op_kinds;
+pub mod organizations_ops;
 pub mod outbox_anchor;
 pub mod outbox_courier;
 pub mod outbox_inbox;
@@ -391,6 +392,8 @@ pub(crate) mod log_checks_tests;
 mod log_ops_tests;
 #[cfg(test)]
 mod log_retention_tests;
+#[cfg(test)]
+mod organizations_ops_tests;
 #[cfg(test)]
 mod outbox_testkit;
 #[cfg(test)]
