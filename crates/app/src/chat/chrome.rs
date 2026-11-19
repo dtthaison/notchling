@@ -10,6 +10,7 @@ use crate::chat::data::{Session, Tool};
 
 pub const POLL_MS: i64 = 1_000;
 pub const NOTE_MS: i64 = 6_000;
+pub const POLL_FAILS: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Task {
@@ -178,11 +179,24 @@ pub struct State {
     pub notes: HashMap<String, (String, i64)>,
     pub asking: HashSet<String>,
     pub peeked: HashSet<String>,
+    pub poll_fails: HashMap<String, u32>,
     pub last_poll_ms: i64,
 }
 
 impl State {
+    pub fn poll_failed(&mut self, id: &str) -> bool {
+        let fails = self.poll_fails.entry(id.to_owned()).or_insert(0);
+        *fails += 1;
+        if *fails >= POLL_FAILS {
+            self.poll_fails.remove(id);
+            self.tasks.remove(id);
+            return true;
+        }
+        false
+    }
+
     pub fn apply(&mut self, id: &str, status: &Status, now_ms: i64) -> Applied {
+        self.poll_fails.remove(id);
         match status.on {
             Some(on) => {
                 self.on.insert(id.to_owned(), on);

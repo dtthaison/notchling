@@ -389,7 +389,13 @@ fn a_waiting_turn_on_can_be_flipped_to_off() {
     reading(&fake, vec![Ok(report(MENU_ON)), Ok(report(MENU_OFF))]);
     let (_d, roots) = roots("flip");
     let s = setup_in(true, PROMPT, sessions(), roots, None);
-    s.ops.attach_chrome(ChromeOps::new(Arc::new(fake.clone())));
+    let chrome = ChromeOps::new(Arc::new(fake.clone()));
+    let words: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = words.clone();
+    chrome.set_audit(Arc::new(move |_, word, _| {
+        seen.lock().unwrap().push(word.to_string());
+    }));
+    s.ops.attach_chrome(chrome);
     let first = command(&s, "job-a", "/chrome").unwrap();
     assert_eq!(first["chrome"]["task"]["on"], true);
     let again = command(&s, "job-a", "/chrome").unwrap();
@@ -404,6 +410,8 @@ fn a_waiting_turn_on_can_be_flipped_to_off() {
     let log = fake.0.lock().unwrap();
     assert_eq!(log.restarts, [false]);
     assert_eq!(log.looked, 2);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(*words.lock().unwrap(), ["chrome_off"]);
 }
 
 #[test]
@@ -553,6 +561,7 @@ fn a_change_left_pending_by_a_stopped_daemon_is_finished_when_idle() {
     status::write_pending(
         &state,
         &status::Pending {
+            at_ms: crate::acting_ops::now_ms(),
             on: true,
             before: vec!["--no-chrome".to_string()],
             wanted: vec!["--chrome".to_string()],
@@ -577,6 +586,7 @@ fn a_pending_change_on_a_working_session_is_undone_and_one_already_replaced_is_d
     )
     .unwrap();
     let pending = status::Pending {
+        at_ms: crate::acting_ops::now_ms(),
         on: true,
         before: vec!["--no-chrome".to_string()],
         wanted: vec!["--chrome".to_string()],
@@ -610,4 +620,114 @@ fn other_respawns_wait_for_a_chrome_change_of_the_same_job() {
     drop(guard);
     rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     thread.join().unwrap();
+}
+
+fn pending_at(state: &std::path::Path, age_ms: i64) {
+    status::write_pending(
+        state,
+        &status::Pending {
+            at_ms: crate::acting_ops::now_ms() - age_ms,
+            on: true,
+            before: vec!["--no-chrome".to_string()],
+            wanted: vec!["--chrome".to_string()],
+        },
+    )
+    .unwrap();
+}
+
+fn reverted(state: &std::path::Path, launcher: &FakeLauncher) {
+    assert!(launcher.commands().is_empty());
+    assert_eq!(status::read_flags(state).unwrap(), ["--no-chrome"]);
+    assert_eq!(status::read_pending(state), None);
+}
+
+#[test]
+fn an_old_pending_change_is_reverted_not_respawned() {
+    let launcher = Arc::new(FakeLauncher::new());
+    let (_d, ops, state) = live("reconcileold", launcher.clone(), r#"["--chrome"]"#);
+    pending_at(&state, crate::chrome_ops::PENDING_MAX_AGE_MS + 60_000);
+    crate::chrome_ops::reconcile(&ops);
+    reverted(&state, &launcher);
+}
+
+#[test]
+fn a_pending_change_is_reverted_when_background_work_is_unknown_or_present() {
+    for (tag, body) in [
+        (
+            "reconcileunknown",
+            r#"{"state":"done","respawnFlags":["--chrome"]}"#,
+        ),
+        (
+            "reconciletasks",
+            r#"{"state":"done","respawnFlags":["--chrome"],"inFlight":{"tasks":1}}"#,
+        ),
+        (
+            "reconcilequeued",
+            r#"{"state":"done","respawnFlags":["--chrome"],"inFlight":{"tasks":0,"queued":1}}"#,
+        ),
+    ] {
+        let launcher = Arc::new(FakeLauncher::new());
+        let (_d, ops, state) = live(tag, launcher.clone(), r#"["--chrome"]"#);
+        std::fs::write(&state, body).unwrap();
+        pending_at(&state, 1_000);
+        crate::chrome_ops::reconcile(&ops);
+        reverted(&state, &launcher);
+    }
+}
+
+#[test]
+fn nothing_is_reconciled_while_acting_is_off() {
+    let launcher = Arc::new(FakeLauncher::new());
+    let (_d, ops, state) = live("reconcileoff", launcher.clone(), r#"["--chrome"]"#);
+    ops.acting_switch().set(false);
+    pending_at(&state, 1_000);
+    crate::chrome_ops::reconcile(&ops);
+    assert!(launcher.commands().is_empty());
+    assert!(status::read_pending(&state).is_some());
+}
+
+#[test]
+fn the_pending_change_is_reconciled_when_acting_goes_from_off_to_on() {
+    let launcher = Arc::new(FakeLauncher::new());
+    let (_d, ops, state) = live("reconcilewatch", launcher.clone(), r#"["--chrome"]"#);
+    ops.acting_switch().set(false);
+    pending_at(&state, 1_000);
+    crate::chrome_ops::reconcile_when_acting_turns_on(&ops);
+    assert!(launcher.commands().is_empty());
+    ops.acting_switch().set(true);
+    let mut waited = 0;
+    while status::read_pending(&state).is_some() && waited < 400 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        waited += 1;
+    }
+    assert_eq!(status::read_pending(&state), None);
+    assert_eq!(launcher.commands().len(), 1);
+    assert_eq!(status::read_flags(&state).unwrap(), ["--chrome"]);
+}
+
+#[test]
+fn a_superseded_restart_does_nothing_before_and_after_waiting_for_the_typing_lock() {
+    let fake = Fake::default();
+    let mut cancelable = crate::chrome_ops::Cancelable {
+        inner: Box::new(FakeHost(fake.clone())),
+        cancel: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+    };
+    assert!(cancelable.restart(true).is_err());
+    assert!(fake.0.lock().unwrap().restarts.is_empty());
+    let launcher = Arc::new(FakeLauncher::new());
+    let (_d, ops, state) = live("superseded", launcher.clone(), r#"["--no-chrome"]"#);
+    let hosts = LiveHosts::new(&ops);
+    let mut host = hosts.host(&job_a(&ops));
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    host.set_cancel(flag.clone());
+    let lock = ops.typing_locks().for_job("abcd1234");
+    let guard = lock.lock().unwrap();
+    let thread = std::thread::spawn(move || host.restart(true));
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    drop(guard);
+    let result = thread.join().unwrap();
+    assert!(result.is_err());
+    assert!(launcher.commands().is_empty());
+    assert_eq!(status::read_flags(&state).unwrap(), ["--no-chrome"]);
 }

@@ -445,3 +445,23 @@ fn other_sessions_do_not_see_chrome_in_the_list() {
         2
     );
 }
+
+#[test]
+fn a_transient_poll_error_keeps_the_task_and_five_in_a_row_give_it_up() {
+    let mut state = State::default();
+    state.begin("s1", true, 0);
+    for _ in 0..4 {
+        assert!(!state.poll_failed("s1"));
+        assert_eq!(state.active(), vec!["s1".to_owned()]);
+    }
+    let working = status(
+        json!({"phase": "working", "step": "checking", "on": true, "since_ms": 1}),
+        Some(false),
+    );
+    assert_eq!(state.apply("s1", &working, 5), Applied::Working);
+    for _ in 0..4 {
+        assert!(!state.poll_failed("s1"), "an answer resets the count");
+    }
+    assert!(state.poll_failed("s1"));
+    assert!(state.active().is_empty());
+}

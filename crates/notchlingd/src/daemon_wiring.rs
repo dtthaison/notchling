@@ -561,14 +561,7 @@ impl Wired {
             }
         }));
         acting.attach_chrome(chrome);
-        let reconciling = Arc::downgrade(&acting);
-        let _ = std::thread::Builder::new()
-            .name("chrome-reconcile".to_string())
-            .spawn(move || {
-                if let Some(acting) = reconciling.upgrade() {
-                    crate::chrome_ops::reconcile(&acting);
-                }
-            });
+        crate::chrome_ops::reconcile_when_acting_turns_on(&acting);
         let node_slot = crate::ask_wiring::Slot::default();
         let worker = crate::ask_wiring::worker_in(node_slot.clone());
         let ask =

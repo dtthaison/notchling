@@ -1,5 +1,5 @@
 use crate::acting_ops::{now_ms, ActingOps};
-use crate::outbox_courier::live_files;
+use crate::outbox_courier::{live_files, JobFiles};
 use notchling_engine::chrome::drive::{self, Goal, Refusal, Report};
 use notchling_engine::chrome::flow::{self, Host, Options, Phase, Step};
 use notchling_engine::chrome::status::{self, Detected};
@@ -51,12 +51,15 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-struct Cancelable {
-    inner: Box<dyn Host + Send>,
-    cancel: Arc<AtomicBool>,
+pub(crate) struct Cancelable {
+    pub(crate) inner: Box<dyn Host + Send>,
+    pub(crate) cancel: Arc<AtomicBool>,
 }
 
 impl Host for Cancelable {
+    fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
+        self.cancel = cancel;
+    }
     fn turn_running(&mut self) -> bool {
         self.inner.turn_running()
     }
@@ -67,6 +70,9 @@ impl Host for Cancelable {
         self.inner.look(goal)
     }
     fn restart(&mut self, on: bool) -> Result<(), String> {
+        if self.cancelled() {
+            return Err("Cancelled.".to_string());
+        }
         self.inner.restart(on)
     }
     fn sleep(&mut self, ms: u64) {
@@ -143,13 +149,17 @@ impl ChromeOps {
         let work = move || {
             let mut host = Cancelable {
                 inner: me.hosts.host(&agent_now),
-                cancel,
+                cancel: cancel.clone(),
             };
+            host.inner.set_cancel(cancel.clone());
             let id = agent_now.id.clone();
             let sink = me.clone();
             let end = flow::run(&mut host, Options { on, force }, &mut |phase| {
                 sink.set(&id, serial, phase)
             });
+            if cancel.load(Ordering::SeqCst) {
+                return;
+            }
             if let Some(audit) = me.audit.get() {
                 let result = match end {
                     Phase::Done { .. } => DoneOrFailed::Done,
@@ -233,6 +243,7 @@ impl Hosts for LiveHosts {
             acting: self.acting.clone(),
             id: agent.id.clone(),
             job,
+            cancel: None,
         })
     }
 
@@ -251,6 +262,7 @@ struct LiveHost {
     acting: Weak<ActingOps>,
     id: String,
     job: String,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl LiveHost {
@@ -289,6 +301,7 @@ impl LiveHost {
         status::write_pending(
             file,
             &status::Pending {
+                at_ms: now_ms(),
                 on,
                 before: before.clone(),
                 wanted: wanted.clone(),
@@ -318,6 +331,12 @@ impl LiveHost {
         Ok(())
     }
 
+    fn superseded(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+    }
+
     fn busy(&self, acting: &ActingOps) -> bool {
         let files = live_files(acting.roots.clone());
         let Some(fresh) = files.row(&self.job).or_else(|| self.agent(acting)) else {
@@ -333,8 +352,12 @@ impl Host for LiveHost {
         self.acting().is_some_and(|acting| self.busy(&acting))
     }
 
+    fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
+        self.cancel = Some(cancel);
+    }
+
     fn cancelled(&mut self) -> bool {
-        self.acting().is_none_or(|acting| !acting.is_on())
+        self.superseded() || self.acting().is_none_or(|acting| !acting.is_on())
     }
 
     fn tasks_in_flight(&mut self) -> Option<u32> {
@@ -376,6 +399,9 @@ impl Host for LiveHost {
             if !acting.is_on() {
                 return Err("Act on Sessions is off.".to_string());
             }
+            if self.superseded() {
+                return Err("Cancelled.".to_string());
+            }
             if self.busy(&acting) {
                 return Err("The session started working. Try again.".to_string());
             }
@@ -406,6 +432,22 @@ impl Host for LiveHost {
     }
 }
 
+pub const PENDING_MAX_AGE_MS: i64 = 10 * 60 * 1_000;
+
+fn safe_to_respawn(
+    acting: &ActingOps,
+    files: &dyn JobFiles,
+    job: &str,
+    state: &std::path::Path,
+) -> bool {
+    let Some(agent) = files.row(job) else {
+        return false;
+    };
+    let working = agent.turn_running()
+        || (agent.group == AgentGroup::Working && files.restarted(&agent, now_ms()));
+    acting.is_on() && !working && status::tasks_in_flight(state) == Some(0)
+}
+
 pub fn reconcile(acting: &ActingOps) {
     if !acting.is_on() {
         return;
@@ -423,17 +465,31 @@ pub fn reconcile(acting: &ActingOps) {
             let job = entry.file_name().to_string_lossy().into_owned();
             let current = status::read_flags(&state);
             if current.as_ref() == Some(&pending.wanted) {
-                let busy = files.row(&job).is_some_and(|agent| {
-                    agent.turn_running()
-                        || (agent.group == AgentGroup::Working && files.restarted(&agent, now_ms()))
-                });
-                if busy {
-                    let _ = status::set_flags(&state, &pending.before);
-                } else {
+                let fresh = now_ms() - pending.at_ms <= PENDING_MAX_AGE_MS;
+                if fresh && safe_to_respawn(acting, files.as_ref(), &job, &state) {
                     let _ = acting.respawn(&job);
+                } else {
+                    let _ = status::set_flags(&state, &pending.before);
                 }
             }
             status::clear_pending(&state);
         }
     }
+}
+
+pub fn reconcile_when_acting_turns_on(acting: &Arc<ActingOps>) {
+    let weak = Arc::downgrade(acting);
+    acting.acting_switch().watch(Arc::new(move |on| {
+        if !on {
+            return;
+        }
+        let weak = weak.clone();
+        let _ = std::thread::Builder::new()
+            .name("chrome-reconcile".to_string())
+            .spawn(move || {
+                if let Some(acting) = weak.upgrade() {
+                    reconcile(&acting);
+                }
+            });
+    }));
 }

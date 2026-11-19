@@ -77,6 +77,7 @@ pub trait Host {
     fn cancelled(&mut self) -> bool {
         false
     }
+    fn set_cancel(&mut self, _cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) {}
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -89,10 +90,16 @@ pub const BACKOFF_MAX_MS: u64 = 30_000;
 
 struct Patience {
     since: Option<(Wait, u64)>,
+    first: Option<u64>,
     tries: u32,
 }
 
 impl Patience {
+    fn total(&mut self, now: u64) -> u64 {
+        let first = *self.first.get_or_insert(now);
+        now.saturating_sub(first)
+    }
+
     fn wait(&mut self, why: Wait, now: u64) -> Option<u64> {
         match self.since {
             Some((was, at)) if was == why => Some(now.saturating_sub(at)),
@@ -147,6 +154,7 @@ pub fn run(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) ->
 fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> Phase {
     let mut patience = Patience {
         since: None,
+        first: None,
         tries: 0,
     };
     let mut starts = 0;
@@ -157,7 +165,7 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
         if host.turn_running() {
             let now = host.now_ms();
             let waited = patience.wait(Wait::Turn, now).unwrap_or(0);
-            if waited >= cap(Wait::Turn) {
+            if waited >= cap(Wait::Turn) || patience.total(now) >= TURN_CAP_MS {
                 return needs(Need::Busy { why: Wait::Turn });
             }
             say(Phase::Waiting { why: Wait::Turn });
@@ -193,7 +201,7 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                 };
                 let now = host.now_ms();
                 let waited = patience.wait(why, now).unwrap_or(0);
-                if waited >= cap(why) {
+                if waited >= cap(why) || patience.total(now) >= TURN_CAP_MS {
                     return needs(Need::Busy { why });
                 }
                 say(Phase::Waiting { why });
@@ -352,6 +360,9 @@ fn restart(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) ->
         step: Step::Restarting,
     });
     if let Err(text) = host.restart(options.on) {
+        if host.cancelled() {
+            return Phase::Cancelled;
+        }
         return needs(Need::Failed { text });
     }
     settle(

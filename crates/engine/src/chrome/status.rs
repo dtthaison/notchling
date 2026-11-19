@@ -118,9 +118,12 @@ const SET_TRIES: usize = 4;
 
 pub fn set_flags(state: &Path, flags: &[String]) -> Result<(), RewriteError> {
     let mut last = RewriteError::Write("The session's file kept changing.".to_string());
-    for _ in 0..SET_TRIES {
+    for attempt in 0..SET_TRIES {
         match set_flags_once(state, flags) {
-            Err(RewriteError::Changed) => last = RewriteError::Changed,
+            Err(RewriteError::Changed) => {
+                last = RewriteError::Changed;
+                std::thread::sleep(std::time::Duration::from_millis(15 * (attempt as u64 + 1)));
+            }
             other => return other,
         }
     }
@@ -195,8 +198,14 @@ pub fn with_flags_text(text: &str, flags: &[String]) -> Option<String> {
     let list = serde_json::to_string(flags).ok()?;
     let out = format!("{}{}{}", &text[..open], list, &text[close..]);
     let parsed: Value = serde_json::from_str(&out).ok()?;
-    let back = parsed.get("respawnFlags")?.as_array()?;
-    (back.len() == flags.len()).then_some(out)
+    let back: Vec<&str> = parsed
+        .get("respawnFlags")?
+        .as_array()?
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<Vec<&str>>>()?;
+    let same = back.len() == flags.len() && back.iter().zip(flags).all(|(a, b)| *a == b.as_str());
+    same.then_some(out)
 }
 
 fn write_private(
@@ -264,6 +273,8 @@ fn set_flags_once(state: &Path, flags: &[String]) -> Result<(), RewriteError> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pending {
+    #[serde(default)]
+    pub at_ms: i64,
     pub on: bool,
     pub before: Vec<String>,
     pub wanted: Vec<String>,
@@ -302,14 +313,20 @@ pub fn permission_mode(transcript: &Path) -> Option<String> {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
     let text = String::from_utf8_lossy(&bytes);
-    text.lines().rev().find_map(|line| {
+    let last = text.lines().rev().find_map(|line| {
         let value: Value = serde_json::from_str(line).ok()?;
         if value.get("type")?.as_str()? != "permission-mode" {
             return None;
         }
-        let mode = value.get("permissionMode")?.as_str()?;
-        MODES.contains(&mode).then(|| mode.to_string())
-    })
+        Some(
+            value
+                .get("permissionMode")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        )
+    })?;
+    MODES.contains(&last.as_str()).then_some(last)
 }
 
 pub fn with_mode(flags: &[String], mode: &str) -> Vec<String> {

@@ -8,6 +8,13 @@ use crate::chat::chrome::{self, Act, Applied, Sheet};
 use crate::chat::data::Session;
 use crate::sheets::chrome_view::{ChromeChoice, ChromeView};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sent {
+    Start,
+    Poll,
+    Peek,
+}
+
 impl ChatView {
     pub(super) fn chrome_session(&self, id: &str) -> Option<Session> {
         self.sessions
@@ -52,7 +59,6 @@ impl ChatView {
             return true;
         }
         self.put_draft(&id, String::new(), cx);
-        self.set_attached(&id, &[], cx);
         let on = which == notchling_engine::chrome::command::Command::On;
         self.chrome_start(&id, on, false, cx);
         true
@@ -81,7 +87,7 @@ impl ChatView {
         self.use_chrome.begin(id, on, super::now_ms());
         self.use_chrome.last_poll_ms = super::now_ms();
         let row = id.to_owned();
-        self.chrome_send(Request::chrome(id, on, force), row, true, cx);
+        self.chrome_send(Request::chrome(id, on, force), row, Sent::Start, cx);
         cx.notify();
     }
 
@@ -90,10 +96,15 @@ impl ChatView {
             return;
         }
         self.use_chrome.asking.insert(id.to_owned());
-        self.chrome_send(Request::chrome_state(id, false), id.to_owned(), false, cx);
+        self.chrome_send(
+            Request::chrome_state(id, false),
+            id.to_owned(),
+            Sent::Peek,
+            cx,
+        );
     }
 
-    fn chrome_send(&mut self, request: Request, row: String, loud: bool, cx: &mut Context<Self>) {
+    fn chrome_send(&mut self, request: Request, row: String, sent: Sent, cx: &mut Context<Self>) {
         let actions = self.acts(cx).actions;
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -102,7 +113,7 @@ impl ChatView {
                 .await;
             this.update(cx, |view, cx| {
                 view.use_chrome.asking.remove(&row);
-                view.chrome_answered(&row, result, loud, cx);
+                view.chrome_answered(&row, result, sent, cx);
             })
             .ok();
         })
@@ -113,7 +124,7 @@ impl ChatView {
         &mut self,
         id: &str,
         result: Result<Value, String>,
-        loud: bool,
+        sent: Sent,
         cx: &mut Context<Self>,
     ) {
         match result {
@@ -131,12 +142,18 @@ impl ChatView {
                     }
                 }
             }
-            Err(message) => {
-                self.use_chrome.tasks.remove(id);
-                if loud {
+            Err(message) => match sent {
+                Sent::Start => {
+                    self.use_chrome.tasks.remove(id);
                     self.tools.error = Some(message);
                 }
-            }
+                Sent::Poll => {
+                    if self.use_chrome.poll_failed(id) {
+                        self.tools.error = Some(message);
+                    }
+                }
+                Sent::Peek => {}
+            },
         }
         cx.notify();
     }
@@ -164,7 +181,7 @@ impl ChatView {
         self.use_chrome.last_poll_ms = now;
         for id in self.use_chrome.active() {
             if self.use_chrome.asking.insert(id.clone()) {
-                self.chrome_send(Request::chrome_state(&id, false), id, true, cx);
+                self.chrome_send(Request::chrome_state(&id, false), id, Sent::Poll, cx);
             }
         }
     }
