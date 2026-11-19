@@ -106,6 +106,12 @@ cost-report-notworth-heading = Not worth changing
 cost-report-notworth-saving = { $title }: saves only about { $saving }
 # $title is a finding's name.
 cost-report-notworth-already = { $title }: already low
+# $title is a finding's name and $peak a count of helpers at the same time.
+cost-report-notworth-builders = { $title }: never more than { $peak }
+# $title is a finding's name and $limit a count of calls.
+cost-report-notworth-long = { $title }: no run went past { $limit } calls
+# $title is a finding's name.
+cost-report-notworth-reviews = { $title }: no review was repeated
 
 ## Not measurable
 

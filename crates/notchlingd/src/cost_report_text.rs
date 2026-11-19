@@ -241,12 +241,18 @@ pub fn render(reply: &Value) -> String {
         out.push(String::new());
         out.push(w::report_notworth_heading().to_string());
         for f in worthless {
-            let title = name_of(f.get("id").and_then(Value::as_str).unwrap_or(""));
+            let id = f.get("id").and_then(Value::as_str).unwrap_or("");
+            let title = name_of(id);
             out.push(format!(
                 "  {}",
-                match f.get("saving").and_then(Value::as_f64) {
-                    Some(s) => w::report_notworth_saving(&title, &money(s)),
-                    None => w::report_notworth_already(&title),
+                match (f.get("saving").and_then(Value::as_f64), id) {
+                    (Some(s), _) => w::report_notworth_saving(&title, &money(s)),
+                    (None, "many_builders") => {
+                        w::report_notworth_builders(&title, &count(ev(f, "peak_builders")))
+                    }
+                    (None, "long_runs") => w::report_notworth_long(&title, &count(LONG_RUN as f64)),
+                    (None, "repeated_reviews") => w::report_notworth_reviews(&title),
+                    (None, _) => w::report_notworth_already(&title),
                 }
             ));
         }

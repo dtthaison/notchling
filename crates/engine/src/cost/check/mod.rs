@@ -179,11 +179,34 @@ fn sort_findings(list: &mut [Finding]) {
     });
 }
 
+fn flagged(finding: &Finding) -> bool {
+    let any = |names: &[&str]| names.iter().any(|n| finding.count(n) > 0.0);
+    match finding.id {
+        "premium_subagents" => any(&["calls"]),
+        "repeated_reviews" => any(&["repeat_runs"]),
+        "cold_resumes" => any(&["main_rebuilds", "sub_rebuilds"]),
+        "model_switches" => any(&["switches"]),
+        "long_runs" => any(&["runs_over_limit"]),
+        "many_builders" => any(&["buckets_over_cap"]),
+        _ => false,
+    }
+}
+
+fn measured(finding: &Finding) -> bool {
+    let any = |names: &[&str]| names.iter().any(|n| finding.count(n) > 0.0);
+    match finding.id {
+        "repeated_reviews" => any(&["review_runs"]),
+        "long_runs" => any(&["sub_runs"]),
+        "many_builders" => any(&["peak_builders"]),
+        _ => false,
+    }
+}
+
 fn shown(finding: &Finding, total: Option<f64>) -> bool {
     match (finding.saving, total) {
         (Some(saving), Some(total)) => saving >= SHOW_FLOOR || saving >= SHOW_SHARE * total,
         (Some(saving), None) => saving >= SHOW_FLOOR,
-        (None, _) => finding.evidence.iter().any(|e| e.value > 0.0),
+        (None, _) => true,
     }
 }
 
@@ -212,9 +235,10 @@ pub fn analyse(window: &[Call], catalog: &Catalog, options: &Options) -> Report 
             .map(|(s, t)| s / t);
     }
     sort_findings(&mut all);
-    all.retain(|f| f.evidence.iter().any(|e| e.value > 0.0));
+    let (raised, quiet): (Vec<Finding>, Vec<Finding>) = all.into_iter().partition(flagged);
     let (findings, mut not_worth): (Vec<Finding>, Vec<Finding>) =
-        all.into_iter().partition(|f| shown(f, total));
+        raised.into_iter().partition(|f| shown(f, total));
+    not_worth.extend(quiet.into_iter().filter(measured));
     let (effort, effort_unknown) = findings::main_effort(&data);
     not_worth.extend(effort);
     sort_findings(&mut not_worth);

@@ -225,6 +225,15 @@ fn the_text_names_the_findings_and_labels_the_money() {
     assert!(text.contains("Opus or Fable on helper agents"), "{text}");
     assert!(text.contains("Cache rebuilt after an idle gap"), "{text}");
     assert!(text.contains("Where it goes"), "{text}");
+    assert!(
+        text.contains("Many builders at once: never more than 2"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Long helper runs and big contexts: no run went past 100 calls"),
+        "{text}"
+    );
+    assert!(!text.contains("saving unknown"), "{text}");
     assert!(text.contains("claude-opus-5-5"), "{text}");
     assert_eq!(shown(&reply, false), text);
     let parsed: Value = serde_json::from_str(&shown(&reply, true)).expect("json");

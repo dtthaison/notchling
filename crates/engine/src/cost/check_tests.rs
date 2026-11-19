@@ -648,3 +648,98 @@ fn from_transcripts_to_a_ranked_report() {
     let json = serde_json::to_value(&report).expect("json");
     assert_eq!(json["findings"][0]["id"], ids[0]);
 }
+
+fn quiet_helpers() -> Vec<Call> {
+    let mut calls = Vec::new();
+    for (n, agent) in ["a1", "a2"].into_iter().enumerate() {
+        for i in 0..8 {
+            calls.push(call(
+                &sub_of(agent, SONNET),
+                NOW - 5_000.0 + n as f64 * 40.0 + i as f64 * 20.0,
+                60_000,
+                0,
+                0,
+            ));
+        }
+    }
+    calls
+}
+
+#[test]
+fn a_finding_that_shows_nothing_wrong_is_not_a_change_to_make() {
+    let report = run(&quiet_helpers());
+    assert!(report.findings.is_empty(), "{:?}", report.findings);
+    let builders = report
+        .not_worth
+        .iter()
+        .find(|f| f.id == "many_builders")
+        .expect("measured, so listed");
+    assert_eq!(builders.saving, None);
+    assert_eq!(builders.count("peak_builders"), 2.0);
+    let long = report
+        .not_worth
+        .iter()
+        .find(|f| f.id == "long_runs")
+        .expect("measured, so listed");
+    assert_eq!(long.count("runs_over_limit"), 0.0);
+}
+
+#[test]
+fn a_lever_with_nothing_measured_is_left_out_everywhere() {
+    let calls = vec![call(&main_of(SONNET), NOW - 100.0, 1_000, 0, 0)];
+    let report = run(&calls);
+    for id in [
+        "many_builders",
+        "long_runs",
+        "repeated_reviews",
+        "premium_subagents",
+    ] {
+        assert!(finding(&report, id).is_none(), "{id}");
+    }
+}
+
+#[test]
+fn big_contexts_alone_do_not_raise_a_long_run_finding() {
+    let calls: Vec<Call> = (0..4)
+        .map(|i| {
+            call(
+                &sub_of("a1", SONNET),
+                NOW - 900.0 + i as f64 * 20.0,
+                200_000,
+                0,
+                0,
+            )
+        })
+        .collect();
+    let report = run(&calls);
+    assert!(report.findings.iter().all(|f| f.id != "long_runs"));
+    let long = finding(&report, "long_runs").expect("measured");
+    assert!(long.count("calls_over_150k") > 0.0);
+}
+
+#[test]
+fn a_saving_is_unknown_only_when_a_price_is_missing() {
+    let long_run = |model: &'static str| -> Vec<Call> {
+        (0..250)
+            .map(|i| {
+                call(
+                    &sub_of("a1", model),
+                    NOW - 20_000.0 + i as f64 * 20.0,
+                    40_000,
+                    0,
+                    0,
+                )
+            })
+            .collect()
+    };
+    let report = run(&long_run(SONNET));
+    assert!(report.findings.iter().all(|f| f.saving.is_some()));
+    let report = run(&long_run("claude-mystery-9"));
+    let long = report
+        .findings
+        .iter()
+        .find(|f| f.id == "long_runs")
+        .expect("raised");
+    assert_eq!(long.saving, None);
+    assert!(report.unknown.iter().any(|u| u.id == "price"));
+}
