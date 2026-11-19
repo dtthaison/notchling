@@ -18,7 +18,7 @@ use notchling_locale as t;
 use serde_json::{Map, Value};
 
 use super::agents::{Page, Tool};
-use super::agents_view::agents_page;
+use super::agents_view::{agents_page, OwnSections};
 use super::banner::Banners;
 use super::client_model::{self, ClientPart};
 use super::client_view::ClientHandlers;
@@ -755,11 +755,13 @@ impl Render for SettingsView {
             let handlers = self.client_handlers(cx);
             list = list.child(agents_page(
                 self.tool,
-                settings,
+                OwnSections {
+                    settings,
+                    chrome: self.chrome_section(a, cx),
+                },
                 &self.hooks,
                 self.client.as_ref(),
                 &handlers,
-                self.chrome_section(a, cx),
                 a,
                 cx,
             ));

@@ -26,19 +26,23 @@ fn header(tool: Tool, a: Appearance) -> Div {
         .child(label(tool.title(), TypeRole::Heading, Ink::Text, a))
 }
 
+pub struct OwnSections {
+    pub settings: Vec<Div>,
+    pub chrome: Div,
+}
+
 pub fn agents_page(
     tool: Tool,
-    settings: Vec<Div>,
+    own: OwnSections,
     hooks: &HooksShown,
     client: Option<&ClientPart>,
     handlers: &ClientHandlers,
-    chrome: Div,
     a: Appearance,
     cx: &App,
 ) -> Div {
-    let mut chrome = Some(chrome);
+    let mut chrome = Some(own.chrome);
     let mut page = div().flex().flex_col().gap(px(14.0)).child(header(tool, a));
-    let mut settings = Some(settings);
+    let mut settings = Some(own.settings);
     for section in tool.sections() {
         page = match section {
             Section::Settings => page.children(settings.take().unwrap_or_default()),
