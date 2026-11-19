@@ -4,6 +4,8 @@ pub mod input_box;
 #[cfg(test)]
 mod input_box_chips_tests;
 #[cfg(test)]
+mod input_box_guard_tests;
+#[cfg(test)]
 mod input_box_hint_tests;
 #[cfg(test)]
 mod input_box_invisible_tests;

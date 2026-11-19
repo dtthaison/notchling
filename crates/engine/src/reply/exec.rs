@@ -77,7 +77,9 @@ pub fn wait_attached(
 fn box_focused(pty: &mut dyn Pty) -> bool {
     let lines = pty.screen();
     let cursor = pty.cursor();
-    !input_box::starting(&lines, cursor) && input_box::focused(&lines, cursor)
+    let shades = pty.shades();
+    !input_box::starting(&lines, cursor)
+        && (input_box::focused(&lines, cursor) || input_box::cursor_drawn(&lines, &shades))
 }
 
 pub trait ScreenCheck {
@@ -414,7 +416,9 @@ impl Run<'_> {
         } else if self.check.dialog_open(&lines) {
             Shown::Dialog
         } else {
-            match input_box::read_shaded(&lines, cursor, &shades) {
+            match input_box::read_shaded(&lines, cursor, &shades)
+                .filter(|_| input_box::prompt_row(&lines))
+            {
                 Some(input) => {
                     let focused = input_box::focused(&lines, cursor)
                         || input_box::cursor_drawn(&lines, &shades);
@@ -495,6 +499,12 @@ impl Run<'_> {
         }
     }
 
+    fn highlight_in_box(&mut self) -> bool {
+        let lines = self.pty.screen();
+        let shades = self.pty.shades();
+        input_box::stray_highlight(&lines, &shades)
+    }
+
     fn await_prompt(&mut self, timeout_ms: u64) -> Result<(), Failure> {
         let start = self.pty.now_ms();
         let mut deadline = start + timeout_ms;
@@ -526,6 +536,9 @@ impl Run<'_> {
             if now >= deadline {
                 let lately = boxed.is_some_and(|at| now - at <= 2 * INPUT_POLL_MS);
                 match shown {
+                    Shown::Input(_, false) if self.highlight_in_box() => {
+                        return Err(Failure::NoInput)
+                    }
                     Shown::Input(..) => return Ok(()),
                     Shown::Starting => return Err(Failure::Timeout),
                     Shown::Other if lately && grace => {

@@ -441,23 +441,48 @@ fn bare(held: &[String]) -> bool {
     }
 }
 
+const HINT_AT: usize = 3;
+
+fn chip_in(text: &str) -> bool {
+    text.contains("[Image]")
+        || text.match_indices('[').any(|(at, _)| {
+            let tail = &text[at + 1..];
+            let inner = tail.split(']').next().unwrap_or(tail);
+            let inner: String = inner.chars().take(60).collect();
+            inner
+                .match_indices(" #")
+                .any(|(n, _)| inner[n + 2..].starts_with(|c: char| c.is_ascii_digit()))
+        })
+}
+
+fn marked(held: &[String]) -> bool {
+    held.first()
+        .and_then(|row| row.chars().next())
+        .is_some_and(|c| MARKS.contains(&c))
+}
+
 fn hinted(held: &[String], rows: &[Vec<Shade>]) -> bool {
-    if held.len() != rows.len() {
+    if held.len() != rows.len() || !marked(held) || chip_in(&held.join(" ")) {
         return false;
     }
-    let (mut faint, mut first) = (0, true);
+    let (mut faint, mut first, mut gap) = (0, true, false);
     for (n, (row, shades)) in held.iter().zip(rows).enumerate() {
+        let mut drawn = false;
         for (i, c) in row.chars().enumerate() {
-            if c.is_whitespace() || is_dropped(c) || (n == 0 && i == 0 && MARKS.contains(&c)) {
+            if c.is_whitespace() || is_dropped(c) || (n == 0 && i == 0) {
                 continue;
+            }
+            if gap || (first && (n > 0 || i > HINT_AT)) {
+                return false;
             }
             match (shades.get(i), first) {
                 (Some(Shade::Faint), _) => faint += 1,
                 (Some(Shade::Cursor), true) => {}
                 _ => return false,
             }
-            first = false;
+            (first, drawn) = (false, true);
         }
+        gap |= !drawn && !first;
     }
     faint > 0
 }
@@ -483,12 +508,35 @@ pub fn hint_shown(lines: &[String], shades: &[Vec<Shade>]) -> bool {
 }
 
 pub fn cursor_drawn(lines: &[String], shades: &[Vec<Shade>]) -> bool {
+    let Some((top, bottom)) = span(lines) else {
+        return false;
+    };
+    let rows = shades_of(shades, top, bottom);
+    let first = rows.first().map(Vec::as_slice).unwrap_or_default();
+    let runs = |cells: &[Shade]| {
+        cells
+            .iter()
+            .enumerate()
+            .filter(|(i, shade)| {
+                **shade == Shade::Cursor && (*i == 0 || cells[i - 1] != Shade::Cursor)
+            })
+            .count()
+    };
+    marked(&held_rows(lines, top, bottom))
+        && runs(first) == 1
+        && rows.iter().skip(1).all(|row| runs(row) == 0)
+}
+
+pub fn stray_highlight(lines: &[String], shades: &[Vec<Shade>]) -> bool {
     span(lines).is_some_and(|(top, bottom)| {
         shades_of(shades, top, bottom)
             .iter()
-            .flatten()
-            .any(|shade| *shade == Shade::Cursor)
+            .any(|row| row.contains(&Shade::Cursor))
     })
+}
+
+pub fn prompt_row(lines: &[String]) -> bool {
+    span(lines).is_some_and(|(top, bottom)| marked(&held_rows(lines, top, bottom)))
 }
 
 pub fn read(lines: &[String], cursor: Option<(usize, usize)>) -> Option<Input> {
@@ -502,6 +550,7 @@ pub fn read_shaded(
 ) -> Option<Input> {
     let (top, bottom) = span(lines)?;
     let mut held = held_rows(lines, top, bottom);
+    let styled = held.len() == shades_of(shades, top, bottom).len();
     if hinted(&held, shades_of(shades, top, bottom)) {
         held = vec![held[0]
             .chars()
@@ -509,7 +558,7 @@ pub fn read_shaded(
             .filter(|c| MARKS.contains(c))
             .collect()];
     }
-    let home = cursor.is_some_and(|(row, col)| row == top + 1 && col <= HOME_COL);
+    let home = !styled && cursor.is_some_and(|(row, col)| row == top + 1 && col <= HOME_COL);
     Some(Input {
         empty: home || bare(&held),
         held,
