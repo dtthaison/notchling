@@ -89,6 +89,10 @@ impl OrganizationsView {
         }
     }
 
+    fn detached(&self) -> bool {
+        matches!(&self.model.load, Load::Failed(why) if Some(why.as_str()) == Acting::Detached.message())
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let Some(actions) = self.actions.clone() else {
             return;
@@ -103,7 +107,9 @@ impl OrganizationsView {
                 .spawn(async move { actions.read(&request) })
                 .await;
             this.update(cx, |view, cx| {
-                view.model.finish(reply);
+                if view.model.finish(reply) {
+                    view.refresh(cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -291,14 +297,17 @@ impl Render for OrganizationsView {
                 a,
             ));
         }
+        if let Some(notice) = self.model.notice.as_ref().filter(|n| n.page) {
+            page = page.child(label(&notice.text, TypeRole::Label, Ink::Needs, a));
+        }
         match &self.model.load {
             Load::Failed(why) => {
-                page = page.child(label(
-                    &t::organizations::read_failed(why),
-                    TypeRole::Label,
-                    Ink::Needs,
-                    a,
-                ));
+                let text = if self.detached() {
+                    t::organizations::detached().to_owned()
+                } else {
+                    t::organizations::read_failed(why)
+                };
+                page = page.child(label(&text, TypeRole::Label, Ink::Needs, a));
             }
             Load::Loading => {
                 page = page.child(label(
@@ -317,7 +326,7 @@ impl Render for OrganizationsView {
         if self.model.editable() && self.model.load != Load::Loading {
             page = page.child(self.new_section(a, cx));
         }
-        if self.model.only_personal() && !self.model.rows.is_empty() {
+        if self.model.only_personal() && !self.model.rows.is_empty() && self.model.editable() {
             page = page.child(label(
                 t::organizations::only_personal(),
                 TypeRole::Meta,

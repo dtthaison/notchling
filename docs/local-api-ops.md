@@ -1029,7 +1029,7 @@ no op migrates a machines file.
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
 | `organizations.list` | app, quiet | `{}` | `{organizations: [{id, name, githubOwner, color, folders, personal, counts: {accounts, secrets, machines}}], colors, onlyPersonal, unreadable}` |
-| `organizations.create` | app | `{name, color?, githubOwner?}` | `{id}`; with only Personal it first marks every account, secret and machine as Personal's |
+| `organizations.create` | app | `{name, color?, githubOwner?}` | `{id}`; with only Personal it first marks every account and secret as Personal's (machines without a mark already count as Personal) |
 | `organizations.rename` | app | `{id, name}` | `{}` |
 | `organizations.color.set` | app | `{id, color}` | `{}` |
 | `organizations.folders.set` | app | `{id, folders: [path]}` | `{folders}`, the folders as stored |

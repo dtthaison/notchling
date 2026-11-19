@@ -410,7 +410,7 @@ impl OrganizationsView {
             .model
             .notice
             .as_ref()
-            .filter(|n| n.row.is_none())
+            .filter(|n| n.row.is_none() && !n.page)
             .map(|n| label(&n.text, TypeRole::Label, Ink::Needs, a));
         card(a)
             .p(px(SPACE[2]))

@@ -149,7 +149,6 @@ pub struct FolderEdit {
     pub id: String,
     pub drafts: Vec<String>,
     pub preview: Preview,
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -167,6 +166,7 @@ pub enum Open {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
     pub row: Option<String>,
+    pub page: bool,
     pub text: String,
 }
 
@@ -181,11 +181,13 @@ pub struct OrganizationsModel {
     pub new_color: Option<String>,
     pub home: String,
     pub reading: bool,
+    pub again: bool,
 }
 
 impl OrganizationsModel {
     pub fn start(&mut self) -> bool {
         if self.reading {
+            self.again = true;
             return false;
         }
         self.reading = true;
@@ -195,8 +197,11 @@ impl OrganizationsModel {
         true
     }
 
-    pub fn finish(&mut self, reply: Result<Value, String>) {
+    pub fn finish(&mut self, reply: Result<Value, String>) -> bool {
         self.reading = false;
+        if std::mem::take(&mut self.again) {
+            return true;
+        }
         match reply {
             Err(why) => self.load = Load::Failed(why),
             Ok(value) => {
@@ -222,6 +227,7 @@ impl OrganizationsModel {
                 self.forget_gone_rows();
             }
         }
+        false
     }
 
     fn forget_gone_rows(&mut self) {
@@ -260,7 +266,7 @@ impl OrganizationsModel {
     }
 
     pub fn editable(&self) -> bool {
-        self.unreadable.is_none()
+        self.unreadable.is_none() && !matches!(self.load, Load::Failed(_))
     }
 
     pub fn toggle_menu(&mut self, id: &str) {
@@ -299,7 +305,6 @@ impl OrganizationsModel {
             id: id.to_owned(),
             drafts,
             preview: Preview::Ready(Notes::default()),
-            error: None,
         });
     }
 
@@ -310,6 +315,7 @@ impl OrganizationsModel {
             Some(text) => {
                 self.notice = Some(Notice {
                     row: Some(id.to_owned()),
+                    page: false,
                     text,
                 })
             }
@@ -322,23 +328,37 @@ impl OrganizationsModel {
 
     pub fn fail(&mut self, row: Option<&str>, message: &str, data: Option<&Value>) {
         let subject = row.map(|id| self.name_of(id)).unwrap_or_default();
+        if matches!(self.open, Open::ConfirmDelete(_)) {
+            self.open = Open::Nothing;
+        }
+        let gone = Self::first_problem(data)
+            .and_then(|p| p.get("kind"))
+            .and_then(Value::as_str)
+            == Some("id_unknown");
         self.notice = Some(Notice {
-            row: row.map(str::to_owned),
+            row: row.filter(|_| !gone).map(str::to_owned),
+            page: gone,
             text: self.failure_text(message, data, &subject),
         });
     }
 
-    pub fn failure_text(&self, message: &str, data: Option<&Value>, subject: &str) -> String {
-        let problem = data
-            .and_then(|d| d.get("problems"))
+    fn first_problem(data: Option<&Value>) -> Option<&Value> {
+        data.and_then(|d| d.get("problems"))
             .and_then(Value::as_array)
-            .and_then(|p| p.first());
-        match problem {
+            .and_then(|p| p.first())
+    }
+
+    pub fn failure_text(&self, message: &str, data: Option<&Value>, subject: &str) -> String {
+        match Self::first_problem(data) {
             Some(problem) => self.problem_text(problem, subject),
             None if data.and_then(|d| d.get("kind")).and_then(Value::as_str)
                 == Some("unreadable") =>
             {
-                t::organizations::unreadable(message)
+                let why = data
+                    .and_then(|d| d.get("why"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(message);
+                t::organizations::unreadable(why)
             }
             None => t::organizations::error_failed(message),
         }
@@ -402,7 +422,6 @@ impl OrganizationsModel {
         }
         edit.drafts.push(typed.to_owned());
         edit.preview = Preview::Checking;
-        edit.error = None;
         true
     }
 
@@ -415,7 +434,6 @@ impl OrganizationsModel {
         }
         edit.drafts.remove(index);
         edit.preview = Preview::Checking;
-        edit.error = None;
         true
     }
 

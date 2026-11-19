@@ -61,11 +61,13 @@ pub fn preview(
         let Some(path) = expand(folder, look.home) else {
             continue;
         };
+        let path = (look.resolve)(&path).unwrap_or(path);
         for org in doc.organizations.iter().filter(|o| o.id != id) {
             for claimed in &org.folders {
                 let Some(other) = expand(claimed, look.home) else {
                     continue;
                 };
+                let other = (look.resolve)(&other).unwrap_or(other);
                 let relation = if within(&path, &other, look.fold) {
                     Relation::Inside
                 } else if within(&other, &path, look.fold) {

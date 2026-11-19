@@ -144,7 +144,7 @@ pub fn fail(error: EditError) -> ApiError {
             ErrorCode::Failed,
             format!("Organizations can't be read, so nothing was changed ({why})"),
         )
-        .with_data(json!({"kind": "unreadable"})),
+        .with_data(json!({"kind": "unreadable", "why": why})),
         EditError::Problems(problems) => {
             let first = problems
                 .first()

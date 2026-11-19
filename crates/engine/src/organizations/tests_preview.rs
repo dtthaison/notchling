@@ -182,3 +182,31 @@ fn an_unreadable_document_gives_no_preview() {
     assert!(matches!(err, EditError::Unreadable(_)));
     let _ = Kind::Claude;
 }
+
+#[cfg(unix)]
+#[test]
+fn a_folder_reached_through_a_link_overlaps_the_folder_it_links_to() {
+    let rig = Rig::new("preview-symlink");
+    let home = rig.tmp.path("home");
+    let real = rig.tmp.path("real/aptus");
+    std::fs::create_dir_all(real.join("vendor")).unwrap();
+    std::fs::create_dir_all(home.join("work")).unwrap();
+    std::os::unix::fs::symlink(&real, home.join("work/aptus")).unwrap();
+    let orgs = rig.orgs.clone().with_home(&home);
+    orgs.create("AptusFIT", None, None).unwrap();
+    orgs.create("Acme", None, None).unwrap();
+    orgs.set_folders("aptusfit", &["~/work/aptus".to_owned()])
+        .unwrap();
+    let wanted = [real.join("vendor").to_string_lossy().into_owned()];
+    let out = orgs.preview_folders("acme", &wanted, &[]).unwrap();
+    assert_eq!(out.problem, None);
+    assert_eq!(
+        out.overlaps,
+        [Overlap {
+            folder: wanted[0].clone(),
+            organization: "aptusfit".into(),
+            other: "~/work/aptus".into(),
+            relation: Relation::Inside,
+        }]
+    );
+}

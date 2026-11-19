@@ -47,9 +47,6 @@ organizations-save = Save
 # Button that closes a form without changing anything.
 organizations-cancel = Cancel
 
-# Tooltip of the button that opens an organization's menu.
-organizations-more = More
-
 ## Row
 
 # The line under an organization's name; $accounts, $secrets and $machines are the three counts below.
@@ -92,11 +89,6 @@ organizations-menu-folders = Folders…
 
 # Menu item: remove the organization.
 organizations-menu-delete = Delete Organization
-
-## Rename
-
-# Title of the form that renames an organization; $name is its current name.
-organizations-rename-title = Rename { $name }
 
 ## Colour
 
@@ -143,9 +135,6 @@ organizations-folders-placeholder = Folder, such as ~/work/acme
 
 # Button that adds the typed folder to the list.
 organizations-folders-add = Add
-
-# Tooltip of the button that removes a folder from the list.
-organizations-folders-remove = Remove folder
 
 # Shown in the folder editor while the list is empty.
 organizations-folders-empty = No folders yet

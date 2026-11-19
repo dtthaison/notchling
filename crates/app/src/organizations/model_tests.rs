@@ -61,7 +61,6 @@ fn an_unreadable_store_blocks_editing_and_says_why() {
 fn a_failed_read_keeps_the_rows_already_shown_and_reads_again_later() {
     let mut m = model(Shown::List);
     assert!(m.start());
-    assert!(!m.start());
     m.finish(Err("daemon busy".into()));
     assert_eq!(m.load, Load::Failed("daemon busy".into()));
     assert_eq!(m.rows.len(), 3);
@@ -315,6 +314,14 @@ fn every_problem_the_daemon_names_has_a_plain_sentence() {
         ),
         "Organizations can't be read, so nothing here can be changed. Organizations can't be read"
     );
+    assert_eq!(
+        m.failure_text(
+            "Organizations can't be read, so nothing was changed (version 9)",
+            Some(&json!({"kind": "unreadable", "why": "version 9"})),
+            ""
+        ),
+        "Organizations can't be read, so nothing here can be changed. version 9"
+    );
 }
 
 #[test]
@@ -374,4 +381,58 @@ fn the_kit_palette_and_the_engine_list_name_the_same_colours_in_the_same_order()
         assert_ne!(colour_name(name), name, "{name} has no word");
     }
     assert_eq!(colour_name("mauve"), "mauve");
+}
+
+#[test]
+fn a_gone_organization_leaves_a_page_notice_that_a_refresh_keeps() {
+    let mut m = model(Shown::List);
+    m.fail(
+        Some("acme-studio"),
+        "x",
+        Some(&json!({"problems": [{"kind": "id_unknown", "id": "acme-studio"}]})),
+    );
+    let notice = m.notice.clone().unwrap();
+    assert!(notice.page);
+    assert_eq!(notice.row, None);
+    assert_eq!(notice.text, t::organizations::error_gone());
+    assert!(m.start());
+    m.finish(Ok(reply(Shown::One)));
+    assert_eq!(m.notice, Some(notice));
+}
+
+#[test]
+fn a_failed_first_read_offers_no_editing() {
+    let mut m = OrganizationsModel::default();
+    assert!(m.start());
+    m.finish(Err("daemon busy".into()));
+    assert!(!m.editable());
+    assert!(m.start());
+    m.finish(Ok(reply(Shown::One)));
+    assert!(m.editable());
+}
+
+#[test]
+fn a_read_asked_for_while_one_is_in_flight_drops_the_older_answer_and_reads_again() {
+    let mut m = OrganizationsModel::default();
+    assert!(m.start());
+    assert!(!m.start());
+    assert!(m.finish(Ok(reply(Shown::One))));
+    assert!(m.rows.is_empty());
+    assert!(m.start());
+    assert!(!m.finish(Ok(reply(Shown::List))));
+    assert_eq!(m.rows.len(), 3);
+    assert!(!m.again);
+}
+
+#[test]
+fn a_failed_delete_closes_the_confirm_and_keeps_the_error() {
+    let mut m = model(Shown::List);
+    m.open = Open::ConfirmDelete("acme-studio".into());
+    m.fail(
+        Some("acme-studio"),
+        "x",
+        Some(&json!({"problems": [{"kind": "not_empty", "counts": {"accounts": 1}}]})),
+    );
+    assert_eq!(m.open, Open::Nothing);
+    assert_eq!(m.notice.unwrap().row.as_deref(), Some("acme-studio"));
 }
