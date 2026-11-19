@@ -7,15 +7,17 @@ pub enum Page {
     Organizations,
     Agents,
     Skills,
+    Costs,
     Activity,
 }
 
 impl Page {
-    pub const ALL: [Page; 5] = [
+    pub const ALL: [Page; 6] = [
         Page::General,
         Page::Organizations,
         Page::Agents,
         Page::Skills,
+        Page::Costs,
         Page::Activity,
     ];
 
@@ -25,6 +27,7 @@ impl Page {
             Page::Organizations => t::organizations::page(),
             Page::Agents => t::settings::page_agents(),
             Page::Skills => t::settings::page_skills(),
+            Page::Costs => t::settings::page_costs(),
             Page::Activity => t::settings::page_activity(),
         }
     }
@@ -35,6 +38,7 @@ impl Page {
             Page::Organizations => "organizations",
             Page::Agents => "agents",
             Page::Skills => "skills",
+            Page::Costs => "costs",
             Page::Activity => "activity",
         }
     }
