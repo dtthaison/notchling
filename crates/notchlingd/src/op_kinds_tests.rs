@@ -34,7 +34,9 @@ fn rig(tag: &str) -> (Root, Wired, Ops) {
     (Root(root), wired, ops)
 }
 
-const OWN_QUIET: [&str; 10] = [
+const OWN_QUIET: [&str; 12] = [
+    ops::ORGANIZATIONS_LIST,
+    ops::ORGANIZATIONS_FOLDERS_PREVIEW,
     ops::CATALOG_ROLES,
     ops::GIT_STATUS,
     ops::GIT_DIFF,
@@ -47,7 +49,12 @@ const OWN_QUIET: [&str; 10] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 113] = [
+const NEVER_QUIET: [&str; 118] = [
+    ops::ORGANIZATIONS_CREATE,
+    ops::ORGANIZATIONS_RENAME,
+    ops::ORGANIZATIONS_COLOR_SET,
+    ops::ORGANIZATIONS_FOLDERS_SET,
+    ops::ORGANIZATIONS_DELETE,
     ops::HELLO,
     ops::LOG_VERIFY,
     ops::LOG_CHAIN_START,

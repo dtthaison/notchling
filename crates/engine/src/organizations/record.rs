@@ -7,6 +7,9 @@ pub const VERSION: i64 = 1;
 pub const PERSONAL_ID: &str = "personal";
 pub const PERSONAL_NAME: &str = "Personal";
 pub const DEFAULT_COLOR: &str = "grey";
+pub const COLORS: [&str; 9] = [
+    "grey", "orange", "yellow", "lime", "teal", "blue", "purple", "pink", "red",
+];
 pub const NAME_MAX: usize = 40;
 const OWNER_MAX: usize = 39;
 const COLOR_MAX: usize = 20;
@@ -222,7 +225,7 @@ impl Document {
             problems.push(Problem::NameTaken(name.clone()));
         }
         let color = color.unwrap_or(DEFAULT_COLOR).trim().to_owned();
-        if !valid_color(&color) {
+        if !known_color(&color) {
             problems.push(Problem::ColorInvalid(color.clone()));
         }
         let owner = github_owner.map(str::trim).filter(|o| !o.is_empty());
@@ -267,7 +270,7 @@ impl Document {
 
     pub fn set_color(&mut self, id: &str, color: &str) -> Result<(), Problem> {
         let color = color.trim();
-        if !valid_color(color) {
+        if !known_color(color) {
             return Err(Problem::ColorInvalid(color.into()));
         }
         self.find_mut(id)?.color = color.into();
@@ -398,6 +401,10 @@ pub fn valid_color(color: &str) -> bool {
         && color
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+pub fn known_color(color: &str) -> bool {
+    COLORS.contains(&color)
 }
 
 pub fn valid_owner(owner: &str) -> bool {

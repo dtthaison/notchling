@@ -2,6 +2,7 @@ use super::backup;
 use super::folders;
 use super::kinds::{self, Kind, FIELD, KINDS};
 use super::migrate::MigrateError;
+use super::preview::{self, FolderPreview, Lookup};
 use super::record::{Counts, Document, MachineSettings, Problem, DOC};
 use super::view::{Resolved, State, View};
 use crate::machines::registry::{self, RegistryFiles, RegistryState, REGISTRY_DOC};
@@ -189,6 +190,28 @@ impl Organizations {
     pub fn set_folders(&self, id: &str, folders: &[String]) -> Result<(), EditError> {
         let key = self.folder_key();
         self.edit(|doc| doc.set_folders_with(id, folders, &key).map_err(|p| vec![p]))
+    }
+
+    pub fn preview_folders(
+        &self,
+        id: &str,
+        wanted: &[String],
+        sessions: &[PathBuf],
+    ) -> Result<FolderPreview, EditError> {
+        let doc = match self.state() {
+            State::Loaded(doc) => doc,
+            State::Missing => Document::personal_only(),
+            State::Unreadable(why) => return Err(EditError::Unreadable(why)),
+        };
+        let home = self.home.clone().unwrap_or_else(|| PathBuf::from("/"));
+        let key = self.folder_key();
+        let look = Lookup {
+            home: &home,
+            resolve: &folders::real,
+            fold: folders::folds_case(),
+            key: &key,
+        };
+        Ok(preview::preview(&doc, id, wanted, sessions, &look))
     }
 
     pub fn set_machine_settings(
