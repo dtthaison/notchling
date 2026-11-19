@@ -152,6 +152,12 @@ impl ActingOps {
                 None,
                 self.account_of(text("to_config_dir").as_deref()),
             ),
+            ops::SESSION_COMMAND
+                if text("command")
+                    .is_some_and(|c| notchling_engine::chrome::command::is_chrome(&c)) =>
+            {
+                return None
+            }
             ops::SESSION_COMMAND => (
                 ControlAction::SlashCommand,
                 text("command").as_deref().and_then(word_of),
@@ -168,6 +174,17 @@ impl ActingOps {
             folder,
             account,
         })
+    }
+
+    pub(crate) fn note_chrome(&self, agent: &Agent, word: &str, result: DoneOrFailed) {
+        let target = Target {
+            action: ControlAction::SlashCommand,
+            command: Some(word.to_string()),
+            session: Some(session_ref(agent)),
+            folder: None,
+            account: None,
+        };
+        self.note_control(&target, result, false);
     }
 
     pub(crate) fn note_control(&self, target: &Target, result: DoneOrFailed, commit: bool) -> bool {

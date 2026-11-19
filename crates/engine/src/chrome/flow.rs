@@ -8,6 +8,7 @@ pub const BOX_CAP_MS: u64 = 10 * 60 * 1_000;
 pub const QUESTION_CAP_MS: u64 = 10 * 60 * 1_000;
 pub const CONNECT_LOOKS: usize = 6;
 pub const START_TRIES: usize = 3;
+pub const RECONNECT_AFTER: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +39,7 @@ pub enum Done {
 #[serde(tag = "need", rename_all = "snake_case")]
 pub enum Need {
     Tasks { count: u32 },
+    TasksUnknown,
     NoExtension,
     NotConnected,
     TurnedOffInMcp,
@@ -53,21 +55,28 @@ pub enum Phase {
     Working { step: Step },
     Done { result: Done },
     NeedsYou { need: Need },
+    Cancelled,
 }
 
 impl Phase {
     pub fn is_over(&self) -> bool {
-        matches!(self, Phase::Done { .. } | Phase::NeedsYou { .. })
+        matches!(
+            self,
+            Phase::Done { .. } | Phase::NeedsYou { .. } | Phase::Cancelled
+        )
     }
 }
 
 pub trait Host {
     fn turn_running(&mut self) -> bool;
-    fn tasks_in_flight(&mut self) -> u32;
+    fn tasks_in_flight(&mut self) -> Option<u32>;
     fn look(&mut self, goal: Goal) -> Result<Report, Refusal>;
     fn restart(&mut self, on: bool) -> Result<(), String>;
     fn sleep(&mut self, ms: u64);
     fn now_ms(&mut self) -> u64;
+    fn cancelled(&mut self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -76,8 +85,11 @@ pub struct Options {
     pub force: bool,
 }
 
+pub const BACKOFF_MAX_MS: u64 = 30_000;
+
 struct Patience {
     since: Option<(Wait, u64)>,
+    tries: u32,
 }
 
 impl Patience {
@@ -86,13 +98,24 @@ impl Patience {
             Some((was, at)) if was == why => Some(now.saturating_sub(at)),
             _ => {
                 self.since = Some((why, now));
+                self.tries = 0;
                 Some(0)
             }
         }
     }
 
+    fn pause(&mut self, why: Wait) -> u64 {
+        let tries = self.tries;
+        self.tries += 1;
+        match why {
+            Wait::Turn => POLL_MS,
+            _ => (POLL_MS << tries.min(8)).min(BACKOFF_MAX_MS),
+        }
+    }
+
     fn clear(&mut self) {
         self.since = None;
+        self.tries = 0;
     }
 }
 
@@ -122,9 +145,15 @@ pub fn run(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) ->
 }
 
 fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> Phase {
-    let mut patience = Patience { since: None };
+    let mut patience = Patience {
+        since: None,
+        tries: 0,
+    };
     let mut starts = 0;
     let report = loop {
+        if host.cancelled() {
+            return Phase::Cancelled;
+        }
         if host.turn_running() {
             let now = host.now_ms();
             let waited = patience.wait(Wait::Turn, now).unwrap_or(0);
@@ -168,11 +197,14 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                     return needs(Need::Busy { why });
                 }
                 say(Phase::Waiting { why });
-                host.sleep(POLL_MS);
+                host.sleep(patience.pause(why));
             }
         }
     };
     patience.clear();
+    if host.cancelled() {
+        return Phase::Cancelled;
+    }
     decide(host, options, report, say)
 }
 
@@ -188,7 +220,7 @@ fn decide(
         (true, Link::Enabled) => Phase::Done {
             result: Done::AlreadyOn,
         },
-        (true, Link::Connecting) => settle(host, options, menu.extension, say, false),
+        (true, Link::Connecting) => settle(host, options, menu.extension, say, Reconnecting::May),
         (true, Link::NotConnected) => reconnect(host, menu.extension, say),
         (true, Link::NotEnabled) => restart(host, options, say),
         (true, Link::TurnedOffInMcp) => needs(Need::TurnedOffInMcp),
@@ -215,7 +247,7 @@ fn reconnect(host: &mut dyn Host, extension: Extension, say: &mut dyn FnMut(Phas
             },
             report.menu.extension,
             say,
-            true,
+            Reconnecting::Done,
         ),
         Err(Refusal::Unavailable) => needs(missing(extension)),
         Err(refusal) => needs(Need::Failed {
@@ -224,15 +256,27 @@ fn reconnect(host: &mut dyn Host, extension: Extension, say: &mut dyn FnMut(Phas
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reconnecting {
+    May,
+    Restarted,
+    Done,
+}
+
 fn settle(
     host: &mut dyn Host,
     options: Options,
     extension: Extension,
     say: &mut dyn FnMut(Phase),
-    reconnected: bool,
+    how: Reconnecting,
 ) -> Phase {
     let mut extension = extension;
+    let mut opened = false;
+    let reconnected = how != Reconnecting::May;
     for look in 0..CONNECT_LOOKS {
+        if host.cancelled() {
+            return Phase::Cancelled;
+        }
         if look > 0 || reconnected {
             host.sleep(POLL_MS);
         }
@@ -241,8 +285,14 @@ fn settle(
         });
         match host.look(Goal::Read) {
             Ok(report) => {
+                opened = true;
                 extension = report.menu.extension;
                 match (options.on, report.menu.link) {
+                    (true, Link::NotConnected)
+                        if look >= RECONNECT_AFTER && how != Reconnecting::Done =>
+                    {
+                        return reconnect(host, extension, say);
+                    }
                     (true, Link::Enabled) => {
                         return Phase::Done {
                             result: if reconnected {
@@ -274,7 +324,11 @@ fn settle(
             }
         }
     }
-    if options.on {
+    if options.on && !opened {
+        needs(Need::Failed {
+            text: Refusal::Starting.to_string(),
+        })
+    } else if options.on {
         needs(missing(extension))
     } else {
         needs(Need::Failed {
@@ -284,9 +338,15 @@ fn settle(
 }
 
 fn restart(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> Phase {
-    let tasks = host.tasks_in_flight();
-    if tasks > 0 && !options.force {
-        return needs(Need::Tasks { count: tasks });
+    if !options.force {
+        match host.tasks_in_flight() {
+            None => return needs(Need::TasksUnknown),
+            Some(0) => {}
+            Some(count) => return needs(Need::Tasks { count }),
+        }
+    }
+    if host.cancelled() {
+        return Phase::Cancelled;
     }
     say(Phase::Working {
         step: Step::Restarting,
@@ -294,5 +354,11 @@ fn restart(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) ->
     if let Err(text) = host.restart(options.on) {
         return needs(Need::Failed { text });
     }
-    settle(host, options, Extension::Unknown, say, true)
+    settle(
+        host,
+        options,
+        Extension::Unknown,
+        say,
+        Reconnecting::Restarted,
+    )
 }

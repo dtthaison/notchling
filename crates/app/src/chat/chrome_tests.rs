@@ -132,7 +132,7 @@ fn the_notes_say_what_is_happening_in_plain_words() {
             },
             true
         ),
-        "Turning on Chrome…"
+        "Turning on Chrome… the session restarts if it has to, and the conversation is kept"
     );
     assert_eq!(
         note(
@@ -141,7 +141,7 @@ fn the_notes_say_what_is_happening_in_plain_words() {
             },
             false
         ),
-        "Turning off Chrome…"
+        "Turning off Chrome… the session restarts if it has to, and the conversation is kept"
     );
     assert!(note(
         Phase::Working {
@@ -191,7 +191,10 @@ fn chrome_already_on_is_a_note_and_never_a_sheet() {
 fn chrome_off_turns_on_with_progress_and_no_sheet() {
     let mut state = State::default();
     state.begin("s1", true, 10);
-    assert_eq!(state.note("s1", 11).as_deref(), Some("Turning on Chrome…"));
+    assert_eq!(
+        state.note("s1", 11).as_deref(),
+        Some("Turning on Chrome… the session restarts if it has to, and the conversation is kept")
+    );
     assert_eq!(state.active(), vec!["s1".to_owned()]);
     let restarting = status(
         json!({"phase": "working", "step": "restarting", "on": true, "since_ms": 12}),
@@ -290,4 +293,155 @@ fn the_help_lines_say_install_sign_in_and_one_profile() {
     assert!(install.contains("Chrome Web Store"));
     assert!(account.contains("same Claude account"));
     assert!(profiles.contains("Several Chrome profiles"));
+}
+
+#[test]
+fn turning_off_with_background_work_offers_turn_off_anyway_not_turn_on() {
+    let off = |need: Need| Sheet {
+        session: "s1".into(),
+        on: Some(true),
+        wanted_on: false,
+        need: Some(need),
+    };
+    assert_eq!(
+        off(Need::Tasks { count: 1 }).acts(),
+        vec![Act::TurnOffAnyway, Act::TryAgain]
+    );
+    assert_eq!(
+        off(Need::TasksUnknown).acts(),
+        vec![Act::TurnOffAnyway, Act::TryAgain]
+    );
+    assert_eq!(Act::TurnOffAnyway.label(), "Turn Off Anyway");
+    let on = Sheet {
+        wanted_on: true,
+        ..off(Need::TasksUnknown)
+    };
+    assert_eq!(on.acts(), vec![Act::TurnOnAnyway, Act::TryAgain]);
+    assert!(on.problem().unwrap().contains("can't tell"));
+}
+
+#[test]
+fn the_sheet_never_says_on_above_a_problem_that_means_it_is_not() {
+    let mut state = State::default();
+    state.begin("s1", true, 0);
+    let needs = status(
+        json!({"phase": "needs_you", "need": {"need": "not_connected"}, "on": true, "since_ms": 9}),
+        Some(true),
+    );
+    let Applied::Needs(sheet) = state.apply("s1", &needs, 10) else {
+        panic!("the sheet opens");
+    };
+    assert_eq!(sheet.on, Some(false));
+    assert_eq!(sheet.status(), "Off for this session");
+    assert_eq!(state.on.get("s1"), Some(&false));
+    state.begin("s1", false, 20);
+    let tasks = status(
+        json!({"phase": "needs_you", "need": {"need": "tasks", "count": 2}, "on": false, "since_ms": 9}),
+        Some(true),
+    );
+    let Applied::Needs(sheet) = state.apply("s1", &tasks, 30) else {
+        panic!("the sheet opens");
+    };
+    assert_eq!(sheet.on, Some(true));
+    assert_eq!(state.on.get("s1"), Some(&true));
+}
+
+#[test]
+fn a_finished_task_sets_the_checkmark_from_its_result_even_when_nothing_was_detected() {
+    let mut state = State::default();
+    let done = status(
+        json!({"phase": "done", "result": "already_on", "on": true, "since_ms": 1}),
+        None,
+    );
+    assert_eq!(state.apply("s1", &done, 1), Applied::Finished);
+    assert_eq!(state.on.get("s1"), Some(&true));
+    let off = status(
+        json!({"phase": "done", "result": "off", "on": false, "since_ms": 1}),
+        Some(true),
+    );
+    assert_eq!(state.apply("s1", &off, 2), Applied::Finished);
+    assert_eq!(state.on.get("s1"), Some(&false));
+}
+
+#[test]
+fn a_cancelled_task_ends_quietly_and_is_acknowledged() {
+    let mut state = State::default();
+    state.begin("s1", true, 0);
+    let cancelled = status(
+        json!({"phase": "cancelled", "on": true, "since_ms": 1}),
+        Some(false),
+    );
+    assert_eq!(state.apply("s1", &cancelled, 5), Applied::Finished);
+    assert_eq!(state.note("s1", 6), None);
+    assert!(state.active().is_empty());
+}
+
+fn base_commands() -> Vec<notchling_engine::control::slash::SlashCommand> {
+    notchling_engine::control::slash::built_ins()
+}
+
+#[test]
+fn typing_a_slash_suggests_chrome_and_chrome_off_for_sessions_notchling_can_restart() {
+    use super::chrome::{commands_for, spaced, suggestions};
+    use super::slash_menu::SlashMenu;
+    let job = session(Tool::Claude, agent(AgentTarget::Job("j1".into())));
+    let commands = commands_for(&job, &base_commands());
+    let menu = SlashMenu::default();
+    let names = |text: &str| -> Vec<String> {
+        menu.rows(text, &commands)
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    };
+    assert_eq!(names("/chr"), ["chrome", "chrome off"]);
+    assert_eq!(names("/chrome"), ["chrome", "chrome off"]);
+    assert!(names("/").len() <= super::slash_menu::ROWS);
+    let rows = menu.rows("/chrome", &commands);
+    assert_eq!(rows[0].description, "Turn on Chrome for this session");
+    assert_eq!(rows[1].description, "Turn off Chrome for this session");
+    assert_eq!(suggestions().len(), 2);
+    assert_eq!(
+        commands.iter().filter(|c| c.name == "chrome").count(),
+        1,
+        "the built-in entry is replaced, not doubled"
+    );
+    assert_eq!(spaced("/chrome o").len(), 1);
+    assert_eq!(spaced("/chrome o")[0].name, "chrome off");
+    assert!(spaced("/chrome ").is_empty());
+    assert!(spaced("/chrome off").is_empty());
+    assert!(spaced("/chrome off ").is_empty());
+    assert!(spaced("/chrome x").is_empty());
+    assert!(spaced("/chromebook o").is_empty());
+}
+
+#[test]
+fn other_sessions_do_not_see_chrome_in_the_list() {
+    use super::chrome::commands_for;
+    use super::slash_menu::SlashMenu;
+    let menu = SlashMenu::default();
+    let hidden = |s: Session| -> usize {
+        let commands = commands_for(&s, &base_commands());
+        menu.rows("/chr", &commands)
+            .into_iter()
+            .filter(|c| c.name.starts_with("chrome"))
+            .count()
+    };
+    assert_eq!(
+        hidden(session(Tool::Claude, agent(AgentTarget::Process(7)))),
+        0
+    );
+    let mut remote = agent(AgentTarget::Job("j1".into()));
+    remote.node = Some(NodeRef {
+        id: "n1".into(),
+        name: "m2".into(),
+        online: true,
+    });
+    assert_eq!(hidden(session(Tool::Claude, remote)), 0);
+    let mut headless = agent(AgentTarget::Job("j1".into()));
+    headless.headless = true;
+    assert_eq!(hidden(session(Tool::Claude, headless)), 0);
+    assert_eq!(
+        hidden(session(Tool::Claude, agent(AgentTarget::Job("j1".into())))),
+        2
+    );
 }

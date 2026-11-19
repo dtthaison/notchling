@@ -1,15 +1,19 @@
 use crate::acting_ops::{now_ms, ActingOps};
+use crate::outbox_courier::live_files;
 use notchling_engine::chrome::drive::{self, Goal, Refusal, Report};
 use notchling_engine::chrome::flow::{self, Host, Options, Phase, Step};
 use notchling_engine::chrome::status::{self, Detected};
 use notchling_engine::control::{claude_json_for, job_state_path, plan_respawn};
 use notchling_engine::reply::keys::timing::{DETACH_QUIET_MS, DETACH_TIMEOUT_MS};
-use notchling_engine::sessions::{Agent, AgentTarget};
+use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
+use notchling_events::kinds::choices::DoneOrFailed;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::Duration;
+
+const TIMED_OUT: &str = "didn't finish in";
 
 pub trait Hosts: Send + Sync {
     fn host(&self, agent: &Agent) -> Box<dyn Host + Send>;
@@ -22,9 +26,21 @@ struct Task {
     phase: Phase,
     since_ms: i64,
     serial: u64,
+    cancel: Arc<AtomicBool>,
+}
+
+pub type Audit = Arc<dyn Fn(&Agent, &str, DoneOrFailed) + Send + Sync>;
+
+pub fn audit_word(on: bool, force: bool) -> String {
+    format!(
+        "chrome_{}{}",
+        if on { "on" } else { "off" },
+        if force { "_forced" } else { "" }
+    )
 }
 
 pub struct ChromeOps {
+    audit: OnceLock<Audit>,
     hosts: Arc<dyn Hosts>,
     tasks: Mutex<HashMap<String, Task>>,
     serial: AtomicU64,
@@ -33,6 +49,35 @@ pub struct ChromeOps {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+struct Cancelable {
+    inner: Box<dyn Host + Send>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Host for Cancelable {
+    fn turn_running(&mut self) -> bool {
+        self.inner.turn_running()
+    }
+    fn tasks_in_flight(&mut self) -> Option<u32> {
+        self.inner.tasks_in_flight()
+    }
+    fn look(&mut self, goal: Goal) -> Result<Report, Refusal> {
+        self.inner.look(goal)
+    }
+    fn restart(&mut self, on: bool) -> Result<(), String> {
+        self.inner.restart(on)
+    }
+    fn sleep(&mut self, ms: u64) {
+        self.inner.sleep(ms)
+    }
+    fn now_ms(&mut self) -> u64 {
+        self.inner.now_ms()
+    }
+    fn cancelled(&mut self) -> bool {
+        self.cancel.load(Ordering::SeqCst) || self.inner.cancelled()
+    }
 }
 
 pub fn offers(agent: &Agent) -> bool {
@@ -45,6 +90,7 @@ pub fn offers(agent: &Agent) -> bool {
 impl ChromeOps {
     pub fn new(hosts: Arc<dyn Hosts>) -> Arc<ChromeOps> {
         Arc::new(ChromeOps {
+            audit: OnceLock::new(),
             hosts,
             tasks: Mutex::new(HashMap::new()),
             serial: AtomicU64::new(1),
@@ -55,6 +101,7 @@ impl ChromeOps {
     #[cfg(test)]
     pub fn inline(hosts: Arc<dyn Hosts>) -> Arc<ChromeOps> {
         Arc::new(ChromeOps {
+            audit: OnceLock::new(),
             hosts,
             tasks: Mutex::new(HashMap::new()),
             serial: AtomicU64::new(1),
@@ -62,12 +109,20 @@ impl ChromeOps {
         })
     }
 
+    pub fn set_audit(&self, audit: Audit) {
+        let _ = self.audit.set(audit);
+    }
+
     pub fn start(self: &Arc<Self>, agent: &Agent, on: bool, force: bool) -> Value {
+        let cancel = Arc::new(AtomicBool::new(false));
         let serial = {
             let mut tasks = lock(&self.tasks);
-            if tasks.get(&agent.id).is_some_and(|t| !t.phase.is_over()) {
-                drop(tasks);
-                return self.state(agent, false);
+            if let Some(old) = tasks.get(&agent.id).filter(|t| !t.phase.is_over()) {
+                if old.on == on {
+                    drop(tasks);
+                    return self.state(agent, false);
+                }
+                old.cancel.store(true, Ordering::SeqCst);
             }
             let serial = self.serial.fetch_add(1, Ordering::SeqCst);
             tasks.insert(
@@ -79,18 +134,29 @@ impl ChromeOps {
                     },
                     since_ms: now_ms(),
                     serial,
+                    cancel: cancel.clone(),
                 },
             );
             serial
         };
         let (me, agent_now) = (self.clone(), agent.clone());
         let work = move || {
-            let mut host = me.hosts.host(&agent_now);
+            let mut host = Cancelable {
+                inner: me.hosts.host(&agent_now),
+                cancel,
+            };
             let id = agent_now.id.clone();
             let sink = me.clone();
-            flow::run(host.as_mut(), Options { on, force }, &mut |phase| {
+            let end = flow::run(&mut host, Options { on, force }, &mut |phase| {
                 sink.set(&id, serial, phase)
             });
+            if let Some(audit) = me.audit.get() {
+                let result = match end {
+                    Phase::Done { .. } => DoneOrFailed::Done,
+                    _ => DoneOrFailed::Failed,
+                };
+                audit(&agent_now, &audit_word(on, force), result);
+            }
         };
         if self.inline {
             work();
@@ -159,9 +225,14 @@ impl LiveHosts {
 
 impl Hosts for LiveHosts {
     fn host(&self, agent: &Agent) -> Box<dyn Host + Send> {
+        let job = match &agent.target {
+            AgentTarget::Job(job) => job.clone(),
+            _ => String::new(),
+        };
         Box::new(LiveHost {
             acting: self.acting.clone(),
             id: agent.id.clone(),
+            job,
         })
     }
 
@@ -179,6 +250,7 @@ impl Hosts for LiveHosts {
 struct LiveHost {
     acting: Weak<ActingOps>,
     id: String,
+    job: String,
 }
 
 impl LiveHost {
@@ -187,27 +259,88 @@ impl LiveHost {
     }
 
     fn agent(&self, acting: &ActingOps) -> Option<Agent> {
-        acting.agents_now().into_iter().find(|a| a.id == self.id)
+        let now = acting.agents_now();
+        let by_id = now.iter().find(|a| a.id == self.id).cloned();
+        by_id.or_else(|| {
+            now.into_iter()
+                .find(|a| matches!(&a.target, AgentTarget::Job(job) if *job == self.job))
+        })
+    }
+
+    fn swap(
+        &self,
+        acting: &ActingOps,
+        agent: &Agent,
+        job: &str,
+        file: &std::path::Path,
+        on: bool,
+    ) -> Result<(), String> {
+        let before = status::read_flags(file).ok_or_else(|| {
+            "Claude Code's file for this session lists no start flags.".to_string()
+        })?;
+        let mut wanted = status::with_flag(&before, on);
+        let transcript = live_files(acting.roots.clone()).transcript(agent);
+        if let Some(mode) = transcript
+            .as_deref()
+            .and_then(|path| status::permission_mode(std::path::Path::new(path)))
+        {
+            wanted = status::with_mode(&wanted, &mode);
+        }
+        status::write_pending(
+            file,
+            &status::Pending {
+                on,
+                before: before.clone(),
+                wanted: wanted.clone(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        if let Err(e) = status::set_flags(file, &wanted) {
+            status::clear_pending(file);
+            return Err(e.to_string());
+        }
+        if let Err(e) = acting.run_raw(&plan_respawn(job, &acting.roots)) {
+            let text = e.to_string();
+            if text.contains(TIMED_OUT) {
+                return Err("Claude Code is slow to restart the session. It may finish by itself; try again in a minute.".to_string());
+            }
+            if status::read_flags(file).as_ref() == Some(&wanted) {
+                let _ = status::set_flags(file, &before);
+            }
+            status::clear_pending(file);
+            return Err(text);
+        }
+        status::clear_pending(file);
+        let kept = status::read_flags(file).and_then(|f| status::flag_of(&f));
+        if kept != Some(on) {
+            return Err("Claude Code didn't keep the setting for this session.".to_string());
+        }
+        Ok(())
+    }
+
+    fn busy(&self, acting: &ActingOps) -> bool {
+        let files = live_files(acting.roots.clone());
+        let Some(fresh) = files.row(&self.job).or_else(|| self.agent(acting)) else {
+            return false;
+        };
+        fresh.turn_running()
+            || (fresh.group == AgentGroup::Working && files.restarted(&fresh, now_ms()))
     }
 }
 
 impl Host for LiveHost {
     fn turn_running(&mut self) -> bool {
-        self.acting()
-            .and_then(|acting| self.agent(&acting))
-            .is_some_and(|agent| agent.turn_running())
+        self.acting().is_some_and(|acting| self.busy(&acting))
     }
 
-    fn tasks_in_flight(&mut self) -> u32 {
-        let Some(acting) = self.acting() else {
-            return 0;
-        };
-        match self.agent(&acting).map(|a| a.target) {
-            Some(AgentTarget::Job(job)) => {
-                status::tasks_in_flight(&job_state_path(&acting.roots, &job))
-            }
-            _ => 0,
-        }
+    fn cancelled(&mut self) -> bool {
+        self.acting().is_none_or(|acting| !acting.is_on())
+    }
+
+    fn tasks_in_flight(&mut self) -> Option<u32> {
+        let acting = self.acting()?;
+        self.agent(&acting)?;
+        status::tasks_in_flight(&job_state_path(&acting.roots, &self.job))
     }
 
     fn look(&mut self, goal: Goal) -> Result<Report, Refusal> {
@@ -239,19 +372,29 @@ impl Host for LiveHost {
             return Err("This session can't be restarted.".to_string());
         };
         let file = job_state_path(&acting.roots, job);
-        let before = status::read_flags(&file).ok_or_else(|| {
-            "Claude Code's file for this session lists no start flags.".to_string()
-        })?;
-        status::set_flags(&file, &status::with_flag(&before, on)).map_err(|e| e.to_string())?;
-        if let Err(e) = acting.run_raw(&plan_respawn(job, &acting.roots)) {
-            let _ = status::set_flags(&file, &before);
-            return Err(e.to_string());
-        }
-        let kept = status::read_flags(&file).and_then(|f| status::flag_of(&f));
-        if kept != Some(on) {
-            return Err("Claude Code didn't keep the setting for this session.".to_string());
-        }
-        Ok(())
+        let result = acting.locked(&agent, |_| {
+            if !acting.is_on() {
+                return Err("Act on Sessions is off.".to_string());
+            }
+            if self.busy(&acting) {
+                return Err("The session started working. Try again.".to_string());
+            }
+            acting.respawn_guarded(job, || self.swap(&acting, &agent, job, &file, on))
+        });
+        acting.note_chrome(
+            &agent,
+            if on {
+                "chrome_restart_on"
+            } else {
+                "chrome_restart_off"
+            },
+            if result.is_ok() {
+                DoneOrFailed::Done
+            } else {
+                DoneOrFailed::Failed
+            },
+        );
+        result
     }
 
     fn sleep(&mut self, ms: u64) {
@@ -260,5 +403,37 @@ impl Host for LiveHost {
 
     fn now_ms(&mut self) -> u64 {
         u64::try_from(now_ms()).unwrap_or(0)
+    }
+}
+
+pub fn reconcile(acting: &ActingOps) {
+    if !acting.is_on() {
+        return;
+    }
+    let files = live_files(acting.roots.clone());
+    for config in notchling_engine::sessions::config_dirs(&acting.roots) {
+        let Ok(entries) = std::fs::read_dir(config.dir.join("jobs")) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let state = entry.path().join("state.json");
+            let Some(pending) = status::read_pending(&state) else {
+                continue;
+            };
+            let job = entry.file_name().to_string_lossy().into_owned();
+            let current = status::read_flags(&state);
+            if current.as_ref() == Some(&pending.wanted) {
+                let busy = files.row(&job).is_some_and(|agent| {
+                    agent.turn_running()
+                        || (agent.group == AgentGroup::Working && files.restarted(&agent, now_ms()))
+                });
+                if busy {
+                    let _ = status::set_flags(&state, &pending.before);
+                } else {
+                    let _ = acting.respawn(&job);
+                }
+            }
+            status::clear_pending(&state);
+        }
     }
 }

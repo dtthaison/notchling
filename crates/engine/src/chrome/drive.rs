@@ -177,7 +177,10 @@ fn ready(pty: &mut dyn Pty) -> Result<(), Refusal> {
 }
 
 fn lists_command(lines: &[String]) -> bool {
-    lines
+    let Some((top, _)) = input_box::span(lines) else {
+        return false;
+    };
+    lines[top..]
         .iter()
         .any(|l| l.contains(menu::COMMAND_HINT) && l.trim_start().starts_with('❯'))
 }
@@ -195,6 +198,16 @@ fn untype(pty: &mut dyn Pty) {
     pty.sleep(ms(KEY_PAUSE_MS));
     if ours_only(pty) {
         let _ = write(pty, UNTYPE);
+        pty.wait_quiet(ms(WAIT_QUIET_MS), ms(WAIT_STEP_MS));
+    }
+}
+
+fn clean_up(pty: &mut dyn Pty) {
+    if menu::is_open(&pty.screen()) {
+        let _ = close(pty);
+    }
+    if ours_only(pty) {
+        untype(pty);
     }
 }
 
@@ -212,13 +225,15 @@ fn type_command(pty: &mut dyn Pty) -> Result<(), Refusal> {
         }
     }
     if ours_only(pty) {
-        untype(pty);
         return Err(Refusal::Unavailable);
     }
     Err(Refusal::BoxHasText)
 }
 
 fn open(pty: &mut dyn Pty) -> Result<Menu, Refusal> {
+    if !ours_only(pty) {
+        return Err(Refusal::BoxHasText);
+    }
     write(pty, ENTER)?;
     let deadline = pty.now_ms() + MENU_WAIT_MS;
     loop {
@@ -228,7 +243,6 @@ fn open(pty: &mut dyn Pty) -> Result<Menu, Refusal> {
             return Ok(menu);
         }
         if pty.now_ms() >= deadline {
-            untype(pty);
             return Err(Refusal::Stuck);
         }
     }
@@ -314,6 +328,14 @@ fn reconnect(pty: &mut dyn Pty, menu: Menu) -> Result<Reconnected, Refusal> {
 
 pub fn run(pty: &mut dyn Pty, goal: Goal) -> Result<Report, Refusal> {
     ready(pty)?;
+    let result = drive(pty, goal);
+    if result.is_err() {
+        clean_up(pty);
+    }
+    result
+}
+
+fn drive(pty: &mut dyn Pty, goal: Goal) -> Result<Report, Refusal> {
     type_command(pty)?;
     let menu = open(pty)?;
     let wants_reconnect = goal == Goal::Reconnect && matches!(menu.link, Link::NotConnected);

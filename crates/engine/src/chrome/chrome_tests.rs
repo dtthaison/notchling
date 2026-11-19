@@ -279,7 +279,7 @@ fn a_connected_session_is_not_reconnected() {
 fn chrome_is_caught_with_or_without_words_after_it() {
     assert_eq!(command::parse("/chrome"), Some(Command::On));
     assert_eq!(command::parse("  /Chrome  "), Some(Command::On));
-    assert_eq!(command::parse("/chrome now please"), Some(Command::On));
+    assert_eq!(command::parse("/chrome now please"), None);
     assert_eq!(command::parse("/chrome off"), Some(Command::Off));
     assert_eq!(command::parse("/chrome OFF"), Some(Command::Off));
     assert_eq!(command::parse("/chrome-browser"), None);
@@ -341,7 +341,7 @@ fn the_session_file_keeps_everything_but_the_flag() {
         "state.json",
         r#"{"state":"done","inFlight":{"tasks":2},"respawnFlags":["--name","demo","--no-chrome","--model","m"],"keep":[1,2]}"#,
     );
-    assert_eq!(status::tasks_in_flight(&file), 2);
+    assert_eq!(status::tasks_in_flight(&file), Some(2));
     status::rewrite_flags(&file, true).unwrap();
     let after: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
@@ -369,11 +369,14 @@ fn the_session_file_keeps_everything_but_the_flag() {
 struct Script {
     turns: VecDeque<bool>,
     looks: VecDeque<Result<menu::Menu, Refusal>>,
-    tasks: u32,
+    tasks: Option<u32>,
+    sleeps: Vec<u64>,
     restarts: Vec<bool>,
     restart_error: Option<String>,
     goals: Vec<Goal>,
     clock: u64,
+    cancel: bool,
+    cancel_after_ms: Option<u64>,
 }
 
 fn menu_with(link: Link, extension: Extension) -> menu::Menu {
@@ -387,11 +390,14 @@ fn script(looks: Vec<Result<menu::Menu, Refusal>>) -> Script {
     Script {
         turns: VecDeque::new(),
         looks: looks.into(),
-        tasks: 0,
+        tasks: Some(0),
+        sleeps: Vec::new(),
         restarts: Vec::new(),
         restart_error: None,
         goals: Vec::new(),
         clock: 0,
+        cancel: false,
+        cancel_after_ms: None,
     }
 }
 
@@ -399,7 +405,7 @@ impl Host for Script {
     fn turn_running(&mut self) -> bool {
         self.turns.pop_front().unwrap_or(false)
     }
-    fn tasks_in_flight(&mut self) -> u32 {
+    fn tasks_in_flight(&mut self) -> Option<u32> {
         self.tasks
     }
     fn look(&mut self, goal: Goal) -> Result<drive::Report, Refusal> {
@@ -423,10 +429,14 @@ impl Host for Script {
         }
     }
     fn sleep(&mut self, ms: u64) {
+        self.sleeps.push(ms);
         self.clock += ms;
     }
     fn now_ms(&mut self) -> u64 {
         self.clock
+    }
+    fn cancelled(&mut self) -> bool {
+        self.cancel || self.cancel_after_ms.is_some_and(|t| self.clock >= t)
     }
 }
 
@@ -608,7 +618,7 @@ fn chrome_turned_off_in_mcp_is_for_the_terminal() {
 #[test]
 fn background_tasks_stop_the_restart_until_the_person_agrees() {
     let mut host = script(vec![Ok(menu_with(Link::NotEnabled, Extension::Installed))]);
-    host.tasks = 3;
+    host.tasks = Some(3);
     let (end, _) = go(&mut host, true, false);
     assert_eq!(
         end,
@@ -621,7 +631,7 @@ fn background_tasks_stop_the_restart_until_the_person_agrees() {
         Ok(menu_with(Link::NotEnabled, Extension::Installed)),
         Ok(menu_with(Link::Enabled, Extension::Installed)),
     ]);
-    agreed.tasks = 3;
+    agreed.tasks = Some(3);
     let (end, _) = go(&mut agreed, true, true);
     assert_eq!(end, Phase::Done { result: Done::On });
     assert_eq!(agreed.restarts, [true]);
@@ -683,4 +693,290 @@ fn the_phase_goes_over_the_wire_in_plain_words() {
     assert_eq!(json, serde_json::json!({"phase": "waiting", "why": "turn"}));
     assert!(Phase::Done { result: Done::On }.is_over());
     assert!(!Phase::Waiting { why: Wait::Box }.is_over());
+}
+
+#[test]
+fn a_menu_is_closed_when_the_reconnect_entry_is_missing() {
+    let not_connected = MENU_ON
+        .replace("✔ enabled", "⚠ not connected")
+        .replace("    Reconnect extension\n", "");
+    let shots = [ON_ATTACH, TYPED, &not_connected, CLOSED];
+    let mut pty = Fake::new(&shots, chrome_walk);
+    assert_eq!(
+        drive::run(&mut pty, Goal::Reconnect),
+        Err(Refusal::Unavailable)
+    );
+    assert_eq!(pty.writes, ["/chrome", "\r", "\x1b"]);
+    assert_eq!(pty.state, 3);
+}
+
+#[test]
+fn a_menu_is_closed_when_moving_to_the_entry_never_gets_there() {
+    let not_connected = MENU_ON.replace("✔ enabled", "⚠ not connected");
+    let shots = [ON_ATTACH, TYPED, &not_connected, CLOSED];
+    let mut pty = Fake::new(&shots, |state, write| match (state, write) {
+        (0, "/chrome") => 1,
+        (1, "\r") => 2,
+        (2, "\x1b") => 3,
+        (s, _) => s,
+    });
+    assert_eq!(drive::run(&mut pty, Goal::Reconnect), Err(Refusal::Stuck));
+    assert_eq!(pty.writes.last().map(String::as_str), Some("\x1b"));
+}
+
+#[test]
+fn enter_is_never_pressed_when_the_box_holds_more_than_the_command() {
+    let mixed = TYPED.replacen("/chrome\n", "hello /chrome\n", 1);
+    let mut pty = Fake::new(&[ON_ATTACH, &mixed], |state, write| match (state, write) {
+        (0, "/chrome") => 1,
+        (s, _) => s,
+    });
+    assert_eq!(drive::run(&mut pty, Goal::Read), Err(Refusal::BoxHasText));
+    assert!(!pty.writes.iter().any(|w| w == "\r"));
+    assert!(!pty.writes.iter().any(|w| w.starts_with('\x7f')));
+}
+
+#[test]
+fn a_line_above_the_box_does_not_count_as_the_commands_list() {
+    let lines: Vec<&str> = TYPED.lines().collect();
+    let rule = lines.iter().position(|l| l.starts_with('─')).unwrap();
+    let mut above: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    above.truncate(rule + 3);
+    above[2] = "❯ ".to_string() + menu::COMMAND_HINT;
+    let screen = above.join("\n");
+    let mut pty = Fake::new(&[ON_ATTACH, &screen], |state, write| match (state, write) {
+        (0, "/chrome") => 1,
+        (s, _) => s,
+    });
+    assert_eq!(drive::run(&mut pty, Goal::Read), Err(Refusal::Unavailable));
+    assert!(!pty.writes.iter().any(|w| w == "\r"));
+}
+
+#[test]
+fn a_cancelled_task_stops_before_it_does_anything() {
+    let mut host = script(vec![Ok(menu_with(Link::NotEnabled, Extension::Installed))]);
+    host.cancel = true;
+    let (end, _) = go(&mut host, true, false);
+    assert_eq!(end, Phase::Cancelled);
+    assert!(host.goals.is_empty());
+    assert!(host.restarts.is_empty());
+    assert!(end.is_over());
+}
+
+#[test]
+fn a_waiting_task_that_is_cancelled_never_restarts_the_session() {
+    let mut host = script(vec![Ok(menu_with(Link::NotEnabled, Extension::Installed))]);
+    host.turns = VecDeque::from([true, true, true, true, true]);
+    host.cancel_after_ms = Some(flow::POLL_MS);
+    let (end, seen) = go(&mut host, true, false);
+    assert_eq!(end, Phase::Cancelled);
+    assert!(seen.contains(&Phase::Waiting { why: Wait::Turn }));
+    assert!(host.restarts.is_empty());
+    assert!(host.goals.is_empty());
+}
+
+#[test]
+fn a_restarted_session_that_comes_up_not_connected_is_reconnected() {
+    let mut host = script(vec![
+        Ok(menu_with(Link::NotEnabled, Extension::Installed)),
+        Ok(menu_with(Link::NotConnected, Extension::Installed)),
+        Ok(menu_with(Link::NotConnected, Extension::Installed)),
+        Ok(menu_with(Link::NotConnected, Extension::Installed)),
+        Ok(menu_with(Link::Enabled, Extension::Installed)),
+        Ok(menu_with(Link::Enabled, Extension::Installed)),
+    ]);
+    let (end, _) = go(&mut host, true, false);
+    assert_eq!(end, Phase::Done { result: Done::On });
+    assert_eq!(host.restarts, [true]);
+    assert!(host.goals.contains(&Goal::Reconnect));
+}
+
+#[test]
+fn a_session_that_never_opened_after_a_restart_is_not_called_not_connected() {
+    let mut looks = vec![Ok(menu_with(Link::NotEnabled, Extension::Installed))];
+    for _ in 0..flow::CONNECT_LOOKS {
+        looks.push(Err(Refusal::Starting));
+    }
+    let mut host = script(looks);
+    let (end, _) = go(&mut host, true, false);
+    assert_eq!(
+        end,
+        Phase::NeedsYou {
+            need: Need::Failed {
+                text: Refusal::Starting.to_string()
+            }
+        }
+    );
+}
+
+#[test]
+fn a_cancelled_phase_reads_back_from_json() {
+    let json = serde_json::to_value(Phase::Cancelled).unwrap();
+    assert_eq!(json, serde_json::json!({"phase": "cancelled"}));
+    let back: Phase = serde_json::from_value(json).unwrap();
+    assert_eq!(back, Phase::Cancelled);
+}
+
+#[test]
+fn prose_after_the_command_is_a_normal_message() {
+    assert_eq!(command::parse("/chrome doesn't connect, why?"), None);
+    assert_eq!(command::parse("/chrome off now"), None);
+    assert_eq!(command::parse("/chrome on"), None);
+    assert_eq!(command::parse("/chrome  off "), Some(Command::Off));
+    assert!(!command::is_chrome("/chrome please fix it"));
+}
+
+#[test]
+fn work_in_flight_counts_tasks_monitors_and_queued_prompts_and_fails_closed() {
+    let root = TempDir::new("chrome-work");
+    let file = |body: &str| root.write("state.json", body);
+    let counted = |body: &str| status::tasks_in_flight(&file(body));
+    assert_eq!(counted(r#"{"inFlight":{"tasks":0,"queued":0}}"#), Some(0));
+    assert_eq!(counted(r#"{"inFlight":{"tasks":2,"queued":1}}"#), Some(3));
+    assert_eq!(
+        counted(r#"{"inFlight":{"tasks":1,"drainableMonitors":1,"queued":0}}"#),
+        Some(1)
+    );
+    assert_eq!(
+        counted(r#"{"inFlight":{"tasks":0,"drainableMonitors":2}}"#),
+        Some(2)
+    );
+    assert_eq!(counted(r#"{"state":"done"}"#), None);
+    assert_eq!(counted("not json"), None);
+    assert_eq!(counted(r#"{"inFlight":3}"#), None);
+    assert_eq!(status::tasks_in_flight(&root.path("missing.json")), None);
+}
+
+#[test]
+fn not_knowing_about_background_work_asks_before_restarting() {
+    let mut host = script(vec![Ok(menu_with(Link::NotEnabled, Extension::Installed))]);
+    host.tasks = None;
+    let (end, _) = go(&mut host, true, false);
+    assert_eq!(
+        end,
+        Phase::NeedsYou {
+            need: Need::TasksUnknown
+        }
+    );
+    assert!(host.restarts.is_empty());
+    let mut agreed = script(vec![
+        Ok(menu_with(Link::NotEnabled, Extension::Installed)),
+        Ok(menu_with(Link::Enabled, Extension::Installed)),
+    ]);
+    agreed.tasks = None;
+    let (end, _) = go(&mut agreed, true, true);
+    assert_eq!(end, Phase::Done { result: Done::On });
+    assert_eq!(agreed.restarts, [true]);
+}
+
+#[test]
+fn a_box_or_question_wait_backs_off_and_stops_at_thirty_seconds() {
+    let mut looks: Vec<Result<menu::Menu, Refusal>> =
+        (0..7).map(|_| Err(Refusal::BoxHasText)).collect();
+    looks.push(Ok(menu_with(Link::Enabled, Extension::Installed)));
+    let mut host = script(looks);
+    let (end, _) = go(&mut host, true, false);
+    assert_eq!(
+        end,
+        Phase::Done {
+            result: Done::AlreadyOn
+        }
+    );
+    assert_eq!(
+        host.sleeps,
+        [3_000, 6_000, 12_000, 24_000, 30_000, 30_000, 30_000]
+    );
+    let mut turn = script(vec![Ok(menu_with(Link::Enabled, Extension::Installed))]);
+    turn.turns = VecDeque::from([true, true, true, true]);
+    let _ = go(&mut turn, true, false);
+    assert!(turn.sleeps.iter().all(|ms| *ms == flow::POLL_MS));
+}
+
+#[test]
+fn the_flag_edit_changes_only_the_flags_text() {
+    let root = TempDir::new("chrome-text");
+    let original = "{\n  \"z\": 1.50,\n  \"n\": 1e3,\n  \"nest\": {\"respawnFlags\": [\"keep\"]},\n  \"respawnFlags\" : [ \"--name\" , \"a\\\"b\" ],\n  \"inFlight\": {\"tasks\": 0}\n}\n";
+    let file = root.write("state.json", original);
+    let flags: Vec<String> = ["--name", "a\"b", "--chrome"]
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
+    status::set_flags(&file, &flags).unwrap();
+    let after = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        after,
+        original.replace(
+            "[ \"--name\" , \"a\\\"b\" ]",
+            "[\"--name\",\"a\\\"b\",\"--chrome\"]"
+        )
+    );
+    assert_eq!(status::read_flags(&file).unwrap(), flags);
+}
+
+#[test]
+fn a_linked_state_file_is_left_alone_and_the_copy_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TempDir::new("chrome-link");
+    let real = root.write("real.json", r#"{"respawnFlags":["--no-chrome"]}"#);
+    let link = root.path("state.json");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let flags = vec!["--chrome".to_string()];
+    assert!(status::set_flags(&link, &flags).is_err());
+    assert_eq!(status::read_flags(&real).unwrap(), ["--no-chrome"]);
+    std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).unwrap();
+    status::set_flags(&real, &flags).unwrap();
+    let mode = std::fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640);
+    assert!(!root.path("real.json.notchling-tmp").exists());
+}
+
+#[test]
+fn a_pending_change_is_written_read_and_cleared() {
+    let root = TempDir::new("chrome-pending");
+    let state = root.write("state.json", r#"{"respawnFlags":[]}"#);
+    assert_eq!(status::read_pending(&state), None);
+    let pending = status::Pending {
+        on: true,
+        before: vec!["--no-chrome".to_string()],
+        wanted: vec!["--chrome".to_string()],
+    };
+    status::write_pending(&state, &pending).unwrap();
+    assert_eq!(status::read_pending(&state), Some(pending));
+    status::clear_pending(&state);
+    assert_eq!(status::read_pending(&state), None);
+}
+
+#[test]
+fn the_permission_mode_is_read_from_the_transcript_and_kept_in_the_flags() {
+    let root = TempDir::new("chrome-mode");
+    let transcript = root.write(
+        "t.jsonl",
+        concat!(
+            r#"{"type":"permission-mode","permissionMode":"plan","sessionId":"s"}"#,
+            "\n",
+            r#"{"type":"user","message":"hi"}"#,
+            "\n",
+            r#"{"type":"permission-mode","permissionMode":"acceptEdits","sessionId":"s"}"#,
+            "\n",
+            r#"{"type":"user","message":"again"}"#,
+            "\n"
+        ),
+    );
+    assert_eq!(
+        status::permission_mode(&transcript).as_deref(),
+        Some("acceptEdits")
+    );
+    let odd = root.write(
+        "u.jsonl",
+        "{\"type\":\"permission-mode\",\"permissionMode\":\"bypassPermissions\"}\n",
+    );
+    assert_eq!(status::permission_mode(&odd), None);
+    let flags: Vec<String> = ["--permission-mode", "auto", "--model", "m", "--chrome"]
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
+    assert_eq!(
+        status::with_mode(&flags, "plan"),
+        ["--model", "m", "--chrome", "--permission-mode", "plan"]
+    );
 }

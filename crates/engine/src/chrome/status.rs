@@ -72,6 +72,7 @@ pub enum RewriteError {
     Read(String),
     NoFlags,
     Write(String),
+    Changed,
 }
 
 impl std::fmt::Display for RewriteError {
@@ -80,6 +81,7 @@ impl std::fmt::Display for RewriteError {
             RewriteError::Read(why) => write!(f, "Couldn't read the session's file: {why}"),
             RewriteError::NoFlags => write!(f, "The session's file lists no start flags."),
             RewriteError::Write(why) => write!(f, "Couldn't update the session's file: {why}"),
+            RewriteError::Changed => write!(f, "The session's file changed while it was updated."),
         }
     }
 }
@@ -93,16 +95,18 @@ pub fn read_flags(state: &Path) -> Option<Vec<String>> {
         .collect()
 }
 
-pub fn tasks_in_flight(state: &Path) -> u32 {
-    let Ok(text) = std::fs::read_to_string(state) else {
-        return 0;
+pub fn tasks_in_flight(state: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(state).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    let flight = value.get("inFlight")?.as_object()?;
+    let count = |key: &str| {
+        flight
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or(0)
     };
-    let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    value
-        .pointer("/inFlight/tasks")
-        .and_then(Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok())
-        .unwrap_or(0)
+    Some(count("tasks").max(count("drainableMonitors")) + count("queued"))
 }
 
 pub fn rewrite_flags(state: &Path, on: bool) -> Result<(), RewriteError> {
@@ -110,9 +114,121 @@ pub fn rewrite_flags(state: &Path, on: bool) -> Result<(), RewriteError> {
     set_flags(state, &with_flag(&flags, on))
 }
 
+const SET_TRIES: usize = 4;
+
 pub fn set_flags(state: &Path, flags: &[String]) -> Result<(), RewriteError> {
+    let mut last = RewriteError::Write("The session's file kept changing.".to_string());
+    for _ in 0..SET_TRIES {
+        match set_flags_once(state, flags) {
+            Err(RewriteError::Changed) => last = RewriteError::Changed,
+            other => return other,
+        }
+    }
+    Err(last)
+}
+
+fn skip_string(bytes: &[u8], mut i: usize) -> usize {
+    i += 1;
+    while i < bytes.len() && bytes[i] != b'"' {
+        if bytes[i] == b'\\' {
+            i += 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+fn skip_space(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+pub fn flags_span(text: &str) -> Option<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let end = skip_string(bytes, i);
+                if depth == 1 && text.get(i + 1..end) == Some("respawnFlags") {
+                    let colon = skip_space(bytes, end + 1);
+                    if bytes.get(colon) == Some(&b':') {
+                        let open = skip_space(bytes, colon + 1);
+                        if bytes.get(open) != Some(&b'[') {
+                            return None;
+                        }
+                        let mut level = 0;
+                        let mut j = open;
+                        while j < bytes.len() {
+                            match bytes[j] {
+                                b'"' => j = skip_string(bytes, j),
+                                b'[' => level += 1,
+                                b']' => {
+                                    level -= 1;
+                                    if level == 0 {
+                                        return Some((open, j + 1));
+                                    }
+                                }
+                                _ => {}
+                            }
+                            j += 1;
+                        }
+                        return None;
+                    }
+                }
+                i = end;
+            }
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+pub fn with_flags_text(text: &str, flags: &[String]) -> Option<String> {
+    let (open, close) = flags_span(text)?;
+    let list = serde_json::to_string(flags).ok()?;
+    let out = format!("{}{}{}", &text[..open], list, &text[close..]);
+    let parsed: Value = serde_json::from_str(&out).ok()?;
+    let back = parsed.get("respawnFlags")?.as_array()?;
+    (back.len() == flags.len()).then_some(out)
+}
+
+fn write_private(
+    path: &Path,
+    body: &[u8],
+    like: Option<std::fs::Permissions>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::remove_file(path);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(body)?;
+    file.sync_all()?;
+    if let Some(perms) = like {
+        std::fs::set_permissions(path, perms)?;
+    }
+    Ok(())
+}
+
+fn set_flags_once(state: &Path, flags: &[String]) -> Result<(), RewriteError> {
+    let link = std::fs::symlink_metadata(state).map_err(|e| RewriteError::Read(e.to_string()))?;
+    if link.file_type().is_symlink() {
+        return Err(RewriteError::Write(
+            "The session's file is a link, so it was left alone.".to_string(),
+        ));
+    }
     let text = std::fs::read_to_string(state).map_err(|e| RewriteError::Read(e.to_string()))?;
-    let mut value: Value =
+    let value: Value =
         serde_json::from_str(&text).map_err(|e| RewriteError::Read(e.to_string()))?;
     if value
         .get("respawnFlags")
@@ -121,15 +237,99 @@ pub fn set_flags(state: &Path, flags: &[String]) -> Result<(), RewriteError> {
     {
         return Err(RewriteError::NoFlags);
     }
-    value["respawnFlags"] = Value::from(flags.to_vec());
+    let body = with_flags_text(&text, flags).ok_or_else(|| {
+        RewriteError::Write("Couldn't find the start flags in the file.".to_string())
+    })?;
     let tmp = state.with_extension("json.notchling-tmp");
-    let body = serde_json::to_vec(&value).map_err(|e| RewriteError::Write(e.to_string()))?;
-    std::fs::write(&tmp, body).map_err(|e| RewriteError::Write(e.to_string()))?;
-    if let Ok(meta) = std::fs::metadata(state) {
-        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    let like = std::fs::metadata(state).ok().map(|m| m.permissions());
+    if let Err(e) = write_private(&tmp, body.as_bytes(), like) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(RewriteError::Write(e.to_string()));
+    }
+    if std::fs::read_to_string(state).ok().as_deref() != Some(text.as_str()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(RewriteError::Changed);
     }
     std::fs::rename(&tmp, state).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         RewriteError::Write(e.to_string())
+    })?;
+    if let Some(parent) = state.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pending {
+    pub on: bool,
+    pub before: Vec<String>,
+    pub wanted: Vec<String>,
+}
+
+pub const PENDING_FILE: &str = "notchling-chrome-pending.json";
+
+pub fn pending_path(state: &Path) -> std::path::PathBuf {
+    state.with_file_name(PENDING_FILE)
+}
+
+pub fn write_pending(state: &Path, pending: &Pending) -> Result<(), RewriteError> {
+    let body = serde_json::to_vec(pending).map_err(|e| RewriteError::Write(e.to_string()))?;
+    write_private(&pending_path(state), &body, None).map_err(|e| RewriteError::Write(e.to_string()))
+}
+
+pub fn read_pending(state: &Path) -> Option<Pending> {
+    let text = std::fs::read_to_string(pending_path(state)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+pub fn clear_pending(state: &Path) {
+    let _ = std::fs::remove_file(pending_path(state));
+}
+
+const MODES: [&str; 4] = ["default", "acceptEdits", "plan", "auto"];
+const MODE_FLAG: &str = "--permission-mode";
+const MODE_TAIL_BYTES: u64 = 512 * 1024;
+
+pub fn permission_mode(transcript: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(transcript).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(MODE_TAIL_BYTES)))
+        .ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    text.lines().rev().find_map(|line| {
+        let value: Value = serde_json::from_str(line).ok()?;
+        if value.get("type")?.as_str()? != "permission-mode" {
+            return None;
+        }
+        let mode = value.get("permissionMode")?.as_str()?;
+        MODES.contains(&mode).then(|| mode.to_string())
     })
+}
+
+pub fn with_mode(flags: &[String], mode: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip = false;
+    for flag in flags {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if flag == MODE_FLAG {
+            skip = true;
+            continue;
+        }
+        if flag.starts_with("--permission-mode=") {
+            continue;
+        }
+        out.push(flag.clone());
+    }
+    out.push(MODE_FLAG.to_string());
+    out.push(mode.to_string());
+    out
 }

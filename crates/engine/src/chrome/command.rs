@@ -6,16 +6,20 @@ pub enum Command {
 
 pub fn parse(text: &str) -> Option<Command> {
     let rest = text.trim().strip_prefix('/')?;
-    let (word, args) = match rest.split_once(char::is_whitespace) {
-        Some((word, args)) => (word, args.trim()),
-        None => (rest, ""),
-    };
-    if !word.eq_ignore_ascii_case("chrome") {
+    let mut words = rest.split_whitespace();
+    if !words.next()?.eq_ignore_ascii_case("chrome") {
         return None;
     }
-    match args.to_lowercase().as_str() {
-        "off" | "disable" | "--no-chrome" => Some(Command::Off),
-        _ => Some(Command::On),
+    let args: Vec<String> = words.map(str::to_lowercase).collect();
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [] => Some(Command::On),
+        ["off" | "disable" | "--no-chrome"] => Some(Command::Off),
+        _ => None,
     }
 }
 

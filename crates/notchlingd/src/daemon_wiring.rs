@@ -553,9 +553,22 @@ impl Wired {
             .with_cluster_dir(layout.cluster_dir());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         acting.attach_outbox(outbox.clone());
-        acting.attach_chrome(crate::chrome_ops::ChromeOps::new(
-            crate::chrome_ops::LiveHosts::new(&acting),
-        ));
+        let chrome = crate::chrome_ops::ChromeOps::new(crate::chrome_ops::LiveHosts::new(&acting));
+        let noting = Arc::downgrade(&acting);
+        chrome.set_audit(Arc::new(move |agent, word, result| {
+            if let Some(acting) = noting.upgrade() {
+                acting.note_chrome(agent, word, result);
+            }
+        }));
+        acting.attach_chrome(chrome);
+        let reconciling = Arc::downgrade(&acting);
+        let _ = std::thread::Builder::new()
+            .name("chrome-reconcile".to_string())
+            .spawn(move || {
+                if let Some(acting) = reconciling.upgrade() {
+                    crate::chrome_ops::reconcile(&acting);
+                }
+            });
         let node_slot = crate::ask_wiring::Slot::default();
         let worker = crate::ask_wiring::worker_in(node_slot.clone());
         let ask =

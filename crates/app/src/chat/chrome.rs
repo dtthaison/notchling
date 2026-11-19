@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use notchling_engine::chrome::flow::{Done, Need, Phase, Step, Wait};
+use notchling_engine::control::slash::SlashCommand;
 use notchling_engine::sessions::AgentTarget;
 use notchling_locale as t;
 use serde_json::Value;
@@ -81,6 +82,7 @@ impl Task {
                 Done::AlreadyOff => t::chat::chrome_already_off(),
             },
             Phase::NeedsYou { .. } => t::chat::chrome_needs_you(),
+            Phase::Cancelled => return None,
         };
         Some(text.to_owned())
     }
@@ -90,6 +92,7 @@ impl Task {
 pub enum Act {
     TryAgain,
     TurnOnAnyway,
+    TurnOffAnyway,
     TurnOn,
     TurnOff,
     OpenTerminal,
@@ -100,6 +103,7 @@ impl Act {
         match self {
             Act::TryAgain => t::chat::chrome_try_again(),
             Act::TurnOnAnyway => t::chat::chrome_turn_on_anyway(),
+            Act::TurnOffAnyway => t::chat::chrome_turn_off_anyway(),
             Act::TurnOn => t::chat::chrome_turn_on(),
             Act::TurnOff => t::chat::chrome_turn_off(),
             Act::OpenTerminal => t::chat::chrome_open_terminal(),
@@ -128,6 +132,7 @@ impl Sheet {
         let need = self.need.as_ref()?;
         Some(match need {
             Need::Tasks { count } => t::chat::chrome_tasks(*count),
+            Need::TasksUnknown => t::chat::chrome_tasks_unknown().to_owned(),
             Need::NoExtension => t::chat::chrome_no_extension().to_owned(),
             Need::NotConnected => t::chat::chrome_not_connected().to_owned(),
             Need::TurnedOffInMcp => t::chat::chrome_mcp_off().to_owned(),
@@ -143,7 +148,12 @@ impl Sheet {
 
     pub fn acts(&self) -> Vec<Act> {
         match &self.need {
-            Some(Need::Tasks { .. }) => vec![Act::TurnOnAnyway, Act::TryAgain],
+            Some(Need::Tasks { .. } | Need::TasksUnknown) if self.wanted_on => {
+                vec![Act::TurnOnAnyway, Act::TryAgain]
+            }
+            Some(Need::Tasks { .. } | Need::TasksUnknown) => {
+                vec![Act::TurnOffAnyway, Act::TryAgain]
+            }
             Some(Need::TurnedOffInMcp) => vec![Act::OpenTerminal, Act::TryAgain],
             Some(Need::Failed { .. }) => vec![Act::TryAgain, Act::OpenTerminal],
             Some(_) => vec![Act::TryAgain],
@@ -167,6 +177,7 @@ pub struct State {
     pub tasks: HashMap<String, Task>,
     pub notes: HashMap<String, (String, i64)>,
     pub asking: HashSet<String>,
+    pub peeked: HashSet<String>,
     pub last_poll_ms: i64,
 }
 
@@ -186,7 +197,13 @@ impl State {
         };
         self.tasks.insert(id.to_owned(), task.clone());
         match &task.phase {
-            Phase::Done { .. } => {
+            Phase::Cancelled => {
+                self.tasks.remove(id);
+                Applied::Finished
+            }
+            Phase::Done { result } => {
+                self.on
+                    .insert(id.to_owned(), matches!(result, Done::On | Done::AlreadyOn));
                 if let Some(text) = task.note() {
                     self.notes.insert(id.to_owned(), (text, now_ms + NOTE_MS));
                 }
@@ -196,9 +213,23 @@ impl State {
             Phase::NeedsYou { need } => {
                 self.tasks.remove(id);
                 self.notes.remove(id);
+                let on = match (need, task.on) {
+                    (Need::Busy { .. }, _) => status.on,
+                    (Need::Tasks { .. }, wanted) => Some(!wanted),
+                    (_, true) => Some(false),
+                    (_, false) => status.on,
+                };
+                match on {
+                    Some(on) => {
+                        self.on.insert(id.to_owned(), on);
+                    }
+                    None => {
+                        self.on.remove(id);
+                    }
+                }
                 Applied::Needs(Sheet {
                     session: id.to_owned(),
-                    on: status.on,
+                    on,
                     wanted_on: task.on,
                     need: Some(need.clone()),
                 })
@@ -256,4 +287,55 @@ pub fn command(on: bool) -> &'static str {
     } else {
         "/chrome off"
     }
+}
+
+pub const NAME_ON: &str = "chrome";
+pub const NAME_OFF: &str = "chrome off";
+
+pub fn suggestions() -> Vec<SlashCommand> {
+    [
+        (NAME_ON, t::chat::chrome_suggest_on()),
+        (NAME_OFF, t::chat::chrome_suggest_off()),
+    ]
+    .into_iter()
+    .map(|(name, description)| SlashCommand {
+        name: name.to_owned(),
+        description: description.to_owned(),
+        argument_hint: None,
+    })
+    .collect()
+}
+
+pub fn commands_for(session: &Session, commands: &[SlashCommand]) -> Vec<SlashCommand> {
+    let mut all: Vec<SlashCommand> = commands
+        .iter()
+        .filter(|c| c.name != NAME_ON)
+        .cloned()
+        .collect();
+    if offered(session) {
+        all.extend(suggestions());
+    }
+    all
+}
+
+pub fn spaced(text: &str) -> Vec<SlashCommand> {
+    let Some(rest) = text.strip_prefix('/') else {
+        return Vec::new();
+    };
+    let lower = rest.to_lowercase();
+    let Some(after) = lower.strip_prefix(NAME_ON) else {
+        return Vec::new();
+    };
+    if !after.starts_with(char::is_whitespace) {
+        return Vec::new();
+    }
+    let arg = after.trim();
+    let off = &NAME_OFF[NAME_ON.len() + 1..];
+    if arg.is_empty() || arg == off || !off.starts_with(arg) {
+        return Vec::new();
+    }
+    suggestions()
+        .into_iter()
+        .filter(|c| c.name == NAME_OFF)
+        .collect()
 }

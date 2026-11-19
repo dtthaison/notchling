@@ -131,6 +131,7 @@ pub struct ActingOps {
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) pause: Pause,
     typing: TypingLocks,
+    pub(crate) respawns: TypingLocks,
     pub(crate) tick: Duration,
     pub(crate) parent_of: Parents,
     stopping: Mutex<HashMap<String, Instant>>,
@@ -165,6 +166,7 @@ impl ActingOps {
             launcher: Arc::new(NoLaunch),
             pause: Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
             typing: TypingLocks::new(),
+            respawns: TypingLocks::new(),
             tick: Duration::from_millis(250),
             parent_of: Box::new(crate::hook::parent_pid),
             stopping: Mutex::new(HashMap::new()),
@@ -308,7 +310,10 @@ impl ActingOps {
             }
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
-            ops::SESSION_CHROME => self.chrome_state(args),
+            ops::SESSION_CHROME => {
+                app_only(caller)?;
+                self.chrome_state(args)
+            }
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
             ops::SESSION_HELD_DISCARD => self.held_discard(args),
@@ -513,6 +518,14 @@ impl ActingOps {
     }
 
     fn controlled(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if op == ops::SESSION_COMMAND
+            && args
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(notchling_engine::chrome::command::is_chrome)
+        {
+            app_only(caller)?;
+        }
         let target = self.target_of(op, args);
         let by_agent = caller.tier == Tier::Agent;
         if let (true, Some(target)) = (by_agent, &target) {
@@ -975,5 +988,13 @@ pub(crate) fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
     drop(out);
     if std::fs::rename(&temp, file).is_err() {
         let _ = std::fs::remove_file(&temp);
+    }
+}
+
+fn app_only(caller: &Caller) -> Result<(), ApiError> {
+    if caller.tier == Tier::App && caller.client == ClientKind::App {
+        Ok(())
+    } else {
+        Err(forbidden("Chrome is changed from the app only"))
     }
 }
