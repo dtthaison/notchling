@@ -750,6 +750,11 @@ impl Platform for MacPlatform {
                         let _: () = msg_send![panel, setPrompt: ns_string(&prompt)];
                     }
 
+                    if let Some(directory) = options.directory.as_ref().and_then(|d| d.to_str()) {
+                        let url: id = msg_send![class!(NSURL), fileURLWithPath: ns_string(directory) isDirectory: YES];
+                        let _: () = msg_send![panel, setDirectoryURL: url];
+                    }
+
                     let _: () = msg_send![panel, beginWithCompletionHandler: block];
                 }
             })

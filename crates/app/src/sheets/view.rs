@@ -349,6 +349,7 @@ impl NewSessionView {
             directories: true,
             multiple: false,
             prompt: Some(t::chat::sheet_choose().into()),
+            directory: None,
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picked.await {

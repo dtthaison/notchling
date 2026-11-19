@@ -401,6 +401,7 @@ impl ChatView {
             directories: folders,
             multiple: true,
             prompt: None,
+            directory: None,
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picked.await {

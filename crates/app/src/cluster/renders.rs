@@ -14,7 +14,7 @@ pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
 pub const STANDBY_NAME: &str = "mac-mini";
 
-pub const VIEWS: [ViewSpec; 26] = [
+pub const VIEWS: [ViewSpec; 29] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -39,6 +39,21 @@ pub const VIEWS: [ViewSpec; 26] = [
         name: "machines-sheet-tailscale",
         size: (WIDTH, 760.0),
         about: "Add from Tailscale: the machines on the active network with a filter, two chosen with their SSH users, one already in Machines hidden, and the note about the other network (made-up devices)",
+    },
+    ViewSpec {
+        name: "machines-sheet-tailscale-test",
+        size: (WIDTH, 1000.0),
+        about: "Add from Tailscale with SSH Keys and test results: connected, wrong user or key, a public key warning with a new host, a missing key file and a test still running (made-up devices)",
+    },
+    ViewSpec {
+        name: "machines-sheet-tailscale-trust",
+        size: (WIDTH, 1120.0),
+        about: "Add from Tailscale after Trust Host on a new host: the host key's fingerprint, the check-it warning and Add to Known Hosts, with a jump-host and a changed-key result on other rows (made-up devices)",
+    },
+    ViewSpec {
+        name: "machines-sheet-edit",
+        size: (WIDTH, 760.0),
+        about: "a machine's Edit Addresses sheet with its SSH Key, Choose and Clear, and a Test with one line per address: connected, wrong network and can't reach (made-up hosts)",
     },
     ViewSpec {
         name: "machines-sheet-organization",
@@ -173,6 +188,9 @@ pub enum Shown {
     MachinesAdd,
     MachinesAddresses,
     MachinesTailscale,
+    MachinesTest,
+    MachinesTrust,
+    MachinesEdit,
     MachinesOrganization,
     MachinesNetwork,
 }
@@ -184,6 +202,9 @@ pub fn shown(name: &str) -> Option<Shown> {
         "machines-sheet-add" => Some(Shown::MachinesAdd),
         "machines-sheet-addresses" => Some(Shown::MachinesAddresses),
         "machines-sheet-tailscale" => Some(Shown::MachinesTailscale),
+        "machines-sheet-tailscale-test" => Some(Shown::MachinesTest),
+        "machines-sheet-tailscale-trust" => Some(Shown::MachinesTrust),
+        "machines-sheet-edit" => Some(Shown::MachinesEdit),
         "machines-sheet-organization" => Some(Shown::MachinesOrganization),
         "machines-sheet-network" => Some(Shown::MachinesNetwork),
         "cluster-empty" => Some(Shown::Empty),
@@ -638,6 +659,9 @@ pub fn model_of(which: Shown) -> ClusterModel {
         | Shown::MachinesAdd
         | Shown::MachinesAddresses
         | Shown::MachinesTailscale
+        | Shown::MachinesTest
+        | Shown::MachinesTrust
+        | Shown::MachinesEdit
         | Shown::MachinesOrganization
         | Shown::MachinesNetwork => ClusterModel::from_status(&two_members(), ME),
         Shown::Update => ClusterModel::from_status(&updating(), ME),

@@ -15,6 +15,7 @@ mod address_rows_view;
 pub mod addresses_form;
 #[cfg(target_os = "macos")]
 mod edit_addresses_view;
+pub mod edit_key;
 pub mod feed;
 pub mod from_tailscale;
 #[cfg(target_os = "macos")]
@@ -34,9 +35,12 @@ pub mod promote_sheet;
 mod promote_view;
 pub mod renders;
 pub mod replication;
+pub mod rounds;
 pub mod secrets;
 #[cfg(target_os = "macos")]
 pub mod secrets_view;
+#[cfg(target_os = "macos")]
+mod ssh_text;
 pub mod tool_runs;
 pub mod tool_setup;
 #[cfg(target_os = "macos")]
@@ -44,6 +48,9 @@ mod tool_setup_view;
 pub mod tool_updates;
 #[cfg(target_os = "macos")]
 mod tool_updates_view;
+pub mod trust;
+#[cfg(target_os = "macos")]
+mod trust_view;
 pub mod updates;
 mod updates_admin;
 mod updates_state;
@@ -69,6 +76,8 @@ mod add_tests;
 #[cfg(test)]
 mod addresses_form_tests;
 #[cfg(test)]
+mod edit_key_tests;
+#[cfg(test)]
 mod feed_tests;
 #[cfg(test)]
 mod from_tailscale_tests;
@@ -90,10 +99,14 @@ mod promote_tests;
 mod replication_tests;
 #[cfg(test)]
 mod secrets_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod ssh_text_tests;
 #[cfg(test)]
 mod tool_setup_tests;
 #[cfg(test)]
 mod tool_updates_tests;
+#[cfg(test)]
+mod trust_tests;
 #[cfg(test)]
 mod updates_state_tests;
 #[cfg(test)]

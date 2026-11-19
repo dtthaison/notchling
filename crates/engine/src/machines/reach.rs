@@ -2,6 +2,7 @@ use super::addresses::{address_problems, AddressKind, MachineAddress, Route};
 use super::registry::Machine;
 use super::runner::{Call, CommandResult, Runner};
 use super::shell::ssh_prefix;
+use super::ssh_test::Target;
 use super::tailscale::{Network, Tailscale};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -89,7 +90,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn print_of(m: &Machine) -> String {
-    format!("{}|{:?}", m.user, m.address_list())
+    format!("{}|{:?}|{:?}", m.user, m.address_list(), m.ssh_key())
 }
 
 impl Router {
@@ -171,6 +172,37 @@ impl Router {
             apply(&mut out, pick);
         }
         out
+    }
+
+    pub fn targets(&self, m: &Machine, all: &[Machine]) -> Vec<(MachineAddress, Target)> {
+        let active = match &self.live {
+            Some(live) if needs_network(m, all, &[]) => live.tailscale.active(),
+            _ => None,
+        };
+        let here = [m.name.clone()];
+        m.address_list()
+            .into_iter()
+            .map(|address| {
+                let wrong = match (
+                    address.kind.is_tailscale(),
+                    address.tailnet_name(),
+                    active.as_ref(),
+                ) {
+                    (true, Some(wanted), Some(net)) if !net.is(wanted) => {
+                        Some((wanted.to_owned(), net.tailnet.clone()))
+                    }
+                    _ => None,
+                };
+                let target = match wrong {
+                    Some((wanted, active)) => Target::WrongNetwork { wanted, active },
+                    None => match self.route_for(m, &address, all, &here) {
+                        Some(route) => Target::Route(route),
+                        None => Target::Unusable,
+                    },
+                };
+                (address, target)
+            })
+            .collect()
     }
 
     pub fn pick(&self, m: &Machine, all: &[Machine]) -> Pick {
@@ -301,6 +333,7 @@ impl Router {
             user: m.address_user(address).to_owned(),
             port: address.port,
             jump: None,
+            key: m.ssh_key().map(str::to_owned),
         };
         if address.kind == AddressKind::Jump {
             if trail.len() > JUMP_DEPTH {

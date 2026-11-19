@@ -13,6 +13,7 @@ pub mod engine_plan;
 mod engine_update;
 pub mod forms;
 pub mod github;
+pub mod host_trust;
 pub mod mac_facts;
 pub mod masks;
 pub mod merge;
@@ -31,6 +32,8 @@ pub mod roots;
 pub mod runner;
 pub mod service_files;
 pub mod shell;
+pub mod ssh_key;
+pub mod ssh_test;
 pub mod status;
 pub mod step;
 mod steps_git;
@@ -103,6 +106,8 @@ pub mod tests_engine_world;
 mod tests_engine_writes;
 #[cfg(test)]
 mod tests_forms;
+#[cfg(test)]
+mod tests_host_trust;
 #[cfg(test)]
 mod tests_machine_steps;
 #[cfg(test)]
@@ -193,6 +198,10 @@ mod tests_secrets;
 mod tests_selfupdate;
 #[cfg(test)]
 mod tests_shell;
+#[cfg(test)]
+mod tests_ssh_key;
+#[cfg(test)]
+mod tests_ssh_test;
 #[cfg(test)]
 mod tests_status;
 #[cfg(test)]
