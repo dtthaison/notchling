@@ -8,7 +8,7 @@ use super::add_sheet::{
     brief, derived_name, install, may_open, not_joined_line, parse_draft, view, AddPassword,
     Button, Draft,
 };
-use super::not_joined::NotJoined;
+use super::not_joined::{NotJoined, Reach};
 
 fn draft(address: &str, name: &str) -> Draft {
     Draft {
@@ -89,7 +89,7 @@ fn address_errors_show_in_the_form_and_hold_check_back() {
     );
     assert_eq!(
         buttons(&none),
-        [(Button::Cancel, true), (Button::Check, false)]
+        [(Button::Cancel, true), (Button::Add, false)]
     );
 
     let root = view(None, &draft("root@vps", ""), 0, "me", &[]);
@@ -97,7 +97,7 @@ fn address_errors_show_in_the_form_and_hold_check_back() {
     assert!(!root
         .actions
         .iter()
-        .any(|a| a.button == Button::Check && a.enabled));
+        .any(|a| a.button == Button::Add && a.enabled));
 
     let taken = view(None, &draft("m1", ""), 0, "me", &["m1".to_owned()]);
     assert!(taken.error.is_some(), "a name already in Machines");
@@ -108,7 +108,7 @@ fn address_errors_show_in_the_form_and_hold_check_back() {
     assert!(ok
         .actions
         .iter()
-        .any(|a| a.button == Button::Check && a.enabled));
+        .any(|a| a.button == Button::Add && a.enabled));
 }
 
 #[test]
@@ -244,6 +244,8 @@ fn not_in_the_cluster_lines_say_the_system() {
         user: "sondoan".into(),
         os: Some(MachineOs::MacOs),
         node_on: false,
+        reach: Reach::Unchecked,
+        checked_s: None,
     };
     assert_eq!(not_joined_line(&mac), "sondoan@m1 · macOS");
     let linux = NotJoined {
@@ -265,11 +267,11 @@ fn a_busy_cluster_sheet_opens_no_add_sheet() {
 #[test]
 fn return_does_what_the_button_does_only_when_it_is_enabled() {
     let empty = view(None, &draft("", ""), 0, "me", &[]);
-    assert!(!empty.allows(Button::Check), "an empty address");
+    assert!(!empty.allows(Button::Add), "an empty address");
     let bad = view(None, &draft("root@vps", ""), 0, "me", &[]);
-    assert!(!bad.allows(Button::Check), "an invalid address");
+    assert!(!bad.allows(Button::Add), "an invalid address");
     let ok = view(None, &draft("agent@vps-sing-1", ""), 0, "me", &[]);
-    assert!(ok.allows(Button::Check));
+    assert!(ok.allows(Button::Add));
     assert!(ok.allows(Button::Cancel));
 
     let checking = snap(Phase::Checking, None);
@@ -280,7 +282,7 @@ fn return_does_what_the_button_does_only_when_it_is_enabled() {
         "me",
         &[],
     );
-    assert!(!busy.allows(Button::Check), "no Check while one runs");
+    assert!(!busy.allows(Button::Add), "no Check while one runs");
 
     let blocked = snap(Phase::Plan, Some(plan(false, Some("Tailscale first"))));
     let held = view(Some(&blocked), &draft("", ""), 5, "me", &[]);
@@ -320,4 +322,57 @@ fn the_admin_password_field_is_labelled() {
     assert!(
         notchling_locale::cluster::add_password_placeholder("me@m1").starts_with("Admin Password")
     );
+}
+
+#[test]
+fn the_add_form_walks_check_saved_and_stopped() {
+    use super::add_sheet::machine_view;
+    use super::machine_add::Phase as Added;
+
+    let typed = draft("deploy@app-1.example", "");
+    let form = machine_view(&Added::Form, &typed, "me", &[]);
+    assert_eq!(form.title, "Add Machine");
+    assert_eq!(
+        buttons(&form),
+        [(Button::Cancel, true), (Button::Add, true)]
+    );
+    let checking = machine_view(&Added::Checking, &typed, "me", &[]);
+    assert!(!checking.form);
+    assert!(checking
+        .busy
+        .as_deref()
+        .is_some_and(|t| t.contains("deploy@app-1.example")));
+    assert_eq!(buttons(&checking), [(Button::Close, true)]);
+
+    let saved = machine_view(
+        &Added::Saved {
+            name: "app-1".into(),
+            note: Some("a note".into()),
+        },
+        &typed,
+        "me",
+        &[],
+    );
+    let done = saved.done.clone().expect("a done line");
+    assert!(
+        done.contains("app-1") && done.contains("Join Cluster"),
+        "{done}"
+    );
+    assert_eq!(saved.note.as_deref(), Some("a note"));
+    assert_eq!(buttons(&saved), [(Button::Done, true)]);
+
+    let stop = Stop::new("no route", true);
+    let stopped = machine_view(&Added::Stopped(stop.clone()), &typed, "me", &[]);
+    assert_eq!(stopped.stop, Some(stop));
+    assert_eq!(
+        buttons(&stopped),
+        [(Button::CheckAgain, true), (Button::Close, true)]
+    );
+    let hard = machine_view(
+        &Added::Stopped(Stop::new("taken", false)),
+        &typed,
+        "me",
+        &[],
+    );
+    assert_eq!(buttons(&hard), [(Button::Close, true)]);
 }

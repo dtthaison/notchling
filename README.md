@@ -9,7 +9,7 @@ Notchling is free and open source, and isn't affiliated with Anthropic, OpenAI o
 
 Notchling 2.0 is written in Rust and replaces the Swift app, which is retired. It is for Macs with Apple silicon. [CHANGELOG.md](CHANGELOG.md) says what is new.
 
-**Some parts are off until you turn them on.** The daemon starts with its switches off, every time: **Act on Sessions**, **Phone Bridge**, **Logins and Lanes**, **Secret Vault**, **Install Hooks and Skills** and the cluster. The first five are in Settings, in the Daemon section; the cluster has a **Turn On** button in the Cluster sheet. A feature below says which switch it needs.
+**Some parts are off until you turn them on.** The daemon starts with its switches off, every time: **Act on Sessions**, **Phone Bridge**, **Logins and Lanes**, **Secret Vault**, **Install Hooks and Skills** and the cluster. The first five are in Settings, in the Daemon section; the cluster has a **Turn On** button in the Machines sheet. A feature below says which switch it needs.
 
 ## What it does
 
@@ -84,7 +84,7 @@ The app is ad hoc signed, not notarized, so macOS blocks the first launch. Open 
 xattr -dr com.apple.quarantine /Applications/Notchling.app
 ```
 
-Linux machines for the cluster need nothing downloaded by hand: **Add Machine** in the Cluster sheet installs Notchling's Linux build on them, taken from the release and checked against its SHA-256.
+Linux machines for the cluster need nothing downloaded by hand: **Add Machine** in the Machines sheet installs Notchling's Linux build on them, taken from the release and checked against its SHA-256.
 
 ## Requirements
 

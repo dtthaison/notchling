@@ -29,6 +29,7 @@ struct Shared {
     last: Mutex<Value>,
     generation: Arc<AtomicU64>,
     stop: AtomicBool,
+    down: AtomicBool,
     adds: AddRuns,
     updates: Arc<UpdateSession>,
     runs: Arc<ToolRuns>,
@@ -74,6 +75,7 @@ impl Shared {
             reported: Mutex::new(BTreeMap::new()),
             generation,
             stop: AtomicBool::new(false),
+            down: AtomicBool::new(false),
             updates: Arc::new(UpdateSession::default()),
         }
     }
@@ -122,6 +124,7 @@ impl Shared {
     }
 
     fn load(&self, status: &Value) {
+        self.set_down(false);
         self.remember(status);
         self.track(status, now_ms());
         let me = status.get("me").and_then(Value::as_str).unwrap_or("");
@@ -154,7 +157,14 @@ impl Shared {
         }
     }
 
+    fn set_down(&self, down: bool) {
+        if self.down.swap(down, Ordering::SeqCst) != down {
+            self.bump();
+        }
+    }
+
     fn lost(&self) {
+        self.set_down(true);
         self.set_mac(None);
         self.remember(&Value::Null);
         let mut model = self.model();
@@ -281,6 +291,10 @@ impl ClusterFeed {
 
     pub fn is_live(&self) -> bool {
         self.transport.is_some()
+    }
+
+    pub fn is_down(&self) -> bool {
+        self.shared.down.load(Ordering::SeqCst)
     }
 
     pub fn generation(&self) -> u64 {

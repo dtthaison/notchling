@@ -17,9 +17,10 @@ use super::add::AddFlow;
 use super::add_parts::AddParts;
 use super::add_runs::Snap;
 use super::add_sheet::{
-    derived_name, install, may_open, sign_in_target, start_flow, view, AddPassword, AddView,
-    Button, Draft,
+    derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, AddPassword,
+    AddView, Button, Draft,
 };
+use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
 use super::view::{field_box, ClusterSheetView};
@@ -40,7 +41,9 @@ pub(super) struct AddSheet {
     pub(super) address: Entity<TextEditor>,
     pub(super) name: Entity<TextEditor>,
     pub(super) touched: bool,
+    pub(super) machine: MachineAdd,
     pub(super) flow: Option<String>,
+    pub(super) joining: bool,
     pub(super) parts: Option<AddParts>,
     pub(super) user: String,
     pub(super) names: Vec<String>,
@@ -67,6 +70,10 @@ pub(super) struct AddUi {
 }
 
 impl AddUi {
+    pub(super) fn forget_list(&mut self) {
+        self.joined = None;
+    }
+
     fn not_joined(
         &mut self,
         feed: &super::feed::ClusterFeed,
@@ -98,12 +105,12 @@ impl AddSheet {
                 &address,
                 |this, _, event: &TextEditorEvent, cx| match event {
                     TextEditorEvent::Changed => this.add_address_changed(cx),
-                    TextEditorEvent::Submit => this.add_submit(Button::Check, cx),
+                    TextEditorEvent::Submit => this.add_submit(Button::Add, cx),
                 },
             );
         let name_events = cx.subscribe(&name, |this, _, event: &TextEditorEvent, cx| match event {
             TextEditorEvent::Changed => this.add_name_changed(cx),
-            TextEditorEvent::Submit => this.add_submit(Button::Check, cx),
+            TextEditorEvent::Submit => this.add_submit(Button::Add, cx),
         });
         let (user, names) = parts
             .as_ref()
@@ -113,6 +120,8 @@ impl AddSheet {
             address,
             name,
             touched: false,
+            machine: MachineAdd::new(),
+            joining: flow.is_some(),
             flow,
             parts,
             user,
@@ -130,7 +139,7 @@ impl AddSheet {
 
 fn kind_of(button: Button) -> ButtonKind {
     match button {
-        Button::Check | Button::Install | Button::Done => ButtonKind::Primary,
+        Button::Add | Button::Install | Button::Done => ButtonKind::Primary,
         Button::CheckAgain => ButtonKind::Secondary,
         Button::OpenSignIn => ButtonKind::Secondary,
         Button::Close | Button::Cancel => ButtonKind::Ghost,
@@ -139,7 +148,7 @@ fn kind_of(button: Button) -> ButtonKind {
 
 fn title_of(button: Button) -> &'static str {
     match button {
-        Button::Check => t::cluster::add_check(),
+        Button::Add => t::cluster::add_save(),
         Button::CheckAgain => t::cluster::add_check_again(),
         Button::Install => t::cluster::add_install(),
         Button::OpenSignIn => t::cluster::add_open_sign_in(),
@@ -151,7 +160,7 @@ fn title_of(button: Button) -> &'static str {
 
 fn id_of(button: Button) -> &'static str {
     match button {
-        Button::Check => "add-check",
+        Button::Add => "add-save",
         Button::CheckAgain => "add-check-again",
         Button::Install => "add-install",
         Button::OpenSignIn => "add-open-sign-in",
@@ -242,9 +251,21 @@ impl ClusterSheetView {
     fn add_shown(&self, cx: &Context<Self>) -> Option<AddView> {
         let sheet = self.add.sheet.as_ref()?;
         let snap = sheet.flow.as_deref().and_then(|n| self.feed.adds().get(n));
+        let draft = self.add_draft(cx);
+        if snap.is_none() && sheet.joining {
+            return Some(refused_view());
+        }
+        if snap.is_none() {
+            return Some(machine_view(
+                sheet.machine.phase(),
+                &draft,
+                &sheet.user,
+                &sheet.names,
+            ));
+        }
         Some(view(
             snap.as_ref(),
-            &self.add_draft(cx),
+            &draft,
             sheet.password.len(),
             &sheet.user,
             &sheet.names,
@@ -264,17 +285,14 @@ impl ClusterSheetView {
             return;
         };
         match which {
-            Button::Check => {
+            Button::Add => {
                 let Some(parts) = sheet.parts.clone() else {
                     return;
                 };
-                match start_flow(parts, &draft, &sheet.names) {
-                    Ok(flow) => {
-                        let name = flow.name().to_owned();
-                        if runs.begin(flow) {
-                            sheet.flow = Some(name);
-                            sheet.error = None;
-                        }
+                match sheet.machine.begin(&parts, &draft, None) {
+                    Ok(probe) => {
+                        sheet.error = None;
+                        self.run_machine_probe(probe, parts, cx);
                     }
                     Err(why) => sheet.error = Some(why),
                 }
@@ -283,6 +301,14 @@ impl ClusterSheetView {
                 if let Some(name) = sheet.flow.clone() {
                     sheet.error = None;
                     runs.check(&name);
+                } else if let Some(parts) = sheet.parts.clone() {
+                    match sheet.machine.begin(&parts, &draft, None) {
+                        Ok(probe) => {
+                            sheet.error = None;
+                            self.run_machine_probe(probe, parts, cx);
+                        }
+                        Err(why) => sheet.error = Some(why),
+                    }
                 }
             }
             Button::Install => {
@@ -326,6 +352,30 @@ impl ClusterSheetView {
             }
         }
         cx.notify();
+    }
+
+    fn run_machine_probe(&mut self, probe: Probe, parts: AddParts, cx: &mut Context<Self>) {
+        let engine = parts.engine.clone();
+        cx.spawn(async move |this, cx| {
+            let answer = cx
+                .background_executor()
+                .spawn(async move { probe.run(&engine) })
+                .await;
+            this.update(cx, |view, cx| {
+                let source = view.feed.add_source();
+                if let Some(sheet) = view.add.sheet.as_mut() {
+                    if sheet.machine.answered(&parts, answer) {
+                        if let Some(name) = sheet.machine.name() {
+                            source.note_checked(name);
+                        }
+                        view.add.forget_list();
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(super) fn add_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {

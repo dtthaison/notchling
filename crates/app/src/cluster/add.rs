@@ -72,7 +72,19 @@ enum Settled {
     Again,
 }
 
-fn commit(
+pub(super) fn unreachable_stop(user: &str, host: &str, text: &str) -> Stop {
+    let target = format!("{user}@{host}");
+    let howto = if says(text, &["host", "key", "verification", "failed"]) {
+        t::cluster::add_howto_host_key(&target)
+    } else if says(text, &["permission", "denied"]) {
+        t::cluster::add_howto_key(&target)
+    } else {
+        t::cluster::add_howto_reach().to_owned()
+    };
+    Stop::new(text, true).with_howto(howto)
+}
+
+pub(super) fn commit(
     registry: &dyn Registry,
     change: impl FnOnce(&mut Vec<Machine>) -> Result<bool, String>,
 ) -> Result<(), String> {
@@ -291,24 +303,12 @@ impl AddFlow {
         Vec::new()
     }
 
-    fn unreachable(&self, text: &str) -> Stop {
-        let target = format!("{}@{}", self.user, self.host);
-        let howto = if says(text, &["host", "key", "verification", "failed"]) {
-            t::cluster::add_howto_host_key(&target)
-        } else if says(text, &["permission", "denied"]) {
-            t::cluster::add_howto_key(&target)
-        } else {
-            t::cluster::add_howto_reach().to_owned()
-        };
-        Stop::new(text, true).with_howto(howto)
-    }
-
     fn settle(&mut self, results: BTreeMap<StepId, CheckResult>) -> Result<Settled, Stop> {
         let Some(reach) = results.get(&StepId::REACHABLE) else {
             return Err(Stop::new(t::cluster::add_no_answer(), true));
         };
         if !reach.state.is_pass() {
-            return Err(self.unreachable(reach.state.text()));
+            return Err(unreachable_stop(&self.user, &self.host, reach.state.text()));
         }
         let detected = results
             .values()

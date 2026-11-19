@@ -76,7 +76,7 @@ fn the_machines_banner_names_the_machines_and_points_to_the_cluster_sheet() {
         .expect("m1 runs another build");
     assert_eq!(
         line,
-        "1 machine runs another Notchling build: m1. Update them from the Cluster sheet in Notchling."
+        "1 machine runs another Notchling build: m1. Update them from the Machines sheet in Notchling."
     );
 }
 

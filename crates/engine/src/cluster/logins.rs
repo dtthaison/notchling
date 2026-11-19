@@ -208,7 +208,7 @@ pub fn how_to(tool: Tool, node: &str) -> String {
             "In your own terminal on {node} run {AGY_COMMAND} and sign in with the same Google login as the Antigravity app. Notchling never renews a login."
         ),
         _ => format!(
-            "Choose Sign In on {node} in the Cluster sheet, or in your own terminal on {node} run {CODEX_COMMAND}. Notchling never renews a login."
+            "Choose Sign In on {node} in the Machines sheet, or in your own terminal on {node} run {CODEX_COMMAND}. Notchling never renews a login."
         ),
     }
 }

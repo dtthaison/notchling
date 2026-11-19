@@ -8,10 +8,10 @@ use notchling_engine::machines::registry::MachineOs;
 use notchling_engine::machines::steps_tailscale_linux::is_sign_in_link;
 use notchling_locale as t;
 
-use super::add::{AddFlow, Phase, Stop};
-use super::add_parts::AddParts;
+use super::add::{Phase, Stop};
 use super::add_plan::PlanView;
 use super::add_runs::{SignInLink, Snap};
+use super::machine_add::Phase as MachinePhase;
 use super::not_joined::NotJoined;
 
 #[derive(Default)]
@@ -71,7 +71,7 @@ pub fn may_open(busy: bool, sheet_open: bool) -> bool {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Button {
-    Check,
+    Add,
     CheckAgain,
     Install,
     OpenSignIn,
@@ -141,13 +141,6 @@ pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Par
     })
 }
 
-pub fn start_flow(parts: AddParts, draft: &Draft, existing: &[String]) -> Result<AddFlow, String> {
-    let parsed = parse_draft(draft, &parts.this.user, existing)?;
-    let mut flow = AddFlow::from_address(parts, &draft.address, &[])?;
-    flow.set_name(&parsed.name, existing)?;
-    Ok(flow)
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct AddView {
     pub title: String,
@@ -203,19 +196,7 @@ pub fn view(
     existing: &[String],
 ) -> AddView {
     let Some(snap) = snap else {
-        let mut view = AddView::empty(t::cluster::add_title().to_owned());
-        view.form = true;
-        let parsed = parse_draft(draft, user, existing);
-        match &parsed {
-            Ok(ok) => view.target = Some(t::cluster::add_connects_as(&ok.target)),
-            Err(why) if !draft.address.trim().is_empty() => view.error = Some(why.clone()),
-            Err(_) => {}
-        }
-        view.actions = vec![
-            Action::on(Button::Cancel),
-            Action::when(Button::Check, parsed.is_ok()),
-        ];
-        return view;
+        return machine_view(&MachinePhase::Form, draft, user, existing);
     };
     let mut view = AddView::empty(t::cluster::add_title_named(&snap.name));
     let target = format!("{}@{}", snap.user, snap.host);
@@ -265,6 +246,54 @@ pub fn view(
         Phase::Stopped(stop) => {
             view.stop = Some(stop.clone());
             view.log = snap.log.clone();
+            view.actions = vec![Action::on(Button::Close)];
+            if stop.check_again {
+                view.actions.insert(0, Action::on(Button::CheckAgain));
+            }
+        }
+    }
+    view
+}
+
+pub fn refused_view() -> AddView {
+    let mut view = AddView::empty(t::cluster::add_title().to_owned());
+    view.actions = vec![Action::on(Button::Close)];
+    view
+}
+
+pub fn machine_view(
+    phase: &MachinePhase,
+    draft: &Draft,
+    user: &str,
+    existing: &[String],
+) -> AddView {
+    let mut view = AddView::empty(t::cluster::add_title().to_owned());
+    let parsed = parse_draft(draft, user, existing);
+    match phase {
+        MachinePhase::Form => {
+            view.form = true;
+            match &parsed {
+                Ok(ok) => view.target = Some(t::cluster::add_connects_as(&ok.target)),
+                Err(why) if !draft.address.trim().is_empty() => view.error = Some(why.clone()),
+                Err(_) => {}
+            }
+            view.actions = vec![
+                Action::on(Button::Cancel),
+                Action::when(Button::Add, parsed.is_ok()),
+            ];
+        }
+        MachinePhase::Checking => {
+            let target = parsed.map(|p| p.target).unwrap_or_default();
+            view.busy = Some(t::cluster::add_checking(&target));
+            view.actions = vec![Action::on(Button::Close)];
+        }
+        MachinePhase::Saved { name, note } => {
+            view.done = Some(t::cluster::add_saved(name));
+            view.note = note.clone();
+            view.actions = vec![Action::on(Button::Done)];
+        }
+        MachinePhase::Stopped(stop) => {
+            view.stop = Some(stop.clone());
             view.actions = vec![Action::on(Button::Close)];
             if stop.check_again {
                 view.actions.insert(0, Action::on(Button::CheckAgain));
