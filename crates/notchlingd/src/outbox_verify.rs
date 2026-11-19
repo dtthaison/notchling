@@ -375,3 +375,7 @@ mod tests;
 #[cfg(test)]
 #[path = "outbox_late_tests.rs"]
 mod late_tests;
+
+#[cfg(test)]
+#[path = "outbox_invisible_tests.rs"]
+mod invisible_tests;

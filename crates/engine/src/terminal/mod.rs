@@ -4,6 +4,8 @@ pub mod input_box;
 #[cfg(test)]
 mod input_box_chips_tests;
 #[cfg(test)]
+mod input_box_invisible_tests;
+#[cfg(test)]
 mod input_box_picture_tests;
 pub mod keys;
 mod live;
