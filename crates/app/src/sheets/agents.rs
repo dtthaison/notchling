@@ -4,17 +4,25 @@ use notchling_locale::{self as t, Text};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     General,
+    Organizations,
     Agents,
     Skills,
     Activity,
 }
 
 impl Page {
-    pub const ALL: [Page; 4] = [Page::General, Page::Agents, Page::Skills, Page::Activity];
+    pub const ALL: [Page; 5] = [
+        Page::General,
+        Page::Organizations,
+        Page::Agents,
+        Page::Skills,
+        Page::Activity,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
             Page::General => t::settings::page_general(),
+            Page::Organizations => t::organizations::page(),
             Page::Agents => t::settings::page_agents(),
             Page::Skills => t::settings::page_skills(),
             Page::Activity => t::settings::page_activity(),
@@ -24,6 +32,7 @@ impl Page {
     pub fn id(self) -> &'static str {
         match self {
             Page::General => "general",
+            Page::Organizations => "organizations",
             Page::Agents => "agents",
             Page::Skills => "skills",
             Page::Activity => "activity",
