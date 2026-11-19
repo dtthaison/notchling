@@ -6,7 +6,7 @@ use notchling_kit::ui::{
     button_with, hsla, icon_button, label, parts_button, parts_on, parts_tip, phone_mark,
     toggle_parts, KitPart, KitStyled,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::phone::{button_tip_off, button_tip_on};
@@ -87,16 +87,7 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
         t::chat::window_show_details()
     };
     gate::tip_text(
-        icon_button(
-            "details-button",
-            Icon::PanelRight,
-            IconSize::Button.points(),
-            kind,
-            PartState::Rest,
-            a,
-        )
-        .size(px(HEADER_BUTTON))
-        .px(px(0.0)),
+        icon_button("details-button", Icon::PanelRight, kind, PartState::Rest, a),
         tip.into(),
         a,
     )
@@ -129,16 +120,7 @@ fn inbox_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> i
         ButtonKind::Ghost
     };
     let button = gate::tip_text(
-        icon_button(
-            "inbox",
-            Icon::Bell,
-            IconSize::Button.points(),
-            kind,
-            PartState::Rest,
-            a,
-        )
-        .size(px(HEADER_BUTTON))
-        .px(px(0.0)),
+        icon_button("inbox", Icon::Bell, kind, PartState::Rest, a),
         t::chat::inbox_tip().into(),
         a,
     )

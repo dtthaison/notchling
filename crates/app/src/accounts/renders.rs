@@ -16,11 +16,16 @@ pub const NOW: f64 = 1_800_000_000.0;
 
 pub const MENU_RENDER: &str = "accounts-window-menu";
 
-pub const VIEWS: [ViewSpec; 6] = [
+pub const VIEWS: [ViewSpec; 7] = [
     ViewSpec {
         name: "accounts-window",
         size: (560.0, 640.0),
         about: "the Accounts window, Claude Code tab, accounts switch on (made-up data)",
+    },
+    ViewSpec {
+        name: "accounts-sheet",
+        size: (560.0, 640.0),
+        about: "the Accounts sheet as Chat shows it, with its close button (made-up data)",
     },
     ViewSpec {
         name: MENU_RENDER,
@@ -60,7 +65,7 @@ pub enum Shown {
 
 pub fn shown(name: &str) -> Option<Shown> {
     Some(match name {
-        "accounts-window" | MENU_RENDER => Shown::Claude,
+        "accounts-window" | "accounts-sheet" | MENU_RENDER => Shown::Claude,
         "accounts-window-off" => Shown::Off,
         "accounts-window-codex" => Shown::Codex,
         "limit-bars" => Shown::LimitBars,

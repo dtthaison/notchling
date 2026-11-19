@@ -12,7 +12,7 @@ use notchling_kit::ui::{
     button, hsla, icon, icon_button, label, scrollable_list, window_appearance, KitStyled,
     TextEditor, TextEditorEvent, ThumbRecord,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::changes_panel::HEADER;
 use super::inspector::{MARK_BOX, ROW_LINE};
@@ -350,7 +350,6 @@ impl BranchesPanel {
             icon_button(
                 "branches-close",
                 Icon::Close,
-                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 PartState::Rest,
                 a,

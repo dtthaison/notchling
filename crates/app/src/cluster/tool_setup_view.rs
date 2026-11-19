@@ -18,6 +18,7 @@ use super::tool_setup::{
 use super::tool_updates_view::{now_ms, ToolView};
 use super::view::ClusterSheetView;
 use crate::accounts::view_rows::mono;
+use crate::sheets::header::{card_title, close_button};
 
 impl ClusterSheetView {
     pub(super) fn start_install(&mut self, node: &str, tool: Tool, cx: &mut Context<Self>) {
@@ -280,12 +281,25 @@ impl ClusterSheetView {
     pub(super) fn login_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
         let sheet = self.tools.runs.sheet()?;
         let (machine, tool) = (sheet.machine, sheet.tool);
-        let mut inner = div().flex().flex_col().gap(px(SPACE[1])).child(label(
+        let title = label(
             &t::cluster::login_title(tool.title(), &machine),
             TypeRole::Heading,
             Ink::Text,
             a,
-        ));
+        );
+        let mut inner = div().flex().flex_col().gap(px(SPACE[1]));
+        let (signing, stop) = (can_sign_in(tool), machine.clone());
+        let close = close_button("node-login-close", a, cx, move |this: &mut Self, _, cx| {
+            if signing {
+                this.tools
+                    .runs
+                    .cancel(&stop, &t::cluster::tool_sign_in_stopping(&stop));
+                this.tools.seen = None;
+            } else {
+                this.tools.runs.clear_sheet();
+            }
+            cx.notify();
+        });
         let mut buttons = div()
             .pt(px(SPACE[1]))
             .flex()
@@ -359,23 +373,6 @@ impl ClusterSheetView {
                         ));
                 }
             }
-            let to = machine.clone();
-            buttons = buttons.child(
-                button(
-                    "node-login-cancel",
-                    t::cluster::login_cancel(),
-                    ButtonKind::Ghost,
-                    PartState::Rest,
-                    a,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.tools
-                        .runs
-                        .cancel(&to, &t::cluster::tool_sign_in_stopping(&to));
-                    this.tools.seen = None;
-                    cx.notify();
-                })),
-            );
             if let Some(prompt) = &session.prompt {
                 let url = prompt.url().to_owned();
                 buttons = buttons.child(
@@ -400,30 +397,16 @@ impl ClusterSheetView {
                 Ink::TextMuted,
                 a,
             ));
-            buttons = buttons
-                .child(
-                    button(
-                        "node-login-close",
-                        t::cluster::login_close(),
-                        ButtonKind::Ghost,
-                        PartState::Rest,
-                        a,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.tools.runs.clear_sheet();
-                        cx.notify();
-                    })),
+            buttons = buttons.child(
+                button(
+                    "node-login-check",
+                    t::cluster::login_check(),
+                    ButtonKind::Primary,
+                    PartState::Rest,
+                    a,
                 )
-                .child(
-                    button(
-                        "node-login-check",
-                        t::cluster::login_check(),
-                        ButtonKind::Primary,
-                        PartState::Rest,
-                        a,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.check_from_sheet(cx))),
-                );
+                .on_click(cx.listener(|this, _, _, cx| this.check_from_sheet(cx))),
+            );
         }
         Some(
             div()
@@ -441,6 +424,7 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
+                        .child(card_title(title, close))
                         .child(inner)
                         .child(buttons),
                 ),

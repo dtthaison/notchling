@@ -19,6 +19,9 @@ mod client_model_check_tests;
 mod client_model_tests;
 #[cfg(target_os = "macos")]
 pub mod client_view;
+pub mod header;
+#[cfg(test)]
+mod header_tests;
 pub mod hook_rows;
 #[cfg(test)]
 mod hook_rows_tests;

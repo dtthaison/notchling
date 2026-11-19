@@ -5,7 +5,8 @@ use notchling_kit::ui::{button, card, hsla, label, scrollable, window_appearance
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::view::{sheet_header, Dismiss};
+use super::header::sheet_header;
+use super::view::Dismiss;
 use crate::chat::chrome::{Act, Sheet};
 
 pub struct ChromeChoice(pub Act);
@@ -110,14 +111,6 @@ impl ChromeView {
 impl Render for ChromeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        let close = button(
-            "close",
-            t::chat::sheet_close(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
         div()
             .relative()
             .size_full()
@@ -126,7 +119,13 @@ impl Render for ChromeView {
             .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .fill(Ink::Window, a)
-            .child(sheet_header(Icon::Web, t::chat::chrome_title(), close, a))
+            .child(sheet_header(
+                Icon::Web,
+                t::chat::chrome_title(),
+                Vec::new(),
+                a,
+                cx,
+            ))
             .child(
                 div().flex_1().min_h(px(0.0)).child(scrollable(
                     div()

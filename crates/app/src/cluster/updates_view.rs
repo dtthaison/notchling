@@ -23,6 +23,7 @@ use super::view::ClusterSheetView;
 use crate::machines::sheets_view::checkbox;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
+use crate::sheets::header::{card_title, close_button};
 use crate::vault::pick::VaultPick;
 use crate::vault::pick_view::{pick_list, PickEvent};
 
@@ -549,6 +550,9 @@ impl ClusterSheetView {
             );
         }
         let footer = self.update_footer(&rows, outcome.is_some(), running, a, cx);
+        let close = close_button("update-close", a, cx, |this: &mut Self, _, cx| {
+            this.close_update(cx)
+        });
         Some(
             div()
                 .absolute()
@@ -566,11 +570,9 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
-                        .child(label(
-                            t::cluster::update_title(),
-                            TypeRole::Heading,
-                            Ink::Text,
-                            a,
+                        .child(card_title(
+                            label(t::cluster::update_title(), TypeRole::Heading, Ink::Text, a),
+                            close,
                         ))
                         .child(
                             div()
@@ -622,20 +624,6 @@ impl ClusterSheetView {
                     .flex_1()
                     .min_w(px(0.0))
                     .children(reason.map(|why| label(&why, TypeRole::Meta, Ink::TextMuted, a))),
-            )
-            .child(
-                button(
-                    "update-close",
-                    if started {
-                        t::cluster::add_close()
-                    } else {
-                        t::cluster::add_cancel()
-                    },
-                    ButtonKind::Ghost,
-                    PartState::Rest,
-                    a,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.close_update(cx))),
             );
         if running {
             footer = footer.child(button(

@@ -8,7 +8,7 @@ use notchling_kit::ui::{
     account_line, hsla, icon_button, label, node_line, scrollable, session_row_marked, tool_icon,
     KitPart, KitStyled, ToolMark,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::ChatView;
@@ -22,14 +22,7 @@ fn footer_button(
     help: &'static str,
     a: Appearance,
 ) -> gpui::Stateful<Div> {
-    let button = icon_button(
-        id,
-        mark,
-        IconSize::Button.points(),
-        ButtonKind::Ghost,
-        PartState::Rest,
-        a,
-    );
+    let button = icon_button(id, mark, ButtonKind::Ghost, PartState::Rest, a);
     gate::tip_text(button, help.into(), a)
 }
 
@@ -73,7 +66,6 @@ fn footer(a: Appearance, note: Option<&'static str>, cx: &mut Context<ChatView>)
 
 const TOGGLE_LEFT: f32 = 76.0;
 const TOGGLE_TOP: f32 = (HEADER_ROW - HEADER_BUTTON) / 2.0;
-const TOGGLE_HEIGHT: f32 = HEADER_BUTTON;
 const TOGGLE_WIDTH: f32 = HEADER_BUTTON;
 
 pub const HEADER_ROW: f32 = 40.0;
@@ -90,14 +82,10 @@ pub fn toggle_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     let button = icon_button(
         "sidebar-toggle",
         Icon::PanelLeft,
-        IconSize::Button.points(),
         ButtonKind::Ghost,
         PartState::Rest,
         a,
     )
-    .h(px(TOGGLE_HEIGHT))
-    .w(px(TOGGLE_WIDTH))
-    .px(px(0.0))
     .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
     let button = gate::tip_text(button, tip.into(), a);
     div()
@@ -116,14 +104,10 @@ pub fn new_session_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatV
     let button = icon_button(
         "new-session",
         Icon::Plus,
-        IconSize::Button.points(),
         ButtonKind::Ghost,
         PartState::Rest,
         a,
     )
-    .h(px(TOGGLE_HEIGHT))
-    .w(px(TOGGLE_WIDTH))
-    .px(px(0.0))
     .on_click(cx.listener(|this, _, _, cx| this.open_new_session(cx)));
     let button = gate::tip_text(button, t::chat::new_session().into(), a);
     div()

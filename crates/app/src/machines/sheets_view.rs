@@ -10,6 +10,7 @@ use super::forms::{
 use super::model::Sheet;
 use super::pieces::FixPrompt;
 use super::view::{busy_line, marked, mono_lines, state_icon, state_mark, text_line, MachinesView};
+use crate::sheets::header::{card_title, close_button};
 use crate::vault::pick_view::pick_block;
 
 fn state(enabled: bool) -> PartState {
@@ -112,7 +113,12 @@ impl MachinesView {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(label(prompt.title(), TypeRole::Title, Ink::Text, a))
+            .child(card_title(
+                label(prompt.title(), TypeRole::Title, Ink::Text, a),
+                close_button("fix-close", a, cx, |this: &mut Self, _, cx| {
+                    this.cancel_sheet(cx)
+                }),
+            ))
             .child(label(&prompt.intro(), TypeRole::Body, Ink::TextMuted, a))
             .child(scrollable(
                 mono_lines("fix-commands", &prompt.text(), 300.0, a).min_h(px(80.0)),
@@ -161,19 +167,11 @@ impl MachinesView {
             }
         }
         let can_run = prompt.can_run(self.model.password_ready());
-        let cancel = button(
-            "fix-cancel",
-            "Cancel",
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|this, _, _, cx| this.cancel_sheet(cx)));
         let run = button("fix-run", "Run", ButtonKind::Primary, state(can_run), a)
             .when(can_run, |b| {
                 b.on_click(cx.listener(|this, _, _, cx| this.confirm_sheet(cx)))
             });
-        column.child(Self::footer(vec![cancel, run], None))
+        column.child(Self::footer(vec![run], None))
     }
 
     fn add_field(
@@ -212,7 +210,12 @@ impl MachinesView {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(label("Add Machine", TypeRole::Title, Ink::Text, a))
+            .child(card_title(
+                label("Add Machine", TypeRole::Title, Ink::Text, a),
+                close_button("add-close", a, cx, |this: &mut Self, _, cx| {
+                    this.cancel_sheet(cx)
+                }),
+            ))
             .child(text_line(ADD_INTRO, TypeRole::Body, Ink::TextMuted, a));
         for which in AddField::ALL {
             column = column.child(self.add_field(form, which, a, cx));
@@ -267,14 +270,6 @@ impl MachinesView {
                 a,
             )
         });
-        let cancel = button(
-            "add-cancel",
-            "Cancel",
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|this, _, _, cx| this.cancel_sheet(cx)));
         let can_check = form.can_check(&existing, can_add);
         let check = button(
             "add-check",
@@ -291,7 +286,7 @@ impl MachinesView {
             .when(may_add, |b| {
                 b.on_click(cx.listener(|this, _, _, cx| this.add_machine(cx)))
             });
-        column.child(Self::footer(vec![cancel, check, add], checking))
+        column.child(Self::footer(vec![check, add], checking))
     }
 
     fn job_field(
@@ -457,7 +452,12 @@ impl MachinesView {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(label(form.title(), TypeRole::Title, Ink::Text, a))
+            .child(card_title(
+                label(form.title(), TypeRole::Title, Ink::Text, a),
+                close_button("job-close", a, cx, |this: &mut Self, _, cx| {
+                    this.cancel_sheet(cx)
+                }),
+            ))
             .child(label(
                 &format!("on {}", form.draft.machine),
                 TypeRole::Meta,
@@ -471,19 +471,11 @@ impl MachinesView {
         if let Some(error) = &form.error {
             column = column.child(text_line(error, TypeRole::Meta, Ink::Expired, a));
         }
-        let cancel = button(
-            "job-cancel",
-            "Cancel",
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|this, _, _, cx| this.cancel_sheet(cx)));
         let can_save = form.can_save();
         let save = button("job-save", "Save", ButtonKind::Primary, state(can_save), a)
             .when(can_save, |b| {
                 b.on_click(cx.listener(|this, _, _, cx| this.save_job(cx)))
             });
-        column.child(Self::footer(vec![cancel, save], None))
+        column.child(Self::footer(vec![save], None))
     }
 }

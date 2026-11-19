@@ -10,15 +10,15 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
     button, card, hsla, icon, icon_button, label, spinner, KitPart, TextEditor, TextEditorEvent,
 };
-use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::add::AddFlow;
 use super::add_parts::AddParts;
 use super::add_runs::Snap;
 use super::add_sheet::{
-    derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, AddPassword,
-    AddView, Button, Draft,
+    derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, Action,
+    AddPassword, AddView, Button, Draft,
 };
 use super::address_rows_view::{RowEditor, Rows};
 use super::addresses_form::{RowDraft, RowMeta};
@@ -29,6 +29,7 @@ use super::view::{field_box, ClusterSheetView};
 use crate::mac::gate;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
+use crate::sheets::header::{card_title, close_button};
 use crate::sheets::view::Dismiss;
 use crate::vault::form::Form;
 use crate::vault::pick::{local_entries, VaultPick};
@@ -145,6 +146,17 @@ impl AddSheet {
             _name_events: name_events,
         }
     }
+}
+
+fn closes(button: Button) -> bool {
+    matches!(button, Button::Close | Button::Cancel | Button::Done)
+}
+
+fn closing_button(actions: &[Action]) -> Button {
+    [Button::Cancel, Button::Done, Button::Close]
+        .into_iter()
+        .find(|b| actions.iter().any(|a| a.button == *b))
+        .unwrap_or(Button::Close)
 }
 
 fn kind_of(button: Button) -> ButtonKind {
@@ -562,7 +574,6 @@ impl ClusterSheetView {
             icon_button(
                 "cluster-add-machine",
                 Icon::Plus,
-                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 self.state_for_add(),
                 a,
@@ -621,13 +632,17 @@ impl ClusterSheetView {
             .flex()
             .justify_end()
             .gap(px(SPACE[1]));
-        if sheet.parts.is_none() {
-            buttons = buttons.child(self.add_action(Button::Close, true, a, cx));
-        } else {
-            for action in &shown.actions {
+        let has_buttons = sheet.parts.is_some() && shown.actions.iter().any(|a| !closes(a.button));
+        let mut closer = Button::Close;
+        if sheet.parts.is_some() {
+            closer = closing_button(&shown.actions);
+            for action in shown.actions.iter().filter(|a| !closes(a.button)) {
                 buttons = buttons.child(self.add_action(action.button, action.enabled, a, cx));
             }
         }
+        let close = close_button("add-close", a, cx, move |this: &mut Self, _, cx| {
+            this.add_button(closer, cx)
+        });
         Some(
             div()
                 .absolute()
@@ -649,9 +664,12 @@ impl ClusterSheetView {
                         .flex()
                         .flex_col()
                         .gap(px(SPACE[1]))
-                        .child(label(&shown.title, TypeRole::Heading, Ink::Text, a))
+                        .child(card_title(
+                            label(&shown.title, TypeRole::Heading, Ink::Text, a),
+                            close,
+                        ))
                         .child(body)
-                        .child(buttons)
+                        .children(has_buttons.then_some(buttons))
                         .part_at("Add Machine Sheet", Corner::TopTrailing, a, cx),
                 ),
         )

@@ -148,6 +148,7 @@ pub fn build_render(name: &str, cx: &mut App) -> Option<AnyView> {
             if menu {
                 view.open_menu(&format!("{CLAUDE_DESKTOP}-a1"));
             }
+            view.in_sheet = name == "accounts-sheet";
             cx.new(|_| view).into()
         }
     })

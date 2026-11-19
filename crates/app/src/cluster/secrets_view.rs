@@ -210,7 +210,7 @@ pub fn editor_footer<V: 'static>(
     on: &Handler<V, SecretsEvent>,
 ) -> Div {
     let can = editor.model.is_some_and(SecretsModel::is_changed) && !editor.busy;
-    let (save_on, cancel_on) = (on.clone(), on.clone());
+    let save_on = on.clone();
     let mut save = button(
         "secrets-save",
         t::cluster::secrets_save(),
@@ -226,14 +226,6 @@ pub fn editor_footer<V: 'static>(
         save =
             save.on_click(cx.listener(move |this, _, _, cx| save_on(this, SecretsEvent::Save, cx)));
     }
-    let cancel = button(
-        "secrets-cancel",
-        t::cluster::secrets_cancel(),
-        ButtonKind::Secondary,
-        PartState::Rest,
-        a,
-    )
-    .on_click(cx.listener(move |this, _, _, cx| cancel_on(this, SecretsEvent::Cancel, cx)));
     div()
         .flex_shrink_0()
         .px(px(SIDE_PADDING))
@@ -244,7 +236,6 @@ pub fn editor_footer<V: 'static>(
         .gap(px(SPACE[1]))
         .border_t(px(1.0))
         .border_color(hsla(Ink::Hairline.color(a)))
-        .child(cancel)
         .child(save)
 }
 

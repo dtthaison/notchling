@@ -1,26 +1,19 @@
 use gpui::{div, prelude::*, px, Context, Div};
 use notchling_kit::metric::{RADIUS_CARD, SPINNER_SMALL};
-use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, label, scrollable, spinner};
+use notchling_kit::ui::{card, label, scrollable, spinner};
 use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::view::MachinesView;
+use crate::sheets::header::close_button;
 
 impl MachinesView {
     pub(super) fn diff_overlay(&self, a: Appearance, cx: &mut Context<Self>) -> Option<Div> {
         const LIMIT: usize = 2000;
         let diff = self.model.diff.as_ref()?;
-        let done = button(
-            "diff-done",
-            "Done",
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
+        let done = close_button("diff-close", a, cx, |this: &mut Self, _, cx| {
             this.model.diff = None;
             cx.notify();
-        }));
+        });
         let body = match &diff.text {
             None => div()
                 .id("diff-lines")

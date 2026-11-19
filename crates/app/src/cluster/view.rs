@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, px, AnyView, ClipboardItem, Context, Div, Entity, EventEmitter, Render,
-    Subscription, Window,
+    div, prelude::*, px, AnyElement, AnyView, ClipboardItem, Context, Div, Entity, EventEmitter,
+    Render, Subscription, Window,
 };
 use notchling_kit::metric::{CONTROL, RADIUS_SM, SIDE_PADDING, SPACE};
 use notchling_kit::part::field_look;
@@ -36,7 +36,8 @@ use super::view_secrets::{secrets_fixture, Editing};
 use super::wire::{self, Request};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
-use crate::sheets::view::{sheet_header, Dismiss};
+use crate::sheets::header::sheet_header_closing;
+use crate::sheets::view::Dismiss;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switches;
 use crate::vault::store::Vault;
@@ -724,21 +725,10 @@ impl Render for ClusterSheetView {
         }
         let can_add =
             machines && self.editing.is_none() && self.feed.add_source().parts().is_some();
-        let done = button(
-            "cluster-done",
-            t::cluster::done(),
-            ButtonKind::Secondary,
-            PartState::Rest,
-            a,
-        )
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)));
-        let header_end = div()
-            .id("cluster-header-end")
-            .flex()
-            .items_center()
-            .gap(px(SPACE[0]))
-            .children(can_add.then(|| self.add_machine_button(a, cx)))
-            .child(done);
+        let trailing: Vec<AnyElement> = can_add
+            .then(|| self.add_machine_button(a, cx).into_any_element())
+            .into_iter()
+            .collect();
         let alert = self.remove_alert(&model, a, cx);
         let machine_alert = self.machine_remove_alert(a, cx);
         let switch_alert = self.switch_alert(a, cx);
@@ -789,7 +779,20 @@ impl Render for ClusterSheetView {
             .flex_col()
             .fill(Ink::Window, a)
             .overflow_hidden()
-            .child(sheet_header(Icon::Server, &title, header_end, a))
+            .child(sheet_header_closing(
+                Icon::Server,
+                &title,
+                trailing,
+                a,
+                cx,
+                |this, _, cx| {
+                    if this.editing.is_some() {
+                        this.secrets_event(SecretsEvent::Cancel, cx);
+                    } else {
+                        cx.emit(Dismiss);
+                    }
+                },
+            ))
             .child(content)
             .children(footer)
             .children(alert)

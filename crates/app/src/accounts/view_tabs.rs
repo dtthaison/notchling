@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use gpui::{div, prelude::*, px, Context, Div, Stateful};
 use notchling_kit::metric::SIDE_PADDING;
-use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, icon_button, KitStyled};
-use notchling_kit::{Appearance, Icon, IconSize, Ink};
+use notchling_kit::part::ButtonKind;
+use notchling_kit::ui::{hsla, icon_button, KitStyled};
+use notchling_kit::{Appearance, Icon, Ink};
 
 use super::cost::{cost_view, Range};
 use super::model::{Tab, CLAUDE_CODE, REFRESH_TIP};
@@ -15,7 +15,7 @@ use super::view_cost::cost_page;
 use super::view_rows::segmented;
 use crate::acting::Control;
 use crate::mac::gate;
-use crate::sheets::view::Dismiss;
+use crate::sheets::header::{close_button, dismiss};
 
 impl AccountsView {
     pub(super) fn poll_add(&self, cx: &mut Context<Self>) {
@@ -65,7 +65,6 @@ impl AccountsView {
             icon_button(
                 "accounts-refresh",
                 Icon::Resume,
-                IconSize::Button.points(),
                 ButtonKind::Ghost,
                 gate::state(refresh_control),
                 a,
@@ -79,16 +78,9 @@ impl AccountsView {
                 cx.notify();
             }))
         });
-        let done = self.in_sheet.then(|| {
-            button(
-                "accounts-done",
-                "Done",
-                ButtonKind::Secondary,
-                PartState::Rest,
-                a,
-            )
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(Dismiss)))
-        });
+        let done = self
+            .in_sheet
+            .then(|| close_button("sheet-close", a, cx, dismiss::<Self>));
         div()
             .flex_shrink_0()
             .px(px(SIDE_PADDING))
