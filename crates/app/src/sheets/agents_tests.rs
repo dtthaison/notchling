@@ -53,6 +53,7 @@ fn the_page_and_tool_lists_keep_their_order() {
             Page::Organizations,
             Page::Agents,
             Page::Skills,
+            Page::Costs,
             Page::Activity
         ]
     );

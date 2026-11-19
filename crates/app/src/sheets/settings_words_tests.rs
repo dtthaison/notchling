@@ -164,7 +164,14 @@ fn pages_and_hooks_use_messages() {
     );
     assert_eq!(
         Page::ALL.map(Page::id),
-        ["general", "organizations", "agents", "skills", "activity"],
+        [
+            "general",
+            "organizations",
+            "agents",
+            "skills",
+            "costs",
+            "activity"
+        ],
         "an element id never changes with the language"
     );
     let installed = HookState::Installed.word();

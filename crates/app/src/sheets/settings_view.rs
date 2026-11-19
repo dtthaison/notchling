@@ -37,6 +37,7 @@ use crate::accounts::view_rows::{segmented_full, Handler};
 use crate::activity::view::ActivityView;
 mod chrome;
 mod cluster;
+mod costs;
 mod organizations;
 mod shortcut;
 mod sidecar;
@@ -69,6 +70,9 @@ pub struct SettingsView {
     shortcut: shortcut::ShortcutState,
     cluster: Option<Arc<crate::cluster::feed::ClusterFeed>>,
     organizations: Option<Entity<crate::organizations::view::OrganizationsView>>,
+    costs: Option<Entity<crate::costs::view::CostsView>>,
+    costs_setup: Option<Entity<crate::costs::setup_view::SetupView>>,
+    claude_dir: Option<std::path::PathBuf>,
     sidecar: sidecar::SidecarUi,
 }
 
@@ -110,6 +114,9 @@ impl SettingsView {
             shortcut: shortcut::ShortcutState::default(),
             cluster: None,
             organizations: None,
+            costs: None,
+            costs_setup: None,
+            claude_dir: None,
             sidecar: sidecar::SidecarUi::default(),
         }
     }
@@ -181,6 +188,9 @@ impl SettingsView {
         }
         if page == Page::Organizations {
             self.show_organizations(cx);
+        }
+        if page == Page::Costs {
+            self.show_costs(cx);
         }
         if page == Page::Activity {
             match &self.activity {
@@ -765,6 +775,7 @@ impl Render for SettingsView {
             }
         }
         list = list.children(self.organizations_page());
+        list = list.children(self.costs_page());
         if self.page == Page::Agents {
             for section in shared_agent_sections(&read) {
                 list = list.child(self.section_view(&section, &mut n, a, cx));
@@ -825,6 +836,7 @@ impl Render for SettingsView {
             scrollable(list).into_any_element()
         };
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -844,6 +856,7 @@ impl Render for SettingsView {
                     .px(px(SIDE_PADDING))
                     .pb(px(10.0))
             }))
+            .children(self.costs_overlay())
     }
 }
 

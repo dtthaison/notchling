@@ -247,7 +247,13 @@ impl ChatView {
             .then(|| self.root.data_dir.clone());
         let acts = self.acts(cx);
         let hooks = Arc::new(Hooks::for_run(Some(&self.root)));
-        let entity = cx.new(|_| SettingsView::new(data_dir.as_deref(), acts));
+        let claude_dir = self
+            .root
+            .fixture
+            .is_none()
+            .then(|| self.root.claude_dir.clone());
+        let entity =
+            cx.new(|_| SettingsView::new(data_dir.as_deref(), acts).with_claude_dir(claude_dir));
         cx.subscribe(&entity, |this, _, e: &SettingChanged, cx| {
             this.applied_setting(&e.key, &e.value, cx);
         })

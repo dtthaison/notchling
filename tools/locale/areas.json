@@ -32,6 +32,13 @@
       "moved": true
     },
     {
+      "name": "costs",
+      "paths": [
+        "crates/app/src/costs/**"
+      ],
+      "moved": true
+    },
+    {
       "name": "chat-sidebar",
       "paths": [
         "crates/app/src/chat/sidebar.rs",
