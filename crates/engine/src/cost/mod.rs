@@ -12,6 +12,8 @@ pub mod tracker;
 #[cfg(test)]
 mod account_log_tests;
 #[cfg(test)]
+mod check_tests;
+#[cfg(test)]
 mod fork_tests;
 #[cfg(test)]
 mod ledger_testkit;

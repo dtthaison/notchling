@@ -3885,6 +3885,7 @@ dependencies = [
  "notchling-engine",
  "notchling-events",
  "notchling-local-api",
+ "notchling-locale",
  "notchling-platform",
  "p12",
  "rcgen",

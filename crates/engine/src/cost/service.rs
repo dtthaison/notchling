@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub const SCAN_EVERY: f64 = 20.0;
 pub const LEDGER_SLICE: Duration = Duration::from_secs(3);
+pub const LEDGER_EVERY: f64 = 300.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Checked {
@@ -35,7 +36,9 @@ pub struct CostService {
     ledger: Mutex<Option<Ledger>>,
     published: Mutex<(Option<f64>, Ranged)>,
     scanning: AtomicBool,
+    filling: AtomicBool,
     last_started: Mutex<Option<f64>>,
+    last_kept: Mutex<Option<f64>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -61,7 +64,9 @@ impl CostService {
             ledger: Mutex::new(ledger),
             published: Mutex::new((None, Ranged::default())),
             scanning: AtomicBool::new(false),
+            filling: AtomicBool::new(false),
             last_started: Mutex::new(None),
+            last_kept: Mutex::new(None),
         })
     }
 
@@ -96,10 +101,27 @@ impl CostService {
         let ranged = tracker.ranged(now);
         drop(tracker);
         *lock(&self.published) = (Some(now), ranged);
+        drop(_scanning);
         self.fill_ledger(now);
     }
 
+    pub fn keep(self: &Arc<Self>, now: f64) {
+        let due = lock(&self.last_kept).is_none_or(|t| now - t >= LEDGER_EVERY);
+        if !due || self.filling.load(Ordering::SeqCst) {
+            return;
+        }
+        *lock(&self.last_kept) = Some(now);
+        let service = self.clone();
+        let _ = std::thread::Builder::new()
+            .name("notchling-usage".into())
+            .spawn(move || service.fill_ledger(now));
+    }
+
     fn fill_ledger(&self, now: f64) {
+        if self.filling.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let _filling = Scanning(&self.filling);
         loop {
             let progress = match lock(&self.ledger).as_mut() {
                 Some(ledger) => ledger.refresh(now, Some(LEDGER_SLICE)),

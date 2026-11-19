@@ -810,6 +810,33 @@ account), and writes only the daemon's own cache.
 - The lists are cut to 50 rows, and `by_account` is left out if the reply would pass 700 KB
   (a line is at most 1 MiB).
 
+## `cost_report_ops.rs`
+
+`cost.report`: the Cost Check over the usage ledger (`<data>/daemon/usage.db`, [`notchling_engine::cost::ledger`]). Agent tier, read only, not switched. It reads the ledger and writes only the ledger's own rows: it first reads any transcript bytes added since the last pass, for at most 20 s.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `cost.report` | agent | `{days?: 1 to 30, plan?: "api" or "subscription" or "auto"}` (14 days, `auto` by default) | see below |
+
+```json
+{"complete": true, "scanned": 1795176000.0, "ledger_calls": 41207,
+ "report": {"days": 14, "from": 1793966400.0, "to": 1795176000.0, "plan": "unknown", "money": "api_equivalent",
+            "totals": {"calls": 127307, "tokens": 25100000000, "cost": 10800.0, "unpriced_calls": 0},
+            "by_role": [{"key": "sub", "calls": 103000, "tokens": 1, "cost": 8155.0, "cost_share": 0.76, "token_share": 0.7}],
+            "by_model": [{"key": "claude-opus-5-5", "calls": 52000, "tokens": 1, "cost": 6036.0, "cost_share": 0.56, "token_share": 0.4}],
+            "cache": {"main": {"five_min": 0, "one_hour": 9, "mixed": 0, "unknown": 1}, "sub": {"five_min": 1500, "one_hour": 0, "mixed": 0, "unknown": 2}},
+            "findings": [{"id": "premium_subagents", "saving": 850.0, "saving_share": 0.079, "tokens_avoided": null,
+                          "evidence": [{"name": "runs", "value": 282.0}], "detail": {"target": "claude-sonnet-5-5"}}],
+            "not_worth": [{"id": "main_effort", "saving": null, "saving_share": null, "tokens_avoided": null, "evidence": [], "detail": {}}],
+            "unknown": [{"id": "cache_ttl", "count": 120}], "saving": 1500.0, "saving_share": 0.14}}
+```
+
+- `findings` are ranked by `saving`, biggest first; a finding whose price is missing has `saving: null` and comes last. `not_worth` holds the levers under the bar (1% of spend or $5) and the ones already low. `saving` over all findings counts each call once: a call a finding claimed is skipped by the ones after it.
+- Dollar amounts are API list prices. `money` is `"estimate"` for `plan: "api"` and `"api_equivalent"` otherwise; for a subscription a client leads with `saving_share` and `tokens_avoided`.
+- A `null` is unknown, never zero: `totals.cost` is `null` when no call had a priced model; `unknown` lists what the transcripts could not tell (`price`, `cache_ttl`, `agent_type`, `effort`), each with a call count.
+- `cache` counts main sessions and helper runs by the time their own `cache_creation` numbers show: `5m` or `1h` is read from `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`, `mixed` has both, `unknown` has no split to read. The check never assumes an hour.
+- `complete` is `false` when the first reading of the transcripts hit the 20 s budget; ask again for the rest.
+
 ## `daemon_wiring.rs` and `every_session.rs`
 
 `sessions.list` is the one op `Ops` answers itself (agent tier, read only, no switch).
@@ -1015,6 +1042,7 @@ that reads or writes a login sits behind the traits in
 | `limits.set_mode` | app | `{provider, mode?, switch_at?}` | `{"provider", "mode", "switch_at"}` |
 | `limits.usage` | app | `{refresh?}` | each Claude Code account's limits, see [`crate::limits_usage`]; `renewals: {id: "renewing" \| "failed"}` (absent when empty) names a login in use that a Refresh asked Claude Code to renew |
 | `cost.summary` | agent | `{range?}` | see [`crate::cost_ops`] |
+| `cost.report` | agent | `{days?, plan?}` | see [`crate::cost_report_ops`] |
 
 ```json
 {"accounts_on": false, "watching": false, "switch_at": 95,

@@ -12,6 +12,7 @@ use crate::awake_ops::AwakeOps;
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::{BridgeOps, BridgeSetup};
 use crate::catalog_ops::CatalogService;
+use crate::cost_report_ops::CostReportOps;
 use crate::cluster_forward::{acting_gated, Forward};
 use crate::cluster_prompts::RemotePrompts;
 use crate::cluster_relay::HeldRelay;
@@ -903,6 +904,7 @@ impl Wired {
             .with_group(self.sidecar.clone())
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
+            .with_group(Arc::new(CostReportOps::new(self.limits.cost().clone())))
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.outbox.clone())

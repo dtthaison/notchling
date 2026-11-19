@@ -17,6 +17,7 @@ notchling-cluster-net = { path = "../cluster-net" }
 notchling-engine = { path = "../engine" }
 notchling-events = { path = "../events" }
 notchling-local-api = { path = "../local-api" }
+notchling-locale = { path = "../locale" }
 notchling-platform = { path = "../platform" }
 rusqlite = { version = "0.41.1", features = ["bundled", "backup"] }
 sha2 = "0.10"

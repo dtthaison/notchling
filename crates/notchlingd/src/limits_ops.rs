@@ -317,6 +317,7 @@ impl LimitsOps {
     }
 
     pub fn tick_at(&self, now: f64) -> bool {
+        self.cost.keep(now);
         if !self.accounts.is_on() {
             return false;
         }
