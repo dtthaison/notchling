@@ -395,9 +395,9 @@ fn verify(
     after: &str,
     table: Option<&str>,
     key: &str,
-    want: Option<bool>,
+    want: Option<&str>,
 ) -> Result<(), Failure> {
-    if get_bool(after, table, key)? != want {
+    if get_raw(after, table, key)?.as_deref() != want {
         return Err(bad("check_failed"));
     }
     let (old_others, old_headers) = shape(before, table, key)?;
@@ -421,16 +421,56 @@ pub fn set_bool(
     key: &str,
     value: bool,
 ) -> Result<String, TomlEditError> {
+    put(text, table, key, if value { "true" } else { "false" }, true)
+}
+
+pub fn get_raw(
+    text: &str,
+    table: Option<&str>,
+    key: &str,
+) -> Result<Option<String>, TomlEditError> {
+    check_name(key)?;
+    if let Some(t) = table {
+        check_name(t)?;
+    }
+    let scan = scan(text)?;
+    match matching(&scan, table, key).as_slice() {
+        [] => Ok(None),
+        [one] => Ok(Some(text[one.value.0..one.value.1].to_string())),
+        _ => Err(TomlEditError::Duplicate),
+    }
+}
+
+pub fn set_raw(
+    text: &str,
+    table: Option<&str>,
+    key: &str,
+    raw: &str,
+) -> Result<String, TomlEditError> {
+    if raw.is_empty() || raw.contains(['\n', '\r', '#']) {
+        return Err(bad("bad_value"));
+    }
+    put(text, table, key, raw, false)
+}
+
+fn put(
+    text: &str,
+    table: Option<&str>,
+    key: &str,
+    word: &str,
+    bool_only: bool,
+) -> Result<String, TomlEditError> {
     check_name(key)?;
     if let Some(t) = table {
         check_name(t)?;
     }
     let scan = scan(text)?;
     let found = matching(&scan, table, key);
-    let word = if value { "true" } else { "false" };
     let out = match found.as_slice() {
         [one] => {
-            bool_of(text, one)?;
+            if bool_only {
+                bool_of(text, one)?;
+            }
             if &text[one.value.0..one.value.1] == word {
                 return Ok(text.to_string());
             }
@@ -441,7 +481,7 @@ pub fn set_bool(
         [] => insert_new(text, &scan, table, key, word),
         _ => return Err(TomlEditError::Duplicate),
     };
-    verify(text, &out, table, key, Some(value))?;
+    verify(text, &out, table, key, Some(word))?;
     Ok(out)
 }
 
@@ -501,4 +541,29 @@ pub fn remove(text: &str, table: Option<&str>, key: &str) -> Result<String, Toml
         }
         _ => Err(TomlEditError::Duplicate),
     }
+}
+
+pub fn prune_empty_table(text: &str, table: &str) -> Result<String, TomlEditError> {
+    check_name(table)?;
+    scan(text)?;
+    let header = format!("[{table}]");
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let Some(at) = lines.iter().position(|l| l.trim() == header) else {
+        return Ok(text.to_string());
+    };
+    let mut end = at + 1;
+    while end < lines.len() && lines[end].trim().is_empty() {
+        end += 1;
+    }
+    if end < lines.len() && !lines[end].trim_start().starts_with('[') {
+        return Ok(text.to_string());
+    }
+    let start = if at > 0 && lines[at - 1].trim().is_empty() {
+        at - 1
+    } else {
+        at
+    };
+    let out = lines[..start].concat() + &lines[end..].concat();
+    scan(&out)?;
+    Ok(out)
 }

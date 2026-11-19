@@ -366,6 +366,27 @@ file and the daemon's own cache, and the one thing it writes is that cache.
 - Reply: `{applied, changed, tools: [{tool, source, read, note, total, first, added, removed, efforts: [{model, added, removed}], unpriced, written}], suggestions: [text], skills: [text], priceHelp, text}`. `suggestions` are role picks to review (a marked model that is gone or has a newer one in its family, or no longer offers the marked effort) and are never applied; `unpriced` are models with no price in the data file or the override; `text` is the report as the command line prints it.
 - `notchling models [check] [--json]` and `notchling models update [--json] [--no-skills]` call these; `--force` passes `force`; exit 0 report made, 1 refused or failed, 2 not running or a wrong command. A list read for the first time (`first`) has no diff to show; it says so. The app waits up to 120 s.
 
+## `cost_profile_ops.rs`
+
+The Cost Profile's Set Up ([decision XXXX](decisions/XXXX-cost-profile.md)): one table of models and efforts, planned, applied, undone and checked per tool. Never `cost.report`; that name and `crates/engine/src/cost/` belong to the spend report.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `cost.profile.get` | agent | none | `{profile}` |
+| `cost.profile.set` | app | `{preset?, picks?, habits?, tools?, guards?, reset?}` | `{profile}` after saving |
+| `cost.setup.plan` | agent | `{consent?, wait?}` | `{on, plan}`; writes nothing |
+| `cost.setup.apply` | app | `{consent?, wait?}` | `{on, applied, failed, results, plan}`; with `install` off, the plan and `message` |
+| `cost.setup.undo` | app | `{tool}` | `{on, tool, results, conflicts}` |
+| `cost.setup.check` | agent | `{resolve?: {id, choice: keep or restore}}` | `{on, rows, drift}`; `resolve` is app tier and needs `install` on |
+
+- `profile`: `{preset, custom, tools, picks, habits, table, presets, floors}`; an app-tier caller also gets `guards` and `imported` (the lines taken from the person's own rule files, each with where it went). `table` is `{role: {tool: {model, effort, own, notes} or null}}` for the seven roles and `claude`, `codex`, `agy`; `notes` say a floor raised a pick, a family moved, an effort clamped or a list was unchecked. `presets` is the same table for each preset.
+- `set`: `picks` is `{"role.tool": "model effort" or null}`, `habits` `{name: number or null}` (each name has a range; outside it is refused), `tools` `{claude, codex, agy: bool}`, `guards` `{name: level or null}`, `reset` clears picks and habit edits. Everything else is refused, and the preset must be one of `saver`, `balanced`, `quality`.
+- `consent` names parts of files the person owns that Set Up may change: `rules` (replace a hand-written model rule), `pstack`, `orchestrator`, `orchestrator_new`, `codex_agents`, `codex_config`. A part without its consent shows as `offer` with its diff and is not written. `wait` turns on the rule's `notchling wait` lines (off until that command ships).
+- A plan action is `{id, tool, path, part: file or keys or block, kind: create, update, remove, unchanged, skip or offer, state, needs, reason, diff, keys, notes}`. To an agent, the `diff` of a `keys` action (`settings.json`, Codex's `config.toml`) is empty: it gets the changed keys and their before and after only.
+- `apply` makes a backup of every file it changes and records `daemon/cost-setup.json`; a failure part way stops, keeps what was done and answers `failed` with the results as error data. `undo` per tool puts back each file, key and block from the manifest and reports a `conflict` for anything changed since, leaving it.
+- `check` rows: `{id, tool, path, state: in_step, outdated, edited, missing, changed_by_tool, returned or skipped, detail}`.
+- `notchling cost setup [--apply] [--consent a,b] [--wait] [--json]`, `notchling cost check [--json]` and `notchling cost undo <claude|codex|agy> [--json]` call these. Setup is a dry run without `--apply`. The command line is agent tier, so `--apply` and `undo` are refused with "Only the Notchling app writes these files"; exit 0 done, 1 refused or failed, 2 not running or a wrong command.
+
 ## `cluster_ops.rs`
 
 Cluster plan B ([plan](superpowers/plans/2026-11-13-cluster-v1-b-nodes.md)): this machine as a node of one

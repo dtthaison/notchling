@@ -49,7 +49,7 @@ const OWN_QUIET: [&str; 12] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 126] = [
+const NEVER_QUIET: [&str; 132] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -139,6 +139,12 @@ const NEVER_QUIET: [&str; 126] = [
     ops::CATALOG_GET,
     ops::MODELS_CHECK,
     ops::MODELS_UPDATE,
+    ops::COST_PROFILE_GET,
+    ops::COST_PROFILE_SET,
+    ops::COST_SETUP_PLAN,
+    ops::COST_SETUP_APPLY,
+    ops::COST_SETUP_UNDO,
+    ops::COST_SETUP_CHECK,
     ops::INBOX_LIST,
     ops::INBOX_ANSWER,
     ops::INBOX_SEEN,

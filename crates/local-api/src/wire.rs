@@ -105,6 +105,12 @@ pub mod ops {
     pub const CATALOG_ROLES: &str = "catalog.roles";
     pub const MODELS_CHECK: &str = "models.check";
     pub const MODELS_UPDATE: &str = "models.update";
+    pub const COST_PROFILE_GET: &str = "cost.profile.get";
+    pub const COST_PROFILE_SET: &str = "cost.profile.set";
+    pub const COST_SETUP_PLAN: &str = "cost.setup.plan";
+    pub const COST_SETUP_APPLY: &str = "cost.setup.apply";
+    pub const COST_SETUP_UNDO: &str = "cost.setup.undo";
+    pub const COST_SETUP_CHECK: &str = "cost.setup.check";
 
     pub const INBOX_LIST: &str = "inbox.list";
     pub const INBOX_ANSWER: &str = "inbox.answer";

@@ -9,6 +9,7 @@ pub mod cluster;
 pub mod contract;
 pub mod control;
 pub mod cost;
+pub mod cost_profile;
 pub mod delegate;
 pub mod docfile;
 pub mod git;

@@ -49,6 +49,12 @@ log_choice! {
         CheckForUpdates = "checkForUpdates",
         SearchShortcut = "searchShortcut",
         ClusterFailover = "clusterFailover",
+        CostPreset = "costPreset",
+        CostPicks = "costPicks",
+        CostClaude = "costClaude",
+        CostCodex = "costCodex",
+        CostAgy = "costAgy",
+        CostProfileApp = "costProfileApp",
         VaultReminderSent = "vaultReminderSent",
         BridgeEnabled = "bridgeEnabled",
         DebugAccessCertsFile = "debugAccessCertsFile",
@@ -81,6 +87,9 @@ log_choice! {
         Sidecar = "sidecar",
         Panel = "panel",
         Browser = "browser",
+        Saver = "saver",
+        Balanced = "balanced",
+        Quality = "quality",
     }
 }
 
