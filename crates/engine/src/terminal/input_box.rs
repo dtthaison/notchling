@@ -1,3 +1,4 @@
+use super::screen::Shade;
 use crate::transcript::message::is_picture_name;
 use crate::transcript::stored::{as_stored, is_dropped};
 
@@ -368,7 +369,15 @@ impl Pictured {
 }
 
 pub fn typed_text(lines: &[String], cursor: Option<(usize, usize)>) -> Option<String> {
-    let input = read(lines, cursor).filter(|input| !input.empty)?;
+    typed_text_shaded(lines, cursor, &[])
+}
+
+pub fn typed_text_shaded(
+    lines: &[String],
+    cursor: Option<(usize, usize)>,
+    shades: &[Vec<Shade>],
+) -> Option<String> {
+    let input = read_shaded(lines, cursor, shades).filter(|input| !input.empty)?;
     let text = input.typed();
     (!text.trim().is_empty()).then_some(text)
 }
@@ -432,12 +441,74 @@ fn bare(held: &[String]) -> bool {
     }
 }
 
-pub fn read(lines: &[String], cursor: Option<(usize, usize)>) -> Option<Input> {
-    let (top, bottom) = span(lines)?;
-    let held: Vec<String> = lines[top + 1..bottom]
+fn hinted(held: &[String], rows: &[Vec<Shade>]) -> bool {
+    if held.len() != rows.len() {
+        return false;
+    }
+    let (mut faint, mut first) = (0, true);
+    for (n, (row, shades)) in held.iter().zip(rows).enumerate() {
+        for (i, c) in row.chars().enumerate() {
+            if c.is_whitespace() || is_dropped(c) || (n == 0 && i == 0 && MARKS.contains(&c)) {
+                continue;
+            }
+            match (shades.get(i), first) {
+                (Some(Shade::Faint), _) => faint += 1,
+                (Some(Shade::Cursor), true) => {}
+                _ => return false,
+            }
+            first = false;
+        }
+    }
+    faint > 0
+}
+
+fn held_rows(lines: &[String], top: usize, bottom: usize) -> Vec<String> {
+    lines[top + 1..bottom]
         .iter()
         .map(|l| l.trim_end().to_string())
-        .collect();
+        .collect()
+}
+
+fn shades_of(shades: &[Vec<Shade>], top: usize, bottom: usize) -> &[Vec<Shade>] {
+    shades.get(top + 1..bottom).unwrap_or(&[])
+}
+
+pub fn hint_shown(lines: &[String], shades: &[Vec<Shade>]) -> bool {
+    span(lines).is_some_and(|(top, bottom)| {
+        hinted(
+            &held_rows(lines, top, bottom),
+            shades_of(shades, top, bottom),
+        )
+    })
+}
+
+pub fn cursor_drawn(lines: &[String], shades: &[Vec<Shade>]) -> bool {
+    span(lines).is_some_and(|(top, bottom)| {
+        shades_of(shades, top, bottom)
+            .iter()
+            .flatten()
+            .any(|shade| *shade == Shade::Cursor)
+    })
+}
+
+pub fn read(lines: &[String], cursor: Option<(usize, usize)>) -> Option<Input> {
+    read_shaded(lines, cursor, &[])
+}
+
+pub fn read_shaded(
+    lines: &[String],
+    cursor: Option<(usize, usize)>,
+    shades: &[Vec<Shade>],
+) -> Option<Input> {
+    let (top, bottom) = span(lines)?;
+    let mut held = held_rows(lines, top, bottom);
+    if hinted(&held, shades_of(shades, top, bottom)) {
+        held = vec![held[0]
+            .chars()
+            .take(1)
+            .filter(|c| MARKS.contains(c))
+            .collect()];
+    }
     let home = cursor.is_some_and(|(row, col)| row == top + 1 && col <= HOME_COL);
     Some(Input {
         empty: home || bare(&held),

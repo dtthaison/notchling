@@ -21,6 +21,23 @@ pub struct TermStyle {
     pub inverse: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shade {
+    Plain,
+    Faint,
+    Cursor,
+}
+
+impl TermStyle {
+    pub fn shade(&self) -> Shade {
+        match (self.inverse, self.dim) {
+            (true, _) => Shade::Cursor,
+            (false, true) => Shade::Faint,
+            (false, false) => Shade::Plain,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TermCell {
     pub text: String,
@@ -159,6 +176,17 @@ impl TerminalScreen {
                 let kept = s.trim_end_matches(' ').len();
                 s.truncate(kept);
                 s
+            })
+            .collect()
+    }
+
+    pub fn shades(&self) -> Vec<Vec<Shade>> {
+        self.cells
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .flat_map(|cell| cell.text.chars().map(|_| cell.style.shade()))
+                    .collect()
             })
             .collect()
     }

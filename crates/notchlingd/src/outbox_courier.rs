@@ -385,7 +385,9 @@ impl ClaudeCourier {
     fn note_of(&self, session: &str, failure: &Failure, pty: &mut dyn Pty) -> Option<String> {
         match failure {
             Failure::NotCleared | Failure::Mixed => {
-                input_box::typed_text(&pty.screen(), pty.cursor()).map(|text| shown_box(&text))
+                let lines = pty.screen();
+                let (cursor, shades) = (pty.cursor(), pty.shades());
+                input_box::typed_text_shaded(&lines, cursor, &shades).map(|text| shown_box(&text))
             }
             Failure::Dialog => {
                 lock(&self.memos)

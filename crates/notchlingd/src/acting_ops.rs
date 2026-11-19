@@ -475,7 +475,9 @@ impl ActingOps {
         }
         let in_box = match (&played, plan.reply_text()) {
             (Err(Failure::NotCleared), Some(_)) => {
-                input_box::typed_text(&pty.screen(), pty.cursor())
+                let lines = pty.screen();
+                let (cursor, shades) = (pty.cursor(), pty.shades());
+                input_box::typed_text_shaded(&lines, cursor, &shades)
             }
             _ => None,
         };
