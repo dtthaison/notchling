@@ -13,6 +13,7 @@ pub mod engine_plan;
 mod engine_update;
 pub mod forms;
 pub mod github;
+pub mod host_trust;
 pub mod mac_facts;
 pub mod masks;
 pub mod merge;
@@ -105,6 +106,8 @@ pub mod tests_engine_world;
 mod tests_engine_writes;
 #[cfg(test)]
 mod tests_forms;
+#[cfg(test)]
+mod tests_host_trust;
 #[cfg(test)]
 mod tests_machine_steps;
 #[cfg(test)]

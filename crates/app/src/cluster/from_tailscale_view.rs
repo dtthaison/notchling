@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, px, Context, Div, Entity, PathPromptOptions, SharedString, Subscription,
@@ -6,7 +8,7 @@ use gpui::{
 };
 use notchling_engine::machines::addresses::Route;
 use notchling_engine::machines::ssh_key::{inspect, tidy};
-use notchling_engine::machines::ssh_test::{run as run_ssh_test, SshTest};
+use notchling_engine::machines::ssh_test::{run_stoppable, SshTest};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
@@ -18,7 +20,8 @@ use notchling_locale as t;
 
 use super::add_parts::AddParts;
 use super::from_tailscale::{import_machines, FromTailscale, PeerRow, Read, TestState};
-use super::ssh_text::{key_note, key_title, test_ink, test_text};
+use super::ssh_text::{key_note, key_title, test_ink, test_text, trusts_here};
+use super::trust::TrustWhere;
 use super::view::{field_box, ClusterSheetView};
 
 const SHEET_WIDTH: f32 = 600.0;
@@ -32,6 +35,13 @@ pub(super) struct TailscaleUi {
     pub filter: Option<Entity<TextEditor>>,
     pub users: BTreeMap<String, Entity<TextEditor>>,
     pub subscriptions: Vec<Subscription>,
+    pub stop: Arc<AtomicBool>,
+}
+
+impl Drop for TailscaleUi {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
 }
 
 impl ClusterSheetView {
@@ -96,7 +106,9 @@ impl ClusterSheetView {
             filter: Some(filter),
             users: BTreeMap::new(),
             subscriptions: vec![sub],
+            stop: Arc::new(AtomicBool::new(false)),
         };
+        self.trust = None;
         cx.notify();
     }
 
@@ -181,8 +193,26 @@ impl ClusterSheetView {
         };
         match key.map(|k| tidy(k, &home)) {
             Some(key) => {
-                let status = inspect(&key, &home);
-                model.set_key(host, Some(&key), Some(status));
+                model.set_key(host, Some(&key), None);
+                let epoch = model.epoch;
+                let host = host.to_owned();
+                cx.spawn(async move |this, cx| {
+                    let work = key.clone();
+                    let status = cx
+                        .background_executor()
+                        .spawn(async move { inspect(&work, &home) })
+                        .await;
+                    this.update(cx, |view, cx| {
+                        if let Some(model) =
+                            view.tailscale.model.as_mut().filter(|m| m.epoch == epoch)
+                        {
+                            model.set_key_status(&host, &key, status);
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
             }
             None => model.set_key(host, None, None),
         }
@@ -225,37 +255,47 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn tailscale_start_lanes(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn tailscale_start_lanes(&mut self, cx: &mut Context<Self>) {
         let Some(parts) = self.tailscale.parts.clone() else {
             return;
         };
-        let Some(model) = self.tailscale.model.as_mut() else {
+        let Some(model) = self.tailscale.model.as_ref() else {
             return;
         };
-        let start = model.lanes_to_start();
-        model.lanes += start;
+        let epoch = model.epoch;
+        let start = model.lanes_to_start(self.test_lanes);
+        self.test_lanes += start;
+        let stop = self.tailscale.stop.clone();
         for _ in 0..start {
             let runner = parts.engine.runner().clone();
             let tailscale = parts.engine.router().tailscale().cloned();
             let home = std::path::PathBuf::from(&parts.this.home);
+            let stop = stop.clone();
             cx.spawn(async move |this, cx| loop {
                 let job = this
                     .update(cx, |view, _| {
-                        view.tailscale.model.as_mut().and_then(|m| m.next_job())
+                        view.tailscale
+                            .model
+                            .as_mut()
+                            .filter(|m| m.epoch == epoch)
+                            .and_then(|m| m.next_job())
                     })
                     .ok()
                     .flatten();
                 let Some(job) = job else {
                     this.update(cx, |view, _| {
-                        if let Some(model) = view.tailscale.model.as_mut() {
-                            model.lanes = model.lanes.saturating_sub(1);
-                        }
+                        view.test_lanes = view.test_lanes.saturating_sub(1);
                     })
                     .ok();
                     break;
                 };
                 let work = job.clone();
-                let (runner, tailscale, home) = (runner.clone(), tailscale.clone(), home.clone());
+                let (runner, tailscale, home, stop) = (
+                    runner.clone(),
+                    tailscale.clone(),
+                    home.clone(),
+                    stop.clone(),
+                );
                 let result = cx
                     .background_executor()
                     .spawn(async move {
@@ -272,12 +312,14 @@ impl ClusterSheetView {
                         }
                         let route =
                             Route::direct(&work.host, &work.user).with_key(work.key.as_deref());
-                        run_ssh_test(&*runner, &route, &home)
+                        run_stoppable(&*runner, &route, &home, Some(&stop))
                     })
                     .await;
                 let alive = this
                     .update(cx, |view, cx| {
-                        if let Some(model) = view.tailscale.model.as_mut() {
+                        if let Some(model) =
+                            view.tailscale.model.as_mut().filter(|m| m.epoch == epoch)
+                        {
                             model.finish_test(&job.host, job.round, result);
                         }
                         cx.notify();
@@ -330,6 +372,7 @@ impl ClusterSheetView {
 
     fn tailscale_close(&mut self, cx: &mut Context<Self>) {
         self.tailscale = TailscaleUi::default();
+        self.trust = None;
         cx.notify();
     }
 
@@ -658,8 +701,16 @@ impl ClusterSheetView {
             let mut block = div().flex().flex_col().gap(px(SPACE[0])).child(line);
             if row.chosen {
                 block = block.child(self.tailscale_row_tools(i, row, a, cx));
-                if let Some(extra) = Self::tailscale_row_result(row, a) {
+                if let Some(extra) = self.tailscale_row_result(row, a, cx) {
                     block = block.child(extra);
+                }
+                if let Some(trust) = self.trust_block(
+                    &TrustWhere::Tailscale(row.host.clone()),
+                    CHECK_INDENT,
+                    a,
+                    cx,
+                ) {
+                    block = block.child(trust);
                 }
             }
             inner = inner.child(block);
@@ -729,7 +780,12 @@ impl ClusterSheetView {
         )
     }
 
-    fn tailscale_row_result(row: &PeerRow, a: Appearance) -> Option<Div> {
+    fn tailscale_row_result(
+        &self,
+        row: &PeerRow,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let mut lines = div().pl(px(CHECK_INDENT)).flex().flex_col().gap(px(2.0));
         let mut any = false;
         if let Some((text, ink)) = key_note(row.key.as_deref(), row.key_issue) {
@@ -738,12 +794,41 @@ impl ClusterSheetView {
         }
         if let Some(TestState::Done(result)) = row.test.as_ref().filter(|_| row.key_issue.is_none())
         {
-            lines = lines.child(label(
-                &test_text(result),
-                TypeRole::Meta,
-                test_ink(result),
-                a,
-            ));
+            let text = label(&test_text(result), TypeRole::Meta, test_ink(result), a);
+            let asking = self
+                .trust
+                .as_ref()
+                .is_some_and(|k| k.is_at(&TrustWhere::Tailscale(row.host.clone())));
+            if trusts_here(result) && !asking {
+                let (host, user) = (row.host.clone(), row.user.clone());
+                lines = lines.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(SPACE[0]))
+                        .child(div().flex_1().min_w(px(0.0)).child(text))
+                        .child(
+                            button(
+                                SharedString::from(format!("tailscale-trust-{}", row.host)),
+                                t::cluster::ssh_trust(),
+                                ButtonKind::Secondary,
+                                PartState::Rest,
+                                a,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.trust_begin(
+                                        TrustWhere::Tailscale(host.clone()),
+                                        Route::direct(&host, &user),
+                                        cx,
+                                    )
+                                },
+                            )),
+                        ),
+                );
+            } else {
+                lines = lines.child(text);
+            }
             any = true;
         }
         any.then_some(lines)

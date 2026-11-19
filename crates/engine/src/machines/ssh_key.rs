@@ -28,7 +28,7 @@ pub fn shape_ok(path: &str) -> bool {
     let typed = path.trim();
     !typed.is_empty()
         && typed.len() <= MAX_LEN
-        && !typed.chars().any(char::is_control)
+        && !typed.chars().any(|c| c.is_control() || c == '%')
         && (typed.starts_with('/') || typed.starts_with("~/"))
         && !typed.ends_with('/')
 }

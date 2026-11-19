@@ -35,6 +35,7 @@ pub mod promote_sheet;
 mod promote_view;
 pub mod renders;
 pub mod replication;
+pub mod rounds;
 pub mod secrets;
 #[cfg(target_os = "macos")]
 pub mod secrets_view;
@@ -47,6 +48,9 @@ mod tool_setup_view;
 pub mod tool_updates;
 #[cfg(target_os = "macos")]
 mod tool_updates_view;
+pub mod trust;
+#[cfg(target_os = "macos")]
+mod trust_view;
 pub mod updates;
 mod updates_state;
 #[cfg(target_os = "macos")]
@@ -100,6 +104,8 @@ mod ssh_text_tests;
 mod tool_setup_tests;
 #[cfg(test)]
 mod tool_updates_tests;
+#[cfg(test)]
+mod trust_tests;
 #[cfg(test)]
 mod updates_state_tests;
 #[cfg(test)]

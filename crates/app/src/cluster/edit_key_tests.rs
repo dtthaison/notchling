@@ -91,3 +91,39 @@ fn only_the_key_changing_is_a_change() {
         Some("~/.ssh/k")
     );
 }
+
+#[test]
+fn a_typed_key_is_only_shape_checked_on_the_ui_thread() {
+    let home = std::path::Path::new("/nonexistent-home");
+    assert_eq!(super::edit_key::key_text("  ", home), Ok(None));
+    assert_eq!(
+        super::edit_key::key_text("/nonexistent-home/.ssh/id_x", home),
+        Ok(Some("~/.ssh/id_x".to_owned()))
+    );
+    assert_eq!(
+        super::edit_key::key_text("id_x", home),
+        Err(KeyIssue::BadShape)
+    );
+    assert_eq!(
+        super::edit_key::key_text("~/.ssh/a%h", home),
+        Err(KeyIssue::BadShape)
+    );
+}
+
+#[test]
+fn the_signature_changes_with_an_address_row_or_the_key() {
+    use super::addresses_form::{RowDraft, RowMeta};
+    use super::edit_key::signature;
+    let row = |text: &str| RowDraft {
+        text: text.into(),
+        meta: RowMeta::default(),
+    };
+    let base = signature(&[row("10.0.0.1")], "~/.ssh/a");
+    assert_eq!(base, signature(&[row("10.0.0.1")], " ~/.ssh/a "));
+    assert_ne!(base, signature(&[row("10.0.0.2")], "~/.ssh/a"));
+    assert_ne!(
+        base,
+        signature(&[row("10.0.0.1"), row("10.0.0.2")], "~/.ssh/a")
+    );
+    assert_ne!(base, signature(&[row("10.0.0.1")], "~/.ssh/b"));
+}

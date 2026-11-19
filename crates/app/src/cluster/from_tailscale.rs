@@ -55,8 +55,7 @@ pub struct FromTailscale {
     pub key_status: BTreeMap<String, KeyStatus>,
     pub tests: BTreeMap<String, TestState>,
     pub waiting: VecDeque<String>,
-    pub lanes: usize,
-    round: u64,
+    pub epoch: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,8 +95,7 @@ impl FromTailscale {
             key_status: BTreeMap::new(),
             tests: BTreeMap::new(),
             waiting: VecDeque::new(),
-            lanes: 0,
-            round: 0,
+            epoch: super::rounds::next(),
         }
     }
 
@@ -287,6 +285,20 @@ impl FromTailscale {
         self.error = None;
     }
 
+    pub fn set_key_status(&mut self, host: &str, key: &str, status: KeyStatus) {
+        if self.keys.get(host).map(String::as_str) == Some(key) {
+            self.key_status.insert(host.to_owned(), status);
+        }
+    }
+
+    pub fn key_pending(&self) -> bool {
+        self.chosen.keys().any(|host| {
+            self.keys
+                .get(host)
+                .is_some_and(|k| shape_ok(k) && !self.key_status.contains_key(host))
+        })
+    }
+
     fn key_issue_of(&self, host: &str) -> Option<KeyIssue> {
         match self.keys.get(host) {
             Some(key) if !shape_ok(key) => Some(KeyIssue::BadShape),
@@ -317,9 +329,8 @@ impl FromTailscale {
                 .insert(host.to_owned(), TestState::Done(SshTest::Key(issue)));
             return false;
         }
-        self.round += 1;
         self.tests
-            .insert(host.to_owned(), TestState::Running(self.round));
+            .insert(host.to_owned(), TestState::Running(super::rounds::next()));
         self.waiting.push_back(host.to_owned());
         true
     }
@@ -333,9 +344,9 @@ impl FromTailscale {
         self.read == Read::Ready && !self.chosen.is_empty()
     }
 
-    pub fn lanes_to_start(&self) -> usize {
+    pub fn lanes_to_start(&self, running: usize) -> usize {
         TEST_PARALLEL
-            .saturating_sub(self.lanes)
+            .saturating_sub(running)
             .min(self.waiting.len())
     }
 
@@ -380,6 +391,7 @@ impl FromTailscale {
             && !self.chosen.is_empty()
             && self.chosen.values().all(|u| is_user(u))
             && self.key_issue().is_none()
+            && !self.key_pending()
     }
 
     pub fn other_networks_note(&self) -> Option<String> {

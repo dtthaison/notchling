@@ -231,7 +231,7 @@ fn only_a_chosen_row_can_be_tested_and_it_waits_for_a_lane() {
     model.toggle(M1);
     assert!(model.request_test(M1));
     assert!(!model.request_test(M1), "one test of a row at a time");
-    assert_eq!(model.lanes_to_start(), 1);
+    assert_eq!(model.lanes_to_start(0), 1);
     let job = model.next_job().expect("a job");
     assert_eq!((job.host.as_str(), job.user.as_str()), (M1, "me"));
     assert_eq!(job.key, None);
@@ -251,11 +251,10 @@ fn test_selected_queues_every_checked_row_and_runs_at_most_four_at_once() {
     model.select_all();
     assert!(model.can_test());
     assert_eq!(model.request_selected(), 3);
-    assert_eq!(model.lanes_to_start(), 3);
-    model.lanes = 4;
-    assert_eq!(model.lanes_to_start(), 0);
-    model.lanes = 2;
-    assert_eq!(model.lanes_to_start(), 2);
+    assert_eq!(model.lanes_to_start(0), 3);
+    assert_eq!(model.lanes_to_start(4), 0);
+    assert_eq!(model.lanes_to_start(2), 2);
+    assert_eq!(model.lanes_to_start(9), 0);
     assert_eq!(
         model.request_selected(),
         0,
@@ -367,4 +366,47 @@ fn the_results_and_keys_are_gone_after_an_import() {
     model.request_test(M1);
     model.imported(1);
     assert!(model.keys.is_empty() && model.tests.is_empty() && model.waiting.is_empty());
+}
+
+#[test]
+fn a_new_sheet_never_takes_an_old_sheets_answers_or_jobs() {
+    let mut old = ready(vec![]);
+    old.toggle(M1);
+    old.request_test(M1);
+    let old_round = running_round(&old, M1);
+    let mut fresh = ready(vec![]);
+    assert_ne!(old.epoch, fresh.epoch);
+    fresh.toggle(M1);
+    fresh.request_test(M1);
+    assert_ne!(running_round(&fresh, M1), old_round);
+    fresh.finish_test(M1, old_round, SshTest::Denied);
+    assert_eq!(
+        fresh.tests.get(M1),
+        Some(&TestState::Running(running_round(&fresh, M1))),
+        "a late answer from the old sheet changes nothing"
+    );
+}
+
+#[test]
+fn a_chosen_key_blocks_import_until_it_has_been_checked() {
+    let mut model = ready(vec![]);
+    model.toggle(M1);
+    model.set_key(M1, Some("~/.ssh/id_work"), None);
+    assert!(model.key_pending());
+    assert!(!model.can_import());
+    model.set_key_status(M1, "~/.ssh/other", usable());
+    assert!(model.key_pending(), "a status for another key is ignored");
+    model.set_key_status(M1, "~/.ssh/id_work", usable());
+    assert!(!model.key_pending());
+    assert!(model.can_import());
+    model.set_key(M1, Some("~/.ssh/id_work"), None);
+    model.set_key_status(
+        M1,
+        "~/.ssh/id_work",
+        KeyStatus {
+            issue: Some(KeyIssue::TooOpen),
+            public: false,
+        },
+    );
+    assert!(!model.can_import());
 }

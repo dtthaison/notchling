@@ -2,7 +2,11 @@ use notchling_engine::machines::ssh_key::KeyIssue;
 use notchling_engine::machines::ssh_test::{SshTest, Why};
 use notchling_kit::Ink;
 
-use super::ssh_text::{address_test_text, key_note, key_title, test_ink, test_text};
+use super::ssh_text::{
+    address_test_text, key_note, key_title, test_ink, test_text, trust_lines, trusts_here,
+};
+use super::trust::{TrustFail, TrustFlow};
+use notchling_engine::machines::host_trust::HostKey;
 
 #[test]
 fn each_result_has_its_own_words() {
@@ -44,12 +48,43 @@ fn each_result_has_its_own_words() {
 }
 
 #[test]
-fn a_new_host_says_nothing_was_saved() {
-    let text = test_text(&SshTest::NewHost {
+fn a_new_host_does_not_read_as_a_pass() {
+    let result = SshTest::NewHost {
         user: "ubuntu".into(),
-    });
-    assert!(text.starts_with("Connected as ubuntu"));
-    assert!(text.contains("known_hosts") && text.contains("nothing was saved"));
+    };
+    assert_eq!(
+        test_text(&result),
+        "Connected as ubuntu, but this host isn't trusted yet. Setup will fail until you trust it."
+    );
+    assert_eq!(test_ink(&result), Ink::Needs);
+    assert!(trusts_here(&result));
+    assert!(!trusts_here(&SshTest::Denied));
+}
+
+#[test]
+fn an_untrusted_jump_host_is_named() {
+    let result = SshTest::JumpUntrusted {
+        host: "gw.example".into(),
+    };
+    assert_eq!(test_text(&result), "Jump host gw.example isn't trusted");
+    assert_eq!(test_ink(&result), Ink::Needs);
+}
+
+#[test]
+fn the_host_key_is_shown_with_a_warning_before_it_can_be_added() {
+    let key = HostKey {
+        field: "m1".into(),
+        kind: "ssh-ed25519".into(),
+        blob: "AAAA".into(),
+        fingerprint: "SHA256:abc".into(),
+    };
+    let lines = trust_lines(&TrustFlow::Review(vec![key]));
+    assert_eq!(lines[0].0, "ED25519 SHA256:abc");
+    assert!(lines[1].0.starts_with("Check this matches the machine"));
+    assert_eq!(lines[1].1, Ink::Needs);
+    assert!(trust_lines(&TrustFlow::Failed(TrustFail::Jump))[0]
+        .0
+        .contains("jump host"));
 }
 
 #[test]
@@ -67,7 +102,6 @@ fn a_pass_is_green_and_anything_else_needs_a_look() {
         test_ink(&SshTest::Connected { user: "u".into() }),
         Ink::Done
     );
-    assert_eq!(test_ink(&SshTest::NewHost { user: "u".into() }), Ink::Done);
     assert_eq!(test_ink(&SshTest::Denied), Ink::Needs);
 }
 

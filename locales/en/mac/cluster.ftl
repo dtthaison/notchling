@@ -848,7 +848,9 @@ cluster-ssh-testing = Testing…
 # Result of Test; $user is the account ssh logged in as.
 cluster-ssh-test-connected = Connected as { $user }
 # Result of Test when the host's key isn't in known_hosts; $user is the account ssh logged in as.
-cluster-ssh-test-new-host = Connected as { $user }. The host's key isn't in known_hosts yet, and nothing was saved.
+cluster-ssh-test-new-host = Connected as { $user }, but this host isn't trusted yet. Setup will fail until you trust it.
+# Result of Test when a jump host's key isn't in known_hosts; $host is the jump host.
+cluster-ssh-test-jump-untrusted = Jump host { $host } isn't trusted
 cluster-ssh-test-denied = Wrong user or key (permission denied)
 cluster-ssh-test-host-key-changed = Host key changed
 cluster-ssh-test-timed-out = Can't reach: timed out
@@ -861,3 +863,15 @@ cluster-ssh-test-wrong-network = Not on this Tailscale network
 cluster-ssh-test-wrong-network-named = Not on this Tailscale network: the address is on { $wanted }, and this Mac is on { $active }
 # One line of the Edit Addresses sheet's test; $address is the address tested, $result what happened.
 cluster-ssh-test-address = { $address }: { $result }
+cluster-ssh-key-checking = Checking the key…
+cluster-ssh-trust = Trust Host
+cluster-ssh-trust-scanning = Reading the host key…
+# One host key shown before it is trusted; $kind is the key type, $fingerprint its SHA256 fingerprint.
+cluster-ssh-trust-key = { $kind } { $fingerprint }
+cluster-ssh-trust-check = Check this matches the machine. Notchling read it over the network and can't check it for you.
+cluster-ssh-trust-confirm = Add to Known Hosts
+cluster-ssh-trust-saving = Saving…
+cluster-ssh-trust-jump = Trust Host doesn't work through a jump host. Connect once from Terminal.
+cluster-ssh-trust-nothing = Couldn't read the host key.
+# $why is what went wrong writing ~/.ssh/known_hosts.
+cluster-ssh-trust-write-failed = Couldn't write known_hosts: { $why }

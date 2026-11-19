@@ -327,7 +327,7 @@ impl Route {
     }
 
     fn proxy_command(&self) -> String {
-        let mut words: Vec<String> = [
+        let mut head: Vec<String> = [
             "/usr/bin/ssh",
             "-o",
             "BatchMode=yes",
@@ -337,14 +337,14 @@ impl Route {
         .iter()
         .map(|w| (*w).to_owned())
         .collect();
-        words.extend(self.options("-p"));
-        words.extend(["-W", "%h:%p", "--"].map(str::to_owned));
-        words.push(self.login());
-        words
-            .iter()
-            .map(|w| crate::lanes::quote(w))
-            .collect::<Vec<_>>()
-            .join(" ")
+        head.extend(self.options("-p"));
+        let literal = |w: &String| crate::lanes::quote(&w.replace('%', "%%"));
+        let mut words: Vec<String> = head.iter().map(literal).collect();
+        words.push(crate::lanes::quote("-W"));
+        words.push(crate::lanes::quote("[%h]:%p"));
+        words.push(literal(&"--".to_owned()));
+        words.push(literal(&self.login()));
+        words.join(" ")
     }
 
     pub fn scp_host(&self) -> String {

@@ -1,10 +1,14 @@
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, px, Context, Div, Entity, PathPromptOptions, SharedString, Subscription,
     Window,
 };
-use notchling_engine::machines::ssh_test::run_target;
+use notchling_engine::machines::addresses::Route;
+use notchling_engine::machines::ssh_key::KeyIssue;
+use notchling_engine::machines::ssh_test::{run_target_stoppable, Target, TEST_PARALLEL};
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, hsla, label, KitPart, TextEditor, TextEditorEvent};
@@ -14,8 +18,12 @@ use notchling_locale as t;
 use super::add_parts::AddParts;
 use super::address_rows_view::{RowEditor, Rows};
 use super::addresses_form::{addresses_of, drafts_of, text_of};
-use super::edit_key::{draft_machine, key_of, save_edit, EditTest};
-use super::ssh_text::{address_test_text, key_issue_text, key_note, test_ink};
+use super::edit_key::{
+    draft_machine, key_of, key_text, save_edit, signature, EditResult, EditTest,
+};
+use super::rounds;
+use super::ssh_text::{address_test_text, key_issue_text, key_note, test_ink, trusts_here};
+use super::trust::TrustWhere;
 use super::view::{field_box, ClusterSheetView};
 use crate::accounts::flows::Alert;
 use crate::accounts::view_rows::{alert_overlay, Handler};
@@ -32,8 +40,17 @@ pub(super) struct EditSheet {
     pub parts: AddParts,
     pub key: Entity<TextEditor>,
     pub test: EditTest,
-    pub round: u64,
+    pub tested: String,
+    pub stop: Arc<AtomicBool>,
+    pub saving: bool,
+    pub key_check: Option<(String, Option<KeyIssue>)>,
     pub _key_events: Subscription,
+}
+
+impl Drop for EditSheet {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,7 +88,10 @@ impl ClusterSheetView {
                 if let Some(sheet) = this.edit.as_mut() {
                     sheet.error = None;
                     sheet.test = EditTest::Idle;
+                    sheet.stop.store(true, Ordering::SeqCst);
+                    sheet.stop = Arc::new(AtomicBool::new(false));
                 }
+                this.edit_check_key(cx);
                 cx.notify();
             }
         });
@@ -83,9 +103,14 @@ impl ClusterSheetView {
             parts: parts.clone(),
             key,
             test: EditTest::Idle,
-            round: 0,
+            tested: String::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+            saving: false,
+            key_check: None,
             _key_events: key_events,
         });
+        self.trust = None;
+        self.edit_check_key(cx);
         let mut rows = Vec::new();
         for draft in drafts_of(&machine.address_list(), &machine.user) {
             rows.push(self.row_new(Rows::Edit, &draft.text, draft.meta, cx));
@@ -117,6 +142,7 @@ impl ClusterSheetView {
 
     pub(super) fn edit_cancel(&mut self, cx: &mut Context<Self>) {
         self.edit = None;
+        self.trust = None;
         cx.notify();
     }
 
@@ -158,13 +184,55 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    pub(super) fn edit_test(&mut self, cx: &mut Context<Self>) {
-        let drafts = self.rows_drafts(Rows::Edit, cx);
+    fn edit_check_key(&mut self, cx: &mut Context<Self>) {
         let home = self.edit_home();
         let Some(sheet) = self.edit.as_mut() else {
             return;
         };
-        if matches!(sheet.test, EditTest::Running(_)) {
+        let text = sheet.key.read(cx).text().trim().to_owned();
+        if text.is_empty() {
+            sheet.key_check = None;
+            return;
+        }
+        if sheet.key_check.as_ref().is_some_and(|(t, _)| *t == text) {
+            return;
+        }
+        let name = sheet.name.clone();
+        cx.spawn(async move |this, cx| {
+            let work = text.clone();
+            let issue = cx
+                .background_executor()
+                .spawn(async move { key_of(&work, &home).err() })
+                .await;
+            this.update(cx, |view, cx| {
+                if let Some(sheet) = view.edit.as_mut().filter(|s| s.name == name) {
+                    if sheet.key.read(cx).text().trim() == text {
+                        sheet.key_check = Some((text, issue));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(super) fn edit_signature(&self, cx: &Context<Self>) -> Option<String> {
+        let sheet = self.edit.as_ref()?;
+        Some(signature(
+            &self.rows_drafts(Rows::Edit, cx),
+            sheet.key.read(cx).text(),
+        ))
+    }
+
+    pub(super) fn edit_test(&mut self, cx: &mut Context<Self>) {
+        let drafts = self.rows_drafts(Rows::Edit, cx);
+        let home = self.edit_home();
+        let full = self.test_lanes >= TEST_PARALLEL;
+        let Some(sheet) = self.edit.as_mut() else {
+            return;
+        };
+        if matches!(sheet.test, EditTest::Running(_)) || full {
             return;
         }
         let list = match addresses_of(&drafts, &sheet.name, &sheet.user) {
@@ -176,8 +244,8 @@ impl ClusterSheetView {
             }
         };
         let text = sheet.key.read(cx).text().to_owned();
-        let key = match key_of(&text, &home) {
-            Ok((key, _)) => key,
+        let key = match key_text(&text, &home) {
+            Ok(key) => key,
             Err(issue) => {
                 sheet.error = Some(key_issue_text(issue).to_owned());
                 cx.notify();
@@ -192,32 +260,49 @@ impl ClusterSheetView {
         };
         let draft = draft_machine(&machine, list, key.as_deref());
         sheet.error = None;
-        sheet.round += 1;
-        let round = sheet.round;
+        sheet.stop.store(true, Ordering::SeqCst);
+        sheet.stop = Arc::new(AtomicBool::new(false));
+        sheet.tested = signature(&drafts, &text);
+        let round = rounds::next();
         sheet.test = EditTest::Running(round);
+        let stop = sheet.stop.clone();
         let parts = sheet.parts.clone();
+        self.test_lanes += 1;
         cx.spawn(async move |this, cx| {
             let user = draft.user.clone();
             let results = cx
                 .background_executor()
                 .spawn(async move {
                     let runner = parts.engine.runner().clone();
-                    parts
-                        .engine
-                        .router()
-                        .targets(&draft, &all)
-                        .into_iter()
-                        .map(|(address, target)| {
-                            let result = run_target(&*runner, &target, &home);
-                            (text_of(&address, &user), result)
-                        })
-                        .collect::<Vec<_>>()
+                    let mut results = Vec::new();
+                    for (address, target) in parts.engine.router().targets(&draft, &all) {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let route = match &target {
+                            Target::Route(route) => Some(route.clone()),
+                            _ => None,
+                        };
+                        let result = run_target_stoppable(&*runner, &target, &home, Some(&stop));
+                        results.push(EditResult {
+                            address: text_of(&address, &user),
+                            result,
+                            route,
+                        });
+                    }
+                    results
                 })
                 .await;
             this.update(cx, |view, cx| {
+                view.test_lanes = view.test_lanes.saturating_sub(1);
+                let now = view.edit_signature(cx);
                 if let Some(sheet) = view.edit.as_mut() {
                     if sheet.test == EditTest::Running(round) {
-                        sheet.test = EditTest::Done(round, results);
+                        sheet.test = if now.as_deref() == Some(sheet.tested.as_str()) {
+                            EditTest::Done(round, results)
+                        } else {
+                            EditTest::Idle
+                        };
                     }
                 }
                 cx.notify();
@@ -234,6 +319,9 @@ impl ClusterSheetView {
         let Some(sheet) = self.edit.as_mut() else {
             return;
         };
+        if sheet.saving {
+            return;
+        }
         let list = match addresses_of(&drafts, &sheet.name, &sheet.user) {
             Ok(list) => list,
             Err(why) => {
@@ -243,23 +331,41 @@ impl ClusterSheetView {
             }
         };
         let text = sheet.key.read(cx).text().to_owned();
-        let key = match key_of(&text, &home) {
-            Ok((key, _)) => key,
-            Err(issue) => {
-                sheet.error = Some(key_issue_text(issue).to_owned());
-                cx.notify();
-                return;
-            }
-        };
-        match save_edit(&sheet.parts, &sheet.name, list, key.as_deref()) {
-            Ok(()) => {
-                let name = sheet.name.clone();
-                self.edit = None;
-                self.add.forget_list();
-                self.check_machine(&name, cx);
-            }
-            Err(why) => sheet.error = Some(why),
+        if let Err(issue) = key_text(&text, &home) {
+            sheet.error = Some(key_issue_text(issue).to_owned());
+            cx.notify();
+            return;
         }
+        sheet.saving = true;
+        let name = sheet.name.clone();
+        cx.spawn(async move |this, cx| {
+            let checked = cx
+                .background_executor()
+                .spawn(async move { key_of(&text, &home) })
+                .await;
+            this.update(cx, |view, cx| {
+                let Some(sheet) = view.edit.as_mut().filter(|s| s.name == name) else {
+                    return;
+                };
+                sheet.saving = false;
+                let outcome = match checked {
+                    Ok((key, _)) => save_edit(&sheet.parts, &sheet.name, list, key.as_deref()),
+                    Err(issue) => Err(key_issue_text(issue).to_owned()),
+                };
+                match outcome {
+                    Ok(()) => {
+                        view.edit = None;
+                        view.trust = None;
+                        view.add.forget_list();
+                        view.check_machine(&name, cx);
+                    }
+                    Err(why) => sheet.error = Some(why),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -354,7 +460,7 @@ impl ClusterSheetView {
                             a,
                         ))
                         .child(body)
-                        .child(Self::edit_test_lines(sheet, a))
+                        .child(self.edit_test_lines(sheet, a, cx))
                         .child(buttons)
                         .part_at("Edit Addresses Sheet", Corner::TopTrailing, a, cx),
                 ),
@@ -370,11 +476,21 @@ impl ClusterSheetView {
     ) -> Div {
         let text = sheet.key.read(cx).text().to_owned();
         let home = std::path::PathBuf::from(&sheet.parts.this.home);
-        let issue = if text.trim().is_empty() {
+        let typed = text.trim();
+        let issue = if typed.is_empty() {
             None
+        } else if let Err(issue) = key_text(typed, &home) {
+            Some(issue)
         } else {
-            key_of(&text, &home).err()
+            sheet
+                .key_check
+                .as_ref()
+                .filter(|(checked, _)| checked == typed)
+                .and_then(|(_, issue)| *issue)
         };
+        let checking = !typed.is_empty()
+            && issue.is_none()
+            && !sheet.key_check.as_ref().is_some_and(|(c, _)| c == typed);
         let focused = sheet.key.read(cx).is_focused(window);
         let mut block = div()
             .flex()
@@ -422,7 +538,12 @@ impl ClusterSheetView {
                         .on_click(cx.listener(|this, _, _, cx| this.edit_set_key("", cx))),
                     ),
             );
-        match key_note(Some(text.trim()).filter(|k| !k.is_empty()), issue) {
+        let note = if checking {
+            Some((t::cluster::ssh_key_checking().to_owned(), Ink::TextMuted))
+        } else {
+            key_note(Some(typed).filter(|k| !k.is_empty()), issue)
+        };
+        match note {
             Some((note, ink)) => block = block.child(label(&note, TypeRole::Meta, ink, a)),
             None => {
                 block = block.child(label(
@@ -436,16 +557,55 @@ impl ClusterSheetView {
         block
     }
 
-    fn edit_test_lines(sheet: &EditSheet, a: Appearance) -> Div {
+    fn edit_test_lines(&self, sheet: &EditSheet, a: Appearance, cx: &mut Context<Self>) -> Div {
         let mut lines = div().flex().flex_none().flex_col().gap(px(2.0));
-        if let EditTest::Done(_, results) = &sheet.test {
-            for (address, result) in results {
-                lines = lines.child(label(
-                    &t::cluster::ssh_test_address(address, &address_test_text(result)),
-                    TypeRole::Meta,
-                    test_ink(result),
-                    a,
-                ));
+        let fresh = self.edit_signature(cx).as_deref() == Some(sheet.tested.as_str());
+        let EditTest::Done(_, results) = &sheet.test else {
+            return lines;
+        };
+        if !fresh {
+            return lines;
+        }
+        for (i, row) in results.iter().enumerate() {
+            let text = label(
+                &t::cluster::ssh_test_address(&row.address, &address_test_text(&row.result)),
+                TypeRole::Meta,
+                test_ink(&row.result),
+                a,
+            );
+            let at = TrustWhere::Edit(row.address.clone());
+            let asking = self.trust.as_ref().is_some_and(|k| k.is_at(&at));
+            match (&row.route, trusts_here(&row.result)) {
+                (Some(route), true) if !asking => {
+                    let route: Route = route.clone();
+                    lines = lines.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(SPACE[0]))
+                            .child(div().flex_1().min_w(px(0.0)).child(text))
+                            .child(
+                                button(
+                                    SharedString::from(format!("edit-trust-{i}")),
+                                    t::cluster::ssh_trust(),
+                                    ButtonKind::Secondary,
+                                    PartState::Rest,
+                                    a,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.trust_begin(at.clone(), route.clone(), cx)
+                                    },
+                                )),
+                            ),
+                    );
+                }
+                _ => lines = lines.child(text),
+            }
+            if let Some(block) =
+                self.trust_block(&TrustWhere::Edit(row.address.clone()), 0.0, a, cx)
+            {
+                lines = lines.child(block);
             }
         }
         lines

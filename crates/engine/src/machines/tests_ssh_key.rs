@@ -36,6 +36,8 @@ fn a_key_path_is_absolute_or_under_home() {
         "-oProxyCommand=x",
         "/a/b/",
         "/a/b\nc",
+        "/a/b%h",
+        "~/.ssh/id%%x",
     ] {
         assert!(!shape_ok(bad), "{bad:?}");
     }
@@ -165,7 +167,7 @@ fn a_keyless_jump_stays_a_dash_j_and_a_keyed_hop_becomes_a_proxy_command() {
     let proxy = options[1].strip_prefix("ProxyCommand=").expect("proxy");
     assert_eq!(
         proxy,
-        "'/usr/bin/ssh' '-o' 'BatchMode=yes' '-o' 'ConnectTimeout=8' '-i' '~/.ssh/id_gw' '-o' 'IdentitiesOnly=yes' '-W' '%h:%p' '--' 'hop@gw.example'"
+        "'/usr/bin/ssh' '-o' 'BatchMode=yes' '-o' 'ConnectTimeout=8' '-i' '~/.ssh/id_gw' '-o' 'IdentitiesOnly=yes' '-W' '[%h]:%p' '--' 'hop@gw.example'"
     );
     let both = Route {
         key: Some("~/.ssh/id_dest".into()),
@@ -180,7 +182,7 @@ fn a_keyless_jump_stays_a_dash_j_and_a_keyed_hop_becomes_a_proxy_command() {
 }
 
 #[test]
-fn a_chain_with_a_key_on_the_far_hop_nests_proxy_commands() {
+fn a_chain_with_a_key_on_the_far_hop_nests_proxy_commands_with_escaped_tokens() {
     let far = Route::direct("edge.example", "edge").with_key(Some("~/.ssh/id_edge"));
     let near = Route {
         jump: Some(Box::new(far)),
@@ -192,13 +194,68 @@ fn a_chain_with_a_key_on_the_far_hop_nests_proxy_commands() {
         ..Route::direct("10.0.0.5", "agent")
     };
     let options = route.ssh_options();
-    let proxy = options[1].strip_prefix("ProxyCommand=").unwrap();
-    assert!(proxy.contains("'-p' '2200'"), "{proxy}");
-    assert!(
-        proxy.contains("ProxyCommand=") && proxy.contains("id_edge"),
-        "{proxy}"
+    assert_eq!(options.len(), 2);
+    assert_eq!(options[0], "-o");
+    let inner = "'/usr/bin/ssh' '-o' 'BatchMode=yes' '-o' 'ConnectTimeout=8' '-i' '~/.ssh/id_edge' '-o' 'IdentitiesOnly=yes' '-W' '[%h]:%p' '--' 'edge@edge.example'";
+    let escaped_inner = format!("ProxyCommand={inner}").replace('%', "%%");
+    let escaped_inner = escaped_inner.replace('\'', "'\\''");
+    let expected = format!(
+        "ProxyCommand='/usr/bin/ssh' '-o' 'BatchMode=yes' '-o' 'ConnectTimeout=8' '-p' '2200' '-o' '{escaped_inner}' '-W' '[%h]:%p' '--' 'hop@gw.example'"
     );
-    assert!(!proxy.contains("'-J'"), "{proxy}");
+    assert_eq!(options[1], expected);
+    assert!(options[1].contains("[%%h]:%%p"));
+    assert!(!options[1].contains("'-J'"));
+}
+
+#[test]
+fn three_hops_double_the_percent_signs_at_each_level() {
+    let hop3 = Route::direct("c.example", "c").with_key(Some("~/.ssh/id_c"));
+    let hop2 = Route {
+        jump: Some(Box::new(hop3)),
+        ..Route::direct("b.example", "b")
+    };
+    let hop1 = Route {
+        jump: Some(Box::new(hop2)),
+        ..Route::direct("a.example", "a")
+    };
+    let route = Route {
+        jump: Some(Box::new(hop1)),
+        ..Route::direct("target.example", "t")
+    };
+    let text = route.ssh_options().join(" ");
+    assert!(text.contains("[%h]:%p"));
+    assert!(text.contains("[%%h]:%%p"));
+    assert!(text.contains("[%%%%h]:%%%%p"));
+    assert!(!text.contains("%%%%%%"));
+}
+
+#[test]
+fn an_ipv6_hop_is_reached_through_a_bracketed_target() {
+    let route = Route {
+        jump: Some(Box::new(
+            Route::direct("fd7a::1", "hop").with_key(Some("~/.ssh/id_gw")),
+        )),
+        ..Route::direct("fd7a::2", "agent")
+    };
+    let options = route.ssh_options();
+    assert!(options[1].contains("'-W' '[%h]:%p'"), "{}", options[1]);
+    assert!(options[1].ends_with("'hop@fd7a::1'"), "{}", options[1]);
+}
+
+#[test]
+fn a_percent_in_a_hop_host_or_user_is_escaped_in_the_proxy_command() {
+    let route = Route {
+        jump: Some(Box::new(
+            Route::direct("gw%h.example", "ho%pp").with_key(Some("~/.ssh/id_gw")),
+        )),
+        ..Route::direct("10.0.0.5", "agent")
+    };
+    let options = route.ssh_options();
+    assert!(
+        options[1].ends_with("'--' 'ho%%pp@gw%%h.example'"),
+        "{}",
+        options[1]
+    );
 }
 
 fn rig(keyed: bool) -> (Router, Arc<ScriptedRunner>, Machine) {

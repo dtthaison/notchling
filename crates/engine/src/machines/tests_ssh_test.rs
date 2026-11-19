@@ -28,6 +28,10 @@ fn the_test_asks_who_it_is_with_no_prompts_no_mux_and_a_strict_known_hosts() {
         "UpdateHostKeys=no",
         "StrictHostKeyChecking=yes",
         "ConnectTimeout=5",
+        "ForwardAgent=no",
+        "ForwardX11=no",
+        "PermitLocalCommand=no",
+        "ClearAllForwardings=yes",
     ] {
         assert!(argv.contains(&want.to_owned()), "{want}: {argv:?}");
     }
@@ -48,6 +52,10 @@ fn the_unsaved_pass_never_reads_or_writes_a_known_hosts_file() {
         "UserKnownHostsFile=/dev/null",
         "GlobalKnownHostsFile=/dev/null",
         "UpdateHostKeys=no",
+        "ForwardAgent=no",
+        "ForwardX11=no",
+        "PermitLocalCommand=no",
+        "ClearAllForwardings=yes",
     ] {
         assert!(argv.contains(&want.to_owned()), "{want}: {argv:?}");
     }
@@ -150,7 +158,7 @@ fn a_new_host_with_a_wrong_user_still_says_so() {
     );
     runner.on(
         |_| true,
-        CommandResult::new(255, "", "Host key verification failed."),
+        CommandResult::new(255, "", "No ED25519 host key is known for app-1 and you have requested strict checking.\nHost key verification failed."),
     );
     assert_eq!(run_with(&runner, &route()), SshTest::Denied);
 }
@@ -245,4 +253,121 @@ fn a_wrong_network_never_runs_ssh() {
     );
     assert!(runner.calls().is_empty());
     assert!(!result.passed());
+}
+
+#[test]
+fn a_new_host_has_not_passed_until_it_is_trusted() {
+    assert!(!SshTest::NewHost { user: "u".into() }.passed());
+    assert!(SshTest::Connected { user: "u".into() }.passed());
+    assert!(!SshTest::JumpUntrusted { host: "gw".into() }.passed());
+}
+
+#[test]
+fn a_revoked_host_key_is_never_retried_loosely() {
+    let runner = ScriptedRunner::new();
+    runner.on(
+        |_| true,
+        CommandResult::new(
+            255,
+            "",
+            "@@@ WARNING: REVOKED HOST KEY DETECTED! @@@\nThe host key for app-1 is marked as revoked.\nHost key verification failed.",
+        ),
+    );
+    assert_eq!(run_with(&runner, &route()), SshTest::HostKeyChanged);
+    assert_eq!(runner.calls().len(), 1);
+}
+
+#[test]
+fn a_dns_spoofing_warning_is_never_retried_loosely() {
+    let runner = ScriptedRunner::new();
+    runner.on(
+        |_| true,
+        CommandResult::new(
+            255,
+            "",
+            "Warning: the ED25519 host key for 'app-1' differs from the key for the IP address\n@@@ POSSIBLE DNS SPOOFING DETECTED! @@@\nHost key verification failed.",
+        ),
+    );
+    assert_eq!(run_with(&runner, &route()), SshTest::HostKeyChanged);
+    assert_eq!(runner.calls().len(), 1);
+}
+
+#[test]
+fn a_bare_verification_failure_is_not_a_new_host() {
+    let runner = ScriptedRunner::new();
+    runner.on(
+        |_| true,
+        CommandResult::new(255, "", "Host key verification failed."),
+    );
+    assert_eq!(
+        run_with(&runner, &route()),
+        SshTest::Unreachable(Why::Other)
+    );
+    assert_eq!(runner.calls().len(), 1);
+}
+
+fn through_gateway() -> Route {
+    Route {
+        jump: Some(Box::new(Route::direct("gw.example", "hop"))),
+        ..Route::direct("10.0.0.5", "agent")
+    }
+}
+
+#[test]
+fn an_untrusted_jump_host_is_named_and_never_retried() {
+    let runner = ScriptedRunner::new();
+    runner.on(
+        |_| true,
+        CommandResult::new(
+            255,
+            "",
+            "No ED25519 host key is known for gw.example and you have requested strict checking.\nHost key verification failed.",
+        ),
+    );
+    assert_eq!(
+        run_with(&runner, &through_gateway()),
+        SshTest::JumpUntrusted {
+            host: "gw.example".into()
+        }
+    );
+    assert_eq!(runner.calls().len(), 1);
+}
+
+#[test]
+fn an_untrusted_jump_host_with_a_port_is_still_named() {
+    let runner = ScriptedRunner::new();
+    runner.on(
+        |_| true,
+        CommandResult::new(
+            255,
+            "",
+            "No RSA host key is known for [gw.example]:2200 and you have requested strict checking.\nHost key verification failed.",
+        ),
+    );
+    assert_eq!(
+        run_with(&runner, &through_gateway()),
+        SshTest::JumpUntrusted {
+            host: "gw.example".into()
+        }
+    );
+}
+
+#[test]
+fn an_untrusted_target_behind_a_jump_is_still_a_new_host() {
+    let runner = ScriptedRunner::new();
+    runner.on(is_loose_args, CommandResult::ok("agent\n"));
+    runner.on(
+        |_| true,
+        CommandResult::new(
+            255,
+            "",
+            "No ED25519 host key is known for 10.0.0.5 and you have requested strict checking.\nHost key verification failed.",
+        ),
+    );
+    assert_eq!(
+        run_with(&runner, &through_gateway()),
+        SshTest::NewHost {
+            user: "agent".into()
+        }
+    );
 }

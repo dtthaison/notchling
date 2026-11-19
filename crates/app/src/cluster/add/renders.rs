@@ -39,6 +39,7 @@ pub(in crate::cluster) fn adds(which: Shown) -> bool {
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
             | Shown::MachinesTest
+            | Shown::MachinesTrust
             | Shown::MachinesEdit
             | Shown::MachinesOrganization
             | Shown::MachinesNetwork
@@ -134,6 +135,49 @@ fn preview_tests(model: &mut FromTailscale) {
     model.request_test("pi-6.tail1234.ts.net");
 }
 
+fn preview_trust(model: &mut FromTailscale) {
+    model.set_key("nas-4.tail1234.ts.net", None, None);
+    model.waiting.clear();
+    model.tests.insert(
+        "nas-4.tail1234.ts.net".to_owned(),
+        TestState::Done(SshTest::JumpUntrusted {
+            host: "gw.example".into(),
+        }),
+    );
+    model.tests.insert(
+        "pi-6.tail1234.ts.net".to_owned(),
+        TestState::Done(SshTest::HostKeyChanged),
+    );
+}
+
+fn preview_trust_ask() -> crate::cluster::trust::TrustAsk {
+    use crate::cluster::trust::{TrustAsk, TrustFlow, TrustWhere};
+    use notchling_engine::machines::addresses::Route;
+    use notchling_engine::machines::host_trust::HostKey;
+    let mut ask = TrustAsk::begin(
+        TrustWhere::Tailscale("edge-3.tail1234.ts.net".into()),
+        Route::direct("edge-3.tail1234.ts.net", "sondoan"),
+        1,
+    );
+    let key = |kind: &str, fingerprint: &str| HostKey {
+        field: "edge-3.tail1234.ts.net".into(),
+        kind: kind.into(),
+        blob: "AAAA".into(),
+        fingerprint: fingerprint.into(),
+    };
+    ask.flow = TrustFlow::Review(vec![
+        key(
+            "ssh-ed25519",
+            "SHA256:Z3JhbmQgdGhlIHRlc3QgZml4dHVyZSBub3QgYSBrZXk",
+        ),
+        key(
+            "ecdsa-sha2-nistp256",
+            "SHA256:bm90IGEgcmVhbCBob3N0IGtleSwganVzdCBhIGRlbW8",
+        ),
+    ]);
+    ask
+}
+
 fn from_tailscale(existing: Vec<notchling_engine::machines::registry::Machine>) -> FromTailscale {
     let mut model = FromTailscale::new(USER, existing);
     model.loaded(
@@ -180,6 +224,7 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
             | Shown::MachinesTest
+            | Shown::MachinesTrust
             | Shown::MachinesEdit
             | Shown::MachinesOrganization
             | Shown::MachinesNetwork
@@ -358,6 +403,7 @@ impl ClusterSheetView {
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
             | Shown::MachinesTest
+            | Shown::MachinesTrust
             | Shown::MachinesEdit
             | Shown::MachinesOrganization => None,
             Shown::AddPlan | Shown::AddRunning | Shown::AddStopped => Some("m2".to_owned()),
@@ -369,7 +415,10 @@ impl ClusterSheetView {
         }
         if matches!(
             which,
-            Shown::MachinesTailscale | Shown::MachinesTest | Shown::MachinesOrganization
+            Shown::MachinesTailscale
+                | Shown::MachinesTest
+                | Shown::MachinesTrust
+                | Shown::MachinesOrganization
         ) {
             let mut existing = parts.as_ref().map(|p| p.registry.all()).unwrap_or_default();
             existing.push(notchling_engine::machines::registry::Machine::new(
@@ -377,7 +426,7 @@ impl ClusterSheetView {
                 "oracle-sg.tail1234.ts.net",
                 USER,
             ));
-            if which == Shown::MachinesTest {
+            if matches!(which, Shown::MachinesTest | Shown::MachinesTrust) {
                 for host in [
                     "app-1.tail1234.ts.net",
                     "dev-7.tail1234.ts.net",
@@ -402,11 +451,17 @@ impl ClusterSheetView {
                 })));
                 model.next_organization();
             }
-            if which == Shown::MachinesTest {
+            if matches!(which, Shown::MachinesTest | Shown::MachinesTrust) {
                 preview_tests(&mut model);
+            }
+            if which == Shown::MachinesTrust {
+                preview_trust(&mut model);
             }
             self.start_tailscale(model, None, cx);
             self.tailscale_preview_users(cx);
+            if which == Shown::MachinesTrust {
+                self.trust = Some(preview_trust_ask());
+            }
             return;
         }
         let sheet = crate::cluster::add_view::AddSheet::new(parts, flow, cx);
@@ -449,7 +504,7 @@ impl ClusterSheetView {
 
     fn preview_edit(&mut self, cx: &mut gpui::Context<Self>) {
         use crate::cluster::address_rows_view::Rows;
-        use crate::cluster::edit_key::EditTest;
+        use crate::cluster::edit_key::{EditResult, EditTest};
         use notchling_engine::machines::ssh_test::Why;
         self.open_edit_addresses("app-1", cx);
         self.tailnets = vec!["person@example.com".into(), "work.example".into()];
@@ -471,23 +526,33 @@ impl ClusterSheetView {
             sheet
                 .key
                 .update(cx, |editor, cx| editor.set_text("~/.ssh/id_deploy", cx));
+        }
+        let sig = self.edit_signature(cx).unwrap_or_default();
+        if let Some(sheet) = self.edit.as_mut() {
+            sheet.tested = sig;
+            sheet.key_check = Some(("~/.ssh/id_deploy".into(), None));
+            let row = |address: &str, result: SshTest| EditResult {
+                address: address.into(),
+                result,
+                route: None,
+            };
             sheet.test = EditTest::Done(
                 1,
                 vec![
-                    (
-                        "app-1.example".into(),
+                    row(
+                        "app-1.example",
                         SshTest::WrongNetwork {
                             wanted: "work.example".into(),
                             active: "person@example.com".into(),
                         },
                     ),
-                    (
-                        "192.168.1.20".into(),
+                    row(
+                        "192.168.1.20",
                         SshTest::Connected {
                             user: "deploy".into(),
                         },
                     ),
-                    ("10.0.0.7:2222".into(), SshTest::Unreachable(Why::TimedOut)),
+                    row("10.0.0.7:2222", SshTest::Unreachable(Why::TimedOut)),
                 ],
             );
         }
