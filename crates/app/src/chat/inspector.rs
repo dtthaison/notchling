@@ -239,6 +239,7 @@ pub fn inspector_with_fan(
         shells: shell_rows_with_fan(
             conversation,
             fan,
+            shells.map_or(&[][..], |listing| listing.idle.as_slice()),
             shells.map(|listing| listing.ids.as_slice()),
             writers,
         ),
