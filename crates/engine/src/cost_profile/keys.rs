@@ -151,7 +151,10 @@ pub fn claude_keys(
         }
         let ours = match (&now, before_rec) {
             (None, _) | (_, None) => true,
-            (Some(v), Some(rec)) => *v == rec.after,
+            (Some(v), Some(rec)) => {
+                let shown = v.to_string();
+                shown == rec.after
+            }
         };
         if !ours {
             plan.skipped.push(Skipped {
@@ -252,7 +255,10 @@ pub fn codex_keys(
         }
         let ours = match (&now, before_rec) {
             (None, _) | (_, None) => true,
-            (Some(v), Some(rec)) => *v == rec.after,
+            (Some(v), Some(rec)) => {
+                let shown = v.to_string();
+                shown == rec.after
+            }
         };
         if !ours {
             plan.skipped.push(Skipped {
