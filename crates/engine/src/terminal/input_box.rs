@@ -110,8 +110,14 @@ fn is_picture(path: &str) -> bool {
     PICTURE_EXTENSIONS.iter().any(|ext| path.ends_with(ext))
 }
 
+struct Piece {
+    letters: String,
+    exact: String,
+    picture: bool,
+}
+
 struct Message {
-    pieces: Vec<(String, bool)>,
+    pieces: Vec<Piece>,
     literal: bool,
 }
 
@@ -122,12 +128,20 @@ impl Message {
         for line in text.split('\n') {
             match path_line(line) {
                 Some(paths) => {
-                    pieces.extend(paths.iter().map(|path| (letters(path), is_picture(path))));
+                    pieces.extend(paths.iter().map(|path| Piece {
+                        letters: letters(path),
+                        exact: squeezed(path),
+                        picture: is_picture(path),
+                    }));
                 }
                 None => {
                     let line = squeezed(line);
                     literal |= strip_chips(&line).1 > 0;
-                    pieces.push((letters(&line), false));
+                    pieces.push(Piece {
+                        letters: letters(&line),
+                        exact: line,
+                        picture: false,
+                    });
                 }
             }
         }
@@ -143,37 +157,43 @@ impl Message {
     }
 
     fn pictures(&self) -> usize {
-        self.pieces.iter().filter(|(_, picture)| *picture).count()
+        self.pieces.iter().filter(|piece| piece.picture).count()
     }
 
-    fn kept(&self, gone: impl Fn(usize) -> bool) -> String {
+    fn wordless(&self) -> bool {
+        self.pieces
+            .iter()
+            .all(|piece| piece.picture || piece.letters.is_empty())
+    }
+
+    fn kept(&self, gone: impl Fn(usize) -> bool, exact: bool) -> String {
         let mut nth = 0;
         let mut kept = String::new();
-        for (words, picture) in &self.pieces {
-            let read = *picture && gone(nth);
-            nth += usize::from(*picture);
+        for piece in &self.pieces {
+            let read = piece.picture && gone(nth);
+            nth += usize::from(piece.picture);
             if !read {
-                kept.push_str(words);
+                kept.push_str(if exact { &piece.exact } else { &piece.letters });
             }
         }
         kept
     }
 
-    fn without(&self, chips: usize) -> Vec<String> {
+    fn without(&self, chips: usize, exact: bool) -> Vec<String> {
         let pictures = self.pictures();
         if chips > pictures {
             return Vec::new();
         }
         if pictures > PICTURES_MAX {
             return match chips {
-                0 => vec![self.kept(|_| false)],
-                n if n == pictures => vec![self.kept(|_| true)],
+                0 => vec![self.kept(|_| false, exact)],
+                n if n == pictures => vec![self.kept(|_| true, exact)],
                 _ => Vec::new(),
             };
         }
         (0..1usize << pictures)
             .filter(|mask| mask.count_ones() as usize == chips)
-            .map(|mask| self.kept(|nth| mask >> nth & 1 == 1))
+            .map(|mask| self.kept(|nth| mask >> nth & 1 == 1, exact))
             .collect()
     }
 }
@@ -232,7 +252,7 @@ impl Input {
             let have = letters(&shown);
             let size = have.chars().count();
             size > 0
-                && message.without(chips).iter().any(|want| {
+                && message.without(chips, false).iter().any(|want| {
                     have == *want
                         || (size >= MIN_PART && (want.starts_with(&have) || want.ends_with(&have)))
                 })
@@ -264,7 +284,7 @@ impl Input {
                 };
                 let have = letters(&shown);
                 message
-                    .without(chips.min(message.pictures()))
+                    .without(chips.min(message.pictures()), false)
                     .iter()
                     .any(|want| !want.is_empty() && have.contains(want))
             }
@@ -289,7 +309,7 @@ impl Input {
         if letters(text).is_empty() {
             return Fill::Whole;
         }
-        let wants = message.without(real);
+        let wants = message.without(real, false);
         let have = letters(&shown);
         if wants.contains(&have) {
             Fill::Whole
@@ -312,8 +332,32 @@ pub fn holds_message(typed: &str, text: &str) -> bool {
     !letters(text).is_empty() && !letters(typed).is_empty() && input.fill(text) == Fill::Whole
 }
 
-pub fn shown_as_chips(text: &str, shown: &str) -> bool {
-    shown.contains("[Image #") && Message::of(text).pictures() > 0 && holds_message(shown, text)
+pub struct Pictured(Message);
+
+impl Pictured {
+    pub fn of(text: &str) -> Option<Pictured> {
+        let message = Message::of(text);
+        (message.pictures() > 0 && !message.literal).then_some(Pictured(message))
+    }
+
+    pub fn is_shown_as(&self, shown: &str, images: Option<usize>) -> bool {
+        let bare = shown.trim().is_empty();
+        if !bare && !shown.contains("[Image #") {
+            return false;
+        }
+        let (rest, chips) = strip_chips(&squeezed(shown));
+        let pictures = self.0.pictures();
+        let chips = match (chips, images) {
+            (0, Some(n)) if bare && n >= pictures => pictures,
+            (0, _) => return false,
+            (n, Some(images)) if images < n => return false,
+            (n, _) if n > pictures => return false,
+            (n, _) => n,
+        };
+        let exact = self.0.wordless();
+        let have = if exact { rest } else { letters(&rest) };
+        self.0.without(chips, exact).contains(&have)
+    }
 }
 
 pub fn typed_text(lines: &[String], cursor: Option<(usize, usize)>) -> Option<String> {

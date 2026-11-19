@@ -7,7 +7,7 @@ use notchling_engine::transcript::model::Conversation;
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
-use super::outgoing::{dated_since, Outgoing};
+use super::outgoing::{sent_since, Outgoing, Turns, Wanted, GRACE_MS};
 use crate::acting::Request;
 
 const SENT_KEPT: usize = 50;
@@ -161,21 +161,25 @@ pub fn head_needs_you(rows: &[OutboxRow]) -> bool {
     })
 }
 
-fn shown_by_transcript(row: &OutboxRow, conversation: &Conversation) -> bool {
+fn shown_by_transcript(row: &OutboxRow, turns: &mut Turns) -> bool {
     let since = match row.state {
         State::Sending => row.updated_ms,
         State::Unsure => row.attempt_ms.unwrap_or(row.queued_ms),
         _ => return false,
     };
-    dated_since(&row.text, since as f64, conversation)
+    turns.take(&Wanted::of(&row.text), since as f64)
 }
 
 pub fn hidden_queued(queued: &[String], rows: &[OutboxRow]) -> Option<usize> {
     let held = rows.iter().find(|r| r.state == State::InQueue)?;
     let wanted = squeeze(&held.text);
-    queued
-        .iter()
-        .position(|entry| squeeze(entry) == wanted || input_box::shown_as_chips(&held.text, entry))
+    let pictured = input_box::Pictured::of(&held.text);
+    queued.iter().position(|entry| {
+        squeeze(entry) == wanted
+            || pictured
+                .as_ref()
+                .is_some_and(|pictured| pictured.is_shown_as(entry, None))
+    })
 }
 
 pub fn unbubbled(outgoing: Vec<String>, bubbles: &[Bubble]) -> Vec<String> {
@@ -381,21 +385,24 @@ impl OutboxFeed {
             return false;
         };
         let before = list.len();
+        let mut turns = Turns::new(conversation);
         list.retain(|kept| {
-            let waiting = Outgoing {
-                text: kept.row.text.clone(),
-                seen: usize::MAX,
-                delivered_at: Some(kept.at_ms),
-                sent_at: kept.row.queued_ms,
-                boxed: None,
-            };
-            waiting.keep(conversation, now_ms)
+            let arrived = turns.take(&Wanted::of(&kept.row.text), sent_since(kept.row.queued_ms));
+            !arrived && now_ms.saturating_sub(kept.at_ms) < GRACE_MS
         });
         let changed = list.len() != before;
         if list.is_empty() {
             self.sent.remove(session);
         }
         changed
+    }
+
+    pub fn sent_expired(&self, agent: &Agent, now_ms: i64) -> bool {
+        self.sent
+            .get(&agent.outbox_key())
+            .into_iter()
+            .flatten()
+            .any(|kept| now_ms.saturating_sub(kept.at_ms) >= GRACE_MS)
     }
 
     pub fn bubbles(&self, session: &str) -> Vec<Bubble> {
@@ -407,23 +414,24 @@ impl OutboxFeed {
     }
 
     pub fn bubbles_in(&self, session: &str, conversation: &Conversation) -> Vec<Bubble> {
-        let sent = self
-            .sent
-            .get(session)
-            .into_iter()
-            .flatten()
-            .map(|kept| Bubble {
+        let mut turns = Turns::new(conversation);
+        let mut out: Vec<Bubble> = Vec::new();
+        for kept in self.sent.get(session).into_iter().flatten() {
+            turns.take(&Wanted::of(&kept.row.text), sent_since(kept.row.queued_ms));
+            out.push(Bubble {
                 id: kept.row.id.clone(),
                 text: kept.row.text.clone(),
                 status: Status::Sent,
                 buttons: Vec::new(),
             });
-        let waiting = self
-            .rows(session)
-            .iter()
-            .filter(|row| !shown_by_transcript(row, conversation))
-            .map(bubble);
-        sent.chain(waiting).collect()
+        }
+        out.extend(
+            self.rows(session)
+                .iter()
+                .filter(|row| !shown_by_transcript(row, &mut turns))
+                .map(bubble),
+        );
+        out
     }
 
     pub fn is_empty(&self) -> bool {
