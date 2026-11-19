@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use notchling_locale as t;
 use serde_json::Value;
 
-use super::profile::TOOLS;
+use super::profile::{imports_of, Imported, ImportedLine, TOOLS};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
@@ -78,6 +78,22 @@ pub struct Action {
 }
 
 impl Action {
+    pub fn explain(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.id.starts_with("claude.rules.replaced") {
+            out.push(t::costs::explain_rules_replaced().to_owned());
+        } else if self.id.starts_with("claude.pointer.") {
+            out.push(t::costs::explain_pointer().to_owned());
+        } else if self.id == "claude.orchestrator.new" {
+            out.push(t::costs::explain_orchestrator_new().to_owned());
+        } else if self.id == "codex.config" {
+            out.push(t::costs::explain_codex_config().to_owned());
+        }
+        out.extend(self.reason.iter().map(|r| why_text(r)));
+        out.extend(self.notes.iter().map(|n| why_text(n)));
+        out
+    }
+
     pub fn has_detail(&self) -> bool {
         !self.diff.is_empty() || !self.keys.is_empty()
     }
@@ -93,17 +109,10 @@ pub struct Group {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReportLine {
-    pub line: u64,
-    pub text: String,
-    pub fate: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub on: bool,
     pub groups: Vec<Group>,
-    pub report: Vec<ReportLine>,
+    pub imports: Vec<Imported>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -212,6 +221,45 @@ pub fn fate_text(fate: &str) -> String {
     }
 }
 
+pub fn why_text(text: &str) -> String {
+    text.split("; ")
+        .map(|part| match part.rsplit_once(": ") {
+            Some((key, why)) if known_why(why) => format!("{key}: {}", one_why(why)),
+            _ if known_why(part) => one_why(part),
+            _ => part.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn known_why(why: &str) -> bool {
+    matches!(
+        why,
+        "kept"
+            | "changed-since"
+            | "alias-set"
+            | "codex-rejects"
+            | "toml-layout"
+            | "edited"
+            | "replacement-skipped"
+            | "duplicate-id"
+    )
+}
+
+fn one_why(why: &str) -> String {
+    match why {
+        "kept" => t::costs::why_kept(),
+        "changed-since" => t::costs::why_changed_since(),
+        "alias-set" => t::costs::why_alias_set(),
+        "codex-rejects" => t::costs::why_codex_rejects(),
+        "toml-layout" => t::costs::why_toml_layout(),
+        "edited" => t::costs::why_edited(),
+        "replacement-skipped" => t::costs::why_replacement_skipped(),
+        _ => t::costs::why_duplicate_id(),
+    }
+    .to_owned()
+}
+
 pub fn key_line(change: &KeyChange) -> String {
     let before = if change.before.is_empty() {
         t::costs::key_unset().to_owned()
@@ -308,6 +356,23 @@ fn versions_of(reply: &Value) -> [Option<String>; 3] {
     out
 }
 
+fn report_lines(report: Option<&Value>) -> Vec<ImportedLine> {
+    report
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| {
+                    Some(ImportedLine {
+                        number: r.get("line")?.as_u64()?,
+                        text: r.get("text")?.as_str()?.to_owned(),
+                        fate: r.get("fate")?.as_str()?.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 impl Plan {
     pub fn from_reply(reply: &Value, versions: Option<&Value>, home: &str) -> Option<Plan> {
         let plan = reply.get("plan")?;
@@ -346,25 +411,20 @@ impl Plan {
                 }
             })
             .collect();
-        let report = plan
-            .get("report")
-            .and_then(Value::as_array)
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(|r| {
-                        Some(ReportLine {
-                            line: r.get("line")?.as_u64()?,
-                            text: r.get("text")?.as_str()?.to_owned(),
-                            fate: r.get("fate")?.as_str()?.to_owned(),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut imports = plan.get("profile").map(imports_of).unwrap_or_default();
+        if imports.is_empty() {
+            let lines = report_lines(plan.get("report"));
+            if !lines.is_empty() {
+                imports.push(Imported {
+                    source: String::new(),
+                    lines,
+                });
+            }
+        }
         Some(Plan {
             on: reply.get("on").and_then(Value::as_bool).unwrap_or(false),
             groups,
-            report,
+            imports,
         })
     }
 
@@ -416,8 +476,14 @@ impl SetupModel {
                 self.plan = Some(plan);
                 self.message = None;
             }
-            Ok(None) => self.message = Some(t::costs::setup_unreadable().to_owned()),
-            Err(why) => self.message = Some(why),
+            Ok(None) => {
+                self.plan = None;
+                self.message = Some(t::costs::setup_unreadable().to_owned());
+            }
+            Err(why) => {
+                self.plan = None;
+                self.message = Some(why);
+            }
         }
         self.stage = Stage::Review;
     }
@@ -519,6 +585,12 @@ impl SetupModel {
                     .collect()
             })
             .unwrap_or_default();
+        if rows.is_empty() && message.is_some() {
+            self.plan = None;
+            self.message = message;
+            self.stage = Stage::Review;
+            return;
+        }
         self.written = rows;
         self.message = message;
         self.stage = Stage::Done;

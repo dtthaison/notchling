@@ -1,5 +1,7 @@
 use super::renders::{plan_reply, setup, versions_reply, Shown, HOME};
-use super::setup::{diff_line, fate_text, Change, DiffLine, Outcome, Plan, SetupModel, Stage};
+use super::setup::{
+    diff_line, fate_text, why_text, Change, DiffLine, Outcome, Plan, SetupModel, Stage,
+};
 use serde_json::json;
 
 fn plan(on: bool, ticked: bool) -> Plan {
@@ -33,6 +35,7 @@ fn rows_are_new_edit_replace_remove_then_offers() {
             Change::New,
             Change::Edit,
             Change::Offer,
+            Change::Offer,
             Change::Offer
         ]
     );
@@ -44,7 +47,7 @@ fn a_ticked_replacement_of_a_whole_file_is_a_replace() {
     assert!(p.groups[0]
         .actions
         .iter()
-        .any(|a| a.id == "claude.rules.replaced" && a.change == Change::Replace));
+        .any(|a| a.id == "claude.rules.replaced.model-choice.md" && a.change == Change::Replace));
 }
 
 #[test]
@@ -83,15 +86,15 @@ fn offers_start_unticked_and_ticking_asks_for_their_consent() {
         .plan
         .as_ref()
         .unwrap()
-        .action("claude.orchestrator_new")
+        .action("claude.orchestrator.new")
         .unwrap()
         .clone();
     assert!(!m.ticked(&offer));
     assert!(m.consent_list().is_empty());
-    assert!(m.toggle_offer("claude.orchestrator_new"));
+    assert!(m.toggle_offer("claude.orchestrator.new"));
     assert_eq!(m.consent_list(), ["orchestrator_new"]);
     assert!(m.ticked(&offer));
-    assert!(m.toggle_offer("claude.orchestrator_new"));
+    assert!(m.toggle_offer("claude.orchestrator.new"));
     assert!(m.consent_list().is_empty());
 }
 
@@ -151,7 +154,7 @@ fn what_apply_wrote_is_listed_with_its_tool_and_backup() {
     assert_eq!(settings.change, Change::Edit);
     assert_eq!(
         settings.backup.as_deref(),
-        Some("~/.claude/settings.json.notchling-backup-1793000000000")
+        Some("~/.claude/settings.json.notchling-setup-1793000000000")
     );
     assert_eq!(
         m.written

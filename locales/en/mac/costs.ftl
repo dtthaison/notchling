@@ -168,8 +168,8 @@ costs-habit-output = { $count ->
 # Section title above the note about rules taken from the person's own files.
 costs-imported-title = Imported Rules
 
-# Line under that title; $source is a file name, $moved how many lines went into the table and $kept how many stayed in the file.
-costs-imported-summary = From { $source }: { NUMBER($moved) } moved into the table, { NUMBER($kept) } kept in your file.
+# Line under a rule file's name; $moved is how many lines went into the table and $kept how many stayed in the file.
+costs-imported-summary = { NUMBER($moved) } moved into the table, { NUMBER($kept) } kept in your file.
 
 ## Check
 
@@ -226,6 +226,12 @@ costs-drift-returned = Came back
 
 # State of a file: it was left out.
 costs-drift-skipped = Skipped
+
+# State of a file or key the person took over with Keep Mine: Notchling no longer changes it.
+costs-drift-yours = Yours, not managed
+
+# Summary line of the Check list when the check could not run; the reason is shown under it.
+costs-check-failed = The check can't run.
 
 ## Cache
 
@@ -284,6 +290,9 @@ costs-setup-reading = Reading what is on this Mac…
 
 # When the plan can't be read.
 costs-setup-unreadable = The plan can't be read.
+
+# Footer of the sheet when the plan or the setup record could not be read; there is no Apply then.
+costs-setup-failed-footer = Nothing was changed.
 
 # Footer of the sheet before Apply.
 costs-setup-nothing-written = Nothing is written until Apply.
@@ -419,3 +428,41 @@ costs-outcome-conflict = Left as it is
 
 # What Undo did to a file: it failed.
 costs-outcome-failed = Failed
+
+## Why a change or a skip
+
+# Under a rule file Set Up would replace; it is imported first.
+costs-explain-rules-replaced = Your own model rules. Its table and lines are imported into notchling-cost.md first, then this file is replaced after a backup.
+
+# Under a file that still names the old rule file.
+costs-explain-pointer = Still names the old rule file. It will name notchling-cost.md instead.
+
+# Under the offer of a new orchestrator agent.
+costs-explain-orchestrator-new = A main chat that plans and delegates, and never edits.
+
+# Under the change to Codex's own config file.
+costs-explain-codex-config = Changes only Notchling's keys in your own config.toml.
+
+# After a key name: Notchling left it because the person took it over.
+costs-why-kept = Yours, not managed
+
+# After a key name: it was changed after Notchling wrote it.
+costs-why-changed-since = changed since Notchling wrote it, left as it is
+
+# After a key name: the tool reads it under another name.
+costs-why-alias-set = set under its other name
+
+# After a key name: Codex does not take the value.
+costs-why-codex-rejects = Codex doesn't accept it
+
+# After a key name: the file's layout cannot hold it.
+costs-why-toml-layout = the file's layout can't hold it
+
+# A file edited since Notchling wrote it.
+costs-why-edited = Edited since Notchling wrote it
+
+# A file skipped because the new rule file it depends on is not written.
+costs-why-replacement-skipped = Skipped until the new rule file is written
+
+# A file skipped because another action names the same file.
+costs-why-duplicate-id = Skipped, listed twice

@@ -24,6 +24,8 @@ mod picks_tests;
 #[cfg(test)]
 mod profile_tests;
 #[cfg(test)]
+mod review_tests;
+#[cfg(test)]
 mod setup_tests;
 #[cfg(test)]
 mod wire_tests;

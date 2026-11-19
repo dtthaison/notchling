@@ -7,6 +7,7 @@ use notchling_locale as t;
 
 use super::picks::{choose_model, effort_allowed, model_allowed, pick_text, NO_MODEL};
 use super::profile::{note_text, role_title, tool_title, Cell, Floor, Profile, Row};
+use super::setup::short_path;
 use super::view::CostsView;
 use crate::mac::gate;
 
@@ -392,13 +393,38 @@ impl CostsView {
     }
 
     pub(super) fn imported_section(&self, profile: &Profile, a: Appearance) -> Option<Div> {
-        let imported = profile.imported.as_ref()?;
-        let moved = imported
-            .lines
-            .iter()
-            .filter(|l| l.fate.starts_with("profile:"))
-            .count();
-        let kept = imported.lines.iter().filter(|l| l.fate == "kept").count();
+        if profile.imports.is_empty() {
+            return None;
+        }
+        let mut rows = card(a).flex().flex_col();
+        for (i, imported) in profile.imports.iter().enumerate() {
+            let moved = imported
+                .lines
+                .iter()
+                .filter(|l| l.fate.starts_with("profile:"))
+                .count();
+            let kept = imported.lines.iter().filter(|l| l.fate == "kept").count();
+            let source = short_path(&imported.source, &self.home);
+            rows = rows.child(
+                div()
+                    .px(px(14.0))
+                    .py(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .when(i > 0, |r| {
+                        r.border_t(px(1.0))
+                            .border_color(hsla(Ink::Hairline.color(a)))
+                    })
+                    .child(label(&source, TypeRole::Mono, Ink::Text, a))
+                    .child(label(
+                        &t::costs::imported_summary(moved as u64, kept as u64),
+                        TypeRole::Meta,
+                        Ink::TextMuted,
+                        a,
+                    )),
+            );
+        }
         Some(
             div()
                 .flex()
@@ -410,12 +436,7 @@ impl CostsView {
                     Ink::TextFaint,
                     a,
                 ))
-                .child(label(
-                    &t::costs::imported_summary(&imported.source, moved as u64, kept as u64),
-                    TypeRole::Meta,
-                    Ink::TextMuted,
-                    a,
-                )),
+                .child(rows),
         )
     }
 }

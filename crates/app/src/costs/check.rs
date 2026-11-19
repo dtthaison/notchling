@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::setup::{short_path, tool_index};
+use super::setup::{short_path, tool_index, why_text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Drift {
@@ -11,9 +11,22 @@ pub enum Drift {
     ChangedByTool,
     Returned,
     Skipped,
+    Yours,
 }
 
 impl Drift {
+    pub fn from_row(state: &str, detail: Option<&str>) -> Drift {
+        let kept = |d: &str| {
+            d.split("; ")
+                .all(|part| part == "kept" || part.ends_with(": kept"))
+        };
+        match (state, detail) {
+            ("skipped", Some("kept")) => Drift::Yours,
+            ("changed_by_tool", Some(d)) if !d.is_empty() && kept(d) => Drift::Yours,
+            _ => Drift::parse(state),
+        }
+    }
+
     pub fn parse(text: &str) -> Drift {
         match text {
             "in_step" => Drift::InStep,
@@ -35,6 +48,7 @@ impl Drift {
             Drift::ChangedByTool => "changed-by-tool",
             Drift::Returned => "returned",
             Drift::Skipped => "skipped",
+            Drift::Yours => "yours",
         }
     }
 
@@ -43,7 +57,7 @@ impl Drift {
             Drift::InStep => Dot::Done,
             Drift::Edited | Drift::Missing | Drift::Returned => Dot::Needs,
             Drift::Outdated | Drift::ChangedByTool => Dot::Working,
-            Drift::Skipped => Dot::Muted,
+            Drift::Skipped | Drift::Yours => Dot::Muted,
         }
     }
 
@@ -53,7 +67,7 @@ impl Drift {
                 &[Resolve::Keep, Resolve::Restore]
             }
             Drift::Missing | Drift::Outdated => &[Resolve::Restore],
-            Drift::InStep | Drift::Skipped => &[],
+            Drift::InStep | Drift::Skipped | Drift::Yours => &[],
         }
     }
 }
@@ -116,15 +130,14 @@ impl CheckModel {
                     .map(|list| {
                         list.iter()
                             .filter_map(|r| {
+                                let detail = r.get("detail").and_then(Value::as_str);
+                                let state = Drift::from_row(r.get("state")?.as_str()?, detail);
                                 Some(Row {
                                     id: r.get("id")?.as_str()?.to_owned(),
                                     tool: tool_index(r.get("tool")?.as_str()?)?,
                                     path: short_path(r.get("path")?.as_str()?, home),
-                                    state: Drift::parse(r.get("state")?.as_str()?),
-                                    detail: r
-                                        .get("detail")
-                                        .and_then(Value::as_str)
-                                        .map(str::to_owned),
+                                    state,
+                                    detail: detail.filter(|_| state != Drift::Yours).map(why_text),
                                 })
                             })
                             .collect()
@@ -134,6 +147,8 @@ impl CheckModel {
                 self.loaded = true;
             }
             Err(why) => {
+                self.rows.clear();
+                self.on = false;
                 self.message = Some(why);
                 self.loaded = true;
             }
@@ -143,7 +158,7 @@ impl CheckModel {
     pub fn drifted(&self) -> usize {
         self.rows
             .iter()
-            .filter(|r| !matches!(r.state, Drift::InStep | Drift::Skipped))
+            .filter(|r| !matches!(r.state, Drift::InStep | Drift::Skipped | Drift::Yours))
             .count()
     }
 

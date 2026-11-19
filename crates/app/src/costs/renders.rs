@@ -9,7 +9,9 @@ use crate::views::ViewSpec;
 
 pub const HOME: &str = "/Users/me";
 
-pub const VIEWS: [ViewSpec; 7] = [
+const DAMAGED: &str = "the setup record /Users/me/Library/Application Support/Notchling/daemon/cost-setup.json is damaged; nothing was changed. Move it aside to start over.";
+
+pub const VIEWS: [ViewSpec; 9] = [
     ViewSpec {
         name: "settings-costs",
         size: (620.0, 900.0),
@@ -17,12 +19,12 @@ pub const VIEWS: [ViewSpec; 7] = [
     },
     ViewSpec {
         name: "settings-costs-custom",
-        size: (620.0, 1080.0),
+        size: (620.0, 1560.0),
         about: "the Models & Costs page after an edit (Custom) with the judge's Claude Code picker open: models and efforts under the floor are disabled (made-up data)",
     },
     ViewSpec {
         name: "cost-setup",
-        size: (620.0, 1180.0),
+        size: (620.0, 1500.0),
         about: "the Set Up sheet: the tools found with versions, each planned file as New, Edit, Replace or Remove with one diff shown, unticked offers, the imported lines and Apply (made-up data)",
     },
     ViewSpec {
@@ -45,6 +47,16 @@ pub const VIEWS: [ViewSpec; 7] = [
         size: (620.0, 760.0),
         about: "the Set Up sheet while the install switch is off: the plan is shown and Apply is disabled with its note (made-up data)",
     },
+    ViewSpec {
+        name: "cost-setup-damaged",
+        size: (620.0, 420.0),
+        about: "the Set Up sheet when the setup record is damaged: the error and no Apply (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-costs-check-damaged",
+        size: (620.0, 560.0),
+        about: "the Models & Costs page's Check tab when the setup record is damaged: the error and no rows (made-up data)",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +68,8 @@ pub enum Shown {
     Check,
     Cache,
     SetupOff,
+    Damaged,
+    CheckDamaged,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -67,6 +81,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-costs-check" => Shown::Check,
         "settings-costs-cache" => Shown::Cache,
         "cost-setup-off" => Shown::SetupOff,
+        "cost-setup-damaged" => Shown::Damaged,
+        "settings-costs-check-damaged" => Shown::CheckDamaged,
         _ => return None,
     })
 }
@@ -113,6 +129,21 @@ fn cell(text: &str, own: bool) -> Value {
     })
 }
 
+fn imports() -> Value {
+    json!([
+        {"source": "/Users/me/.claude/rules/model-choice.md", "kept": [], "report": [
+            {"line": 3, "text": "| haiku | Bulk reading, search, listing |", "fate": "profile:read"},
+            {"line": 4, "text": "| sonnet | Routine code: specified edits |", "fate": "profile:code"},
+            {"line": 9, "text": "- Try a stronger model at lower effort first.", "fate": "kept"},
+            {"line": 12, "text": "| Model | Use for |", "fate": "regenerated"},
+        ]},
+        {"source": "/Users/me/.claude/rules/costs-old.md", "kept": [], "report": [
+            {"line": 2, "text": "| opus | Judgment: design, review |", "fate": "profile:judge"},
+            {"line": 6, "text": "- Keep helpers on five minutes.", "fate": "kept"},
+        ]},
+    ])
+}
+
 pub fn profile_reply(edited: bool) -> Value {
     let mut table = Map::new();
     for (role, picks) in BALANCED {
@@ -144,7 +175,8 @@ pub fn profile_reply(edited: bool) -> Value {
         "presets": {},
         "floors": {"fix": "sonnet high", "judge": "opus high", "hardest": "opus xhigh"},
         "guards": {},
-        "imported": Value::Null,
+        "imported": imports()[0].clone(),
+        "imports": imports(),
     }})
 }
 
@@ -232,25 +264,34 @@ pub fn plan_reply(on: bool, ticked: bool) -> Value {
     );
     let old_rules = with(
         action(
-            "claude.rules.replaced",
+            "claude.rules.replaced.model-choice.md",
             "claude",
             "/Users/me/.claude/rules/model-choice.md",
             "file",
             if ticked { "update" } else { "offer" },
         ),
-        json!({"needs": ["rules"], "diff": OLD_RULES_DIFF,
-            "reason": "Your own model rules. Their table moves into notchling-cost.md and a pointer line stays."}),
+        json!({"needs": ["rules"], "diff": OLD_RULES_DIFF}),
+    );
+    let pointer = with(
+        action(
+            "claude.pointer.agents/CLAUDE.md",
+            "claude",
+            "/Users/me/.claude/agents/CLAUDE.md",
+            "file",
+            if ticked { "update" } else { "offer" },
+        ),
+        json!({"needs": ["rules"],
+            "diff": "--- /Users/me/.claude/agents/CLAUDE.md\n+++ /Users/me/.claude/agents/CLAUDE.md\n@@ -3,1 +3,1 @@\n-Models: see rules/model-choice.md\n+Models: see rules/notchling-cost.md\n"}),
     );
     let orchestrator = with(
         action(
-            "claude.orchestrator_new",
+            "claude.orchestrator.new",
             "claude",
             "/Users/me/.claude/agents/notchling-orchestrator.md",
             "file",
             "offer",
         ),
-        json!({"needs": ["orchestrator_new"],
-            "reason": "A main chat that plans and delegates, and never edits."}),
+        json!({"needs": ["orchestrator_new"]}),
     );
     let agents = with(
         action(
@@ -272,7 +313,7 @@ pub fn plan_reply(on: bool, ticked: bool) -> Value {
         ),
         json!({"needs": ["codex_config"],
             "keys": [{"key": "agents.max_threads", "before": null, "after": 5}],
-            "reason": "Two keys in your own config.toml."}),
+            "notes": ["agents.job_max_runtime_seconds: kept"]}),
     );
     let agy = with(
         action(
@@ -293,13 +334,8 @@ pub fn plan_reply(on: bool, ticked: bool) -> Value {
     );
     json!({"on": on, "plan": {
         "changes": 5,
-        "actions": [rule, builder, settings, old_rules, orchestrator, unchanged, agents, config, agy],
-        "report": [
-            {"line": 3, "text": "| haiku | Bulk reading, search, listing |", "fate": "profile:read"},
-            {"line": 4, "text": "| sonnet | Routine code: specified edits |", "fate": "profile:code"},
-            {"line": 9, "text": "- Try a stronger model at lower effort first.", "fate": "kept"},
-            {"line": 12, "text": "| Model | Use for |", "fate": "regenerated"},
-        ],
+        "actions": [rule, builder, settings, old_rules, pointer, orchestrator, unchanged, agents, config, agy],
+        "report": [],
         "detected": {"claude": true, "codex": true, "antigravity": false, "pstack": false,
             "orchestrator": false, "ownRules": ["/Users/me/.claude/rules/model-choice.md"]},
         "profile": profile_reply(false)["profile"].clone(),
@@ -322,7 +358,7 @@ fn applied_reply() -> Value {
         {"id": "claude.agent.builder", "path": "/Users/me/.claude/agents/notchling-builder.md",
             "kind": "create", "done": true, "backup": null, "error": null},
         {"id": "claude.settings", "path": "/Users/me/.claude/settings.json", "kind": "update",
-            "done": true, "backup": "/Users/me/.claude/settings.json.notchling-backup-1793000000000", "error": null},
+            "done": true, "backup": "/Users/me/.claude/settings.json.notchling-setup-1793000000000", "error": null},
         {"id": "codex.agents_md", "path": "/Users/me/.codex/AGENTS.md", "kind": "create",
             "done": true, "backup": null, "error": null},
     ]})
@@ -342,6 +378,10 @@ fn undo_reply() -> Value {
 pub fn setup(shown: Shown) -> SetupModel {
     let on = shown != Shown::SetupOff;
     let mut model = SetupModel::new(HOME);
+    if shown == Shown::Damaged {
+        model.show_plan(Err(DAMAGED.to_owned()), None);
+        return model;
+    }
     model.show_plan(Ok(plan_reply(on, false)), Some(versions_reply()));
     match shown {
         Shown::Setup | Shown::SetupOff => {
@@ -360,6 +400,10 @@ pub fn setup(shown: Shown) -> SetupModel {
 
 pub fn check(shown: Shown) -> CheckModel {
     let mut model = CheckModel::default();
+    if shown == Shown::CheckDamaged {
+        model.show(Err(DAMAGED.to_owned()), HOME);
+        return model;
+    }
     if shown != Shown::Check {
         return model;
     }
@@ -377,7 +421,9 @@ pub fn check(shown: Shown) -> CheckModel {
             {"id": "codex.agents_md", "tool": "codex", "path": "/Users/me/.codex/AGENTS.md",
                 "state": "outdated", "detail": null},
             {"id": "codex.config", "tool": "codex", "path": "/Users/me/.codex/config.toml",
-                "state": "in_step", "detail": null},
+                "state": "changed_by_tool", "detail": "agents.max_threads: kept"},
+            {"id": "claude.pstack", "tool": "claude", "path": "/Users/me/.claude/rules/pstack-models.md",
+                "state": "skipped", "detail": "kept"},
         ]})),
         HOME,
     );

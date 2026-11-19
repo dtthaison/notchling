@@ -12,9 +12,10 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 use serde_json::Value;
 
-use super::profile::tool_title;
+use super::profile::{tool_title, Imported};
 use super::setup::{
-    diff_line, fate_text, key_line, Action, Change, DiffLine, Group, Outcome, SetupModel, Stage,
+    diff_line, fate_text, key_line, short_path, Action, Change, DiffLine, Group, Outcome,
+    SetupModel, Stage,
 };
 use super::wire;
 use crate::actions::Actions;
@@ -309,7 +310,7 @@ impl SetupView {
             .border_color(hsla(Ink::Hairline.color(a)))
             .child(top);
         let inset = if offer { 26.0 } else { 0.0 } + TAG_WIDTH + 10.0;
-        for note in action.reason.iter().chain(action.notes.iter()) {
+        for note in &action.explain() {
             row = row.child(
                 label(note, TypeRole::Meta, Ink::TextMuted, a)
                     .pl(px(inset))
@@ -378,10 +379,9 @@ impl SetupView {
         body
     }
 
-    fn report_section(&self, a: Appearance) -> Option<Div> {
-        let plan = self.model.plan.as_ref().filter(|p| !p.report.is_empty())?;
+    fn report_block(&self, import: &Imported, a: Appearance) -> Div {
         let mut rows = card(a).flex().flex_col();
-        for (i, line) in plan.report.iter().take(REPORT_LINES).enumerate() {
+        for (i, line) in import.lines.iter().take(REPORT_LINES).enumerate() {
             rows = rows.child(
                 div()
                     .px(px(14.0))
@@ -394,7 +394,7 @@ impl SetupView {
                             .border_color(hsla(Ink::Hairline.color(a)))
                     })
                     .child(
-                        label(&line.line.to_string(), TypeRole::Meta, Ink::TextFaint, a)
+                        label(&line.number.to_string(), TypeRole::Meta, Ink::TextFaint, a)
                             .w(px(24.0))
                             .flex_shrink_0(),
                     )
@@ -409,27 +409,44 @@ impl SetupView {
                     ),
             );
         }
-        let more = plan.report.len().saturating_sub(REPORT_LINES);
+        let more = import.lines.len().saturating_sub(REPORT_LINES);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .children((!import.source.is_empty()).then(|| {
+                label(
+                    &short_path(&import.source, &self.model.home),
+                    TypeRole::Mono,
+                    Ink::TextMuted,
+                    a,
+                )
+            }))
+            .child(rows)
+            .children((more > 0).then(|| {
+                label(
+                    &t::costs::report_more(more as u64),
+                    TypeRole::Meta,
+                    Ink::TextFaint,
+                    a,
+                )
+            }))
+    }
+
+    fn report_section(&self, a: Appearance) -> Option<Div> {
+        let plan = self.model.plan.as_ref().filter(|p| !p.imports.is_empty())?;
         Some(
             div()
                 .flex()
                 .flex_col()
-                .gap(px(6.0))
+                .gap(px(10.0))
                 .child(label(
                     t::costs::report_title(),
                     TypeRole::Section,
                     Ink::TextFaint,
                     a,
                 ))
-                .child(rows)
-                .children((more > 0).then(|| {
-                    label(
-                        &t::costs::report_more(more as u64),
-                        TypeRole::Meta,
-                        Ink::TextFaint,
-                        a,
-                    )
-                })),
+                .children(plan.imports.iter().map(|i| self.report_block(i, a))),
         )
     }
 
@@ -602,6 +619,9 @@ impl SetupView {
                 t::costs::setup_done(self.model.written.iter().filter(|w| w.done).count() as u64),
                 Ink::TextMuted,
             ),
+            Stage::Review if self.model.plan.is_none() => {
+                (t::costs::setup_failed_footer().to_owned(), Ink::Needs)
+            }
             Stage::Review if !self.model.install_on() => {
                 (t::costs::setup_install_off().to_owned(), Ink::Needs)
             }
@@ -640,7 +660,11 @@ impl SetupView {
             .border_t(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
             .child(label(&hint, TypeRole::Meta, ink, a).flex_1())
-            .children((self.model.stage != Stage::Done).then_some(apply))
+            .children(
+                (self.model.stage != Stage::Done
+                    && (self.model.stage != Stage::Review || self.model.plan.is_some()))
+                .then_some(apply),
+            )
     }
 }
 

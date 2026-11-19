@@ -446,12 +446,12 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
         sessions: None,
     };
     Some(match which {
-        Shown::Setup | Shown::Applied | Shown::SetupOff => {
+        Shown::Setup | Shown::Applied | Shown::SetupOff | Shown::Damaged => {
             cx.new(|_| SetupView::fixed(setup(which))).into()
         }
         _ => {
             let tab = match which {
-                Shown::Check => Tab::Check,
+                Shown::Check | Shown::CheckDamaged => Tab::Check,
                 Shown::Cache => Tab::Cache,
                 _ => Tab::Roles,
             };

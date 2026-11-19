@@ -36,7 +36,7 @@ fn the_choice_names_are_the_ops_words() {
 #[test]
 fn rows_are_read_with_their_tool_and_short_path() {
     let m = check(Shown::Check);
-    assert_eq!(m.rows.len(), 6);
+    assert_eq!(m.rows.len(), 7);
     assert_eq!(m.rows[0].path, "~/.claude/rules/notchling-cost.md");
     assert_eq!(m.rows[4].tool, 1);
     assert_eq!(m.rows[2].state, Drift::ChangedByTool);
@@ -90,7 +90,7 @@ fn a_resolve_the_switch_refused_keeps_the_rows_and_shows_the_note() {
         Ok(json!({"on": false, "applied": false, "message": "install is off"})),
         HOME,
     );
-    assert_eq!(m.rows.len(), 6);
+    assert_eq!(m.rows.len(), 7);
     assert_eq!(m.message.as_deref(), Some("install is off"));
 }
 

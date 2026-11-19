@@ -32,6 +32,7 @@ pub(super) fn drift_word(state: Drift) -> &'static str {
         Drift::ChangedByTool => t::costs::drift_changed_by_tool(),
         Drift::Returned => t::costs::drift_returned(),
         Drift::Skipped => t::costs::drift_skipped(),
+        Drift::Yours => t::costs::drift_yours(),
     }
 }
 
@@ -141,6 +142,8 @@ impl CostsView {
         let model = &self.check;
         let summary = if !model.loaded {
             t::costs::check_loading().to_owned()
+        } else if model.message.is_some() && model.rows.is_empty() {
+            t::costs::check_failed().to_owned()
         } else if model.rows.is_empty() {
             t::costs::check_empty().to_owned()
         } else if model.drifted() == 0 {

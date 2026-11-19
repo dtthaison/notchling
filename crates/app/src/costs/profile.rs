@@ -83,7 +83,7 @@ pub struct Profile {
     pub tools: [bool; 3],
     pub rows: Vec<Row>,
     pub habits: Vec<(String, u64)>,
-    pub imported: Option<Imported>,
+    pub imports: Vec<Imported>,
 }
 
 pub fn role_title(role: &str) -> String {
@@ -142,7 +142,7 @@ fn cell_of(v: &Value) -> Option<Cell> {
     })
 }
 
-fn imported_of(v: &Value) -> Option<Imported> {
+pub fn imported_of(v: &Value) -> Option<Imported> {
     let lines = v
         .get("report")?
         .as_array()?
@@ -159,6 +159,17 @@ fn imported_of(v: &Value) -> Option<Imported> {
         source: v.get("source")?.as_str()?.to_owned(),
         lines,
     })
+}
+
+pub fn imports_of(v: &Value) -> Vec<Imported> {
+    match v.get("imports").and_then(Value::as_array) {
+        Some(list) => list.iter().filter_map(imported_of).collect(),
+        None => v
+            .get("imported")
+            .and_then(imported_of)
+            .into_iter()
+            .collect(),
+    }
 }
 
 const HABITS: [&str; 5] = [
@@ -211,7 +222,7 @@ impl Profile {
             tools,
             rows,
             habits,
-            imported: p.get("imported").and_then(imported_of),
+            imports: imports_of(p),
         })
     }
 
