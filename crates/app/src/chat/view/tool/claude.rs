@@ -45,6 +45,9 @@ impl ChatTool for Claude {
         cx: &mut Context<ChatView>,
     ) -> bool {
         let id = &session.agent.id;
+        if view.chrome_command(session, text, cx) {
+            return true;
+        }
         match menu_route(text, &session.agent.target) {
             MenuRoute::Reply => return false,
             MenuRoute::Attach { job } => {

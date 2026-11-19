@@ -43,6 +43,7 @@ pub(super) fn on_right_click(
                 at: event.position,
                 confirm_remove: false,
             });
+            this.chrome_peek(&row_id, cx);
             cx.stop_propagation();
             cx.notify();
         }),
@@ -109,6 +110,16 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
                     this.close_rows(ids, cx);
                 },
             )));
+    }
+    if let Some(on) = view.chrome_menu_item(&menu.row_id) {
+        let row = menu.row_id.clone();
+        let control = view.acting_control(cx);
+        items = items.child(if control.enabled {
+            check_item("row-chrome", t::chat::chrome_use(), on, a)
+                .on_click(cx.listener(move |this, _, _, cx| this.chrome_toggle(&row, cx)))
+        } else {
+            held_item("row-chrome", t::chat::chrome_use(), control, a)
+        });
     }
     if removable {
         let control = view.acting_control(cx);

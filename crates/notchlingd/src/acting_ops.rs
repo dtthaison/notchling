@@ -139,6 +139,7 @@ pub struct ActingOps {
     codex: OnceLock<Arc<CodexOps>>,
     catalog: OnceLock<Arc<CatalogService>>,
     outbox: OnceLock<Arc<OutboxOps>>,
+    chrome: OnceLock<Arc<crate::chrome_ops::ChromeOps>>,
     pub(crate) login: OnceLock<Arc<dyn crate::cluster_logins::LoginEnv>>,
     screen_file: Option<PathBuf>,
     pub(crate) reply_screen_file: Option<PathBuf>,
@@ -172,6 +173,7 @@ impl ActingOps {
             codex: OnceLock::new(),
             catalog: OnceLock::new(),
             outbox: OnceLock::new(),
+            chrome: OnceLock::new(),
             login: OnceLock::new(),
             screen_file: None,
             reply_screen_file: None,
@@ -204,6 +206,23 @@ impl ActingOps {
 
     pub fn attach_catalog(&self, catalog: Arc<CatalogService>) {
         let _ = self.catalog.set(catalog);
+    }
+
+    pub fn attach_chrome(&self, chrome: Arc<crate::chrome_ops::ChromeOps>) {
+        let _ = self.chrome.set(chrome);
+    }
+
+    pub(crate) fn chrome(&self) -> Option<&Arc<crate::chrome_ops::ChromeOps>> {
+        self.chrome.get()
+    }
+
+    fn chrome_state(&self, args: &Value) -> Result<Value, ApiError> {
+        let agent = self.agent(args)?;
+        let ack = args.get("ack").and_then(Value::as_bool).unwrap_or(false);
+        let chrome = self
+            .chrome()
+            .ok_or_else(|| ApiError::internal("Chrome is not wired".to_string()))?;
+        Ok(chrome.state(&agent, ack))
     }
 
     pub fn attach_outbox(&self, outbox: Arc<OutboxOps>) {
@@ -263,7 +282,7 @@ impl ActingOps {
             ops::SETTINGS_GET_ACTING | ops::SESSION_QUESTION | ops::HOOK_REQUEST => {
                 Some(OpSpec::AGENT)
             }
-            ops::SESSION_SHELL_OUTPUT => Some(OpSpec::APP),
+            ops::SESSION_SHELL_OUTPUT | ops::SESSION_CHROME => Some(OpSpec::APP),
             op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -289,6 +308,7 @@ impl ActingOps {
             }
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
+            ops::SESSION_CHROME => self.chrome_state(args),
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
             ops::SESSION_HELD_DISCARD => self.held_discard(args),
@@ -374,7 +394,7 @@ impl ActingOps {
         Some(result)
     }
 
-    fn locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> R {
+    pub(crate) fn locked<R>(&self, agent: &Agent, then: impl FnOnce(&Agent) -> R) -> R {
         let mut current = agent.clone();
         loop {
             let lock = self.typing_lock(&current);

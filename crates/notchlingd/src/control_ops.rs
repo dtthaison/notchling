@@ -206,6 +206,18 @@ impl ActingOps {
         if !command.starts_with('/') || command.len() < 2 {
             return Err(bad("a command starts with /"));
         }
+        if let Some(which) = notchling_engine::chrome::command::parse(command) {
+            let agent = self.agent(args)?;
+            let chrome = self
+                .chrome()
+                .ok_or_else(|| bad("Chrome can't be turned on here"))?;
+            if !crate::chrome_ops::offers(&agent) {
+                return Err(bad("Chrome is for Claude Code sessions on this Mac"));
+            }
+            let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+            let on = which == notchling_engine::chrome::command::Command::On;
+            return Ok(json!({"sent": false, "chrome": chrome.start(&agent, on, force)}));
+        }
         if route(command) == Route::Terminal {
             return Err(bad(format!(
                 "{command} opens a menu, which needs a terminal to show it"

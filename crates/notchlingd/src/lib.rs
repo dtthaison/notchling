@@ -36,6 +36,7 @@ pub mod bridge_machines;
 pub mod bridge_ops;
 pub mod caller_session;
 pub mod catalog_ops;
+pub mod chrome_ops;
 pub mod cli;
 pub mod clients;
 pub mod cluster_blobs;
@@ -257,6 +258,8 @@ mod caller_session_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
+#[cfg(test)]
+mod chrome_ops_tests;
 #[cfg(test)]
 mod cluster_fence_keeper_kit;
 #[cfg(test)]

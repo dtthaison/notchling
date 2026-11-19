@@ -10,7 +10,7 @@ pub struct SlashCommand {
     pub argument_hint: Option<String>,
 }
 
-pub const MENU_COMMANDS: [&str; 17] = [
+pub const MENU_COMMANDS: [&str; 25] = [
     "plugin",
     "mcp",
     "agents",
@@ -28,13 +28,22 @@ pub const MENU_COMMANDS: [&str; 17] = [
     "export",
     "login",
     "logout",
+    "theme",
+    "skills",
+    "diff",
+    "tasks",
+    "privacy-settings",
+    "release-notes",
+    "workflows",
+    "passes",
 ];
 
 const MENU_WHEN_BARE: [&str; 2] = ["model", "effort"];
 
-const BUILT_INS: [(&str, &str); 63] = [
+const BUILT_INS: [(&str, &str); 72] = [
     ("clear", "Clear the conversation and start fresh"),
     ("compact", "Summarise the conversation to free up context"),
+    ("chrome", "Turn on Chrome for this session"),
     ("context", "Show how much context is used"),
     ("cost", "Show the cost of this session"),
     ("usage", "Show plan usage limits"),
@@ -96,6 +105,14 @@ const BUILT_INS: [(&str, &str); 63] = [
     ("verify", ""),
     ("extra-usage", ""),
     ("usage-credits", ""),
+    ("theme", "Change the color theme"),
+    ("skills", "List and manage skills"),
+    ("diff", "Show changes in this session"),
+    ("tasks", "Show background tasks"),
+    ("privacy-settings", "Change privacy settings"),
+    ("release-notes", "Show release notes"),
+    ("workflows", "Show workflows"),
+    ("passes", "Share a free week of Claude Code"),
     ("login", "Sign in"),
     ("logout", "Sign out"),
     ("help", "Show help"),

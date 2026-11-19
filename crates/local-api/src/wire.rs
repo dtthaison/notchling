@@ -27,6 +27,7 @@ pub mod ops {
     pub const PROMPTS_LIST: &str = "prompts.list";
     pub const SESSION_QUESTION: &str = "session.question";
     pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
+    pub const SESSION_CHROME: &str = "session.chrome";
     pub const HOOK_REQUEST: &str = "hook.request";
 
     pub const CODEX_SEND: &str = "codex.send";

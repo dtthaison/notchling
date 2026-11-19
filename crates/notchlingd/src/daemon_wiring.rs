@@ -553,6 +553,9 @@ impl Wired {
             .with_cluster_dir(layout.cluster_dir());
         let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
         acting.attach_outbox(outbox.clone());
+        acting.attach_chrome(crate::chrome_ops::ChromeOps::new(
+            crate::chrome_ops::LiveHosts::new(&acting),
+        ));
         let node_slot = crate::ask_wiring::Slot::default();
         let worker = crate::ask_wiring::worker_in(node_slot.clone());
         let ask =

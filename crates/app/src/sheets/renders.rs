@@ -18,7 +18,7 @@ use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 16] = [
+pub const VIEWS: [ViewSpec; 19] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -95,6 +95,21 @@ pub const VIEWS: [ViewSpec; 16] = [
         about: "the Settings sheet's Skills & Models page: How It Works, each tool's skills (installed, out of date, not installed, tool missing), Models by Job (built-in, override and live-list choices) and the Override file (fixture replies)",
     },
     ViewSpec {
+        name: "chrome-on",
+        size: (560.0, 420.0),
+        about: "the Chrome sheet for a session with Chrome on: the status, the help lines and Turn Off (made-up data)",
+    },
+    ViewSpec {
+        name: "chrome-off",
+        size: (560.0, 420.0),
+        about: "the Chrome sheet for a session with Chrome off: the status, the help lines and Turn On (made-up data)",
+    },
+    ViewSpec {
+        name: "chrome-not-connected",
+        size: (560.0, 440.0),
+        about: "the Chrome sheet when the extension isn't connected: the fix, the help lines and Try Again (made-up data)",
+    },
+    ViewSpec {
         name: "settings-agents-client-update",
         size: (620.0, 900.0),
         about: "the Client part with a newer version out: Latest, Update (Install off, so disabled with its note) and the Partly Checked line",
@@ -119,6 +134,9 @@ pub enum Shown {
     SettingsAgentsClientFailed,
     SettingsAgentsClientUpdate,
     SettingsSkills,
+    ChromeOn,
+    ChromeOff,
+    ChromeNotConnected,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -139,6 +157,9 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-agents-client-failed" => Shown::SettingsAgentsClientFailed,
         "settings-agents-client-update" => Shown::SettingsAgentsClientUpdate,
         "settings-skills" => Shown::SettingsSkills,
+        "chrome-on" => Shown::ChromeOn,
+        "chrome-off" => Shown::ChromeOff,
+        "chrome-not-connected" => Shown::ChromeNotConnected,
         _ => return None,
     })
 }
@@ -159,8 +180,27 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsAgentsClient
         | Shown::SettingsAgentsClientFailed
         | Shown::SettingsAgentsClientUpdate
-        | Shown::SettingsSkills => Acting::Off,
+        | Shown::SettingsSkills
+        | Shown::ChromeOn
+        | Shown::ChromeOff
+        | Shown::ChromeNotConnected => Acting::Off,
     }
+}
+
+pub fn chrome_sheet(shown: Shown) -> Option<crate::chat::chrome::Sheet> {
+    use notchling_engine::chrome::flow::Need;
+    let (on, need) = match shown {
+        Shown::ChromeOn => (Some(true), None),
+        Shown::ChromeOff => (Some(false), None),
+        Shown::ChromeNotConnected => (Some(false), Some(Need::NotConnected)),
+        _ => return None,
+    };
+    Some(crate::chat::chrome::Sheet {
+        session: "fix-the-bug".to_owned(),
+        on,
+        wanted_on: true,
+        need,
+    })
 }
 
 pub fn page(shown: Shown) -> Page {

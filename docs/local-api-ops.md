@@ -61,6 +61,7 @@ hook's request. Built and switched off: while [`Acting`] is off every acting op 
 | `settings.get_acting` | agent | `{}` | `{"acting": bool}` |
 | `session.question` | agent (a held prompt), app (the screen) | `{id}` | `{"promptId", "items"}` for a held question; else, for the app with acting on, the job's screen read (`{"id": "screen:…", "items"}`, `{"items": []}` when no question shows) |
 | `session.shell_output` | app (acting on) | `{id, command}` | `{"lines": [string]}`: what the running shell command `command` (a Claude Code `!` row) has drawn under its echo on the job's terminal, read through an attach that types nothing; `[]` when the job isn't working (judged from its own files, not the cached list), the command isn't on the screen or it printed nothing yet; `"busy": true` is added when a reply or interrupt holds the job's typing lock and the read was skipped. A quiet read (not in the audit) |
+| `session.chrome` | app | `{id, ack?}` | `{offered, task, detected}`: whether Chrome can be turned on for this Claude Code session (a job on this Mac, no shell row), the task `session.command` `/chrome` started (`phase`: `waiting`, `working`, `done` or `needs_you`, with `why`, `step`, `result` or `need`, plus `on` and `since_ms`) or `null`, and what the job's own files say (`detected.on`, `basis`: `flag`, `default` or `unknown`). `ack: true` clears a finished task after it was read. A quiet read (not in the audit) |
 | `hook.request` | agent, `client: "hook"` only, from a process a Claude Code session started | `{event, waitMs?}` | a decision (`prompts`) |
 
 An `id` is a row id from `sessions.list`. A held prompt is answered by its own id from
@@ -734,14 +735,14 @@ op ([`crate::acting_ops`] checks both before these run).
 | `session.new` | `{folder, config_dir?, flags?: ["--model", <an allowed model>]}` | `{"jobId": "6ce4c19c" or null}` |
 | `folder.trust` | `{folder, config_dir?}` | `{"trusted": true}` |
 | `session.move` | `{id, to_config_dir}` | `{"jobId": ...}` |
-| `session.command` | `{id, command}` | `{"sent": true}` |
+| `session.command` | `{id, command, force?}` | `{"sent": true}`; for `/chrome` and `/chrome off` nothing is typed: `{"sent": false, "chrome": <the `session.chrome` reply>}` and the work runs in the daemon (`force: true` restarts past running background tasks) |
 
 `config_dir` and `to_config_dir` name a lane by its folder (a `lanes.json` entry), or the main
 login by `~/.claude` (or `null`, or left out); any other folder is refused. `session.new`
 refused by Claude Code for an untrusted folder fails with Claude Code's words ("Workspace not
 trusted"); `folder.trust` then a second `session.new` is the way on. `session.command` types a
 slash command like a reply; one that opens a menu (`/plugin`, `/mcp`…) needs a visible terminal,
-so it is refused here.
+so it is refused here. `/chrome` is caught first: the daemon turns Chrome on or off for the job (it edits the job's `respawnFlags`, runs `claude respawn`, and checks `/chrome`'s own screen through an attach that types nothing over the box), so it never reaches the terminal as a reply.
 
 What a caller may change is narrow, since whoever holds the app tier for a moment shouldn't be
 able to widen what a session may do:

@@ -1,0 +1,30 @@
+cursor 15 2 false
+ ▝▝   ▝▝   ~/work/demo
+
+
+❯ /chrome
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Claude in Chrome
+
+  Let Claude use your Chrome browser: open sites, fill forms, take screenshots, and read console
+  logs and network requests.
+
+  Status:      ◯ not enabled in this session
+  Extension:   ✔ installed
+  By default:  ◯ off
+
+  ❯ Manage permissions
+    Reconnect extension
+    Turn on by default
+
+  ⚠ Claude in Chrome is off in this session, so reconnecting can't add its browser tools. Exit,
+    then run claude --chrome (add --resume to continue this session).
+
+  For one session, start with claude --chrome or claude --no-chrome. Claude Code asks before
+  Claude acts on a site, unless your permission mode or a rule in /permissions answers for you.
+
+  Learn more: https://code.claude.com/docs/en/chrome
+
+  ↑/↓ to navigate · Enter to select · Esc to close
+───────────────────────────────────────────────────────────────────────────────────────── demo ─

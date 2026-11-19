@@ -4,6 +4,7 @@ pub mod ask;
 pub mod awake;
 pub mod bridge;
 pub mod catalog;
+pub mod chrome;
 pub mod cluster;
 pub mod contract;
 pub mod control;
