@@ -216,7 +216,13 @@ fn a_model_with_no_price_has_no_cost_not_a_zero() {
     let world = World::new("ledger-unpriced");
     world.main(
         "s1",
-        &line("m1", NOW - HOUR, "claude-mystery-9", use_of(1, 2, 3, 4, 0), ""),
+        &line(
+            "m1",
+            NOW - HOUR,
+            "claude-mystery-9",
+            use_of(1, 2, 3, 4, 0),
+            "",
+        ),
     );
     let mut ledger = world.ledger();
     ledger.refresh(NOW, None);

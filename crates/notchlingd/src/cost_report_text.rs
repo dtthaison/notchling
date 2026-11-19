@@ -210,10 +210,7 @@ pub fn render(reply: &Value) -> String {
         ));
     }
     if let Some(cache) = report.get("cache") {
-        for (who, key) in [
-            (w::report_who_main(), "main"),
-            (w::report_who_sub(), "sub"),
-        ] {
+        for (who, key) in [(w::report_who_main(), "main"), (w::report_who_sub(), "sub")] {
             let c = cache.get(key).unwrap_or(&Value::Null);
             out.push(w::report_cache(
                 who,

@@ -200,7 +200,9 @@ pub fn many_builders(data: &mut Data) -> Finding {
     let mut finding = Finding::new("many_builders");
     let buckets = data.buckets();
     let subs = |set: &std::collections::HashSet<usize>| {
-        set.iter().filter(|s| data.calls[data.streams[**s].start].sub).count()
+        set.iter()
+            .filter(|s| data.calls[data.streams[**s].start].sub)
+            .count()
     };
     let over: BTreeSet<i64> = buckets
         .iter()
@@ -241,7 +243,11 @@ pub fn many_builders(data: &mut Data) -> Finding {
     finding.ev("cost_over_cap_usd", over_cost);
     finding.ev(
         "share_with_many_agents",
-        if total > 0.0 { crowded_cost / total } else { 0.0 },
+        if total > 0.0 {
+            crowded_cost / total
+        } else {
+            0.0
+        },
     );
     if !over.is_empty() {
         finding.saving = Some(saving);

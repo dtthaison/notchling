@@ -136,15 +136,43 @@ fn the_report_counts_main_sessions_and_helper_runs_by_their_measured_time() {
 fn opus_and_fable_on_subagents_are_priced_against_the_middle_model() {
     let mut calls = Vec::new();
     for n in 0..20 {
-        calls.push(call(&sub_of("a1", OPUS), NOW - 5_000.0 + n as f64, 50_000, 100_000, 0));
-        calls.push(call(&sub_of("a2", FABLE), NOW - 4_000.0 + n as f64, 50_000, 100_000, 0));
-        calls.push(call(&sub_of("a3", SONNET), NOW - 3_000.0 + n as f64, 50_000, 100_000, 0));
-        calls.push(call(&main_of(OPUS), NOW - 2_000.0 + n as f64, 50_000, 100_000, 0));
+        calls.push(call(
+            &sub_of("a1", OPUS),
+            NOW - 5_000.0 + n as f64,
+            50_000,
+            100_000,
+            0,
+        ));
+        calls.push(call(
+            &sub_of("a2", FABLE),
+            NOW - 4_000.0 + n as f64,
+            50_000,
+            100_000,
+            0,
+        ));
+        calls.push(call(
+            &sub_of("a3", SONNET),
+            NOW - 3_000.0 + n as f64,
+            50_000,
+            100_000,
+            0,
+        ));
+        calls.push(call(
+            &main_of(OPUS),
+            NOW - 2_000.0 + n as f64,
+            50_000,
+            100_000,
+            0,
+        ));
     }
     let report = run(&calls);
     let f = finding(&report, "premium_subagents").expect("finding");
     assert_eq!(f.count("runs"), 2.0);
-    assert_eq!(f.count("calls"), 40.0, "main-chat Opus and sub Sonnet are not counted");
+    assert_eq!(
+        f.count("calls"),
+        40.0,
+        "main-chat Opus and sub Sonnet are not counted"
+    );
     assert_eq!(f.detail["target"], SONNET);
     assert_eq!(f.detail["models"], format!("{FABLE}, {OPUS}"));
     let sonnet = sonnet_price();
@@ -175,7 +203,11 @@ fn a_cold_resume_is_a_gap_past_the_measured_time_and_a_hot_one_is_not() {
     ];
     let report = run(&calls);
     let f = finding(&report, "cold_resumes").expect("finding");
-    assert_eq!(f.count("sub_rebuilds"), 1.0, "the 11-minute gap on a 5-minute cache");
+    assert_eq!(
+        f.count("sub_rebuilds"),
+        1.0,
+        "the 11-minute gap on a 5-minute cache"
+    );
     assert_eq!(
         f.count("main_rebuilds"),
         1.0,
@@ -205,7 +237,13 @@ fn the_one_hour_helper_cache_is_weighed_from_the_users_own_numbers() {
     let helper = sub_of("a1", SONNET);
     let mut calls = vec![call(&helper, NOW - 9_000.0, 0, 80_000, 0)];
     for n in 1..=3 {
-        calls.push(call(&helper, NOW - 9_000.0 + n as f64 * 900.0, 0, 80_000, 0));
+        calls.push(call(
+            &helper,
+            NOW - 9_000.0 + n as f64 * 900.0,
+            0,
+            80_000,
+            0,
+        ));
     }
     let report = run(&calls);
     let f = finding(&report, "cold_resumes").expect("finding");
@@ -233,7 +271,11 @@ fn a_model_switch_inside_the_cache_time_is_a_rebuild_of_its_own() {
     ];
     let report = run(&calls);
     let f = finding(&report, "model_switches").expect("finding");
-    assert_eq!(f.count("switches"), 1.0, "the small re-write is not a rebuild");
+    assert_eq!(
+        f.count("switches"),
+        1.0,
+        "the small re-write is not a rebuild"
+    );
     assert_eq!(f.count("rewritten_tokens"), 120_000.0);
     assert!(finding(&report, "cold_resumes").is_none());
 }
@@ -242,7 +284,15 @@ fn a_model_switch_inside_the_cache_time_is_a_rebuild_of_its_own() {
 fn a_long_run_is_priced_as_fresh_builders_every_hundred_calls() {
     let helper = sub_of("a1", SONNET);
     let calls: Vec<Call> = (0..250)
-        .map(|i| call(&helper, NOW - 20_000.0 + i as f64 * 20.0, 40_000 + i * 1_000, 0, 0))
+        .map(|i| {
+            call(
+                &helper,
+                NOW - 20_000.0 + i as f64 * 20.0,
+                40_000 + i * 1_000,
+                0,
+                0,
+            )
+        })
         .collect();
     let report = run(&calls);
     let f = finding(&report, "long_runs").expect("finding");
@@ -290,10 +340,22 @@ fn builders_at_once_over_the_cap_cost_a_share_of_what_runs_alongside() {
     let names = ["a1", "a2", "a3", "a4", "a5", "a6", "a7"];
     for name in names {
         for i in 0..10 {
-            calls.push(call(&sub_of(name, SONNET), NOW - 5_000.0 + i as f64, 100_000, 0, 0));
+            calls.push(call(
+                &sub_of(name, SONNET),
+                NOW - 5_000.0 + i as f64,
+                100_000,
+                0,
+                0,
+            ));
         }
     }
-    calls.push(call(&sub_of("late", SONNET), NOW - 100_000.0, 100_000, 0, 0));
+    calls.push(call(
+        &sub_of("late", SONNET),
+        NOW - 100_000.0,
+        100_000,
+        0,
+        0,
+    ));
     let report = run(&calls);
     let f = finding(&report, "many_builders").expect("finding");
     assert_eq!(f.count("peak_builders"), 7.0);
@@ -317,10 +379,7 @@ fn one_call_is_never_claimed_by_two_findings() {
     assert!(premium.saving.expect("saving") > 0.0);
     let cold = finding(&report, "cold_resumes").expect("rebuild is still evidence");
     assert_eq!(cold.count("sub_rebuilds"), 1.0);
-    near(
-        cold.saving.expect("saving"),
-        0.0,
-    );
+    near(cold.saving.expect("saving"), 0.0);
     let long = finding(&report, "long_runs").expect("long run is still evidence");
     assert_eq!(long.count("runs_over_limit"), 1.0);
     near(long.saving.expect("saving"), 0.0);
@@ -335,13 +394,28 @@ fn one_call_is_never_claimed_by_two_findings() {
 #[test]
 fn overlapping_findings_add_up_to_less_than_the_spend() {
     let mut calls = Vec::new();
-    for (n, name) in ["a1", "a2", "a3", "a4", "a5", "a6", "a7"].into_iter().enumerate() {
+    for (n, name) in ["a1", "a2", "a3", "a4", "a5", "a6", "a7"]
+        .into_iter()
+        .enumerate()
+    {
         let mut spec = sub_of(name, if n % 2 == 0 { OPUS } else { SONNET });
         spec.agent_type = Some("reviewer");
         for i in 0..130 {
-            calls.push(call(&spec, NOW - 9_000.0 + i as f64 * 5.0, 50_000 + i * 1_500, 0, 0));
+            calls.push(call(
+                &spec,
+                NOW - 9_000.0 + i as f64 * 5.0,
+                50_000 + i * 1_500,
+                0,
+                0,
+            ));
         }
-        calls.push(call(&spec, NOW - 9_000.0 + 130.0 * 5.0 + 800.0, 0, 150_000, 0));
+        calls.push(call(
+            &spec,
+            NOW - 9_000.0 + 130.0 * 5.0 + 800.0,
+            0,
+            150_000,
+            0,
+        ));
     }
     let report = run(&calls);
     let total: f64 = calls.iter().map(|c| c.cost.expect("priced")).sum();
@@ -366,7 +440,10 @@ fn a_model_with_no_price_is_unknown_not_zero() {
     assert_eq!(report.totals.cost, None);
     assert_eq!(report.totals.unpriced_calls, 5);
     assert_eq!(report.saving, None);
-    assert!(report.unknown.iter().any(|u| u.id == "price" && u.count == 5));
+    assert!(report
+        .unknown
+        .iter()
+        .any(|u| u.id == "price" && u.count == 5));
     assert_eq!(report.by_model[0].cost, None);
     assert_eq!(report.by_model[0].cost_share, None);
 }
@@ -375,7 +452,13 @@ fn a_model_with_no_price_is_unknown_not_zero() {
 fn a_small_lever_goes_under_not_worth_changing_with_its_number() {
     let mut calls = Vec::new();
     for i in 0..10 {
-        calls.push(call(&main_of(SONNET), NOW - 5_000.0 + i as f64, 900_000, 0, 0));
+        calls.push(call(
+            &main_of(SONNET),
+            NOW - 5_000.0 + i as f64,
+            900_000,
+            0,
+            0,
+        ));
     }
     calls.push(call(&sub_of("a1", OPUS), NOW - 800.0, 20_000, 0, 0));
     let report = run(&calls);
@@ -408,13 +491,24 @@ fn the_main_chat_effort_is_not_worth_changing_when_it_is_already_low() {
     }
     let blind = run(&calls);
     assert!(blind.not_worth.iter().all(|f| f.id != "main_effort"));
-    assert!(blind.unknown.iter().any(|u| u.id == "effort" && u.count == 10));
+    assert!(blind
+        .unknown
+        .iter()
+        .any(|u| u.id == "effort" && u.count == 10));
 }
 
 #[test]
 fn money_is_labelled_for_the_plan_and_the_share_is_always_there() {
     let calls: Vec<Call> = (0..30)
-        .map(|i| call(&sub_of("a1", OPUS), NOW - 5_000.0 + i as f64, 50_000, 100_000, 0))
+        .map(|i| {
+            call(
+                &sub_of("a1", OPUS),
+                NOW - 5_000.0 + i as f64,
+                50_000,
+                100_000,
+                0,
+            )
+        })
         .collect();
     let mut options = Options::new(NOW);
     options.plan = Plan::Subscription;
@@ -423,7 +517,10 @@ fn money_is_labelled_for_the_plan_and_the_share_is_always_there() {
     assert!(sub.saving_share.expect("share") > 0.0);
     assert!(sub.findings[0].saving_share.is_some());
     options.plan = Plan::Api;
-    assert_eq!(analyse(&calls, &Catalog::built_in(), &options).money, "estimate");
+    assert_eq!(
+        analyse(&calls, &Catalog::built_in(), &options).money,
+        "estimate"
+    );
     assert_eq!(run(&calls).money, "api_equivalent");
 }
 
@@ -488,6 +585,14 @@ fn from_transcripts_to_a_ranked_report() {
         );
     }
     world.main("s1", &main);
+    let mut idle = String::new();
+    for (i, (at, w5)) in [(90_000.0, 30_000), (89_970.0, 0), (87_000.0, 100_000)]
+        .into_iter()
+        .enumerate()
+    {
+        idle += &line(&format!("i{i}"), NOW - at, SONNET, u(40_000, w5, 0), "");
+    }
+    world.main("s2", &idle);
     for agent in ["agent-b1", "agent-b2"] {
         let mut text = String::new();
         for i in 0..6 {
@@ -523,16 +628,19 @@ fn from_transcripts_to_a_ranked_report() {
     let mut ledger = world.ledger();
     assert!(ledger.refresh(NOW, None).complete());
     let calls = ledger.calls_since(NOW - 14.0 * DAY);
-    assert_eq!(calls.len(), 4 + 12 + 15);
+    assert_eq!(calls.len(), 4 + 3 + 12 + 15);
     let report = analyse(&calls, &Catalog::built_in(), &Options::new(NOW));
-    assert_eq!(report.totals.calls, 31);
+    assert_eq!(report.totals.calls, 34);
     assert_eq!(report.totals.unpriced_calls, 0);
     let ids: Vec<&str> = report.findings.iter().map(|f| f.id).collect();
     assert!(ids.contains(&"premium_subagents"), "{ids:?}");
     assert!(ids.contains(&"repeated_reviews"), "{ids:?}");
     assert!(ids.contains(&"cold_resumes"), "{ids:?}");
     let savings: Vec<f64> = report.findings.iter().filter_map(|f| f.saving).collect();
-    assert!(savings.windows(2).all(|w| w[0] >= w[1]), "ranked: {savings:?}");
+    assert!(
+        savings.windows(2).all(|w| w[0] >= w[1]),
+        "ranked: {savings:?}"
+    );
     assert_eq!(report.cache.main.one_hour, 1);
     assert_eq!(report.cache.sub.five_min, 5);
     assert_eq!(report.by_role.len(), 2);

@@ -45,6 +45,10 @@ fn plan_of(args: &Value) -> Result<Plan, ApiError> {
     }
 }
 
+pub fn shared(service: &Arc<CostService>) -> Arc<CostReportOps> {
+    Arc::new(CostReportOps::new(service.clone()))
+}
+
 impl CostReportOps {
     pub fn new(service: Arc<CostService>) -> CostReportOps {
         CostReportOps {

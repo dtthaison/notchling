@@ -65,7 +65,11 @@ impl Tally {
             Ttl::Unknown => None,
             Ttl::FiveMin => Some(300.0),
             Ttl::OneHour => Some(3_600.0),
-            Ttl::Mixed => Some(if self.hour >= self.five { 3_600.0 } else { 300.0 }),
+            Ttl::Mixed => Some(if self.hour >= self.five {
+                3_600.0
+            } else {
+                300.0
+            }),
         }
     }
 }
@@ -94,11 +98,7 @@ fn target_of(catalog: &Catalog) -> Option<Target> {
 impl<'a> Data<'a> {
     pub fn new(window: &'a [Call], catalog: &'a Catalog) -> Data<'a> {
         let mut calls: Vec<&Call> = window.iter().collect();
-        calls.sort_by(|a, b| {
-            a.stream()
-                .cmp(&b.stream())
-                .then(a.ts.total_cmp(&b.ts))
-        });
+        calls.sort_by(|a, b| a.stream().cmp(&b.stream()).then(a.ts.total_cmp(&b.ts)));
         let mut streams: Vec<Range<usize>> = Vec::new();
         let mut start = 0;
         for i in 1..=calls.len() {
@@ -167,7 +167,10 @@ impl<'a> Data<'a> {
     pub fn rebuild_extra(&self, call: &Call) -> Option<f64> {
         let price = self.price(call)?;
         let writes = (call.write_5m + call.write_1h) as f64;
-        let wrote = prices::estimate(&price, &[0.0, 0.0, 0.0, call.write_5m as f64, call.write_1h as f64]);
+        let wrote = prices::estimate(
+            &price,
+            &[0.0, 0.0, 0.0, call.write_5m as f64, call.write_1h as f64],
+        );
         let read = writes * price.cache_read / 1_000_000.0;
         Some((wrote - read).max(0.0))
     }

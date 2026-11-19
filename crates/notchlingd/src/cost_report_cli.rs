@@ -105,35 +105,45 @@ pub fn shown(reply: &Value, json: bool) -> String {
     cost_report_text::render(reply)
 }
 
+fn say(out: &mut impl std::io::Write, text: std::fmt::Arguments) {
+    let _ = writeln!(out, "{text}");
+}
+
 pub fn run(args: &[String]) -> i32 {
     let parsed = match parse(args) {
         Ok(p) => p,
         Err(message) => {
-            eprintln!("{message}");
+            say(&mut std::io::stderr(), format_args!("{message}"));
             return TROUBLE;
         }
     };
     let Some(layout) = Layout::from_env(parsed.socket.as_deref()) else {
-        eprintln!("{}", message_of(ClientError::Unsupported));
+        say(
+            &mut std::io::stderr(),
+            format_args!("{}", message_of(ClientError::Unsupported)),
+        );
         return TROUBLE;
     };
     let mut client =
         match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("{}", message_of(e));
+                say(&mut std::io::stderr(), format_args!("{}", message_of(e)));
                 return TROUBLE;
             }
         };
     client.set_timeout(WAIT);
     match client.call(COST_REPORT, request(&parsed)) {
         Ok(reply) => {
-            println!("{}", shown(&reply, parsed.json));
+            say(
+                &mut std::io::stdout(),
+                format_args!("{}", shown(&reply, parsed.json)),
+            );
             DONE
         }
         Err(e) => {
             let code = code_of(&e);
-            eprintln!("{}", message_of(e));
+            say(&mut std::io::stderr(), format_args!("{}", message_of(e)));
             code
         }
     }
