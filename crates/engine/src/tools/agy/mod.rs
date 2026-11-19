@@ -1,3 +1,4 @@
+pub mod app_store;
 pub mod children;
 pub mod config;
 pub mod elsewhere;

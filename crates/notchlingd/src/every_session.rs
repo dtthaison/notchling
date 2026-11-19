@@ -4,7 +4,8 @@ use notchling_engine::bridge::foreign::{self, ForeignRow, Tool};
 use notchling_engine::bridge::live::ForeignLive;
 use notchling_engine::contract::flows::delegate_jobs;
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
-use notchling_engine::tools::agy::summaries::{self, Row};
+use notchling_engine::tools::agy::app_store;
+use notchling_engine::tools::agy::summaries::Row;
 use notchling_engine::tools::codex::list as codex_list;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -149,7 +150,7 @@ impl EverySession {
     }
 
     fn antigravity(&self, now_ms: i64) -> Vec<Agent> {
-        summaries::rows_cached(
+        app_store::all_rows_cached(
             &self.agy_root,
             &self.agy_copy_dir,
             now_ms as f64 / 1000.0,
@@ -183,7 +184,7 @@ fn foreign_row(agent: &Agent) -> ForeignRow {
     }
 }
 
-fn agy_agent(row: &Row) -> Agent {
+pub(crate) fn agy_agent(row: &Row) -> Agent {
     Agent {
         id: row.row_id(),
         name: if row.title.trim().is_empty() {

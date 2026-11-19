@@ -6,9 +6,14 @@ pub mod acting;
 mod acting_events;
 pub mod acting_ops;
 pub mod activity_ops;
+pub mod agy_app;
 pub mod agy_elsewhere;
+pub mod agy_hook_run;
+pub mod agy_link;
 pub mod agy_ops;
 pub mod agy_phone;
+pub mod agy_sidecar_ops;
+pub mod agy_sidecar_run;
 pub mod agy_sink;
 mod ask_cli;
 mod ask_cli_args;
@@ -162,6 +167,7 @@ mod outbox_settle;
 pub mod outbox_verify;
 pub mod pages_cli;
 pub mod pages_ops;
+pub mod postmen_wiring;
 mod process_facts;
 pub mod prompts;
 pub mod providers_cli;
@@ -496,6 +502,14 @@ pub fn run(command: Command) -> i32 {
         Command::Asks { args } => ask_cli::run_asks(&args, None),
         Command::Answer { args } => ask_cli::run_answer(&args, None),
         Command::Service { action, dir } => run_service(action, dir.as_deref()),
+        Command::AgySidecar => match Layout::from_env(None) {
+            Some(l) => agy_sidecar_run::run(&l),
+            None => 0,
+        },
+        Command::AgyHook { event } => match Layout::from_env(None) {
+            Some(l) => agy_hook_run::run(&l, &event),
+            None => 0,
+        },
         Command::HookFence => match Layout::from_env(None) {
             Some(l) => hook_fence::run(&l),
             None => 0,

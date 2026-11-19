@@ -18,7 +18,7 @@ use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 15] = [
+pub const VIEWS: [ViewSpec; 16] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -70,9 +70,14 @@ pub const VIEWS: [ViewSpec; 15] = [
         about: "the Agents page's Hooks with no daemon attached: the six explained, none checked",
     },
     ViewSpec {
-        name: "settings-capabilities",
-        size: (620.0, 3500.0),
-        about: "the Agents page with What Notchling Can Do: each tool's fallback, not applicable and not built rows",
+        name: "settings-agents-codex",
+        size: (620.0, 1100.0),
+        about: "the Agents page's Codex tab: its network row and What Notchling Can Do for Codex (fixture data)",
+    },
+    ViewSpec {
+        name: "settings-agents-antigravity",
+        size: (620.0, 1500.0),
+        about: "the Agents page's Antigravity tab with the app (full) choice: Send With, Open Remote Control In, the sidecar row (On) and What Notchling Can Do for Antigravity (fixture data)",
     },
     ViewSpec {
         name: "settings-agents-client",
@@ -108,7 +113,8 @@ pub enum Shown {
     SettingsAgentsPartial,
     SettingsAgentsEmpty,
     SettingsAgentsDetached,
-    SettingsCapabilities,
+    SettingsAgentsCodex,
+    SettingsAgentsAntigravity,
     SettingsAgentsClient,
     SettingsAgentsClientFailed,
     SettingsAgentsClientUpdate,
@@ -127,7 +133,8 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-agents-partial" => Shown::SettingsAgentsPartial,
         "settings-agents-empty" => Shown::SettingsAgentsEmpty,
         "settings-agents-detached" => Shown::SettingsAgentsDetached,
-        "settings-capabilities" => Shown::SettingsCapabilities,
+        "settings-agents-codex" => Shown::SettingsAgentsCodex,
+        "settings-agents-antigravity" => Shown::SettingsAgentsAntigravity,
         "settings-agents-client" => Shown::SettingsAgentsClient,
         "settings-agents-client-failed" => Shown::SettingsAgentsClientFailed,
         "settings-agents-client-update" => Shown::SettingsAgentsClientUpdate,
@@ -147,7 +154,8 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
         | Shown::SettingsAgentsDetached
-        | Shown::SettingsCapabilities
+        | Shown::SettingsAgentsCodex
+        | Shown::SettingsAgentsAntigravity
         | Shown::SettingsAgentsClient
         | Shown::SettingsAgentsClientFailed
         | Shown::SettingsAgentsClientUpdate
@@ -161,13 +169,37 @@ pub fn page(shown: Shown) -> Page {
         | Shown::SettingsAgentsPartial
         | Shown::SettingsAgentsEmpty
         | Shown::SettingsAgentsDetached
-        | Shown::SettingsCapabilities
+        | Shown::SettingsAgentsCodex
+        | Shown::SettingsAgentsAntigravity
         | Shown::SettingsAgentsClient
         | Shown::SettingsAgentsClientFailed
         | Shown::SettingsAgentsClientUpdate => Page::Agents,
         Shown::SettingsSkills => Page::Skills,
         _ => Page::General,
     }
+}
+
+pub fn tool(shown: Shown) -> super::agents::Tool {
+    match shown {
+        Shown::SettingsAgentsCodex => super::agents::Tool::Codex,
+        Shown::SettingsAgentsAntigravity => super::agents::Tool::Antigravity,
+        _ => super::agents::Tool::ClaudeCode,
+    }
+}
+
+pub fn values(shown: Shown) -> serde_json::Map<String, Value> {
+    let mut values = serde_json::Map::new();
+    if shown == Shown::SettingsAgentsAntigravity {
+        values.insert("antigravityChannel".to_owned(), json!("sidecar"));
+    }
+    values
+}
+
+pub fn sidecar(shown: Shown) -> Option<super::sidecar_rows::Shown> {
+    (shown == Shown::SettingsAgentsAntigravity).then_some(super::sidecar_rows::Shown {
+        state: super::sidecar_rows::State::On,
+        running: true,
+    })
 }
 
 fn hook(event: &str, matcher: &str, origin: &str, managed: bool) -> Value {
@@ -435,6 +467,22 @@ mod tests {
         assert_eq!(page(Shown::Settings), Page::General);
         assert_eq!(page(Shown::SettingsAgents), Page::Agents);
         assert_eq!(page(Shown::SettingsSkills), Page::Skills);
+        assert_eq!(page(Shown::SettingsAgentsCodex), Page::Agents);
+        assert_eq!(page(Shown::SettingsAgentsAntigravity), Page::Agents);
+        assert_eq!(
+            tool(Shown::SettingsAgents),
+            super::super::agents::Tool::ClaudeCode
+        );
+        assert_eq!(
+            tool(Shown::SettingsAgentsCodex),
+            super::super::agents::Tool::Codex
+        );
+        assert_eq!(
+            tool(Shown::SettingsAgentsAntigravity),
+            super::super::agents::Tool::Antigravity
+        );
+        assert!(sidecar(Shown::SettingsAgentsAntigravity).is_some());
+        assert!(sidecar(Shown::SettingsAgentsCodex).is_none());
         let (skills, models) = skills_models(Shown::SettingsSkills).unwrap();
         assert_eq!(skills.names().len(), 3);
         assert!(models.file().is_some());

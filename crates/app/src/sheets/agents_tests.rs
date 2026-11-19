@@ -50,10 +50,26 @@ fn the_page_and_tool_lists_keep_their_order() {
         Page::ALL,
         [Page::General, Page::Agents, Page::Skills, Page::Activity]
     );
-    assert_eq!(Tool::ALL, [Tool::ClaudeCode]);
+    assert_eq!(
+        Tool::ALL,
+        [Tool::ClaudeCode, Tool::Codex, Tool::Antigravity]
+    );
     assert_eq!(
         Tool::ClaudeCode.sections(),
-        [Section::Client, Section::Hooks]
+        [
+            Section::Settings,
+            Section::Client,
+            Section::Hooks,
+            Section::Capabilities
+        ]
+    );
+    assert_eq!(
+        Tool::Codex.sections(),
+        [Section::Settings, Section::Capabilities]
+    );
+    assert_eq!(
+        Tool::Antigravity.sections(),
+        [Section::Settings, Section::Capabilities]
     );
     assert_eq!(Page::Agents.title(), "Agents");
     assert_eq!(Page::Skills.title(), "Skills & Models");

@@ -680,7 +680,8 @@ impl Render for NewSessionView {
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
     use super::renders::{
-        acting, banners, client, hooks, new_session, page, shown, skills_models, Shown,
+        acting, banners, client, hooks, new_session, page, shown, sidecar, skills_models, tool,
+        values, Shown,
     };
     use super::settings_view::{BannersView, SettingsView};
     let which = shown(name)?;
@@ -697,7 +698,10 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
             .new(|_| {
                 let view = SettingsView::new(None, acts)
                     .with_hooks(hooks(which))
-                    .with_page(page(which));
+                    .with_page(page(which))
+                    .with_tool(tool(which))
+                    .with_values(values(which))
+                    .with_sidecar(sidecar(which));
                 let view = if which == Shown::SettingsCluster {
                     view.with_cluster(Arc::new(crate::cluster::feed::ClusterFeed::fixed(
                         super::renders::cluster_model(),

@@ -24,6 +24,26 @@ pub fn hook_command(binary: &Path, os: Os) -> String {
     }
 }
 
+pub const AGY_HOOK: &str = "agy-hook";
+
+pub fn agy_hook_command(binary: &Path, event: &str, os: Os) -> String {
+    let path = binary.to_string_lossy();
+    match os {
+        Os::Windows => format!("\"{}\" {AGY_HOOK} {event}", path.replace('"', "")),
+        _ => format!("'{}' {AGY_HOOK} {event}", path.replace('\'', "'\\''")),
+    }
+}
+
+pub fn agy_hook_event(command: &str) -> Option<String> {
+    let (program, first, rest) = call(command)?;
+    match file_name(&program).as_str() {
+        "notchling" | "notchling.exe" if first == AGY_HOOK && rest.len() == 1 => {
+            rest.into_iter().next()
+        }
+        _ => None,
+    }
+}
+
 fn words(command: &str) -> Option<(Vec<String>, bool)> {
     let mut out = Vec::new();
     let mut word = String::new();
@@ -147,6 +167,26 @@ pub fn summary(command: &str) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn an_antigravity_hook_command_is_quoted_and_recognised_by_its_own_words() {
+        for (path, os) in [
+            ("/usr/local/bin/notchling", Os::Mac),
+            ("/Users/me/My Apps/notchling", Os::Linux),
+            ("/Users/o'neil/bin/notchling", Os::Mac),
+        ] {
+            let command = agy_hook_command(&PathBuf::from(path), "pre-tool", os);
+            assert_eq!(agy_hook_event(&command).as_deref(), Some("pre-tool"));
+            assert_eq!(classify(&command), None, "{command}");
+        }
+        assert_eq!(agy_hook_event("'/x/notchling' hook"), None);
+        assert_eq!(agy_hook_event("'/x/other' agy-hook pre-tool"), None);
+        assert_eq!(
+            agy_hook_event("'/x/notchling' agy-hook pre-tool; rm x"),
+            None
+        );
+        assert_eq!(agy_hook_event("'/x/notchling' agy-hook"), None);
+    }
 
     #[test]
     fn the_command_is_quoted_and_recognised_as_ours() {

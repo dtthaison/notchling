@@ -77,6 +77,7 @@ log_choice! {
         Acp = "acp",
         App = "app",
         Remote = "remote",
+        Sidecar = "sidecar",
         Panel = "panel",
         Browser = "browser",
     }
