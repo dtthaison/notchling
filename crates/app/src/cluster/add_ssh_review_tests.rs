@@ -48,6 +48,32 @@ fn editing_stops_a_running_test_and_ignores_its_late_answer() {
 }
 
 #[test]
+fn a_bad_extra_row_is_shown_and_disables_test_and_add() {
+    use super::addresses_form::RowDraft;
+    let mut d = draft("ssh deploy@10.1.2.3");
+    d.more = vec![RowDraft {
+        text: "bad host!".into(),
+        ..RowDraft::default()
+    }];
+    let shown = machine_view(&Phase::Form, &d, ME, &[]);
+    assert!(shown.target.is_none());
+    assert!(shown.error.is_some());
+    assert!(!shown.allows(Button::Add));
+    assert!(!may_test(shown.target.is_some(), false, 0, 4));
+}
+
+#[test]
+fn the_hidden_first_row_is_never_swapped() {
+    use super::addresses_form::may_swap;
+    assert!(!may_swap(3, 1, 0, true));
+    assert!(!may_swap(3, 0, 1, true));
+    assert!(may_swap(3, 1, 2, true));
+    assert!(may_swap(3, 1, 0, false));
+    assert!(!may_swap(3, 1, 3, false));
+    assert!(!may_swap(3, 1, 1, false));
+}
+
+#[test]
 fn a_full_set_of_lanes_disables_test() {
     assert!(may_test(true, false, 3, 4));
     assert!(!may_test(true, false, 4, 4));

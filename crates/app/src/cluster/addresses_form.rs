@@ -192,6 +192,10 @@ pub fn cycle(options: &[Option<String>], current: &Option<String>) -> Option<Str
     }
 }
 
+pub fn may_swap(len: usize, a: usize, b: usize, first_is_elsewhere: bool) -> bool {
+    a < len && b < len && a != b && !(first_is_elsewhere && (a == 0 || b == 0))
+}
+
 pub fn swap_rows(rows: &mut [RowDraft], a: usize, b: usize) -> bool {
     if a >= rows.len() || b >= rows.len() || a == b {
         return false;

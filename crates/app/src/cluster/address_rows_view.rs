@@ -6,7 +6,7 @@ use notchling_kit::ui::{button, label, TextEditor, TextEditorEvent};
 use notchling_kit::{Appearance, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::addresses_form::{cycle, kind_title, swap_rows, RowDraft, RowMeta};
+use super::addresses_form::{cycle, kind_title, may_swap, swap_rows, RowDraft, RowMeta};
 use super::view::{field_box, ClusterSheetView};
 
 pub(super) struct RowEditor {
@@ -120,7 +120,7 @@ impl ClusterSheetView {
             self.add_test_reset();
         }
         let mut drafts = self.rows_drafts(at, cx);
-        if !swap_rows(&mut drafts, i, j) {
+        if !may_swap(drafts.len(), i, j, at == Rows::Add) || !swap_rows(&mut drafts, i, j) {
             return;
         }
         let Some(rows) = self.rows_of(at) else {
@@ -277,7 +277,7 @@ impl ClusterSheetView {
                 }
             }
             controls = controls.child(div().flex_1());
-            if i > 0 {
+            if i > usize::from(first_is_elsewhere) {
                 controls = controls.child(
                     button(
                         SharedString::from(format!("{tag}-row-up-{i}")),
@@ -289,7 +289,7 @@ impl ClusterSheetView {
                     .on_click(cx.listener(move |this, _, _, cx| this.rows_swap(at, i, i - 1, cx))),
                 );
             }
-            if i < last {
+            if i < last && !(first_is_elsewhere && i == 0) {
                 controls = controls.child(
                     button(
                         SharedString::from(format!("{tag}-row-down-{i}")),

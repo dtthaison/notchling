@@ -154,6 +154,7 @@ impl ClusterSheetView {
     pub(super) fn add_test_reset(&mut self) {
         if let Some(sheet) = self.add.sheet.as_mut() {
             sheet.run.reset();
+            sheet.error = None;
         }
     }
 
