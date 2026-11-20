@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, Context, Div};
+use gpui::{div, prelude::*, px, Context, Div, MouseButton, MouseDownEvent};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SIDE_PADDING, SPACE};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -93,6 +93,39 @@ fn details_button(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) ->
     )
     .on_click(cx.listener(|this, _, _, cx| this.toggle_details(cx)))
     .part_at("Details Button", Corner::BottomTrailing, a, cx)
+}
+
+fn more_button(
+    view: &ChatView,
+    id: &str,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> Option<impl IntoElement> {
+    if !view.reload_offered(id) {
+        return None;
+    }
+    let open = view.row_menu.as_ref().is_some_and(|m| m.row_id == id);
+    let kind = if open {
+        ButtonKind::Secondary
+    } else {
+        ButtonKind::Ghost
+    };
+    let row = id.to_owned();
+    Some(
+        gate::tip_text(
+            icon_button("session-more", Icon::More, kind, PartState::Rest, a),
+            t::chat::session_menu_tip().into(),
+            a,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                this.open_session_menu(&row, event.position, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .part_at("Session Menu Button", Corner::BottomTrailing, a, cx),
+    )
 }
 
 pub(super) fn parts_toggle(a: Appearance, cx: &mut Context<ChatView>) -> impl IntoElement {
@@ -193,6 +226,7 @@ pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Div
             .elide()
             .part_at("Session Name", Corner::Trailing, a, cx),
     )
+    .children(more_button(view, &session.agent.id, a, cx))
     .child(details_button(view, a, cx))
     .child(super::terminal::button(view, a, cx))
     .child(super::simulator::button_in_header(view, a, cx))

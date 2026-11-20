@@ -4,6 +4,7 @@ mod findings;
 mod shares;
 
 use crate::catalog::Catalog;
+use crate::cost::ledger::guard::GuardReport;
 use crate::cost::ledger::Call;
 use data::Data;
 use serde::Serialize;
@@ -170,6 +171,7 @@ pub struct Report {
     pub unknown: Vec<Unknown>,
     pub saving: Option<f64>,
     pub saving_share: Option<f64>,
+    pub guard: GuardReport,
 }
 
 fn sort_findings(list: &mut [Finding]) {
@@ -275,5 +277,6 @@ pub fn analyse(window: &[Call], catalog: &Catalog, options: &Options) -> Report 
         unknown,
         saving,
         saving_share,
+        guard: GuardReport::default(),
     }
 }

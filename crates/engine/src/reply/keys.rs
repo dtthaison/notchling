@@ -56,6 +56,7 @@ pub mod timing {
 
     pub const DETACH_QUIET_MS: u64 = 400;
     pub const DETACH_TIMEOUT_MS: u64 = 3_000;
+    pub const PROBE_TIMEOUT_MS: u64 = 3_000;
 
     pub const INPUT_WAIT_MS: u64 = 5_000;
     pub const BOOT_WAIT_MS: u64 = 15_000;

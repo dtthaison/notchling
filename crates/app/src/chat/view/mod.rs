@@ -3,6 +3,7 @@ mod ask_cards;
 mod branches;
 mod branches_panel;
 mod bring_back;
+mod busy_note;
 mod changes;
 mod changes_panel;
 mod chrome;
@@ -13,6 +14,7 @@ mod conversation_list;
 mod conversation_view;
 mod copy;
 mod copy_menu;
+mod dialog_card;
 mod diff_panel;
 mod drop;
 mod header;
@@ -36,6 +38,7 @@ pub mod pane;
 mod panels;
 mod phone;
 mod prompts;
+mod reload;
 mod render_map;
 mod repo;
 mod repo_section;
@@ -163,6 +166,7 @@ pub struct ChatView {
     tasks_open_preview: bool,
     drop_preview: bool,
     outbox_preview: Option<Vec<crate::chat::outbox::Bubble>>,
+    busy: crate::chat::busy::Reading,
     outbox_second: Option<i64>,
     overlay_open: bool,
     page_covered: bool,
@@ -199,6 +203,8 @@ pub struct ChatView {
     account_menu: bool,
     row_menu: Option<row_menu::RowMenu>,
     use_chrome: crate::chat::chrome::State,
+    reload: crate::chat::session_reload::State,
+    reload_view: Option<gpui::WeakEntity<crate::sheets::reload_view::ReloadView>>,
     copy_menu: Option<copy_menu::CopyMenu>,
     keys: copy::Keys,
     accounts_polled_ms: i64,
@@ -441,6 +447,8 @@ impl ChatView {
             account_menu: false,
             row_menu: None,
             use_chrome: crate::chat::chrome::State::default(),
+            reload: crate::chat::session_reload::State::default(),
+            reload_view: None,
             copy_menu: None,
             keys: copy::Keys::new(cx),
             accounts_polled_ms: 0,
@@ -479,6 +487,7 @@ impl ChatView {
             tasks_open_preview: false,
             drop_preview: false,
             outbox_preview: None,
+            busy: crate::chat::busy::Reading::default(),
             outbox_second: None,
             sidebar_hidden: false,
             details_hidden: false,

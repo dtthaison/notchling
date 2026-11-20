@@ -354,6 +354,19 @@ impl OutboxStore {
         Ok(changed > 0)
     }
 
+    pub fn step_aside_now(&self, id: &str, now_ms: i64) -> Result<bool, String> {
+        let changed = self
+            .lock()
+            .execute(
+                "UPDATE outbox SET aside_ms = ?2
+                 WHERE id = ?1 AND state = 'unsure' AND aside_ms IS NULL
+                   AND aside_at_ms IS NOT NULL",
+                params![id, now_ms],
+            )
+            .map_err(db_err)?;
+        Ok(changed > 0)
+    }
+
     pub fn hold(&self, id: &str, until_ms: Option<i64>, now_ms: i64) -> Result<Change, String> {
         let mut db = self.lock();
         let tx = db

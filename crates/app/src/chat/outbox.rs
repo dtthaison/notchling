@@ -8,6 +8,7 @@ use notchling_engine::transcript::stored::{is_blank, same_words, squeezed as squ
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
+use super::busy::Busy;
 use super::outgoing::{sent_since, Outgoing, Turns, Wanted, GRACE_MS};
 use crate::acting::Request;
 
@@ -76,6 +77,8 @@ pub enum Status {
     Queued,
     QueuedRetry,
     WaitingDialog,
+    NeedsAnswer,
+    Busy(Busy),
     WaitsForTurn,
     WaitsForQueue(Tool),
     WaitsForPrevious,
@@ -85,6 +88,7 @@ pub enum Status {
     Sent,
     MayBeIn,
     MayBeInHolding(i64),
+    AnswerUnseen,
     BoxHasText(String),
     BoxHoldsThis,
     Stopped,
@@ -99,12 +103,14 @@ pub enum Button {
     MarkAsSent,
     ClearBoxAndSend,
     ResumeAndSend,
+    ShowTerminal,
+    Dismiss,
 }
 
 impl Button {
     pub fn request(self, id: &str, session: &str) -> Option<Request> {
         match self {
-            Button::Edit => None,
+            Button::Edit | Button::ShowTerminal | Button::Dismiss => None,
             Button::Remove => Some(Request::outbox_remove(id, session)),
             Button::MarkAsSent => Some(Request::outbox_mark_sent(id, session)),
             Button::Retry => Some(Request::outbox_resend(id, session, false, false)),
@@ -133,6 +139,9 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
             (Status::Editing, Vec::new())
         }
         State::Queued => (Status::Queued, vec![Button::Edit, Button::Remove]),
+        State::Waiting if row.why == Some(Why::Answer) => {
+            (Status::NeedsAnswer, vec![Button::Remove])
+        }
         State::Waiting => {
             let status = match row.why {
                 Some(Why::Retry) => Status::QueuedRetry,
@@ -145,6 +154,10 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         }
         State::Sending => (Status::Sending, Vec::new()),
         State::InQueue => (Status::QueuedInSession(row.tool), Vec::new()),
+        State::Unsure if row.why == Some(Why::Answer) => (
+            Status::AnswerUnseen,
+            vec![Button::Retry, Button::MarkAsSent],
+        ),
         State::Unsure => {
             let status = match (row.aside_ms, row.aside_at_ms) {
                 (None, Some(at)) => Status::MayBeInHolding(at),
@@ -185,8 +198,23 @@ fn blocks_next(row: &OutboxRow) -> bool {
     match row.state {
         State::Unsure => row.aside_ms.is_none(),
         State::Box | State::Stopped | State::Gone | State::InQueue => true,
+        State::Waiting if row.why == Some(Why::Answer) => true,
         State::Queued | State::Waiting => row.held_until_ms.is_some(),
         State::Sending => false,
+    }
+}
+
+pub fn offer_terminal(bubbles: &mut [Bubble]) {
+    for bubble in bubbles {
+        let asks = matches!(
+            bubble.status,
+            Status::WaitingDialog | Status::NeedsAnswer | Status::AnswerUnseen
+        );
+        if asks && !bubble.buttons.contains(&Button::ShowTerminal) {
+            bubble
+                .buttons
+                .splice(0..0, [Button::ShowTerminal, Button::Dismiss]);
+        }
     }
 }
 

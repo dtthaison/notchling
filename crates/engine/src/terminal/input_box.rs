@@ -434,11 +434,19 @@ pub fn span(lines: &[String]) -> Option<(usize, usize)> {
     (bottom - top > 1).then_some((top, bottom))
 }
 
+fn blank(row: &str) -> bool {
+    row.chars().all(char::is_whitespace)
+}
+
 fn bare(held: &[String]) -> bool {
-    match held {
-        [only] => only.chars().skip(1).all(char::is_whitespace),
-        _ => false,
-    }
+    let Some((first, rest)) = held.split_first() else {
+        return false;
+    };
+    let after = match first.chars().next() {
+        Some(mark) if MARKS.contains(&mark) => &first[mark.len_utf8()..],
+        _ => first,
+    };
+    blank(after) && rest.iter().all(|row| blank(row))
 }
 
 const HINT_AT: usize = 3;

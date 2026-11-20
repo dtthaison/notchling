@@ -285,7 +285,23 @@ chat-messages-wait = { $count ->
 chat-outbox-queued = Queued
 chat-outbox-retry = Couldn't reach the session, trying again
 chat-outbox-dialog = Waiting for a dialog
+# The message was typed and the session asked you something because of it, such as /model asking before it switches.
+chat-outbox-answer = Needs your answer
+# The session asked something because of the message, and after a long wait Notchling still could not see it answered or closed.
+chat-outbox-answer-unseen = No answer seen in time
 chat-outbox-turn = Waiting for the turn to end
+# $count is how many background tasks the session has running; the message goes in when they end.
+chat-outbox-busy-tasks = { $count ->
+    [one] Waiting: { $count } background task running
+   *[other] Waiting: { $count } background tasks running
+}
+# $count is how many background shell commands the session has running.
+chat-outbox-busy-commands = { $count ->
+    [one] Waiting: { $count } background command running
+   *[other] Waiting: { $count } background commands running
+}
+chat-outbox-busy-replying = Waiting: { -brand-claude } is replying
+chat-outbox-busy-unconfirmed = Waiting: an earlier message is unconfirmed
 # $tool is the tool's name (Claude Code, Codex or Antigravity).
 chat-outbox-wait-queue = Waiting for { $tool } to read the message before
 # A message behind one that is unsure, in the box, held by Edit, or in the tool's queue.
@@ -321,6 +337,8 @@ chat-outbox-mark-sent = Mark as Sent
 # The button that deletes the text in the session's terminal box, then sends the message.
 chat-outbox-clear-send = Clear Box and Send
 chat-outbox-resume-send = Resume and Send
+# Opens the session's own terminal, where its dialog is drawn.
+chat-outbox-show-terminal = Show Terminal
 # The line above the reply box while a queued message is being edited.
 chat-outbox-editing = Editing a queued message
 # The note when a queued message was taken before its edit went in.
@@ -413,6 +431,12 @@ chat-not-answered = Not answered
 chat-step-of = { NUMBER($step) } of { NUMBER($total) }
 chat-pick-any = Pick any that apply
 chat-claude-asks = { -brand-claude } asks
+# $label is the option of the session's dialog that was picked.
+chat-dialog-chose = Answered: { $label }
+# $label is the option that was picked in a dialog the session no longer shows.
+chat-dialog-chose-gone = Already answered in the terminal
+chat-dialog-dismiss = Dismiss
+chat-dialog-dismissed = Dismissed in the terminal
 chat-type-something-else = Type something else…
 chat-next = Next
 chat-submit = Submit
@@ -859,3 +883,39 @@ chat-chrome-turn-on-anyway = Turn On Anyway
 chat-chrome-turn-off = Turn Off
 chat-chrome-turn-off-anyway = Turn Off Anyway
 chat-chrome-open-terminal = Open Terminal
+
+# The Reload Session menu item and its card: restarts a session's process with the same conversation, to pick up new tools, settings, skills and hooks.
+chat-reload-item = Reload Session
+chat-reload-title = Reload Session
+chat-reload-lead = Reloads the session to pick up new tools. The conversation is re-read.
+chat-reload-cost = Reloads the session to pick up new tools. The conversation is re-read: { $tokens } tokens, about { $cost } on { $model }.
+chat-reload-tokens = Reloads the session to pick up new tools. The conversation is re-read: { $tokens } tokens.
+chat-reload-reload = Reload
+chat-reload-cancel = Cancel
+chat-reload-cancel-reload = Cancel Reload
+chat-reload-close = Close
+chat-reload-try-again = Try Again
+chat-reload-copy = Copy Command
+chat-reload-wait-turn = Waiting for the turn to end…
+chat-reload-wait-dialog = Waiting for the open question to be answered…
+chat-reload-wait-tasks = { $count ->
+    [one] 1 helper running: reload when it finishes?
+   *[other] { $count } helpers running: reload when they finish?
+}
+chat-reload-wait-note = The session reloads on its own once it can. Cancel to leave it as it is.
+chat-reload-row = Reloading…
+chat-reload-starting = Starting the reload…
+chat-reload-cancelling = Cancelling the reload…
+chat-reload-working = Reloading… the conversation is kept
+chat-reload-done = Session reloaded
+chat-reload-done-new = Session reloaded. It continues as a new session id.
+chat-reload-busy-turn = The turn didn't end in time. Try again when it has.
+chat-reload-busy-dialog = A question is still open in the session. Answer it, then try again.
+chat-reload-busy-tasks = Background work was still running. Try again when it has finished.
+chat-reload-tasks-unknown = Notchling can't tell whether this session has background work. Reloading the session stops any.
+chat-reload-failed = { $text }
+chat-reload-terminal = This session runs in a terminal Notchling didn't start, so it can't restart it. Quit the session there, then run this in the same folder:
+chat-reload-terminal-command = claude --resume { $id }
+
+# The tooltip of the ⋯ button in Chat's session header: it opens the same menu as a right click on the session's row.
+chat-session-menu-tip = Session Menu

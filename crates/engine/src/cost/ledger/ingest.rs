@@ -263,6 +263,7 @@ fn update(
 
 pub fn refresh(ledger: &mut Ledger, now: f64, budget: Option<Duration>) -> Progress {
     let started = Instant::now();
+    ledger.take_guard();
     let deadline = budget.map(|b| started + b);
     let cutoff = now - (ROW_DAYS * 86_400) as f64;
     let (items, present) = candidates(ledger, cutoff);

@@ -158,6 +158,45 @@ fn list<'a>(v: &'a Value, key: &str) -> &'a [Value] {
         .map_or(&[], Vec::as_slice)
 }
 
+fn guard_name(rule: &str) -> String {
+    match rule {
+        "model" => w::report_guard_name_model().to_string(),
+        "review" => w::report_guard_name_review().to_string(),
+        "cap" => w::report_guard_name_cap().to_string(),
+        "read" => w::report_guard_name_read().to_string(),
+        "tree" => w::report_guard_name_tree().to_string(),
+        "poll" => w::report_guard_name_poll().to_string(),
+        "size" => w::report_guard_name_size().to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn guard_lines(report: &Value, out: &mut Vec<String>) {
+    let Some(guard) = report.get("guard") else {
+        return;
+    };
+    if num(guard, "total") <= 0.0 {
+        return;
+    }
+    out.push(String::new());
+    out.push(w::report_guard_heading(&count(num(guard, "days"))));
+    out.push(format!(
+        "  {}",
+        w::report_guard_total(&count(num(guard, "total")), &count(num(guard, "sessions")))
+    ));
+    for rule in list(guard, "rules") {
+        let name = rule.get("rule").and_then(Value::as_str).unwrap_or("");
+        out.push(format!(
+            "  {}",
+            w::report_guard_rule(
+                &guard_name(name),
+                &count(num(rule, "count")),
+                &count(num(rule, "sessions"))
+            )
+        ));
+    }
+}
+
 pub fn render(reply: &Value) -> String {
     let report = reply.get("report").unwrap_or(&Value::Null);
     let totals = report.get("totals").unwrap_or(&Value::Null);
@@ -273,5 +312,6 @@ pub fn render(reply: &Value) -> String {
             out.push(format!("  {line}"));
         }
     }
+    guard_lines(report, &mut out);
     out.join("\n")
 }

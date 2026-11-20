@@ -7,6 +7,7 @@ use crate::hook_ops::Parents;
 use crate::late_emit::Events;
 use crate::outbox_ops::OutboxOps;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
+use crate::screen_keep::keep_screen;
 use crate::typing_locks::TypingLocks;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
@@ -26,7 +27,7 @@ use notchling_events::{Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -34,7 +35,7 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(290);
 
 pub const STOPPING_FOR: Duration = Duration::from_secs(20);
 
-pub const ACTING_OPS: [&str; 12] = [
+pub const ACTING_OPS: [&str; 14] = [
     ops::SESSION_REPLY,
     ops::SESSION_ANSWER,
     ops::SESSION_PERMISSION,
@@ -47,6 +48,8 @@ pub const ACTING_OPS: [&str; 12] = [
     ops::SESSION_MOVE,
     ops::SESSION_COMMAND,
     ops::SESSION_HELD_DISCARD,
+    ops::SESSION_DIALOG_PICK,
+    ops::SESSION_DIALOG_DISMISS,
 ];
 
 pub const CONTROL_OPS: [&str; 6] = [
@@ -141,6 +144,7 @@ pub struct ActingOps {
     catalog: OnceLock<Arc<CatalogService>>,
     outbox: OnceLock<Arc<OutboxOps>>,
     chrome: OnceLock<Arc<crate::chrome_ops::ChromeOps>>,
+    reload: OnceLock<Arc<crate::reload_ops::ReloadOps>>,
     pub(crate) login: OnceLock<Arc<dyn crate::cluster_logins::LoginEnv>>,
     screen_file: Option<PathBuf>,
     pub(crate) reply_screen_file: Option<PathBuf>,
@@ -176,6 +180,7 @@ impl ActingOps {
             catalog: OnceLock::new(),
             outbox: OnceLock::new(),
             chrome: OnceLock::new(),
+            reload: OnceLock::new(),
             login: OnceLock::new(),
             screen_file: None,
             reply_screen_file: None,
@@ -216,6 +221,14 @@ impl ActingOps {
 
     pub(crate) fn chrome(&self) -> Option<&Arc<crate::chrome_ops::ChromeOps>> {
         self.chrome.get()
+    }
+
+    pub fn attach_reload(&self, reload: Arc<crate::reload_ops::ReloadOps>) {
+        let _ = self.reload.set(reload);
+    }
+
+    pub(crate) fn reload(&self) -> Option<&Arc<crate::reload_ops::ReloadOps>> {
+        self.reload.get()
     }
 
     fn chrome_state(&self, args: &Value) -> Result<Value, ApiError> {
@@ -281,10 +294,14 @@ impl ActingOps {
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SET_ACTING | ops::PROMPTS_LIST => Some(OpSpec::APP),
-            ops::SETTINGS_GET_ACTING | ops::SESSION_QUESTION | ops::HOOK_REQUEST => {
-                Some(OpSpec::AGENT)
-            }
-            ops::SESSION_SHELL_OUTPUT | ops::SESSION_CHROME => Some(OpSpec::APP),
+            ops::SETTINGS_GET_ACTING
+            | ops::SESSION_QUESTION
+            | ops::HOOK_REQUEST
+            | ops::SESSION_RELOAD => Some(OpSpec::AGENT),
+            ops::SESSION_SHELL_OUTPUT
+            | ops::SESSION_DIALOG
+            | ops::SESSION_CHROME
+            | ops::SESSION_RELOAD_STATE => Some(OpSpec::APP),
             op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -310,9 +327,17 @@ impl ActingOps {
             }
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
+            ops::SESSION_DIALOG => self.dialog(caller, args),
+            ops::SESSION_DIALOG_PICK => self.dialog_pick(caller, args),
+            ops::SESSION_DIALOG_DISMISS => self.dialog_dismiss(caller, args),
             ops::SESSION_CHROME => {
                 app_only(caller)?;
                 self.chrome_state(args)
+            }
+            ops::SESSION_RELOAD => self.reload_call(caller, args),
+            ops::SESSION_RELOAD_STATE => {
+                app_only(caller)?;
+                self.reload_state(args)
             }
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
@@ -441,7 +466,7 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
     ) -> Result<Outcome, PlayError> {
-        self.play_inner(agent, plan, log, keep)
+        self.play_inner(agent, plan, log, keep, None)
     }
 
     fn play_inner(
@@ -450,6 +475,7 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
+        at_prompt: Option<&dyn Fn() -> bool>,
     ) -> Result<Outcome, PlayError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
@@ -472,7 +498,12 @@ impl ActingOps {
             },
             any: false,
         };
-        let check = self.attacher.screen_check();
+        let base = self.attacher.screen_check();
+        let guarded = at_prompt.map(|still| screen::AtPrompt { inner: base, still });
+        let check: &dyn ScreenCheck = match &guarded {
+            Some(guarded) => guarded,
+            None => base,
+        };
         let mut pty = pty;
         let played = execute_clearing(plan, pty.as_mut(), check, log, &mut trail, &clearing);
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {
@@ -488,7 +519,7 @@ impl ActingOps {
         if let (Err(failure), Some((chars, file))) = (&played, reply) {
             if !matches!(failure, Failure::Pty(_)) {
                 let head = crate::reply_screen::head(&job, failure, chars, pty.cursor(), &trail);
-                keep_screen(file, &head, &crate::reply_screen::masked(&pty.screen()));
+                crate::reply_screen::keep(file, &job, failure, &head, &pty.screen(), now_ms());
             }
         }
         if let Some(text) = plan.reply_text() {
@@ -781,57 +812,10 @@ impl ActingOps {
             })
         })
     }
-
-    fn shell_output(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        if !self.acting.is_on() {
-            return Err(forbidden(ACTING_OFF));
-        }
-        if caller.tier != Tier::App {
-            return Err(forbidden("reading a session's screen is for the app only"));
-        }
-        let command = text_arg(args, "command")?;
-        if command.trim().is_empty() || command.len() > SHELL_COMMAND_MAX {
-            return Err(bad("command is the shell command the session is running"));
-        }
-        let agent = self.agent(args)?;
-        let no_terminal = || bad("this session has no terminal to read");
-        if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
-            return Err(no_terminal());
-        }
-        let read = self.try_locked(&agent, |agent| {
-            let job = match &agent.target {
-                AgentTarget::Job(now) if agent.can_reply() => now.clone(),
-                _ => return Err(no_terminal()),
-            };
-            if !self.running_now(&job) {
-                return Ok(None);
-            }
-            let config_dir =
-                config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-            let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
-            let lines = read_shell_output(pty.as_mut(), command);
-            Ok(Some((lines, pty)))
-        });
-        match read {
-            None => Ok(json!({"lines": [], "busy": true})),
-            Some(Err(e)) => Err(e),
-            Some(Ok(None)) => Ok(json!({"lines": []})),
-            Some(Ok(Some((lines, pty)))) => {
-                drop(pty);
-                Ok(json!({ "lines": lines }))
-            }
-        }
-    }
-
-    fn running_now(&self, job: &str) -> bool {
-        matches!(
-            fresh::job_status(&self.roots, &Probes::from_proc(), job).as_deref(),
-            Some("busy" | "shell")
-        )
-    }
 }
 
-const SHELL_COMMAND_MAX: usize = 64 * 1024;
+#[path = "acting_screen.rs"]
+mod screen;
 
 fn answer_of(decision: &str) -> AnswerKind {
     match decision {
@@ -952,42 +936,6 @@ fn typing_key(agent: &Agent) -> String {
     match &agent.target {
         AgentTarget::Job(job) => job.clone(),
         _ => agent.id.clone(),
-    }
-}
-
-pub(crate) fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static WRITES: AtomicU64 = AtomicU64::new(0);
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let mut name = file.as_os_str().to_os_string();
-    name.push(format!(
-        ".{}.{}.tmp",
-        std::process::id(),
-        WRITES.fetch_add(1, Ordering::Relaxed)
-    ));
-    let temp = PathBuf::from(name);
-    let Ok(mut out) = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp)
-    else {
-        return;
-    };
-    for line in head {
-        let _ = writeln!(out, "{line}");
-    }
-    let _ = writeln!(out, "----- screen ({} lines) -----", lines.len());
-    for line in lines {
-        let _ = writeln!(out, "{line}");
-    }
-    drop(out);
-    if std::fs::rename(&temp, file).is_err() {
-        let _ = std::fs::remove_file(&temp);
     }
 }
 

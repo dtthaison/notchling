@@ -188,7 +188,7 @@ pub fn read(lines: &[String]) -> Option<PermissionDialog> {
     })
 }
 
-fn clean(row: &str) -> &str {
+pub(crate) fn clean(row: &str) -> &str {
     let row = row.trim();
     let row = row.strip_prefix('│').unwrap_or(row);
     let row = row.strip_suffix('│').unwrap_or(row);

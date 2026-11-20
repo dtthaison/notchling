@@ -2,6 +2,7 @@ use super::process::CUT_NOTICE;
 use super::registry::{DockerState, Machine, MachineOs};
 use super::runner::CommandResult;
 use super::shell;
+use super::specs;
 use super::step::{
     run, Cadence, CheckResult, Detected, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput,
     SetupStep, StepContext, StepFix, StepId, SubRow,
@@ -144,7 +145,24 @@ echo "user=$(id -un)"
 echo "home=$HOME"
 if [ "$(uname -s)" = Darwin ]; then v=$(sw_vers -productVersion 2>/dev/null); else v=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -1 | tr -d '"'); fi
 echo "version=$v"
-echo "disk_kb=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')"
+df -Pk "$HOME" 2>/dev/null | awk 'NR==2 { for (i = NF; i >= 4; i--) if ($i ~ /^[0-9]+%$/ && $(i-1) ~ /^[0-9]+$/ && $(i-2) ~ /^[0-9]+$/ && $(i-3) ~ /^[0-9]+$/) { print "disk_total_kb=" $(i-3); print "disk_kb=" $(i-1); exit } }'
+if [ "$(uname -s)" = Darwin ]; then
+echo "cpus=$(sysctl -n hw.ncpu 2>/dev/null)"
+c=$(sysctl -n machdep.cpu.brand_string 2>/dev/null)
+if [ -z "$c" ]; then c=$(sysctl -n hw.model 2>/dev/null); fi
+echo "cpu_model=$c"
+m=$(sysctl -n hw.memsize 2>/dev/null)
+case "$m" in ""|*[!0-9]*) ;; *) echo "mem_kb=$((m / 1024))";; esac
+else
+n=$(nproc 2>/dev/null)
+if [ -z "$n" ]; then n=$(getconf _NPROCESSORS_ONLN 2>/dev/null); fi
+if [ -z "$n" ]; then n=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null); fi
+echo "cpus=$n"
+c=$(LC_ALL=C lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
+for k in "model name" Hardware Model; do case "$c" in ""|"-") c=$(LC_ALL=C sed -n "s/^$k[[:space:]]*:[[:space:]]*//p" /proc/cpuinfo 2>/dev/null | head -1);; esac; done
+echo "cpu_model=$c"
+echo "mem_kb=$(sed -n 's/^MemTotal:[[:space:]]*\([0-9]*\) kB.*/\1/p' /proc/meminfo 2>/dev/null | head -1)"
+fi
 if command -v docker >/dev/null 2>&1; then if o=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null); then case "$o" in *rootless*) echo docker=rootless;; *) echo docker=rootful;; esac; else echo docker=stopped; fi; else echo docker=none; fi"#;
 
 fn docker_state(text: &str) -> Option<DockerState> {
@@ -159,10 +177,9 @@ fn docker_state(text: &str) -> Option<DockerState> {
 
 fn parse_reachable(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let text = ctx.mask(&out.text);
-    let kv = keyed(
-        &text,
-        &["os", "arch", "home", "version", "disk_kb", "docker"],
-    );
+    let mut wanted = vec!["os", "arch", "home", "version", "disk_kb", "docker"];
+    wanted.extend(specs::SPEC_KEYS);
+    let kv = keyed(&text, &wanted);
     let os_name = match kv.get("os") {
         Some(name) if !name.is_empty() => name.as_str(),
         _ => {
@@ -210,11 +227,14 @@ fn parse_reachable(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     if let Some(docker) = kv.get("docker").and_then(|d| docker_state(d)) {
         abilities.docker = Some(docker);
     }
-    if let Some(kb) = kv.get("disk_kb").and_then(|k| k.parse::<i64>().ok()) {
-        if kb >= 0 {
-            abilities.free_disk_gb = Some(kb / 1_048_576);
-        }
+    if let Some(gb) = kv
+        .get("disk_kb")
+        .and_then(|k| k.parse::<i64>().ok())
+        .and_then(specs::free_gb)
+    {
+        abilities.free_disk_gb = Some(gb);
     }
+    specs::apply(&mut abilities, &kv, ctx.now);
     detected.abilities = Some(abilities);
 
     let label = if os == MachineOs::MacOs {

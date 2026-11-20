@@ -22,6 +22,7 @@ impl Render for ChatView {
             }
         }
         self.sync_prompt(cx);
+        self.read_busy(cx);
         self.sync_asks(window, cx);
         self.sync_vault(window, cx);
         let inset = super::tasks::shown(self);

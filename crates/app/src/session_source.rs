@@ -16,6 +16,7 @@ use serde_json::Value;
 use crate::chat::asks::{self, AskFeed};
 use crate::chat::data::DataRoot;
 use crate::chat::outbox::{Bubble, OutboxFeed, OutboxRow};
+use crate::chat::reload_feed::ReloadFeed;
 use crate::tools::live::ToolLive;
 
 pub type Starter = Arc<dyn Fn(&Path) -> Result<Started, ClientError> + Send + Sync>;
@@ -93,6 +94,7 @@ pub struct View {
     pub tools: ToolLive,
     pub outbox: OutboxFeed,
     pub asks: AskFeed,
+    pub reloads: ReloadFeed,
     pub answered: HashSet<String>,
     pub link: Link,
     pub generation: u64,
@@ -124,6 +126,7 @@ struct State {
     tools: ToolLive,
     outbox: OutboxFeed,
     asks: AskFeed,
+    reloads: ReloadFeed,
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     catalog_generation: u64,
     answered: HashSet<String>,
@@ -220,6 +223,12 @@ impl Shared {
                     state.generation += 1;
                 }
             }
+            topics::RELOAD_CHANGED => {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if state.reloads.apply(&event.data) {
+                    state.generation += 1;
+                }
+            }
             topics::CODEX_TURN | topics::SESSION_CHANGED => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
@@ -236,6 +245,24 @@ impl Shared {
         next.reseed_rows(fresh);
         if state.outbox != next {
             state.outbox = next;
+            state.generation += 1;
+        }
+    }
+
+    fn lose_link(&self, link: Link) {
+        self.set_prompts(None);
+        self.set_shells(Vec::new());
+        self.set_remote_codex(Vec::new());
+        self.clear_outbox_rows();
+        self.reseed_asks(AskFeed::default());
+        self.reset_tools();
+        self.set(link, None);
+    }
+
+    fn reseed_reloads(&self, fresh: ReloadFeed) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.reloads != fresh {
+            state.reloads = fresh;
             state.generation += 1;
         }
     }
@@ -291,6 +318,7 @@ impl SessionSource {
                     tools: ToolLive::default(),
                     outbox: OutboxFeed::default(),
                     asks: AskFeed::default(),
+                    reloads: ReloadFeed::default(),
                     catalog: HashMap::new(),
                     catalog_generation: 0,
                     answered: HashSet::new(),
@@ -332,6 +360,7 @@ impl SessionSource {
             tools: state.tools.clone(),
             outbox: state.outbox.clone(),
             asks: state.asks.clone(),
+            reloads: state.reloads.clone(),
             answered: state.answered.clone(),
             link: state.link,
             generation: state.generation,
@@ -375,6 +404,18 @@ impl SessionSource {
     pub fn asks(&self) -> AskFeed {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.asks.clone()
+    }
+
+    pub fn reloads(&self) -> ReloadFeed {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.reloads.clone()
+    }
+
+    pub fn absorb_reload(&self, id: &str, reply: &Value) {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.reloads.absorb(id, reply) {
+            state.generation += 1;
+        }
     }
 
     pub fn outbox_covers(&self, id: &str) -> bool {
@@ -444,8 +485,9 @@ fn run(config: SourceConfig, shared: &Shared) {
     while !shared.stopped() {
         let mut link = Link::Down;
         match connect(&config, &mut tried_start) {
-            Ok((client, agents, shells, codex, prompts, outbox, asks)) => {
+            Ok((client, agents, shells, codex, prompts, outbox, asks, reloads)) => {
                 shared.set_prompts(prompts);
+                shared.reseed_reloads(reloads);
                 shared.set_shells(shells);
                 shared.set_remote_codex(codex);
                 shared.reseed_outbox(outbox);
@@ -463,13 +505,7 @@ fn run(config: SourceConfig, shared: &Shared) {
         if shared.stopped() {
             return;
         }
-        shared.set_prompts(None);
-        shared.set_shells(Vec::new());
-        shared.set_remote_codex(Vec::new());
-        shared.clear_outbox_rows();
-        shared.reseed_asks(AskFeed::default());
-        shared.reset_tools();
-        shared.set(link, None);
+        shared.lose_link(link);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
 }
@@ -510,6 +546,7 @@ type Connected = (
     Option<Vec<Value>>,
     OutboxFeed,
     AskFeed,
+    ReloadFeed,
 );
 
 fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, ClientError> {
@@ -538,6 +575,11 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Ok(_) | Err(ClientError::Api(_)) => {}
         Err(e) => return Err(e),
     }
+    let reloading = match client.subscribe(&[topics::RELOADS]) {
+        Ok(_) => true,
+        Err(ClientError::Api(_)) => false,
+        Err(e) => return Err(e),
+    };
     let outboxed = match client.subscribe(&[topics::OUTBOX]) {
         Ok(_) => true,
         Err(ClientError::Api(_)) => false,
@@ -564,6 +606,14 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         },
         false => None,
     };
+    let mut reloads = match reloading {
+        true => match client.call(ops::SESSION_RELOAD_STATE, serde_json::json!({"all": true})) {
+            Ok(reply) => ReloadFeed::seed(&reply),
+            Err(ClientError::Api(_)) => ReloadFeed::default(),
+            Err(e) => return Err(e),
+        },
+        false => ReloadFeed::default(),
+    };
     while let Some(event) = client.next_event(Duration::ZERO)? {
         match event.event.as_str() {
             topics::SESSIONS_CHANGED => {
@@ -587,6 +637,9 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             topics::ASK_CHANGED | topics::ASK_REMOVED => {
                 asks.apply(&event.event, &event.data);
             }
+            topics::RELOAD_CHANGED => {
+                reloads.apply(&event.data);
+            }
             _ => {
                 if let Some(list) = &mut prompts {
                     held_change(list, &event);
@@ -594,7 +647,9 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
             }
         }
     }
-    Ok((client, agents, shells, codex, prompts, outbox, asks))
+    Ok((
+        client, agents, shells, codex, prompts, outbox, asks, reloads,
+    ))
 }
 
 fn now_ms() -> i64 {

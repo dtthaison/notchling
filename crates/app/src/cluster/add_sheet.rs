@@ -2,17 +2,18 @@ use std::fmt;
 
 use notchling_engine::accounts::Secret;
 use notchling_engine::machines::address;
-use notchling_engine::machines::addresses::MachineAddress;
+use notchling_engine::machines::addresses::{AddressKind, MachineAddress};
 use notchling_engine::machines::engine_plan::AdminAnswer;
 use notchling_engine::machines::forms::machine_problems;
 use notchling_engine::machines::registry::MachineOs;
+use notchling_engine::machines::ssh_command::{parse_ssh_command, SshTarget};
 use notchling_engine::machines::steps_tailscale_linux::is_sign_in_link;
 use notchling_locale as t;
 
 use super::add::{Phase, Stop};
 use super::add_plan::PlanView;
 use super::add_runs::{SignInLink, Snap};
-use super::addresses_form::{addresses_of, split_row, RowDraft, RowMeta};
+use super::addresses_form::{addresses_of, RowDraft, RowMeta};
 use super::machine_add::Phase as MachinePhase;
 use super::not_joined::NotJoined;
 
@@ -66,6 +67,8 @@ pub fn install(
     }
     started
 }
+
+const DEFAULT_PORT: u16 = 22;
 
 pub fn may_open(busy: bool, sheet_open: bool) -> bool {
     !busy && !sheet_open
@@ -121,31 +124,53 @@ pub struct Draft {
 pub struct Parsed {
     pub target: String,
     pub name: String,
+    pub port: Option<u16>,
+    pub key: Option<String>,
+    pub via: Option<String>,
     pub addresses: Vec<MachineAddress>,
 }
 
-fn without_port(typed: &str) -> Result<String, String> {
-    let row = split_row(typed)?;
-    let host = if row.host.contains(':') {
-        format!("[{}]", row.host)
-    } else {
-        row.host
-    };
-    Ok(match row.user {
-        Some(user) => format!("{user}@{host}"),
-        None => host,
-    })
+fn without_port(target: &SshTarget) -> String {
+    SshTarget {
+        port: None,
+        key: None,
+        jump: None,
+        ..target.clone()
+    }
+    .canonical()
 }
 
 pub fn derived_name(typed: &str, user: &str) -> String {
-    without_port(typed)
-        .and_then(|typed| address::parse(&typed, user, &[]))
+    parse_ssh_command(typed)
+        .and_then(|target| address::parse(&without_port(&target), user, &[]))
         .map(|at| at.name)
         .unwrap_or_default()
 }
 
+fn jump_via(jump: &str, existing: &[String]) -> Result<String, String> {
+    existing
+        .iter()
+        .find(|name| name.as_str() == jump)
+        .cloned()
+        .ok_or_else(|| t::cluster::add_jump_unknown(jump))
+}
+
 pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Parsed, String> {
-    let at = address::parse(&without_port(&draft.address)?, user, &[])?;
+    let ssh = parse_ssh_command(&draft.address)?;
+    let at = address::parse(&without_port(&ssh), user, &[])?;
+    let via = ssh
+        .jump
+        .as_deref()
+        .map(|jump| jump_via(jump, existing))
+        .transpose()?;
+    let first = match &via {
+        Some(via) => RowMeta {
+            kind: Some(AddressKind::Jump),
+            tailnet: None,
+            via: Some(via.clone()),
+        },
+        None => draft.first.clone(),
+    };
     let typed = draft.name.trim();
     let name = if typed.is_empty() {
         at.name.clone()
@@ -155,15 +180,18 @@ pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Par
     if let Some(first) = machine_problems(&name, &at.host, &at.user, existing).first() {
         return Err(first.clone());
     }
-    let plain = draft.more.is_empty()
-        && draft.first.is_plain()
-        && split_row(&draft.address).is_ok_and(|r| r.port.is_none());
+    let plain = draft.more.is_empty() && first.is_plain() && ssh.port.is_none();
     let addresses = if plain {
         Vec::new()
     } else {
         let mut rows = vec![RowDraft {
-            text: draft.address.clone(),
-            meta: draft.first.clone(),
+            text: SshTarget {
+                key: None,
+                jump: None,
+                ..ssh.clone()
+            }
+            .canonical(),
+            meta: first,
         }];
         rows.extend(
             draft
@@ -177,8 +205,31 @@ pub fn parse_draft(draft: &Draft, user: &str, existing: &[String]) -> Result<Par
     Ok(Parsed {
         target: format!("{}@{}", at.user, at.host),
         name,
+        port: ssh.port,
+        key: ssh.key,
+        via,
         addresses,
     })
+}
+
+pub fn seen_line(parsed: &Parsed) -> String {
+    let (user, host) = parsed
+        .target
+        .split_once('@')
+        .unwrap_or(("", parsed.target.as_str()));
+    let port = parsed.port.unwrap_or(DEFAULT_PORT).to_string();
+    let mut line = t::cluster::add_seen_joined(
+        &t::cluster::add_seen_user(user),
+        &t::cluster::add_seen_host(host),
+    );
+    line = t::cluster::add_seen_joined(&line, &t::cluster::add_seen_port(&port));
+    if let Some(key) = &parsed.key {
+        line = t::cluster::add_seen_joined(&line, &t::cluster::add_seen_key(key));
+    }
+    if let Some(via) = &parsed.via {
+        line = t::cluster::add_seen_joined(&line, &t::cluster::add_seen_jump(via));
+    }
+    line
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -313,7 +364,7 @@ pub fn machine_view(
         MachinePhase::Form => {
             view.form = true;
             match &parsed {
-                Ok(ok) => view.target = Some(t::cluster::add_connects_as(&ok.target)),
+                Ok(ok) => view.target = Some(seen_line(ok)),
                 Err(why) if !draft.address.trim().is_empty() => view.error = Some(why.clone()),
                 Err(_) => {}
             }

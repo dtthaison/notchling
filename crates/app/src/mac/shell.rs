@@ -436,6 +436,16 @@ pub fn open_chat_session(cx: &mut App, target: SessionRef, child: Option<String>
     }
 }
 
+pub fn open_chat_reload(cx: &mut App, id: &str) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        let id = id.to_owned();
+        handle
+            .update(cx, |view, _, cx| view.show_reload(&id, cx))
+            .ok();
+    }
+}
+
 pub fn open_chat_ask(cx: &mut App, session: &str, id: &str) {
     open_chat(cx);
     if let Some(handle) = chat_window(cx) {

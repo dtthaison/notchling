@@ -12,6 +12,7 @@ pub mod branch_rows;
 pub mod branches_preview;
 pub mod branches_state;
 pub mod browser_rows;
+pub mod busy;
 pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
@@ -32,6 +33,7 @@ pub mod delegated;
 mod delegated_cap_tests;
 #[cfg(test)]
 mod details_words_tests;
+pub mod dialog_card;
 pub mod drafts;
 pub mod drops;
 pub mod escape;
@@ -67,6 +69,8 @@ pub mod markers;
 pub mod message_meta;
 pub mod outbox;
 #[cfg(test)]
+mod outbox_asked_tests;
+#[cfg(test)]
 mod outbox_box_same_tests;
 #[cfg(test)]
 mod outbox_box_wrap_tests;
@@ -100,6 +104,7 @@ mod prompts_permission_tests;
 #[cfg(test)]
 mod question_parity_tests;
 pub mod reload;
+pub mod reload_feed;
 pub mod remote;
 pub mod remote_control;
 #[cfg(test)]
@@ -120,6 +125,9 @@ pub mod run_command;
 mod run_command_tests;
 pub mod scroll_trace;
 pub mod selection;
+pub mod session_reload;
+#[cfg(test)]
+mod session_reload_tests;
 pub mod shell_list;
 pub mod shell_live;
 #[cfg(test)]

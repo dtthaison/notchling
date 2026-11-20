@@ -1,3 +1,4 @@
+mod answer;
 mod gate;
 mod model;
 mod outcome;
@@ -14,12 +15,17 @@ pub const QUEUE_STALE_MS: i64 = 10_000;
 pub const GONE_AFTER_MS: i64 = 60_000;
 pub const GONE_RECHECK_MS: i64 = 10_000;
 pub const DIALOG_RECHECK_MS: i64 = 30_000;
+pub const ANSWER_GRACE_MS: i64 = 3_000;
+pub const ANSWER_RECHECK_MS: i64 = 5_000;
+pub const ANSWER_CLOSED_READS: u32 = 3;
+pub const ANSWER_HOLD_MS: i64 = 600_000;
 pub const REPLY_WAIT_MS: i64 = 50_000;
 pub const POSTMEN_MAX: usize = 32;
 pub const UNSURE_HOLD_MS: i64 = 120_000;
 pub const HOLD_LEASE_MS: i64 = 600_000;
 
-pub use gate::{gate, Facts, Gate, Job};
+pub use answer::{AnswerWatch, Seen};
+pub use gate::{gate, idle_at_prompt, Facts, Gate, Job};
 pub use model::{
     new_id, Anchor, Change, InsertError, Kind, New, Row, State, Tool, Via, Why, MAX_ROWS, MAX_TEXT,
 };
@@ -28,6 +34,15 @@ pub use refusal::{is_settled, BEING_SENT, CHANGED, IN_QUEUE, NO_MESSAGE};
 pub use store::OutboxStore;
 pub use verdict::{line_within, queued_verdict, verdict, QueuedVerdict, Verdict};
 
+#[cfg(test)]
+#[path = "answer_tests.rs"]
+mod answer_tests;
+#[cfg(test)]
+#[path = "gate_answer_tests.rs"]
+mod gate_answer_tests;
+#[cfg(test)]
+#[path = "gate_idle_tests.rs"]
+mod gate_idle_tests;
 #[cfg(test)]
 #[path = "gate_tests.rs"]
 mod gate_tests;
@@ -55,6 +70,9 @@ mod store_join_tests;
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod store_tests;
+#[cfg(test)]
+#[path = "store_unsure_queue_tests.rs"]
+mod store_unsure_queue_tests;
 #[cfg(test)]
 #[path = "store_unsure_tests.rs"]
 mod store_unsure_tests;

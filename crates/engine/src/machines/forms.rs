@@ -100,6 +100,18 @@ pub fn abilities_line(a: Option<&MachineAbilities>, os: Option<MachineOs>) -> St
         if let Some(arch) = a.arch.as_ref().filter(|x| !x.is_empty()) {
             parts.push(arch.clone());
         }
+        if let Some(n) = a.cpu_cores {
+            parts.push(format!("{n} CPU"));
+        }
+        if let Some(gb) = a.ram_gb {
+            parts.push(format!("{gb} GB RAM"));
+        }
+        if let Some(total) = a.disk_gb {
+            parts.push(match a.free_disk_gb {
+                Some(free) => format!("{total} GB disk ({} free)", free.min(total)),
+                None => format!("{total} GB disk"),
+            });
+        }
         if let Some(x) = a.xcode.as_ref().filter(|x| !x.is_empty()) {
             parts.push(format!("Xcode {x}"));
         }
@@ -119,7 +131,7 @@ pub fn abilities_line(a: Option<&MachineAbilities>, os: Option<MachineOs>) -> St
                 .into(),
             );
         }
-        if let Some(gb) = a.free_disk_gb {
+        if let Some(gb) = a.free_disk_gb.filter(|_| a.disk_gb.is_none()) {
             parts.push(format!("{gb} GB free"));
         }
     }

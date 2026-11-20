@@ -20,12 +20,13 @@ use super::add_sheet::{
     derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, Action,
     AddPassword, AddView, Button, Draft,
 };
+use super::add_test_run::TestRun;
 use super::address_rows_view::{RowEditor, Rows};
 use super::addresses_form::{RowDraft, RowMeta};
 use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
-use super::view::{field_box, ClusterSheetView};
+use super::view::ClusterSheetView;
 use crate::mac::gate;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
@@ -46,6 +47,8 @@ pub(super) struct AddSheet {
     pub(super) name: Entity<TextEditor>,
     pub(super) rows: Vec<RowEditor>,
     pub(super) touched: bool,
+    pub(super) more: bool,
+    pub(super) run: TestRun,
     pub(super) machine: MachineAdd,
     pub(super) flow: Option<String>,
     pub(super) joining: bool,
@@ -131,6 +134,8 @@ impl AddSheet {
             name,
             rows: vec![first],
             touched: false,
+            more: false,
+            run: TestRun::default(),
             machine: MachineAdd::new(),
             joining: flow.is_some(),
             flow,
@@ -241,6 +246,7 @@ impl ClusterSheetView {
     }
 
     fn add_address_changed(&mut self, cx: &mut Context<Self>) {
+        self.add_test_reset();
         let Some(sheet) = self.add.sheet.as_mut() else {
             return;
         };
@@ -266,7 +272,7 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn add_draft(&self, cx: &Context<Self>) -> Draft {
+    pub(super) fn add_draft(&self, cx: &Context<Self>) -> Draft {
         match &self.add.sheet {
             Some(sheet) => {
                 let rows = self.rows_drafts(Rows::Add, cx);
@@ -703,35 +709,11 @@ impl ClusterSheetView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
-        let Some(sheet) = self.add.sheet.as_ref() else {
+        if self.add.sheet.is_none() {
             return body;
-        };
+        }
         if shown.form {
-            let name_focused = sheet.name.read(cx).is_focused(window);
-            body = body
-                .child(label(
-                    t::cluster::add_intro(),
-                    TypeRole::Body,
-                    Ink::TextMuted,
-                    a,
-                ))
-                .child(self.rows_view(Rows::Add, window, a, cx))
-                .children(
-                    shown
-                        .target
-                        .as_deref()
-                        .map(|text| label(text, TypeRole::Meta, Ink::TextMuted, a)),
-                )
-                .child(label(
-                    t::cluster::add_name_label(),
-                    TypeRole::Label,
-                    Ink::TextFaint,
-                    a,
-                ))
-                .child(field_box(&sheet.name, name_focused, a));
-            if let Some(problem) = &shown.error {
-                body = body.child(label(problem, TypeRole::Meta, Ink::Needs, a));
-            }
+            body = self.add_form(body, shown, window, a, cx);
         }
         if let Some(text) = &shown.busy {
             body = body.child(

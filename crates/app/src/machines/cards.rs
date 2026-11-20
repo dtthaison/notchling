@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use gpui::{div, prelude::*, px, App, Context, Div, SharedString};
 use notchling_engine::machines::forms::abilities_line;
+use notchling_engine::machines::names::short_host;
 use notchling_engine::machines::registry::{AdminAccess, Machine};
 use notchling_engine::machines::step::{CheckResult, SetupStep, StepFix, StepId};
 use notchling_engine::machines::steps_repo::offers_replace;
@@ -11,6 +12,8 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, card, icon, label, KitPart, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::checked::checked_line;
+use super::data::now_secs;
 use super::pieces::{LogTail, Tone};
 use super::versions_model::{
     place_rows, remove_note, replace_label, replace_tip, PlaceFlag, VersionRow,
@@ -79,11 +82,17 @@ impl MachinesView {
             Ink::TextMuted,
             a,
         ));
+        if let Some(line) = checked_line(shown.abilities.as_ref(), now_secs()) {
+            body = body.child(label(&line, TypeRole::Meta, Ink::TextFaint, a));
+        }
         body = body.child(self.node_row(machine, busy, a, cx));
         if machine.admin() == AdminAccess::RootSsh {
             body = body.child(marked(
                 Icon::Warning,
-                &format!("Admin steps run as root over SSH on {}.", machine.host),
+                &format!(
+                    "Admin steps run as root over SSH on {}.",
+                    short_host(&machine.host)
+                ),
                 TypeRole::Label,
                 Ink::AccentText,
                 a,
@@ -200,7 +209,7 @@ impl MachinesView {
             .gap(px(10.0))
             .child(label(&machine.name, TypeRole::Title, Ink::Text, a))
             .child(label(
-                &format!("{}@{}", machine.user, machine.host),
+                &format!("{}@{}", machine.user, short_host(&machine.host)),
                 TypeRole::Meta,
                 Ink::TextMuted,
                 a,

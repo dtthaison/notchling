@@ -16,6 +16,7 @@ pub use skills::{apply_skills, plan_skills, Action, SkillPlan, SkillResult, Skil
 
 pub const PROMPT_HOOKS: &str = "prompt_hooks";
 pub const PAGE_HOOKS: &str = "page_hooks";
+pub const GUARD_HOOKS: &str = "guard_hooks";
 pub const VAULT_SKILL: &str = "notchling-vault";
 
 #[cfg(test)]

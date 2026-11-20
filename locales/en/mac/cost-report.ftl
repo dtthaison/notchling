@@ -125,3 +125,26 @@ cost-report-unknown-cache-ttl = { $count } calls were in sessions whose cache ti
 cost-report-unknown-agent-type = { $count } helper calls had no agent type
 # $count is how many calls.
 cost-report-unknown-effort = { $count } main-chat calls had no recorded effort
+
+## What the guard would have done
+
+# $days is a count of days.
+cost-report-guard-heading = What the guard would have done (last { $days } days)
+# $total is a count of tool calls and $sessions a count of sessions.
+cost-report-guard-total = { $total } calls would have been noted or changed, in { $sessions } sessions. The guard only records: no call was changed, denied or delayed.
+# $rule is the name of a guard, $count a count of calls and $sessions a count of sessions.
+cost-report-guard-rule = { $rule }: { $count } calls in { $sessions } sessions
+# The name of the guard that checks which model a helper uses.
+cost-report-guard-name-model = Premium model on routine work
+# The name of the guard that checks how reviews are started.
+cost-report-guard-name-review = Review started as a helper
+# The name of the guard that limits how many builders work at once.
+cost-report-guard-name-cap = More builders at once than the cap
+# The name of the guard that checks reads of large files.
+cost-report-guard-name-read = Large file read whole
+# The name of the guard that checks directory dumps.
+cost-report-guard-name-tree = Directory listing without a limit
+# The name of the guard that checks waiting by sleeping.
+cost-report-guard-name-poll = Waiting by sleeping or looping
+# The name of the guard that checks how long a helper runs.
+cost-report-guard-name-size = Helper past its call budget

@@ -29,6 +29,7 @@ pub enum Command {
         socket: Option<PathBuf>,
     },
     HookFence,
+    HookGuard,
     AgySidecar,
     AgyHook {
         event: String,
@@ -71,6 +72,9 @@ pub enum Command {
         args: Vec<String>,
     },
     Cluster {
+        args: Vec<String>,
+    },
+    Session {
         args: Vec<String>,
     },
     Ask {
@@ -125,6 +129,8 @@ pub fn usage() -> &'static str {
      notchling settings get <key> [--json]  one setting\n  \
      notchling settings set <key> <value> [--json]\n  \
      \u{20}                                           change a setting; some wait for the user's approval in the Inbox\n  \
+     notchling session reload <id|self> [--after-turn] [--json]\n  \
+     \u{20}                                           restart a session's process with the same conversation, to pick up new MCP servers, settings, skills and hooks\n  \
      notchling cluster status [--json]     this machine's cluster and its members\n  \
      notchling cluster join --token-stdin   join the cluster whose token is on stdin\n  \
      notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>\n  \
@@ -134,6 +140,7 @@ pub fn usage() -> &'static str {
      notchling service install|uninstall|print [--dir <folder>]\n  \
      notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
      notchling hook --fence                      Claude Code's PreToolUse hook for cluster sessions: reads the fence file only\n  \
+     notchling hook --guard                      Claude Code's cost guard hook (log only): records what it would have done and never changes a call\n  \
      notchling agy-sidecar                       Antigravity's sidecar: carries the messages you write in Notchling into Antigravity conversations\n  \
      notchling agy-hook pre-tool|pre-invocation  Antigravity's hooks for the sidecar channel: asks the daemon, passes on any trouble\n  \
      notchling --version | --help\n\n\
@@ -152,6 +159,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
     let args: Vec<String> = args.into_iter().collect();
     if args == ["hook", "--fence"] {
         return Ok(Command::HookFence);
+    }
+    if args == ["hook", "--guard"] {
+        return Ok(Command::HookGuard);
     }
     if args == ["agy-sidecar"] {
         return Ok(Command::AgySidecar);
@@ -219,6 +229,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "cluster" => {
             return Ok(Command::Cluster {
+                args: args.collect(),
+            })
+        }
+        "session" => {
+            return Ok(Command::Session {
                 args: args.collect(),
             })
         }
@@ -394,6 +409,15 @@ mod tests {
         }
         assert!(usage().contains("notchling agy-sidecar"));
         assert!(usage().contains("notchling agy-hook"));
+    }
+
+    #[test]
+    fn the_guard_flag_is_a_command_of_its_own() {
+        assert_eq!(p(&["hook", "--guard"]), Ok(Command::HookGuard));
+        assert!(p(&["hook", "--guard", "--socket", "/tmp/s.sock"]).is_err());
+        assert!(p(&["hook", "--socket", "/tmp/s.sock", "--guard"]).is_err());
+        assert!(p(&["hook", "--guard", "--fence"]).is_err());
+        assert!(usage().contains("notchling hook --guard"));
     }
 
     #[test]

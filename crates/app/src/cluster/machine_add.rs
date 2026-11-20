@@ -34,6 +34,7 @@ struct Target {
     host: String,
     user: String,
     organization: Option<String>,
+    key: Option<String>,
     addresses: Vec<MachineAddress>,
 }
 
@@ -51,6 +52,7 @@ pub struct Probe {
     host: String,
     user: String,
     existing: Vec<String>,
+    key: Option<String>,
     addresses: Vec<MachineAddress>,
 }
 
@@ -70,6 +72,7 @@ impl Probe {
 
     pub fn run(&self, engine: &SetupEngine) -> Answer {
         let mut draft = Machine::new(&self.name, &self.host, &self.user);
+        draft.set_ssh_key(self.key.as_deref());
         if !self.addresses.is_empty() {
             draft.set_addresses(self.addresses.clone());
         }
@@ -132,6 +135,7 @@ impl MachineAdd {
             host: host.clone(),
             user: user.clone(),
             organization: organization.filter(|o| !o.trim().is_empty()),
+            key: parsed.key.clone(),
             addresses: parsed.addresses.clone(),
         });
         Ok(Probe {
@@ -140,6 +144,7 @@ impl MachineAdd {
             host,
             user,
             existing,
+            key: parsed.key,
             addresses: parsed.addresses,
         })
     }
@@ -208,6 +213,9 @@ fn save(parts: &AddParts, target: &Target, check: &DraftCheck) -> Result<(), Str
             machine.set_admin(AdminAccess::RootSsh);
         }
         machine.organization = target.organization.clone();
+        if target.key.is_some() {
+            machine.set_ssh_key(target.key.as_deref());
+        }
         if !target.addresses.is_empty() {
             machine.set_addresses(target.addresses.clone());
         }

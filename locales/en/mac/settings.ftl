@@ -395,6 +395,15 @@ settings-hook-artifact-read-failed = When a page read fails (a 404 or another ac
 # What the hook before every tool call does. A cluster is a group of Macs and servers.
 settings-hook-fence = Keeps a cluster session from running tool calls here once it moved to another machine.
 
+# What the cost guard hook before Bash, Read and helper calls does. It only records.
+settings-hook-guard-tools = Records what the cost guard would have done on Bash, Read and helper calls; it changes nothing.
+
+# What the cost guard hook when a helper starts does.
+settings-hook-guard-start = Tells the cost guard a helper started, so it can count helpers working at once.
+
+# What the cost guard hook when a helper stops does.
+settings-hook-guard-stop = Tells the cost guard a helper stopped, so it stops counting it.
+
 # Shown above the hooks when the settings file was left alone because it is not valid JSON.
 settings-hooks-refused-invalid-json = { -brand-claude-code }'s settings.json was left alone: it isn't valid JSON.
 

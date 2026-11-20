@@ -109,7 +109,10 @@ fn address_errors_show_in_the_form_and_hold_check_back() {
 
     let ok = view(None, &draft("agent@vps-sing-1", ""), 0, "me", &[]);
     assert_eq!(ok.error, None);
-    assert!(ok.target.as_deref().unwrap().contains("agent@vps-sing-1"));
+    assert_eq!(
+        ok.target.as_deref(),
+        Some("User agent · Host vps-sing-1 · Port 22")
+    );
     assert!(ok
         .actions
         .iter()
@@ -119,7 +122,10 @@ fn address_errors_show_in_the_form_and_hold_check_back() {
 #[test]
 fn a_bare_host_shows_this_macs_user() {
     let bare = view(None, &draft("m1", ""), 0, "sondoan", &[]);
-    assert!(bare.target.as_deref().unwrap().contains("sondoan@m1"));
+    assert_eq!(
+        bare.target.as_deref(),
+        Some("User sondoan · Host m1 · Port 22")
+    );
 }
 
 #[test]

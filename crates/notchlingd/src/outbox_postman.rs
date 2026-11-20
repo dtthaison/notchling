@@ -2,8 +2,8 @@ use crate::acting::Acting;
 use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
-    after, gate, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd, Verdict, Why,
-    ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
+    after, gate, idle_at_prompt, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd,
+    Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX, TURN_SETTLE_MS,
 };
 use notchling_engine::transcript::sent::Seen;
 use notchling_events::kinds::agents::OutboxThen;
@@ -344,6 +344,20 @@ fn earliest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
     }
 }
 
+struct Calm {
+    id: String,
+    unsure_ms: i64,
+    since: i64,
+    last: i64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Early {
+    Stepped,
+    Waits,
+    Alone,
+}
+
 struct Move {
     row: Row,
     from: State,
@@ -363,6 +377,7 @@ pub(crate) struct Postman {
     cut_short: Option<String>,
     looked: HashMap<String, (i64, i64)>,
     aside_timer: Option<i64>,
+    idle_since: Option<Calm>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -385,6 +400,7 @@ impl Postman {
             cut_short: None,
             looked: HashMap::new(),
             aside_timer: None,
+            idle_since: None,
         }
     }
 
@@ -404,9 +420,15 @@ impl Postman {
             self.aside_timer = earliest(holds, aside);
             let row = match self.inner.ops.store().head(&self.session) {
                 Ok(Some(row)) => row,
-                Ok(None) => return self.rest(now, None),
+                Ok(None) => {
+                    self.idle_since = None;
+                    return self.rest(now, None);
+                }
                 Err(_) => return self.rest(now, Some(now + TICK_MS)),
             };
+            if row.state != State::Unsure {
+                self.idle_since = None;
+            }
             self.courier = Some(self.inner.couriers.of(row.tool).clone());
             let timer = match row.state {
                 State::Sending if self.cut_short.as_deref() != Some(row.id.as_str()) => {
@@ -414,15 +436,29 @@ impl Postman {
                 }
                 State::Unsure => {
                     if self.step_aside(&row, now) {
+                        self.idle_since = None;
                         continue;
                     }
-                    match self.look_again(&row, now) {
+                    let looked = self.look_again(&row, now);
+                    if matches!(looked, Again::Landed) {
+                        self.idle_since = None;
+                        continue;
+                    }
+                    let early = self.early_aside(&row, now);
+                    if early == Early::Stepped {
+                        continue;
+                    }
+                    let timer = match looked {
                         Again::Landed => None,
                         Again::At(at) => Some(earliest(Some(at), row.aside_at_ms).unwrap_or(at)),
                         Again::Never => match row.aside_at_ms {
                             Some(at) => Some(at),
                             None => return self.rest(now, None),
                         },
+                    };
+                    match early {
+                        Early::Waits => earliest(timer, Some(now + TICK_MS)),
+                        _ => timer,
                     }
                 }
                 State::Box | State::Stopped | State::Sending => return self.rest(now, None),
@@ -503,6 +539,59 @@ impl Postman {
                 true
             }
             _ => false,
+        }
+    }
+
+    fn early_aside(&mut self, row: &Row, now: i64) -> Early {
+        if row.aside_at_ms.is_none() || row.aside_ms.is_some() {
+            return Early::Alone;
+        }
+        let store = self.inner.ops.store();
+        let behind = store.list(Some(&self.session)).is_ok_and(|rows| {
+            rows.iter().any(|r| {
+                matches!(r.state, State::Queued | State::Waiting)
+                    && r.hold_ms.is_none_or(|until| until <= now)
+                    && r.next_ms.is_none_or(|next| next <= now)
+            })
+        });
+        if !behind {
+            self.idle_since = None;
+            return Early::Alone;
+        }
+        let facts = self.courier().facts(row, now);
+        if !idle_at_prompt(&facts) {
+            self.idle_since = None;
+            return Early::Waits;
+        }
+        let calm = match self.idle_since.take() {
+            Some(calm)
+                if calm.id == row.id
+                    && calm.unsure_ms == row.updated_ms
+                    && now - calm.last <= 2 * TICK_MS =>
+            {
+                Calm { last: now, ..calm }
+            }
+            _ => Calm {
+                id: row.id.clone(),
+                unsure_ms: row.updated_ms,
+                since: now,
+                last: now,
+            },
+        };
+        let settled = now - calm.since >= TURN_SETTLE_MS && now - row.updated_ms >= TURN_SETTLE_MS;
+        if !settled {
+            self.idle_since = Some(calm);
+            return Early::Waits;
+        }
+        self.idle_since = None;
+        match store.step_aside_now(&row.id, now) {
+            Ok(true) => {
+                self.publish(&row.id);
+                self.inner.ops.emit_then(row, OutboxThen::Aside);
+                Early::Stepped
+            }
+            Ok(false) => Early::Stepped,
+            Err(_) => Early::Waits,
         }
     }
 
@@ -639,6 +728,17 @@ impl Postman {
                     }
                 }
                 None
+            }
+            Gate::Delivered => match self.sent(row) {
+                true => None,
+                false => Some(now + TICK_MS),
+            },
+            Gate::Unsure(why) => {
+                let then = Some(OutboxThen::Unsure);
+                match self.moved(row, row.state, State::Unsure, Some(why), None, then) {
+                    true => None,
+                    false => Some(now + TICK_MS),
+                }
             }
             Gate::Go { guarded } => self.try_row(row, guarded, now),
         }
@@ -844,6 +944,9 @@ impl Postman {
 #[path = "outbox_aside_tests.rs"]
 mod aside_tests;
 #[cfg(test)]
+#[path = "outbox_asked_tests.rs"]
+mod asked_tests;
+#[cfg(test)]
 #[path = "outbox_join_tests.rs"]
 mod join_tests;
 #[cfg(test)]
@@ -852,3 +955,6 @@ mod review_tests;
 #[cfg(test)]
 #[path = "outbox_postman_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "outbox_unsure_queue_tests.rs"]
+mod unsure_queue_tests;

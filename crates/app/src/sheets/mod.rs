@@ -34,6 +34,8 @@ pub mod new_session;
 mod new_session_chrome_tests;
 #[cfg(test)]
 mod new_session_run_on_tests;
+#[cfg(target_os = "macos")]
+pub mod reload_view;
 pub mod renders;
 pub mod run_on;
 #[cfg(target_os = "macos")]

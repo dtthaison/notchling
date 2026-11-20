@@ -11,6 +11,7 @@ use gpui::{
     FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Point, ScrollWheelEvent, SharedString, WeakEntity, Window,
 };
+use notchling_engine::sessions::AgentTarget;
 use notchling_engine::terminal::pty::Signal;
 use notchling_engine::terminal::{Pty, PtyCommand, ReadOutcome, TermCell, TerminalScreen};
 use notchling_kit::labels::Corner;
@@ -258,6 +259,41 @@ impl ChatView {
         self.tick_terminals(cx);
         cx.notify();
         Ok(())
+    }
+
+    pub(super) fn open_session_terminal(&mut self, cx: &mut Context<Self>) {
+        let Some(agent) = self.selected_session().map(|s| s.agent.clone()) else {
+            return;
+        };
+        let AgentTarget::Job(job) = &agent.target else {
+            return;
+        };
+        if self.refuse_selected(Action::Terminal, cx) {
+            return;
+        }
+        let home = self.root.home.clone();
+        let claude = notchling_engine::control::launcher::claude_path(&home);
+        let claude = claude.to_string_lossy().into_owned();
+        let env: Vec<(&str, &str)> = agent
+            .config_dir
+            .as_deref()
+            .map(|dir| vec![("CLAUDE_CONFIG_DIR", dir)])
+            .unwrap_or_default();
+        match start_program(&claude, &["attach", job], &env, &agent.cwd, &home, cx) {
+            Ok(mut shell) => {
+                shell.name = agent.name.trim().to_owned();
+                if self.page.is_open() {
+                    self.close_page(cx);
+                }
+                self.terminal.tabs.add(shell);
+                self.terminal.open = true;
+                self.terminal.focus_next = true;
+                self.tools.error = None;
+                self.tick_terminals(cx);
+            }
+            Err(message) => self.tools.error = Some(message),
+        }
+        cx.notify();
     }
 
     pub(super) fn open_shell_output(&mut self, name: &str, path: &str, cx: &mut Context<Self>) {

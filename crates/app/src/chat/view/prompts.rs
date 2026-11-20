@@ -15,9 +15,11 @@ use notchling_kit::ui::{
 };
 use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 
+use super::dialog_card;
 use super::ChatView;
 use crate::acting::{Control, Decision, Request};
 use crate::chat::data::Tool;
+use crate::chat::dialog_card::Reading;
 use crate::chat::permission_text;
 use crate::chat::prompt_flow::{
     confirmation, failure_text, file_name, is_gone, sending_text, Confirmed, Sending, Told,
@@ -42,6 +44,7 @@ pub struct State {
     screen: Option<(String, PendingQuestion)>,
     screen_asked: Option<String>,
     screen_retry_ms: i64,
+    pub(super) dialog: Reading,
     draft: QuestionDraft,
     sending: Option<Sending>,
     error: Option<String>,
@@ -60,6 +63,7 @@ impl State {
             screen: None,
             screen_asked: None,
             screen_retry_ms: 0,
+            dialog: Reading::default(),
             draft: QuestionDraft::default(),
             sending: None,
             error: None,
@@ -72,6 +76,10 @@ impl State {
 
     pub fn is_shown(&self) -> bool {
         self.shown.is_some()
+    }
+
+    pub(super) fn is_sending(&self) -> bool {
+        self.sending.is_some()
     }
 
     pub fn apply_preview(&mut self, preview: Preview) {
@@ -108,7 +116,7 @@ impl State {
 }
 
 impl ChatView {
-    fn prompt_now(&self) -> Option<Prompt> {
+    pub(super) fn prompt_now(&self) -> Option<Prompt> {
         let session = self.selected_session()?;
         if let Some(preview) = self.prompt.preview {
             return (session.tool == Tool::Claude).then(|| preview_prompt(preview));
@@ -130,6 +138,7 @@ impl ChatView {
             screen,
             &answered,
         )
+        .or_else(|| self.dialog_prompt(&answered))
     }
 
     fn read_screen_question(&mut self, cx: &mut Context<Self>) {
@@ -175,6 +184,7 @@ impl ChatView {
 
     pub(super) fn sync_prompt(&mut self, cx: &mut Context<Self>) {
         self.read_screen_question(cx);
+        self.read_screen_dialog(cx);
         let shown = self.prompt_now();
         let key = |p: &Option<Prompt>| p.as_ref().map(Prompt::key);
         if self.prompt.preview.is_none() && key(&shown) != key(&self.prompt.shown) {
@@ -201,7 +211,7 @@ impl ChatView {
         self.acting(cx).control()
     }
 
-    fn answer_prompt(
+    pub(super) fn answer_prompt(
         &mut self,
         key: String,
         request: Request,
@@ -227,6 +237,7 @@ impl ChatView {
                 match result {
                     Ok(_) => {
                         view.source.mark_answered(&key);
+                        view.reread_dialog_after(&key);
                         if let (Some(told), Some(row)) = (&told, &row) {
                             view.keep_note(row, told.went_through.clone(), cx);
                         }
@@ -238,6 +249,7 @@ impl ChatView {
                     Err(message) => match (&told, &row) {
                         (Some(told), Some(row)) if is_gone(&message) => {
                             view.source.mark_answered(&key);
+                            view.reread_dialog_after(&key);
                             view.keep_note(row, told.already_answered.clone(), cx);
                             view.reload_now(cx);
                         }
@@ -268,7 +280,7 @@ impl ChatView {
     }
 }
 
-fn status(view: &ChatView, gate: Control, a: Appearance) -> Option<Div> {
+pub(super) fn status(view: &ChatView, gate: Control, a: Appearance) -> Option<Div> {
     let text = match view.prompt.sending {
         Some(sending) => sending_text(sending),
         None => gate.tooltip?,
@@ -276,7 +288,7 @@ fn status(view: &ChatView, gate: Control, a: Appearance) -> Option<Div> {
     Some(label(&sentence(text), TypeRole::Meta, Ink::TextMuted, a))
 }
 
-fn failed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+pub(super) fn failed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
     let message = view.prompt.error.as_deref()?;
     Some(
         div()
@@ -329,7 +341,13 @@ fn confirmed(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Opti
     )
 }
 
-fn header(icon_: Icon, title: &str, ink: Ink, step: Option<String>, a: Appearance) -> Div {
+pub(super) fn header(
+    icon_: Icon,
+    title: &str,
+    ink: Ink,
+    step: Option<String>,
+    a: Appearance,
+) -> Div {
     div()
         .h(px(22.0))
         .flex()
@@ -368,6 +386,7 @@ pub(super) fn card(
     let content = match &prompt {
         Prompt::Question(q) => question(view, &row, q, gate, a, window, cx),
         Prompt::Permission(r) => permission(view, r, gate, a, cx),
+        Prompt::Dialog(d) => dialog_card::content(view, &row, d, gate, a, cx),
     };
     Some(
         div()

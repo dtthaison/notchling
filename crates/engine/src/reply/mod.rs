@@ -11,6 +11,8 @@ pub mod shell;
 #[cfg(test)]
 mod exec_box_tests;
 #[cfg(test)]
+mod exec_dialog_tests;
+#[cfg(test)]
 mod exec_hint_tests;
 #[cfg(test)]
 mod exec_leftover_tests;
@@ -26,3 +28,5 @@ mod exec_tests;
 mod pin_tests;
 #[cfg(test)]
 mod plan_clean_tests;
+#[cfg(test)]
+mod read_dialog_tests;

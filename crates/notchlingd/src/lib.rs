@@ -135,6 +135,7 @@ pub mod grant_use;
 pub mod grant_wiring;
 pub mod hook;
 pub mod hook_fence;
+pub mod hook_guard;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
@@ -185,9 +186,12 @@ pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
+pub mod reload_cli;
+pub mod reload_ops;
 mod reply_attempts;
 mod reply_outbox;
 mod reply_screen;
+mod screen_keep;
 pub mod service;
 pub mod settings_asks;
 pub mod settings_cli;
@@ -227,6 +231,8 @@ mod accounts_late_tests;
 mod accounts_ops_log_tests;
 #[cfg(test)]
 mod accounts_ops_tests;
+#[cfg(test)]
+mod acting_dialog_tests;
 #[cfg(test)]
 mod acting_events_tests;
 #[cfg(test)]
@@ -338,6 +344,8 @@ mod codex_children_tests;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]
+mod cost_guard_report_tests;
+#[cfg(test)]
 mod cost_ops_tests;
 #[cfg(test)]
 mod cost_profile_ops_tests;
@@ -374,6 +382,8 @@ mod git_testkit;
 #[cfg(test)]
 mod hook_fence_tests;
 #[cfg(test)]
+mod hook_guard_tests;
+#[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_pages_tests;
@@ -387,6 +397,8 @@ mod inbox_ops_more_tests;
 mod inbox_ops_tests;
 #[cfg(test)]
 mod install_events_tests;
+#[cfg(test)]
+mod install_guard_tests;
 #[cfg(test)]
 mod install_ops_cluster_tests;
 #[cfg(test)]
@@ -430,9 +442,15 @@ mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
 #[cfg(test)]
+mod reload_cli_tests;
+#[cfg(test)]
+mod reload_ops_tests;
+#[cfg(test)]
 mod reply_clear_tests;
 #[cfg(test)]
 mod reply_screen_tests;
+#[cfg(test)]
+mod reply_screens_kept_tests;
 #[cfg(test)]
 mod session_of_tests;
 #[cfg(all(test, unix))]
@@ -527,6 +545,13 @@ pub fn run(command: Command) -> i32 {
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
+        Command::Session { args } => match args.first().map(String::as_str) {
+            Some("reload") => reload_cli::run(&args),
+            _ => {
+                eprintln!("{}", reload_cli::USAGE);
+                reload_cli::TROUBLE
+            }
+        },
         Command::Ask { args } => ask_cli::run_ask(&args, None),
         Command::Asks { args } => ask_cli::run_asks(&args, None),
         Command::Answer { args } => ask_cli::run_answer(&args, None),
@@ -541,6 +566,10 @@ pub fn run(command: Command) -> i32 {
         },
         Command::HookFence => match Layout::from_env(None) {
             Some(l) => hook_fence::run(&l),
+            None => 0,
+        },
+        Command::HookGuard => match Layout::from_env(None) {
+            Some(l) => hook_guard::run(&l),
             None => 0,
         },
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {

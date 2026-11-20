@@ -16,6 +16,8 @@ mod check_tests;
 #[cfg(test)]
 mod fork_tests;
 #[cfg(test)]
+mod ledger_guard_tests;
+#[cfg(test)]
 mod ledger_testkit;
 #[cfg(test)]
 mod ledger_tests;
