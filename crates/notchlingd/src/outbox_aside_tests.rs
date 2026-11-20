@@ -29,6 +29,7 @@ fn unsure_first(r: &Rig, text: &str) -> (String, Postman) {
 fn an_unsure_head_holds_the_row_behind_until_the_hold_runs_out() {
     let r = rig();
     let (first, mut p) = unsure_first(&r, "first message");
+    r.files.set_status(IDLE, "busy");
     let second = r.send("job-idle", "second message");
     p.pass(r.at(T0 + UNSURE_HOLD_MS - 1_000));
     assert_eq!(state(&r, &second.id), Some((State::Queued, None)));

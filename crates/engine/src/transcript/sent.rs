@@ -1,4 +1,4 @@
-use super::message::{cut_chips, Message};
+use super::message::{cut_chips, image_spans, Message};
 use super::restart::{carries_result, flag, WINDOW_BYTES};
 use super::stored::as_stored;
 use super::tail::read_lines;
@@ -121,6 +121,28 @@ fn plain(text: &str) -> String {
     squeezed(&cut_chips(&unpasted(text)))
 }
 
+fn without_paths(text: &str) -> (String, usize) {
+    let text = cut_chips(&unpasted(text));
+    let spans = image_spans(&text);
+    let mut words = String::with_capacity(text.len());
+    let mut at = 0;
+    for (range, _) in &spans {
+        words.push_str(&text[at..range.start]);
+        words.push(' ');
+        at = range.end;
+    }
+    words.push_str(&text[at..]);
+    (squeezed(&words), spans.len())
+}
+
+fn kept_as_text(message: &Message, text: &str, images: Option<usize>) -> bool {
+    if message.pictures == 0 {
+        return false;
+    }
+    let (words, kept) = without_paths(text);
+    kept > 0 && words == message.text && images.is_none_or(|n| kept + n >= message.pictures)
+}
+
 pub(super) fn names(entry: &str, line: &str) -> bool {
     let bash = between(line, "<bash-input>", "</bash-input>", true);
     plain(entry) == plain(line) || bash.is_some_and(|command| squeezed(&command) == squeezed(entry))
@@ -241,7 +263,9 @@ pub(super) fn entry_matches(message: &Message, content: &str) -> bool {
         return false;
     }
     let text = plain(content);
-    text == message.text || message.bash.as_deref() == Some(text.as_str())
+    text == message.text
+        || message.bash.as_deref() == Some(text.as_str())
+        || kept_as_text(message, content, None)
 }
 
 fn line_matches(message: &Message, text: &str, images: usize) -> bool {
@@ -256,7 +280,8 @@ fn line_matches(message: &Message, text: &str, images: usize) -> bool {
             return true;
         }
     }
-    plain(text) == message.text && images >= message.pictures
+    (plain(text) == message.text && images >= message.pictures)
+        || kept_as_text(message, text, Some(images))
 }
 
 fn command_matches(message: &Message, text: &str) -> bool {
@@ -400,6 +425,9 @@ mod human_tests;
 #[cfg(test)]
 #[path = "sent_invisible_tests.rs"]
 mod invisible_tests;
+#[cfg(test)]
+#[path = "sent_kept_paths_tests.rs"]
+mod kept_paths_tests;
 #[cfg(test)]
 #[path = "sent_pictures_tests.rs"]
 mod pictures_tests;

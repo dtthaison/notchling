@@ -2,8 +2,8 @@ use crate::acting::Acting;
 use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
-    after, gate, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd, Verdict, Why,
-    ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
+    after, gate, idle_at_prompt, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd,
+    Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
 };
 use notchling_engine::transcript::sent::Seen;
 use notchling_events::kinds::agents::OutboxThen;
@@ -344,6 +344,13 @@ fn earliest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Early {
+    Stepped,
+    Waits,
+    Alone,
+}
+
 struct Move {
     row: Row,
     from: State,
@@ -416,13 +423,21 @@ impl Postman {
                     if self.step_aside(&row, now) {
                         continue;
                     }
-                    match self.look_again(&row, now) {
+                    let early = self.early_aside(&row, now);
+                    if early == Early::Stepped {
+                        continue;
+                    }
+                    let timer = match self.look_again(&row, now) {
                         Again::Landed => None,
                         Again::At(at) => Some(earliest(Some(at), row.aside_at_ms).unwrap_or(at)),
                         Again::Never => match row.aside_at_ms {
                             Some(at) => Some(at),
                             None => return self.rest(now, None),
                         },
+                    };
+                    match early {
+                        Early::Waits => earliest(timer, Some(now + TICK_MS)),
+                        _ => timer,
                     }
                 }
                 State::Box | State::Stopped | State::Sending => return self.rest(now, None),
@@ -503,6 +518,32 @@ impl Postman {
                 true
             }
             _ => false,
+        }
+    }
+
+    fn early_aside(&mut self, row: &Row, now: i64) -> Early {
+        if row.aside_at_ms.is_none() || row.aside_ms.is_some() {
+            return Early::Alone;
+        }
+        let store = self.inner.ops.store();
+        let behind = store.list(Some(&self.session)).is_ok_and(|rows| {
+            rows.iter()
+                .any(|r| matches!(r.state, State::Queued | State::Waiting))
+        });
+        if !behind {
+            return Early::Alone;
+        }
+        let facts = self.courier().facts(row, now);
+        if !idle_at_prompt(&facts) {
+            return Early::Waits;
+        }
+        match store.step_aside_now(&row.id, now) {
+            Ok(true) => {
+                self.publish(&row.id);
+                self.inner.ops.emit_then(row, OutboxThen::Aside);
+                Early::Stepped
+            }
+            _ => Early::Waits,
         }
     }
 
@@ -852,3 +893,6 @@ mod review_tests;
 #[cfg(test)]
 #[path = "outbox_postman_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "outbox_unsure_queue_tests.rs"]
+mod unsure_queue_tests;
