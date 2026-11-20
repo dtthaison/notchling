@@ -1,7 +1,11 @@
 use super::*;
 use crate::outbox_testkit::{rig, rig_with, Options, Rig, BUSY, IDLE, T0};
-use notchling_engine::outbox::{gate, Gate, State, Why, QUEUE_STALE_MS, TURN_SETTLE_MS};
+use notchling_engine::outbox::{
+    gate, Gate, State, Why, DONE_STOPS_AFTER_TRIES, QUEUE_STALE_MS, SLOW_READ_MS, TURN_SETTLE_MS,
+    UNREADABLE_AFTER_MS,
+};
 use notchling_engine::reply::keys::timing::{ATTACH_QUIET_MS, KEY_PAUSE_MS};
+use notchling_engine::sessions::fresh::Ended;
 use std::sync::atomic::Ordering;
 
 fn taken(r: &Rig, id: &str, text: &str) -> Row {
@@ -52,6 +56,168 @@ fn the_live_status_and_the_job_state_come_from_the_files() {
     );
     r.files.set_state(BUSY, "stopped");
     assert_eq!(r.courier.facts(&row, T0).job, Job::Stopped);
+}
+
+fn checking(since_ms: i64) -> Job {
+    Job::Unknown { since_ms }
+}
+
+#[test]
+fn a_stopped_state_with_a_live_process_is_not_a_stopped_session() {
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.set_state(BUSY, "stopped");
+    r.files
+        .processes
+        .lock()
+        .unwrap()
+        .insert(BUSY.into(), (4242, Some(1)));
+    assert_eq!(r.courier.facts(&row, T0).job, checking(T0));
+    let later = r.courier.facts(&row, T0 + 60_000);
+    assert_ne!(later.job, Job::Stopped);
+    assert!(matches!(
+        gate(&row, &r.courier.facts(&row, T0)),
+        Gate::Wait {
+            why: Why::Checking,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_real_exit_is_stopped_at_once() {
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.set_state(BUSY, "stopped");
+    let facts = r.courier.facts(&row, T0);
+    assert_eq!(facts.job, Job::Stopped);
+    assert_eq!(gate(&row, &facts), Gate::NeedsUser(State::Stopped));
+}
+
+#[test]
+fn a_read_that_timed_out_is_unknown_then_unreadable_and_never_stopped() {
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.read_as(BUSY, Ended::Unknown);
+    let first = r.courier.facts(&row, T0);
+    assert_eq!(first.job, checking(T0));
+    assert!(matches!(
+        gate(&row, &first),
+        Gate::Wait {
+            why: Why::Checking,
+            ..
+        }
+    ));
+    let long = r.courier.facts(&row, T0 + UNREADABLE_AFTER_MS);
+    assert_eq!(long.job, checking(T0));
+    assert!(matches!(
+        gate(&row, &long),
+        Gate::Wait {
+            why: Why::Unreadable,
+            ..
+        }
+    ));
+    let hour = r.courier.facts(&row, T0 + 3_600_000);
+    assert!(matches!(
+        gate(&row, &hour),
+        Gate::Wait {
+            why: Why::Unreadable,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_late_read_never_counts_as_proof_of_a_stop() {
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.set_state(BUSY, "stopped");
+    r.files.reads_take(&r.clock, SLOW_READ_MS);
+    let late = r.courier.facts(&row, T0);
+    assert_eq!(late.job, checking(T0));
+    assert!(matches!(
+        gate(&row, &late),
+        Gate::Wait {
+            why: Why::Checking,
+            ..
+        }
+    ));
+    r.files.reads_take(&r.clock, SLOW_READ_MS - 1);
+    assert_eq!(r.courier.facts(&row, T0 + 1_000).job, Job::Stopped);
+}
+
+#[test]
+fn a_state_file_caught_in_a_rename_is_unknown_and_the_next_read_decides() {
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.set_state(BUSY, "stopped");
+    r.files.read_as(BUSY, Ended::Unknown);
+    assert_eq!(r.courier.facts(&row, T0).job, checking(T0));
+    r.files.ended.lock().unwrap().clear();
+    r.files.set_state(BUSY, "working");
+    let back = r.courier.facts(&row, T0 + 1_000);
+    assert_eq!(
+        back.job,
+        Job::Live {
+            status: Some("busy".into())
+        }
+    );
+    assert!(matches!(gate(&row, &back), Gate::Go { .. }));
+}
+
+#[test]
+fn a_done_job_with_no_process_is_tried_then_stopped_when_the_tries_fail() {
+    let r = rig();
+    let mut row = r.send("job-a", "hi");
+    r.files.set_state(BUSY, "done");
+    let facts = r.courier.facts(&row, T0);
+    assert_eq!(facts.job, Job::Done);
+    assert_eq!(gate(&row, &facts), Gate::Go { guarded: false });
+    row.tries = DONE_STOPS_AFTER_TRIES;
+    assert_eq!(gate(&row, &facts), Gate::NeedsUser(State::Stopped));
+    r.files
+        .processes
+        .lock()
+        .unwrap()
+        .insert(BUSY.into(), (4242, Some(1)));
+    let alive = r.courier.facts(&row, T0 + 1);
+    assert!(matches!(alive.job, Job::Live { .. }));
+    assert!(matches!(gate(&row, &alive), Gate::Go { .. }));
+}
+
+#[test]
+fn an_unreadable_job_waits_in_the_outbox_with_its_reason_and_goes_on_when_it_reads() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.files.read_as(IDLE, Ended::Unknown);
+    let mut p = r.postmen.postman(IDLE);
+    p.pass(r.at(T0));
+    assert_eq!(
+        r.row(&row.id).map(|row| (row.state, row.why)),
+        Some((State::Waiting, Some(Why::Checking)))
+    );
+    p.pass(r.at(T0 + UNREADABLE_AFTER_MS));
+    assert_eq!(
+        r.row(&row.id).map(|row| (row.state, row.why)),
+        Some((State::Waiting, Some(Why::Unreadable)))
+    );
+    p.pass(r.at(T0 + 3_600_000));
+    assert_eq!(r.row(&row.id).unwrap().state, State::Waiting);
+    r.files.ended.lock().unwrap().clear();
+    p.pass(r.at(T0 + 3_601_000));
+    assert_eq!(r.row(&row.id), None, "read again, typed");
+    assert!(r.typed().contains("hi"));
+}
+
+#[test]
+fn a_session_that_really_ended_shows_stopped_in_the_outbox() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.files.set_state(IDLE, "stopped");
+    let mut p = r.postmen.postman(IDLE);
+    p.pass(r.at(T0));
+    assert_eq!(r.row(&row.id).unwrap().state, State::Stopped);
+    assert!(r.typed().is_empty());
 }
 
 #[test]

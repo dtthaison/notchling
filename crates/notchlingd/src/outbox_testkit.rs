@@ -9,6 +9,7 @@ use crate::outbox_verify::SafeModes;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::outbox::{OutboxStore, QueuedVerdict, Row, Verdict, Via};
 use notchling_engine::reply::keys::ENTER;
+use notchling_engine::sessions::fresh::Ended;
 use notchling_engine::sessions::{Agent, Roots};
 use notchling_engine::transcript::queue_state::QueueState;
 use notchling_engine::transcript::sent::Seen;
@@ -55,6 +56,8 @@ pub(crate) struct FakeFiles {
     pub processes: Mutex<HashMap<String, (u32, Option<i64>)>>,
     pub born: Mutex<HashMap<String, i64>>,
     pub shared_name: AtomicBool,
+    pub ended: Mutex<HashMap<String, Ended>>,
+    pub slow: Mutex<Option<(Arc<AtomicI64>, i64)>>,
 }
 
 impl JobFiles for FakeFiles {
@@ -65,6 +68,21 @@ impl JobFiles for FakeFiles {
         let known = self.rows.lock().unwrap().contains_key(job);
         let state = self.states.lock().unwrap().get(job).cloned();
         state.or_else(|| known.then(String::new))
+    }
+    fn ended(&self, job: &str) -> Ended {
+        if let Some((clock, cost)) = self.slow.lock().unwrap().as_ref() {
+            clock.fetch_add(*cost, Ordering::SeqCst);
+        }
+        if let Some(said) = self.ended.lock().unwrap().get(job) {
+            return *said;
+        }
+        let alive = self.processes.lock().unwrap().contains_key(job);
+        match self.states.lock().unwrap().get(job).map(String::as_str) {
+            Some("stopped") if alive => Ended::Unknown,
+            Some("stopped") => Ended::Stopped,
+            Some("done") if !alive => Ended::Done,
+            _ => Ended::No,
+        }
     }
     fn status(&self, job: &str) -> Option<String> {
         self.statuses.lock().unwrap().get(job).cloned()
@@ -102,6 +120,12 @@ impl FakeFiles {
     }
     pub(crate) fn set_state(&self, job: &str, state: &str) {
         self.states.lock().unwrap().insert(job.into(), state.into());
+    }
+    pub(crate) fn read_as(&self, job: &str, ended: Ended) {
+        self.ended.lock().unwrap().insert(job.into(), ended);
+    }
+    pub(crate) fn reads_take(&self, clock: &Arc<AtomicI64>, ms: i64) {
+        *self.slow.lock().unwrap() = Some((clock.clone(), ms));
     }
     pub(crate) fn vanish(&self, job: &str) -> Option<Agent> {
         self.states.lock().unwrap().remove(job);

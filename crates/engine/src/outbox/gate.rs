@@ -1,6 +1,6 @@
 use super::{
-    Kind, Row, State, Why, ANSWER_GRACE_MS, ANSWER_HOLD_MS, DIALOG_RECHECK_MS, GONE_AFTER_MS,
-    QUEUE_STALE_MS, TURN_SETTLE_MS,
+    Kind, Row, State, Why, ANSWER_GRACE_MS, ANSWER_HOLD_MS, DIALOG_RECHECK_MS,
+    DONE_STOPS_AFTER_TRIES, GONE_AFTER_MS, QUEUE_STALE_MS, TURN_SETTLE_MS, UNREADABLE_AFTER_MS,
 };
 
 const RECHECK_MS: i64 = 1_000;
@@ -9,6 +9,8 @@ const RECHECK_MS: i64 = 1_000;
 pub enum Job {
     Missing { since_ms: i64 },
     Stopped,
+    Unknown { since_ms: i64 },
+    Done,
     Live { status: Option<String> },
 }
 
@@ -44,6 +46,21 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
             };
         }
         Job::Stopped => return Gate::NeedsUser(State::Stopped),
+        Job::Unknown { since_ms } => {
+            let why = if now - since_ms >= UNREADABLE_AFTER_MS {
+                Why::Unreadable
+            } else {
+                Why::Checking
+            };
+            return Gate::Wait {
+                why,
+                until_ms: now + RECHECK_MS,
+            };
+        }
+        Job::Done if row.tries >= DONE_STOPS_AFTER_TRIES => {
+            return Gate::NeedsUser(State::Stopped);
+        }
+        Job::Done => None,
         Job::Live { status } => status.as_deref(),
     };
     if row.why == Some(Why::Answer) {

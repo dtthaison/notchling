@@ -1,6 +1,6 @@
 use super::agent::Agent;
 use super::iso::parse_iso_ms;
-use super::jobs::{agent_from_job, rank, read_json, read_sessions};
+use super::jobs::{agent_from_job, rank, read_json, read_sessions, Rank};
 use super::lanes::{config_dirs, Roots};
 use super::monitor::Probes;
 use crate::transcript::util::modified_secs;
@@ -57,6 +57,67 @@ pub fn job_state(roots: &Roots, short_id: &str) -> Option<String> {
     }
     best.map(|(_, state)| state)
         .or_else(|| found.then(String::new))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ended {
+    No,
+    Unknown,
+    Stopped,
+    Done,
+}
+
+pub fn job_ended(roots: &Roots, probes: &Probes, short_id: &str) -> Ended {
+    if !named(short_id) {
+        return Ended::No;
+    }
+    let mut unreadable = false;
+    let mut best: Option<(Rank, String)> = None;
+    for config in config_dirs(roots) {
+        let dir = config.dir.join("jobs").join(short_id);
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(job) = read_json(&dir.join("state.json")) else {
+            unreadable = true;
+            continue;
+        };
+        let this = rank(&job);
+        if best.as_ref().is_none_or(|(top, _)| this > *top) {
+            let state = job.get("state").and_then(Value::as_str).unwrap_or("");
+            best = Some((this, state.to_string()));
+        }
+    }
+    let Some((_, state)) = best else {
+        return if unreadable {
+            Ended::Unknown
+        } else {
+            Ended::No
+        };
+    };
+    let alive = || live_file(roots, probes.is_alive, short_id).is_some();
+    let torn = || {
+        config_dirs(roots)
+            .iter()
+            .any(|c| session_file_unreadable(&c.dir))
+    };
+    match state.as_str() {
+        "stopped" if unreadable || alive() || torn() => Ended::Unknown,
+        "stopped" => Ended::Stopped,
+        "done" if !alive() => Ended::Done,
+        _ => Ended::No,
+    }
+}
+
+fn session_file_unreadable(base: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(base.join("sessions")) else {
+        return false;
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .any(|p| read_json(&p).is_none())
 }
 
 fn live_file(roots: &Roots, alive: &dyn Fn(u32) -> bool, short_id: &str) -> Option<Value> {

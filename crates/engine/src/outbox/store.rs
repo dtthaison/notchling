@@ -571,6 +571,16 @@ impl OutboxStore {
         self.requeue_with(id, from, clear_box, None, now_ms)
     }
 
+    pub fn restart(
+        &self,
+        id: &str,
+        from: &[State],
+        clear_box: bool,
+        now_ms: i64,
+    ) -> Result<Change, String> {
+        self.requeue_with(id, from, clear_box, Some(0), now_ms)
+    }
+
     pub fn untake(
         &self,
         id: &str,

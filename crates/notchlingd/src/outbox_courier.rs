@@ -5,10 +5,11 @@ use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
     AnswerWatch, Facts, Job, Kind, Row, Seen, Tried, TryEnd, Why, ANSWER_GRACE_MS,
-    DIALOG_RECHECK_MS, GONE_AFTER_MS,
+    DIALOG_RECHECK_MS, GONE_AFTER_MS, SLOW_READ_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
+use notchling_engine::sessions::fresh::Ended;
 use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
@@ -78,6 +79,7 @@ impl Courier for Refuse {
 pub(crate) trait JobFiles: Send + Sync {
     fn row(&self, job: &str) -> Option<Agent>;
     fn state(&self, job: &str) -> Option<String>;
+    fn ended(&self, job: &str) -> Ended;
     fn status(&self, job: &str) -> Option<String>;
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
     fn queue(&self, transcript: &str) -> Option<QueueState>;
@@ -119,6 +121,10 @@ impl JobFiles for LiveFiles {
 
     fn state(&self, job: &str) -> Option<String> {
         fresh::job_state(&self.roots, job)
+    }
+
+    fn ended(&self, job: &str) -> Ended {
+        fresh::job_ended(&self.roots, &Probes::from_proc(), job)
     }
 
     fn status(&self, job: &str) -> Option<String> {
@@ -227,6 +233,7 @@ pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
 #[derive(Default)]
 struct Memo {
     missing_since: Option<i64>,
+    unknown_since: Option<i64>,
     dialog_at: Option<i64>,
     calm_since: Option<i64>,
     last_seen: Option<i64>,
@@ -305,8 +312,10 @@ impl ClaudeCourier {
     }
 
     fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
-        let Job::Live { status } = job else {
-            return true;
+        let status = match job {
+            Job::Live { status } => status.as_deref(),
+            Job::Done => None,
+            _ => return true,
         };
         if now_ms - row.updated_ms < ANSWER_GRACE_MS {
             return true;
@@ -318,7 +327,7 @@ impl ClaudeCourier {
             .take();
         let mut watch = taken.unwrap_or_default();
         let key = (row.id.as_str(), row.updated_ms);
-        let open = watch.open(key, status.as_deref(), now_ms, || {
+        let open = watch.open(key, status, now_ms, || {
             let seen = match fresh {
                 Some(agent) => self.acting.dialog_seen(agent),
                 None => Seen::Unknown,
@@ -341,22 +350,29 @@ impl ClaudeCourier {
 
     fn job_of(&self, row: &Row, fresh: Option<&Agent>, now_ms: i64) -> (Job, bool) {
         let state = self.files.state(&row.session);
-        match (fresh, state.as_deref()) {
-            (_, Some("stopped")) => (Job::Stopped, false),
-            (None, None) => (Job::Missing { since_ms: now_ms }, true),
-            (Some(agent), _) if !agent.can_reply() => (
+        let asked = (self.clock)();
+        let ended = self.files.ended(&row.session);
+        let late = (self.clock)() - asked >= SLOW_READ_MS;
+        let unknown = Job::Unknown { since_ms: now_ms };
+        match (fresh, state.as_deref(), ended) {
+            (_, _, Ended::Unknown) => (unknown, false),
+            (_, _, Ended::Stopped) if late => (unknown, false),
+            (_, _, Ended::Stopped) => (Job::Stopped, false),
+            (None, None, _) => (Job::Missing { since_ms: now_ms }, true),
+            (Some(agent), _, _) if !agent.can_reply() => (
                 Job::Missing {
                     since_ms: now_ms - GONE_AFTER_MS,
                 },
                 false,
             ),
-            (Some(_), _) => (
+            (_, _, Ended::Done) if !late => (Job::Done, false),
+            (Some(_), _, _) => (
                 Job::Live {
                     status: self.files.status(&row.session),
                 },
                 false,
             ),
-            (None, Some(_)) => (Job::Live { status: None }, false),
+            (None, Some(_), _) => (Job::Live { status: None }, false),
         }
     }
 
@@ -506,8 +522,15 @@ impl Courier for ClaudeCourier {
             Job::Missing { .. } if missing => Job::Missing {
                 since_ms: *memo.missing_since.get_or_insert(now_ms),
             },
+            Job::Unknown { .. } => {
+                memo.missing_since = None;
+                Job::Unknown {
+                    since_ms: *memo.unknown_since.get_or_insert(now_ms),
+                }
+            }
             other => {
                 memo.missing_since = None;
+                memo.unknown_since = None;
                 other
             }
         };

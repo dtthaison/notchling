@@ -869,6 +869,33 @@ fn resend_resume_calls_hook_then_queues() {
 }
 
 #[test]
+fn resend_resume_starts_the_tries_again() {
+    let r = rig();
+    let id = id_of(&send(&r, "job-idle", "hello"));
+    for at in [10, 12, 14] {
+        r.store.take(&id, at).unwrap().unwrap();
+        r.store
+            .set_state(
+                &id,
+                &[State::Sending],
+                State::Waiting,
+                Some(Why::Retry),
+                None,
+                at + 1,
+            )
+            .unwrap();
+    }
+    r.store
+        .set_state(&id, &[State::Waiting], State::Stopped, None, None, 20)
+        .unwrap();
+    assert_eq!(r.store.get(&id).unwrap().unwrap().tries, 3);
+    r.ops.set_resume(Arc::new(|_| Ok(())));
+    call(&r, ops::OUTBOX_RESEND, json!({"id": id, "resume": true})).unwrap();
+    let row = r.store.get(&id).unwrap().unwrap();
+    assert_eq!((row.state, row.tries), (State::Queued, 0));
+}
+
+#[test]
 fn outbox_topic_is_app_tier() {
     let r = rig();
     assert_eq!(r.ops.topics(), [topics::OUTBOX]);

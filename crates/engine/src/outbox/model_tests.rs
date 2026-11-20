@@ -33,6 +33,9 @@ fn words_round_trip_through_as_str_and_parse() {
         Why::Dropped,
         Why::NotCleared,
         Why::Mixed,
+        Why::Answer,
+        Why::Checking,
+        Why::Unreadable,
     ] {
         assert_eq!(Why::parse(why.as_str()), Some(why));
     }

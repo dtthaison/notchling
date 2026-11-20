@@ -705,11 +705,12 @@ impl OutboxOps {
             (State::Waiting, Some(Why::Retry)) => (State::Waiting, row.clear_box),
             _ => return Err(bad("There's nothing to send again.")),
         };
-        match self
-            .store
-            .requeue(&row.id, &[from], clear_box, now_ms())
-            .map_err(|_| save_failed())?
-        {
+        let now = now_ms();
+        let requeued = match from {
+            State::Stopped => self.store.restart(&row.id, &[from], clear_box, now),
+            _ => self.store.requeue(&row.id, &[from], clear_box, now),
+        };
+        match requeued.map_err(|_| save_failed())? {
             Change::Done => {}
             Change::Busy | Change::Stale => return Err(failed("The message changed; try again.")),
             Change::Missing => return Err(bad(NO_MESSAGE)),

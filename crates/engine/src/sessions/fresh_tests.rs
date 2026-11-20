@@ -150,3 +150,98 @@ fn job_process_ignores_a_session_file_of_a_dead_pid() {
         Some((std::process::id(), Some(2)))
     );
 }
+
+fn ended(dir: &TempDir) -> Ended {
+    job_ended(&roots(dir), &Probes::from_proc(), "be50d36a")
+}
+
+#[test]
+fn a_stopped_job_with_no_live_process_has_really_ended() {
+    let dir = TempDir::new("fresh-ended-stopped");
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "x"));
+    assert_eq!(ended(&dir), Ended::Stopped);
+    let dead = live("idle").replace(&std::process::id().to_string(), "99999999");
+    dir.write("claude/sessions/1.json", &dead);
+    assert_eq!(ended(&dir), Ended::Stopped);
+}
+
+#[test]
+fn a_stopped_job_whose_process_is_alive_is_unknown_not_ended() {
+    let dir = TempDir::new("fresh-ended-alive");
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "x"));
+    dir.write("claude/sessions/1.json", &live("busy"));
+    assert_eq!(ended(&dir), Ended::Unknown);
+}
+
+#[test]
+fn a_stopped_job_is_unknown_while_a_session_file_is_caught_mid_write() {
+    let dir = TempDir::new("fresh-ended-torn-session");
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "x"));
+    let dead = live("idle").replace(&std::process::id().to_string(), "99999999");
+    dir.write("claude/sessions/1.json", &dead);
+    assert_eq!(ended(&dir), Ended::Stopped);
+    dir.write("claude/sessions/2.json", "{\"pid\": 12");
+    assert_eq!(ended(&dir), Ended::Unknown);
+    dir.write("claude/sessions/2.json", &dead);
+    assert_eq!(ended(&dir), Ended::Stopped);
+}
+
+#[test]
+fn a_state_file_caught_mid_write_is_unknown_and_the_finished_one_decides() {
+    let dir = TempDir::new("fresh-ended-torn");
+    dir.write("claude/jobs/be50d36a/state.json", "{ half a wri");
+    assert_eq!(ended(&dir), Ended::Unknown);
+    dir.write("claude/jobs/be50d36a/state.json", "");
+    assert_eq!(ended(&dir), Ended::Unknown);
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "x"));
+    assert_eq!(ended(&dir), Ended::Stopped);
+    dir.write("claude/jobs/be50d36a/state.json", &job("working", 0, "x"));
+    assert_eq!(ended(&dir), Ended::No);
+}
+
+#[test]
+fn a_stale_stopped_copy_is_not_the_answer_while_the_live_copy_cannot_be_read() {
+    let dir = TempDir::new("fresh-ended-copies");
+    let lane = dir.path("lane-b");
+    let lanes = json!([{
+        "name": "b", "path": lane.to_string_lossy(), "accountID": "a2", "email": "b@example.com"
+    }]);
+    dir.write("lanes.json", &lanes.to_string());
+    let roots = Roots {
+        main_dir: dir.path("claude"),
+        lanes_file: dir.path("lanes.json"),
+    };
+    let probes = Probes::from_proc();
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "old"));
+    dir.write("lane-b/jobs/be50d36a/state.json", "{ half a wri");
+    assert_eq!(job_ended(&roots, &probes, "be50d36a"), Ended::Unknown);
+    dir.write("lane-b/jobs/be50d36a/state.json", &job("working", 0, "now"));
+    assert_eq!(job_ended(&roots, &probes, "be50d36a"), Ended::No);
+}
+
+#[test]
+fn a_done_job_with_no_process_is_done_and_with_a_process_is_not_ended() {
+    let dir = TempDir::new("fresh-ended-done");
+    dir.write(
+        "claude/jobs/be50d36a/state.json",
+        &job("done", 0, "finished"),
+    );
+    assert_eq!(ended(&dir), Ended::Done);
+    dir.write("claude/sessions/1.json", &live("idle"));
+    assert_eq!(ended(&dir), Ended::No);
+}
+
+#[test]
+fn a_live_job_or_no_job_has_not_ended() {
+    let dir = TempDir::new("fresh-ended-none");
+    assert_eq!(ended(&dir), Ended::No);
+    dir.write("claude/jobs/be50d36a/state.json", &job("working", 2, "x"));
+    assert_eq!(ended(&dir), Ended::No);
+    for odd in ["", "..", ".hidden", "a/b"] {
+        assert_eq!(
+            job_ended(&roots(&dir), &Probes::from_proc(), odd),
+            Ended::No,
+            "{odd:?}"
+        );
+    }
+}

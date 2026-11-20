@@ -77,6 +77,16 @@ fn every_state_maps_to_words_and_buttons() {
             vec![Edit, Remove],
         ),
         (
+            row("a", "waiting", Some("checking"), "x"),
+            Status::Checking,
+            vec![Edit, Remove],
+        ),
+        (
+            row("a", "waiting", Some("unreadable"), "x"),
+            Status::Unreadable,
+            vec![ShowTerminal, Edit, Remove],
+        ),
+        (
             row("a", "waiting", Some("dialog"), "x"),
             Status::WaitingDialog,
             vec![Edit, Remove],

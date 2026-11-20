@@ -69,6 +69,60 @@ fn stopped_job_needs_user() {
 }
 
 #[test]
+fn an_unknown_job_waits_to_check_and_is_never_stopped() {
+    let mut f = facts(10_000);
+    f.job = Job::Unknown { since_ms: 10_000 };
+    assert_eq!(
+        gate(&row(Kind::Prompt), &f),
+        Gate::Wait {
+            why: Why::Checking,
+            until_ms: 11_000
+        }
+    );
+    f.now_ms = 10_000 + UNREADABLE_AFTER_MS - 1;
+    assert!(matches!(
+        gate(&row(Kind::Prompt), &f),
+        Gate::Wait {
+            why: Why::Checking,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn an_unknown_job_for_long_is_unreadable_and_keeps_waiting() {
+    let mut f = facts(10_000 + UNREADABLE_AFTER_MS);
+    f.job = Job::Unknown { since_ms: 10_000 };
+    assert_eq!(
+        gate(&row(Kind::Prompt), &f),
+        Gate::Wait {
+            why: Why::Unreadable,
+            until_ms: 10_000 + UNREADABLE_AFTER_MS + 1_000
+        }
+    );
+    f.now_ms += 3_600_000;
+    assert!(matches!(
+        gate(&row(Kind::Command), &f),
+        Gate::Wait {
+            why: Why::Unreadable,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_done_job_is_tried_and_is_stopped_only_after_the_tries_fail() {
+    let mut f = facts(1_000);
+    f.job = Job::Done;
+    let mut r = row(Kind::Prompt);
+    assert_eq!(gate(&r, &f), Gate::Go { guarded: false });
+    r.tries = DONE_STOPS_AFTER_TRIES - 1;
+    assert_eq!(gate(&r, &f), Gate::Go { guarded: false });
+    r.tries = DONE_STOPS_AFTER_TRIES;
+    assert_eq!(gate(&r, &f), Gate::NeedsUser(State::Stopped));
+}
+
+#[test]
 fn waiting_status_waits_for_dialog() {
     let mut f = facts(1_000);
     f.job = Job::Live {
