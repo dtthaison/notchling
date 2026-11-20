@@ -883,3 +883,39 @@ chat-chrome-turn-on-anyway = Turn On Anyway
 chat-chrome-turn-off = Turn Off
 chat-chrome-turn-off-anyway = Turn Off Anyway
 chat-chrome-open-terminal = Open Terminal
+
+# The Reload Session menu item and its card: restarts a session's process with the same conversation, to pick up new tools, settings, skills and hooks.
+chat-reload-item = Reload Session
+chat-reload-title = Reload Session
+chat-reload-lead = Reloads the session to pick up new tools. The conversation is re-read.
+chat-reload-cost = Reloads the session to pick up new tools. The conversation is re-read: { $tokens } tokens, about { $cost } on { $model }.
+chat-reload-tokens = Reloads the session to pick up new tools. The conversation is re-read: { $tokens } tokens.
+chat-reload-reload = Reload
+chat-reload-cancel = Cancel
+chat-reload-cancel-reload = Cancel Reload
+chat-reload-close = Close
+chat-reload-try-again = Try Again
+chat-reload-copy = Copy Command
+chat-reload-wait-turn = Waiting for the turn to end…
+chat-reload-wait-dialog = Waiting for the open question to be answered…
+chat-reload-wait-tasks = { $count ->
+    [one] 1 helper running: reload when it finishes?
+   *[other] { $count } helpers running: reload when they finish?
+}
+chat-reload-wait-note = The session reloads on its own once it can. Cancel to leave it as it is.
+chat-reload-row = Reloading…
+chat-reload-starting = Starting the reload…
+chat-reload-cancelling = Cancelling the reload…
+chat-reload-working = Reloading… the conversation is kept
+chat-reload-done = Session reloaded
+chat-reload-done-new = Session reloaded. It continues as a new session id.
+chat-reload-busy-turn = The turn didn't end in time. Try again when it has.
+chat-reload-busy-dialog = A question is still open in the session. Answer it, then try again.
+chat-reload-busy-tasks = Background work was still running. Try again when it has finished.
+chat-reload-tasks-unknown = Notchling can't tell whether this session has background work. Reloading the session stops any.
+chat-reload-failed = { $text }
+chat-reload-terminal = This session runs in a terminal Notchling didn't start, so it can't restart it. Quit the session there, then run this in the same folder:
+chat-reload-terminal-command = claude --resume { $id }
+
+# The tooltip of the ⋯ button in Chat's session header: it opens the same menu as a right click on the session's row.
+chat-session-menu-tip = Session Menu

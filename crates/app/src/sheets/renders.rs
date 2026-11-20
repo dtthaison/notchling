@@ -18,7 +18,7 @@ use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 19] = [
+pub const VIEWS: [ViewSpec; 22] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -110,6 +110,21 @@ pub const VIEWS: [ViewSpec; 19] = [
         about: "the Chrome sheet when the extension isn't connected: the fix, the help lines and Try Again (made-up data)",
     },
     ViewSpec {
+        name: "reload-card",
+        size: (560.0, 176.0),
+        about: "the Reload Session card: what it does, the conversation's tokens and the catalog price on its model, Reload and Cancel (made-up data)",
+    },
+    ViewSpec {
+        name: "reload-waiting",
+        size: (560.0, 252.0),
+        about: "the Reload Session card while three helpers run: the question, the note and Cancel Reload (made-up data)",
+    },
+    ViewSpec {
+        name: "reload-terminal",
+        size: (560.0, 236.0),
+        about: "the Reload Session card for a terminal session the user owns: the instructions, the command and Copy Command (made-up data)",
+    },
+    ViewSpec {
         name: "settings-agents-client-update",
         size: (620.0, 900.0),
         about: "the Client part with a newer version out: Latest, Update (Install off, so disabled with its note) and the Partly Checked line",
@@ -137,6 +152,9 @@ pub enum Shown {
     ChromeOn,
     ChromeOff,
     ChromeNotConnected,
+    ReloadCard,
+    ReloadWaiting,
+    ReloadTerminal,
 }
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -160,6 +178,9 @@ pub fn shown(name: &str) -> Option<Shown> {
         "chrome-on" => Shown::ChromeOn,
         "chrome-off" => Shown::ChromeOff,
         "chrome-not-connected" => Shown::ChromeNotConnected,
+        "reload-card" => Shown::ReloadCard,
+        "reload-waiting" => Shown::ReloadWaiting,
+        "reload-terminal" => Shown::ReloadTerminal,
         _ => return None,
     })
 }
@@ -183,7 +204,10 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsSkills
         | Shown::ChromeOn
         | Shown::ChromeOff
-        | Shown::ChromeNotConnected => Acting::Off,
+        | Shown::ChromeNotConnected
+        | Shown::ReloadCard
+        | Shown::ReloadWaiting
+        | Shown::ReloadTerminal => Acting::Off,
     }
 }
 
@@ -201,6 +225,46 @@ pub fn chrome_sheet(shown: Shown) -> Option<crate::chat::chrome::Sheet> {
         wanted_on: true,
         need,
     })
+}
+
+pub fn reload_card(shown: Shown) -> Option<crate::chat::session_reload::Card> {
+    use crate::chat::session_reload::{lead, Card, Stage};
+    use notchling_engine::catalog::{Catalog, Tool};
+    use notchling_engine::reload::Wait;
+    use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
+    let target = match shown {
+        Shown::ReloadTerminal => AgentTarget::Process(4242),
+        Shown::ReloadCard | Shown::ReloadWaiting => AgentTarget::Job("fix-the-bug".to_owned()),
+        _ => return None,
+    };
+    let agent = Agent {
+        id: "fix-the-bug".to_owned(),
+        name: "Fix the Bug".to_owned(),
+        project: "api".to_owned(),
+        cwd: "/srv/api".to_owned(),
+        group: AgentGroup::Completed,
+        label: "Done".to_owned(),
+        detail: None,
+        since_ms: 0,
+        target,
+        suggested_reply: None,
+        transcript_path: None,
+        host: "Background".to_owned(),
+        headless: false,
+        config_dir: None,
+        command: None,
+        resume_session_id: None,
+        at_prompt: false,
+        node: None,
+        worktree_path: None,
+    };
+    let catalog = Catalog::built_in().models(Tool::Claude, &[]);
+    let words = lead(184_000, Some("claude-opus-5-5"), &catalog);
+    let mut card = Card::open(&agent, words, 0)?;
+    if shown == Shown::ReloadWaiting {
+        card.stage = Stage::Waiting(Wait::Tasks { count: 3 });
+    }
+    Some(card)
 }
 
 pub fn page(shown: Shown) -> Page {

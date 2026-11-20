@@ -19,6 +19,7 @@ use crate::chat::data::Session;
 use crate::chat::data::Tool;
 use crate::chat::remote::{self, bring_back_job};
 use crate::chat::remote_control::Action;
+use crate::chat::session_reload::Mode;
 use crate::chat::sidebar::copyable_id;
 use crate::chat::used;
 use crate::phone::bridge::now_ms;
@@ -110,6 +111,16 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
                     this.close_rows(ids, cx);
                 },
             )));
+    }
+    if let Some(mode) = view.reload_mode(&menu.row_id) {
+        let row = menu.row_id.clone();
+        let control = view.acting_control(cx);
+        items = items.child(if mode == Mode::Terminal || control.enabled {
+            menu_item("row-reload", t::chat::reload_item(), a)
+                .on_click(cx.listener(move |this, _, _, cx| this.reload_open(&row, cx)))
+        } else {
+            held_item("row-reload", t::chat::reload_item(), control, a)
+        });
     }
     if let Some(on) = view.chrome_menu_item(&menu.row_id) {
         let row = menu.row_id.clone();
@@ -253,6 +264,21 @@ pub(super) fn popup(
 }
 
 impl ChatView {
+    pub(super) fn open_session_menu(
+        &mut self,
+        id: &str,
+        at: Point<Pixels>,
+        cx: &mut Context<ChatView>,
+    ) {
+        self.row_menu = Some(RowMenu {
+            row_id: id.to_owned(),
+            at: gpui::point((at.x - px(150.0)).max(px(8.0)), at.y + px(14.0)),
+            confirm_remove: false,
+        });
+        self.chrome_peek(id, cx);
+        cx.notify();
+    }
+
     pub(super) fn load_closed(&mut self) {
         if let Some(store) = self.settings_store() {
             self.closed = closed::from_value(store.get(closed::KEY).as_ref());

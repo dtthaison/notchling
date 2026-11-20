@@ -24,6 +24,7 @@ pub mod organizations;
 pub mod outbox;
 pub mod pages;
 pub mod providers;
+pub mod reload;
 pub mod reply;
 pub mod search;
 pub mod sessions;

@@ -31,6 +31,8 @@ pub mod ops {
     pub const SESSION_DIALOG_PICK: &str = "session.dialog_pick";
     pub const SESSION_DIALOG_DISMISS: &str = "session.dialog_dismiss";
     pub const SESSION_CHROME: &str = "session.chrome";
+    pub const SESSION_RELOAD: &str = "session.reload";
+    pub const SESSION_RELOAD_STATE: &str = "session.reload.state";
     pub const HOOK_REQUEST: &str = "hook.request";
 
     pub const CODEX_SEND: &str = "codex.send";
@@ -244,6 +246,9 @@ pub mod topics {
     pub const OUTBOX: &str = "outbox";
     pub const OUTBOX_CHANGED: &str = "outbox.changed";
     pub const OUTBOX_REMOVED: &str = "outbox.removed";
+
+    pub const RELOADS: &str = "reloads";
+    pub const RELOAD_CHANGED: &str = "reload.changed";
 
     pub const ASKS: &str = "asks";
     pub const ASK_CHANGED: &str = "ask.changed";

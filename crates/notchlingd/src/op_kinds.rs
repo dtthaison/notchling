@@ -44,6 +44,8 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::SESSION_DIALOG_PICK, Home::Called),
     (ops::SESSION_DIALOG_DISMISS, Home::Called),
     (ops::SESSION_CHROME, Home::Quiet),
+    (ops::SESSION_RELOAD, Home::Called),
+    (ops::SESSION_RELOAD_STATE, Home::Quiet),
     (ops::HOOK_REQUEST, Home::Called),
     (ops::CODEX_SEND, Home::Called),
     (ops::CODEX_STOP, Home::Called),

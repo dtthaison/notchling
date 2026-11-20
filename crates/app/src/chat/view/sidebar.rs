@@ -136,6 +136,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
     .with_nodes(&view.nodes())
     .with_asks(&view.source.asks(), &view.sessions)
     .with_vault(view.vault.waiting())
+    .with_reload(&view.reload)
 }
 
 pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {

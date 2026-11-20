@@ -132,7 +132,7 @@ impl Ops {
     fn with_topics(mut self) -> Ops {
         let mut list = vec![topics::SESSIONS];
         if self.acting.is_some() {
-            list.extend([topics::PROMPTS, topics::SETTINGS]);
+            list.extend([topics::PROMPTS, topics::SETTINGS, topics::RELOADS]);
         }
         if self.bridge.is_some() {
             list.push(topics::BRIDGE);
@@ -398,7 +398,7 @@ impl Handler for Ops {
 
     fn topic_tier(&self, topic: &str) -> Tier {
         match topic {
-            topics::PROMPTS | topics::BRIDGE => Tier::App,
+            topics::PROMPTS | topics::BRIDGE | topics::RELOADS => Tier::App,
             _ => self
                 .groups
                 .iter()
@@ -559,6 +559,15 @@ impl Wired {
             }
         }));
         acting.attach_chrome(chrome);
+        let reload = crate::reload_ops::ReloadOps::new(crate::reload_ops::LiveHosts::new(&acting));
+        let noting = Arc::downgrade(&acting);
+        reload.set_audit(Arc::new(move |agent, word, result| {
+            if let Some(acting) = noting.upgrade() {
+                acting.note_chrome(agent, word, result);
+            }
+        }));
+        reload.set_publish(crate::reload_ops::publisher(acting.room.clone()));
+        acting.attach_reload(reload);
         crate::chrome_ops::reconcile_when_acting_turns_on(&acting);
         let node_slot = crate::ask_wiring::Slot::default();
         let worker = crate::ask_wiring::worker_in(node_slot.clone());

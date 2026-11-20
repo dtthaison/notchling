@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::limits_ops::LIMITS_STATUS;
 use crate::limits_usage::LIMITS_USAGE;
 
-pub const QUIET_READS: [&str; 16] = [
+pub const QUIET_READS: [&str; 17] = [
     ops::AWAKE_STATE,
     ops::BRIDGE_STATUS,
     ops::BRIDGE_DEVICES,
@@ -20,6 +20,7 @@ pub const QUIET_READS: [&str; 16] = [
     ops::SESSION_SHELL_OUTPUT,
     ops::SESSION_DIALOG,
     ops::SESSION_CHROME,
+    ops::SESSION_RELOAD_STATE,
     ops::AGY_SIDECAR_STATUS,
 ];
 

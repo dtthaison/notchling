@@ -104,6 +104,7 @@ mod prompts_permission_tests;
 #[cfg(test)]
 mod question_parity_tests;
 pub mod reload;
+pub mod reload_feed;
 pub mod remote;
 pub mod remote_control;
 #[cfg(test)]
@@ -124,6 +125,9 @@ pub mod run_command;
 mod run_command_tests;
 pub mod scroll_trace;
 pub mod selection;
+pub mod session_reload;
+#[cfg(test)]
+mod session_reload_tests;
 pub mod shell_list;
 pub mod shell_live;
 #[cfg(test)]
