@@ -55,6 +55,16 @@ pub struct MachineAbilities {
     )]
     pub free_disk_gb: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_cores: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_model: Option<String>,
+    #[serde(default, rename = "ramGB", skip_serializing_if = "Option::is_none")]
+    pub ram_gb: Option<i64>,
+    #[serde(default, rename = "diskGB", skip_serializing_if = "Option::is_none")]
+    pub disk_gb: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notchling_app: Option<bool>,
 }
 
