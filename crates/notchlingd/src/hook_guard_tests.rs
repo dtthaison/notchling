@@ -133,3 +133,28 @@ fn the_hook_queues_and_still_passes() {
     assert_eq!(rows.lines().count(), 1);
     assert!(!rows.contains("sleep"));
 }
+
+#[test]
+fn a_late_input_is_dropped_without_waiting_or_recording() {
+    let dir = TempDir::new("hook-guard");
+    policy::write(dir.root(), 5).expect("policy");
+    let started = Instant::now();
+    let code = run_in(dir.root(), |_| {
+        std::thread::sleep(Duration::from_millis(400));
+        Some(payload("sleep 60"))
+    });
+    assert_eq!(code, 0);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(queued(&dir).is_empty());
+}
+
+#[test]
+fn the_read_is_given_the_same_deadline_as_the_work() {
+    let dir = TempDir::new("hook-guard");
+    let asked = std::sync::Mutex::new(None);
+    run_in(dir.root(), |limit| {
+        *asked.lock().unwrap() = Some(limit);
+        None
+    });
+    assert_eq!(*asked.lock().unwrap(), Some(crate::hook_guard::DEADLINE));
+}

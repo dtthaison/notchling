@@ -175,6 +175,15 @@ impl InstallOps {
         self
     }
 
+    fn noted_direction(request: &Request) -> Direction {
+        let only_guard = request.prompt == Want::Leave && request.pages == Want::Leave;
+        if only_guard && request.guard == Want::Remove {
+            Direction::Remove
+        } else {
+            request.direction
+        }
+    }
+
     fn note_hook(&self, direction: Direction, result: DoneOrFailed) {
         let Some(events) = &self.events else {
             return;
@@ -364,13 +373,13 @@ impl InstallOps {
                         }
                     }
                     if done.wrote || request.prompt != Want::Leave || request.pages != Want::Leave {
-                        self.note_hook(request.direction, DoneOrFailed::Done);
+                        self.note_hook(Self::noted_direction(request), DoneOrFailed::Done);
                     }
                     backup = done.backup.map(|p| p.to_string_lossy().into_owned());
                     plan.hooks = Ok(done.plan);
                 }
                 Err(e) => {
-                    self.note_hook(request.direction, DoneOrFailed::Failed);
+                    self.note_hook(Self::noted_direction(request), DoneOrFailed::Failed);
                     return Err(failed(e.to_string()));
                 }
             }

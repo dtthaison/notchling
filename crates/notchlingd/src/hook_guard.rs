@@ -4,10 +4,9 @@ use crate::layout::Layout;
 use notchling_engine::guard::{self, Would};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const MAX_INPUT: u64 = 2 * 1024 * 1024;
-pub const STDIN_WAIT: Duration = Duration::from_millis(1_500);
 pub const DEADLINE: Duration = Duration::from_millis(200);
 
 fn clock() -> f64 {
@@ -39,9 +38,17 @@ pub fn guard_dir(layout: &Layout) -> PathBuf {
 }
 
 pub fn run_in(dir: &Path, read: impl FnOnce(Duration) -> Option<Vec<u8>>) -> i32 {
-    if let Some(input) = read(STDIN_WAIT) {
-        let _ = process(input, dir.to_path_buf(), clock(), DEADLINE);
-    }
+    let started = Instant::now();
+    let Some(input) = read(DEADLINE) else {
+        return 0;
+    };
+    let Some(left) = DEADLINE
+        .checked_sub(started.elapsed())
+        .filter(|d| !d.is_zero())
+    else {
+        return 0;
+    };
+    let _ = process(input, dir.to_path_buf(), clock(), left);
     0
 }
 

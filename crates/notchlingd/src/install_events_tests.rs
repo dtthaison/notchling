@@ -65,3 +65,47 @@ fn a_plan_or_an_off_switch_records_nothing() {
     assert!(sink.events().is_empty());
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn taking_only_the_guard_out_is_recorded_as_a_removal() {
+    use notchling_engine::catalog::Tool;
+    use notchling_engine::cost_profile::manifest::{Entry, Manifest, Part};
+    use notchling_engine::settings::Settings;
+    let (dir, mut setup) = setup("guard-removed");
+    let data = dir.join("data");
+    fs::create_dir_all(&data).unwrap();
+    let mut manifest = Manifest::default();
+    manifest.put(Entry {
+        id: "claude.rule".into(),
+        tool: Tool::Claude,
+        path: PathBuf::from("/x/notchling-cost.md"),
+        part: Part::File,
+        removed: false,
+        hash: None,
+        backup: None,
+        existed: false,
+        keys: Vec::new(),
+        at: 1,
+        pending: false,
+        before_hash: None,
+        released: false,
+    });
+    manifest.save(&data).unwrap();
+    setup.guard_data = Some(data.clone());
+    let sink = Arc::new(MemorySink::new());
+    let ops = InstallOps::new(setup, SwitchFlag::in_memory(INSTALL, INSTALL_OFF, true))
+        .with_events(Events::fixed(sink.clone(), Salt([1; 32])));
+    ops.run(ops::INSTALL_APPLY, &json!({"what": ["guard_hooks"]}))
+        .unwrap();
+    Settings::open(&data.join("settings.json"))
+        .unwrap()
+        .set("costGuard", json!("off"))
+        .unwrap();
+    ops.run(ops::INSTALL_APPLY, &json!({"what": ["guard_hooks"]}))
+        .unwrap();
+    let hooks = of(&sink, "install.hook");
+    assert_eq!(hooks.len(), 2);
+    assert_eq!(text(&hooks[0], "action").as_deref(), Some("installed"));
+    assert_eq!(text(&hooks[1], "action").as_deref(), Some("removed"));
+    let _ = fs::remove_dir_all(dir);
+}
