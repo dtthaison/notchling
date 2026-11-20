@@ -549,6 +549,8 @@ cluster-machine-reach-unsure = Can't tell if it is reachable
 cluster-machine-reach-none = Not checked yet
 # Under a machine in that section; $reach is what the check found, such as Reachable, and $age how long ago, such as 5 minutes ago.
 cluster-machine-checked = { $reach } · Checked { $age }
+# Under a machine's facts in the Machines window: when its facts were last read. $age is how long ago, such as 3 minutes ago.
+cluster-machine-facts-checked = Checked { $age }
 # Button on a machine in that section: asks the machine again over SSH.
 cluster-machine-check = Check
 # Shown on a machine's line while its check runs.

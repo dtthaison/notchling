@@ -1,6 +1,9 @@
 pub mod admin_feed;
 #[cfg(target_os = "macos")]
 pub mod cards;
+pub mod checked;
+#[cfg(test)]
+mod checked_tests;
 #[cfg(target_os = "macos")]
 pub mod chrome_view;
 pub mod cli;

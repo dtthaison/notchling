@@ -19,6 +19,7 @@ pub mod masks;
 pub mod merge;
 pub mod merge_ops;
 pub mod morning;
+pub mod names;
 pub mod node_updates;
 pub mod offers;
 pub mod poller;
@@ -32,6 +33,7 @@ pub mod roots;
 pub mod runner;
 pub mod service_files;
 pub mod shell;
+pub mod specs;
 pub mod ssh_command;
 pub mod ssh_key;
 pub mod ssh_test;
@@ -152,6 +154,8 @@ mod tests_poller;
 #[cfg(test)]
 mod tests_reach;
 #[cfg(test)]
+mod tests_reach_short;
+#[cfg(test)]
 mod tests_registry;
 #[cfg(test)]
 mod tests_release_download;
@@ -199,6 +203,8 @@ mod tests_secrets;
 mod tests_selfupdate;
 #[cfg(test)]
 mod tests_shell;
+#[cfg(test)]
+mod tests_specs;
 #[cfg(test)]
 mod tests_ssh_command;
 #[cfg(test)]

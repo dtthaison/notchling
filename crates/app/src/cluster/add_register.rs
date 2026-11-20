@@ -17,6 +17,11 @@ fn merged(old: Option<MachineAbilities>, new: Option<&MachineAbilities>) -> Mach
     out.xcode = new.xcode.clone().or(out.xcode);
     out.docker = new.docker.or(out.docker);
     out.free_disk_gb = new.free_disk_gb.or(out.free_disk_gb);
+    out.cpu_cores = new.cpu_cores.or(out.cpu_cores);
+    out.cpu_model = new.cpu_model.clone().or(out.cpu_model);
+    out.ram_gb = new.ram_gb.or(out.ram_gb);
+    out.disk_gb = new.disk_gb.or(out.disk_gb);
+    out.checked_at = new.checked_at.or(out.checked_at);
     out.notchling_app = new.notchling_app.or(out.notchling_app);
     if !new.ios_runtimes.is_empty() {
         out.ios_runtimes = new.ios_runtimes.clone();

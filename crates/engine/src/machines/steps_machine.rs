@@ -2,6 +2,7 @@ use super::process::CUT_NOTICE;
 use super::registry::{DockerState, Machine, MachineOs};
 use super::runner::CommandResult;
 use super::shell;
+use super::specs;
 use super::step::{
     run, Cadence, CheckResult, Detected, FixContext, FixOutcome, FixPlan, Probe, RemoteOutput,
     SetupStep, StepContext, StepFix, StepId, SubRow,
@@ -145,6 +146,19 @@ echo "home=$HOME"
 if [ "$(uname -s)" = Darwin ]; then v=$(sw_vers -productVersion 2>/dev/null); else v=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -1 | tr -d '"'); fi
 echo "version=$v"
 echo "disk_kb=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')"
+echo "disk_total_kb=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $2}')"
+if [ "$(uname -s)" = Darwin ]; then
+echo "cpus=$(sysctl -n hw.ncpu 2>/dev/null)"
+echo "cpu_model=$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
+m=$(sysctl -n hw.memsize 2>/dev/null)
+if [ -n "$m" ]; then echo "mem_kb=$((m / 1024))"; fi
+else
+echo "cpus=$(nproc 2>/dev/null)"
+c=$(lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
+if [ -z "$c" ]; then c=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo 2>/dev/null | head -1); fi
+echo "cpu_model=$c"
+echo "mem_kb=$(sed -n 's/^MemTotal:[[:space:]]*\([0-9]*\) kB.*/\1/p' /proc/meminfo 2>/dev/null | head -1)"
+fi
 if command -v docker >/dev/null 2>&1; then if o=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null); then case "$o" in *rootless*) echo docker=rootless;; *) echo docker=rootful;; esac; else echo docker=stopped; fi; else echo docker=none; fi"#;
 
 fn docker_state(text: &str) -> Option<DockerState> {
@@ -159,10 +173,9 @@ fn docker_state(text: &str) -> Option<DockerState> {
 
 fn parse_reachable(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
     let text = ctx.mask(&out.text);
-    let kv = keyed(
-        &text,
-        &["os", "arch", "home", "version", "disk_kb", "docker"],
-    );
+    let mut wanted = vec!["os", "arch", "home", "version", "disk_kb", "docker"];
+    wanted.extend(specs::SPEC_KEYS);
+    let kv = keyed(&text, &wanted);
     let os_name = match kv.get("os") {
         Some(name) if !name.is_empty() => name.as_str(),
         _ => {
@@ -215,6 +228,7 @@ fn parse_reachable(out: &RemoteOutput, ctx: &StepContext) -> CheckResult {
             abilities.free_disk_gb = Some(kb / 1_048_576);
         }
     }
+    specs::apply(&mut abilities, &kv, ctx.now);
     detected.abilities = Some(abilities);
 
     let label = if os == MachineOs::MacOs {
