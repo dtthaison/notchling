@@ -101,7 +101,12 @@ The app:
   Antigravity's `notchling` plugin that [decision 0019](decisions/0019-agent-instructions-per-tool.md)
   lists, and `~/.codex/AGENTS.md` only when you have none. It never changes or removes a file it
   didn't write, or one you edited unless you choose Use Notchling's (your copy is kept as a backup),
-  and when you have your own rules for the same purpose it writes none.
+  and when you have your own rules for the same purpose it writes none. The one exception is the
+  Cost Profile ([decision XXXX](decisions/XXXX-cost-profile.md)): it may change or replace a file
+  of yours that holds model rules, such as `model-choice.md`, `pstack-models.md` or an
+  `orchestrator.md`, and add its own keys to a tool's config, only after you agree to that file,
+  with a backup of it, with your lines imported into the profile first and with an Undo that
+  restores it and never overwrites a file you changed since.
 - Answer a session's permission prompt for you. The prompt waits for your answer. When the app isn't
   there to ask you, the hook passes and Claude Code asks in its own terminal. The one exception is a
   job one agent hands to another with `--delegate --write`: the other tool may then edit files in the

@@ -56,12 +56,9 @@ use notchling_engine::cluster::versions::BridgeFacts;
 use notchling_engine::control::launcher::claude_path;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
-use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::git::SandboxedLauncher;
-use notchling_engine::install::skills::SkillSpec;
 use notchling_engine::limits::renew::ClaudeRenewer;
 use notchling_engine::outbox::OutboxStore;
-use notchling_engine::vault::skill as vault_skill;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::{Emit, Salt};
@@ -710,7 +707,7 @@ impl Wired {
         )
         .with_events(events.clone());
         if let Some(binary) = binary {
-            install = install.with_skill(vault_skill_spec(&binary, vault.clone()));
+            install = install.with_skill(crate::vault_skill_wiring::spec(&binary, vault.clone()));
         }
         let states: SwitchStates = {
             let (acting, bridge, switches) = (acting.clone(), bridge.clone(), switches.clone());
@@ -899,6 +896,11 @@ impl Wired {
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())
+            .with_group(crate::cost_profile_ops::wired(
+                layout,
+                &self.catalog,
+                &self.switches,
+            ))
             .with_group(self.sidecar.clone())
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
@@ -975,22 +977,6 @@ impl Wired {
 
     pub fn accounts_switch(&self) -> &Arc<SwitchFlag> {
         &self.switches.accounts
-    }
-}
-
-fn vault_skill_spec(binary: &Path, vault: Arc<VaultOps>) -> SkillSpec {
-    let binary = binary.to_string_lossy().into_owned();
-    SkillSpec {
-        name: vault_skill::NAME.to_string(),
-        tools: vec![SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity],
-        text: Box::new(move |tool| {
-            let tool = match tool {
-                SkillTool::Claude => vault_skill::SkillTool::Claude,
-                SkillTool::Codex => vault_skill::SkillTool::Codex,
-                SkillTool::Antigravity => vault_skill::SkillTool::Antigravity,
-            };
-            vault_skill::content(&binary, &vault.skill_names(), tool)
-        }),
     }
 }
 

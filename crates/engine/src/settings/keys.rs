@@ -263,6 +263,18 @@ pub const KEYS: &[KeySpec] = &[
         .ask("Search shortcut", "The global key that opens Search from any app: modifiers and a key joined by +, such as ctrl+alt+p, or off", "it takes a key from every other app"),
     choice("clusterFailover", "off", &["off", "30m", "1h"], false, "Automatic Failover: how long the primary Mac can be unreachable before a Standby takes over its sessions (off, 30m or 1h). A mirror of the cluster's journaled value; the primary's journal wins")
         .ask("Automatic Failover", "When the primary Mac can't be reached for this long, a Standby takes over its sessions", "it changes what runs where"),
+    choice("costPreset", "balanced", &["saver", "balanced", "quality"], false, "The Cost Profile's starting point: which model and effort each kind of work gets in Claude Code, Codex and Antigravity")
+        .ask("Cost Profile preset", "Which starting point the Cost Profile uses for models and effort per kind of work: saver, balanced or quality", "it decides which models agents are told to use and what Set Up writes"),
+    key("costPicks", K::String, D::Str(""), false, "The Cost Profile's own picks on top of its preset: role.tool=model effort, joined by semicolons, such as code.claude=sonnet high")
+        .ask("Cost Profile picks", "The model and effort picked for single kinds of work on top of the preset, as role.tool=model effort joined by semicolons", "it decides which models agents are told to use"),
+    key("costClaude", K::Bool, D::Bool(true), false, "The Cost Profile covers Claude Code")
+        .ask("Cost Profile for Claude Code", "Let the Cost Profile set up Claude Code", "it decides which files Set Up writes in Claude Code's folder"),
+    key("costCodex", K::Bool, D::Bool(true), false, "The Cost Profile covers Codex")
+        .ask("Cost Profile for Codex", "Let the Cost Profile set up Codex", "it decides which files Set Up writes in Codex's folder"),
+    key("costAgy", K::Bool, D::Bool(true), false, "The Cost Profile covers Antigravity")
+        .ask("Cost Profile for Antigravity", "Let the Cost Profile set up Antigravity", "it decides which files Set Up writes in Antigravity's folder"),
+    key("costProfileApp", K::Json, D::None, false, "The Cost Profile's guard levels, habit edits and rules imported from the user's own files (JSON)")
+        .never("Cost Profile (app only)", "Guard levels, habit edits and the lines imported from your own rule files", "free text from the user's files and guard levels: only the app changes them"),
     key("vaultReminderSent", K::Dict, D::Empty, false, "Vault expiry reminders already sent: secret to days")
         .never("Vault reminders sent", "Expiry reminders the vault already sent", "the vault's own record"),
     key("bridgeEnabled", K::Bool, D::Bool(false), false, "The phone bridge switch")

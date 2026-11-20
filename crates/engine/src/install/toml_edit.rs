@@ -395,9 +395,9 @@ fn verify(
     after: &str,
     table: Option<&str>,
     key: &str,
-    want: Option<bool>,
+    want: Option<&str>,
 ) -> Result<(), Failure> {
-    if get_bool(after, table, key)? != want {
+    if get_raw(after, table, key)?.as_deref() != want {
         return Err(bad("check_failed"));
     }
     let (old_others, old_headers) = shape(before, table, key)?;
@@ -421,16 +421,56 @@ pub fn set_bool(
     key: &str,
     value: bool,
 ) -> Result<String, TomlEditError> {
+    put(text, table, key, if value { "true" } else { "false" }, true)
+}
+
+pub fn get_raw(
+    text: &str,
+    table: Option<&str>,
+    key: &str,
+) -> Result<Option<String>, TomlEditError> {
+    check_name(key)?;
+    if let Some(t) = table {
+        check_name(t)?;
+    }
+    let scan = scan(text)?;
+    match matching(&scan, table, key).as_slice() {
+        [] => Ok(None),
+        [one] => Ok(Some(text[one.value.0..one.value.1].to_string())),
+        _ => Err(TomlEditError::Duplicate),
+    }
+}
+
+pub fn set_raw(
+    text: &str,
+    table: Option<&str>,
+    key: &str,
+    raw: &str,
+) -> Result<String, TomlEditError> {
+    if raw.is_empty() || raw.contains(['\n', '\r', '#']) {
+        return Err(bad("bad_value"));
+    }
+    put(text, table, key, raw, false)
+}
+
+fn put(
+    text: &str,
+    table: Option<&str>,
+    key: &str,
+    word: &str,
+    bool_only: bool,
+) -> Result<String, TomlEditError> {
     check_name(key)?;
     if let Some(t) = table {
         check_name(t)?;
     }
     let scan = scan(text)?;
     let found = matching(&scan, table, key);
-    let word = if value { "true" } else { "false" };
     let out = match found.as_slice() {
         [one] => {
-            bool_of(text, one)?;
+            if bool_only {
+                bool_of(text, one)?;
+            }
             if &text[one.value.0..one.value.1] == word {
                 return Ok(text.to_string());
             }
@@ -438,24 +478,31 @@ pub fn set_bool(
             out.replace_range(one.value.0..one.value.1, word);
             out
         }
-        [] => insert_new(text, &scan, table, key, word),
+        [] => insert_new(text, &scan, table, key, word)?,
         _ => return Err(TomlEditError::Duplicate),
     };
-    verify(text, &out, table, key, Some(value))?;
+    defined_twice(&out)?;
+    verify(text, &out, table, key, Some(word))?;
     Ok(out)
 }
 
-fn insert_new(text: &str, scan: &Scan, table: Option<&str>, key: &str, word: &str) -> String {
+fn insert_new(
+    text: &str,
+    scan: &Scan,
+    table: Option<&str>,
+    key: &str,
+    word: &str,
+) -> Result<String, Failure> {
     let line = format!("{key} = {word}");
     let Some(name) = table else {
         let top: Vec<&Stmt> = scan.stmts.iter().filter(|s| s.table.is_none()).collect();
         if let Some(last) = top.last() {
-            return insert_line(text, last.end, &line, false);
+            return Ok(insert_line(text, last.end, &line, false));
         }
         let first_header = scan.headers.first().map(|h| h.start);
         let at = scan.leading_end;
         let before_header = first_header == Some(at);
-        return insert_line(text, at, &line, before_header);
+        return Ok(insert_line(text, at, &line, before_header));
     };
     let header = scan.headers.iter().find(|h| !h.array && h.name == name);
     match header {
@@ -466,9 +513,18 @@ fn insert_new(text: &str, scan: &Scan, table: Option<&str>, key: &str, word: &st
                 .filter(|s| !s.array_table && s.table.as_deref() == Some(name))
                 .map(|s| s.end)
                 .max();
-            insert_line(text, last.unwrap_or(h.end), &line, false)
+            Ok(insert_line(text, last.unwrap_or(h.end), &line, false))
         }
         None => {
+            let root: Vec<&Stmt> = scan.stmts.iter().filter(|s| s.table.is_none()).collect();
+            if root.iter().any(|s| s.key == name) {
+                return Err(bad("table_form"));
+            }
+            let dotted = format!("{name}.");
+            if let Some(last) = root.iter().rfind(|s| s.key.starts_with(&dotted)) {
+                let line = format!("{name}.{key} = {word}");
+                return Ok(insert_line(text, last.end, &line, false));
+            }
             let eol = eol_of(text);
             let mut out = text.to_string();
             if !out.is_empty() && !out.ends_with('\n') {
@@ -479,7 +535,7 @@ fn insert_new(text: &str, scan: &Scan, table: Option<&str>, key: &str, word: &st
                 out.push_str(eol);
             }
             out.push_str(&format!("[{name}]{eol}{line}{eol}"));
-            out
+            Ok(out)
         }
     }
 }
@@ -501,4 +557,68 @@ pub fn remove(text: &str, table: Option<&str>, key: &str) -> Result<String, Toml
         }
         _ => Err(TomlEditError::Duplicate),
     }
+}
+
+pub fn has_table(text: &str, table: &str) -> Result<bool, TomlEditError> {
+    check_name(table)?;
+    let parsed = scan(text)?;
+    let dotted = format!("{table}.");
+    Ok(parsed.headers.iter().any(|h| !h.array && h.name == table)
+        || parsed
+            .stmts
+            .iter()
+            .any(|s| s.table.is_none() && (s.key == table || s.key.starts_with(&dotted))))
+}
+
+pub fn prune_empty_table(text: &str, table: &str) -> Result<String, TomlEditError> {
+    check_name(table)?;
+    let parsed = scan(text)?;
+    let Some(at) = parsed
+        .headers
+        .iter()
+        .position(|h| !h.array && h.name == table)
+    else {
+        return Ok(text.to_string());
+    };
+    let header = &parsed.headers[at];
+    let sub = format!("{table}.");
+    let used = parsed.headers.iter().any(|h| h.name.starts_with(&sub))
+        || parsed
+            .stmts
+            .iter()
+            .any(|s| s.table.as_deref() == Some(table));
+    let next = parsed
+        .headers
+        .get(at + 1)
+        .map(|h| h.start)
+        .unwrap_or(text.len());
+    if used || !text[header.end..next].trim().is_empty() {
+        return Ok(text.to_string());
+    }
+    let mut start = header.start;
+    let before = &text[..start];
+    if before.ends_with("\r\n\r\n") {
+        start -= 2;
+    } else if before.ends_with("\n\n") {
+        start -= 1;
+    }
+    let out = format!("{}{}", &text[..start], &text[next..]);
+    scan(&out)?;
+    Ok(out)
+}
+
+fn defined_twice(text: &str) -> Result<(), Failure> {
+    let parsed = scan(text)?;
+    for stmt in parsed.stmts.iter().filter(|s| s.table.is_none()) {
+        let inline = text[stmt.value.0..stmt.value.1].starts_with('{');
+        let name = match stmt.key.split_once('.') {
+            Some((first, _)) => first,
+            None if inline => stmt.key.as_str(),
+            None => continue,
+        };
+        if parsed.headers.iter().any(|h| !h.array && h.name == name) {
+            return Err(TomlEditError::Duplicate);
+        }
+    }
+    Ok(())
 }

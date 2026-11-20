@@ -582,6 +582,9 @@ settings-activity-detail-outcome = Outcome: { $outcome }
 # Tab of the Settings sheet: how skills and model choices work, which skills are installed and which model each job uses.
 settings-page-skills = Skills & Models
 
+# Tab of the Settings sheet: the Cost Profile, where the models and efforts per role are chosen and Set Up writes them into each tool.
+settings-page-costs = Models & Costs
+
 # Name of a tool on the Skills & Models page.
 settings-tool-codex = { -brand-codex }
 

@@ -113,6 +113,9 @@ pub fn usage() -> &'static str {
      notchling delegate-models --for <role>  the tool, model and effort for review, review-final, review-secrets or spec-check\n  \
      notchling models [check|update] [--json]  read each tool's models and efforts; update writes Notchling's copy (--force accepts a list that shrank)\n  \
      notchling cost report [--days N] [--plan api|subscription] [--json]  what your agents spent over the last N days (14 by default) and what to change\n  \
+     notchling cost setup [--apply] [--consent a,b] [--json]  plan the Cost Profile's files and show every diff; --apply writes them\n  \
+     notchling cost check [--json]           which of those files drifted since Notchling wrote them\n  \
+     notchling cost undo <claude|codex|agy>  put one tool's files back from their backups\n  \
      notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
      notchling secret <name>[,<name>…] -- <command> [args…]\n  \
      \u{20}                                           run a command with secrets, its output hidden\n  \
@@ -482,6 +485,12 @@ mod tests {
                 args: vec!["update".into(), "--json".into()]
             })
         );
+        assert_eq!(
+            p(&["cost", "setup", "--apply"]),
+            Ok(Command::Cost {
+                args: vec!["setup".into(), "--apply".into()]
+            })
+        );
         let text = usage();
         assert!(
             text.contains("notchling delegate <codex|agy>") && text.contains("delegate-models")
@@ -562,6 +571,7 @@ mod tests {
             "page",
             "delegate-models",
             "models",
+            "cost",
             "secrets",
         ] {
             let line = lines

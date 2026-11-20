@@ -109,9 +109,12 @@ pub mod codex_fence;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod cost_ops;
+pub mod cost_profile_json;
+pub mod cost_profile_ops;
 pub mod cost_report_cli;
 pub mod cost_report_ops;
 pub mod cost_report_text;
+pub mod cost_setup_cli;
 pub mod daemon;
 pub mod daemon_wiring;
 pub mod delegate_cli;
@@ -210,6 +213,7 @@ pub mod vault_args;
 pub mod vault_caller;
 pub mod vault_cli;
 pub mod vault_ops;
+pub mod vault_skill_wiring;
 pub mod vault_wait;
 pub mod versions_check;
 pub mod versions_drift;
@@ -335,6 +339,8 @@ mod codex_children_tests;
 mod control_ops_tests;
 #[cfg(test)]
 mod cost_ops_tests;
+#[cfg(test)]
+mod cost_profile_ops_tests;
 #[cfg(test)]
 mod cost_report_tests;
 #[cfg(test)]
@@ -512,7 +518,10 @@ pub fn run(command: Command) -> i32 {
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
         Command::Models { args } => models_cli::run(&args),
-        Command::Cost { args } => cost_report_cli::run(&args),
+        Command::Cost { args } => match args.first().map(String::as_str) {
+            Some("report") => cost_report_cli::run(&args),
+            _ => cost_setup_cli::run(&args),
+        },
         Command::Secrets { args } => vault_cli::secrets(&args),
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),

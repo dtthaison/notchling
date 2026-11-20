@@ -29,7 +29,7 @@ fn mark_ink(mark: Mark) -> Ink {
     }
 }
 
-pub(super) fn row_shell(a: Appearance, first: bool) -> Div {
+pub(crate) fn row_shell(a: Appearance, first: bool) -> Div {
     let row = div()
         .px(px(14.0))
         .py(px(8.0))
@@ -66,7 +66,7 @@ pub(super) fn note_stack(text: &str, ink: Ink, note: Option<&str>, a: Appearance
     stack
 }
 
-pub(super) fn action(
+pub(crate) fn action(
     id: &'static str,
     title: &str,
     kind: ButtonKind,

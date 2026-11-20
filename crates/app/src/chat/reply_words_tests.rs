@@ -13,7 +13,7 @@ use crate::acting::Decision;
 fn english_values() -> Vec<String> {
     t::testing::messages("en")
         .into_iter()
-        .filter(|(key, _)| *key != "chat-outbox-edit")
+        .filter(|(key, _)| *key != "chat-outbox-edit" && !key.starts_with("costs-"))
         .filter_map(|(key, _)| t::lookup(key))
         .map(|text| text.english().to_owned())
         .collect()

@@ -27,6 +27,10 @@ pub fn sidecar_json(binary: &Path) -> Result<Value, String> {
     }))
 }
 
+pub fn manifest_json() -> Value {
+    manifest()
+}
+
 fn manifest() -> Value {
     json!({
         "name": PLUGIN,

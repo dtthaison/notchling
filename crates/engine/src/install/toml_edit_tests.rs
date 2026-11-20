@@ -206,3 +206,60 @@ fn unplaceable_text_refuses() {
         Err(TomlEditError::Parse("bad_key"))
     ));
 }
+
+#[test]
+fn raw_values_are_read_and_written_in_place() {
+    use super::toml_edit::{get_raw, set_raw};
+    let text = "model = \"x\"\n\n[agents]\nmax_threads = 4 # note\nother = 1\n";
+    assert_eq!(
+        get_raw(text, Some("agents"), "max_threads")
+            .unwrap()
+            .as_deref(),
+        Some("4")
+    );
+    assert_eq!(get_raw(text, Some("agents"), "gone").unwrap(), None);
+    let out = set_raw(text, Some("agents"), "max_threads", "6").unwrap();
+    assert_eq!(
+        out,
+        "model = \"x\"\n\n[agents]\nmax_threads = 6 # note\nother = 1\n"
+    );
+    let added = set_raw(
+        "model = \"x\"\n",
+        Some("agents"),
+        "default_subagent_model",
+        "\"gpt-6-sol\"",
+    )
+    .unwrap();
+    assert_eq!(
+        get_raw(&added, Some("agents"), "default_subagent_model")
+            .unwrap()
+            .as_deref(),
+        Some("\"gpt-6-sol\"")
+    );
+    assert!(set_raw(text, Some("agents"), "bad key", "1").is_err());
+}
+
+#[test]
+fn an_empty_table_notchling_added_is_pruned_and_a_used_one_is_not() {
+    use super::toml_edit::prune_empty_table;
+    assert_eq!(
+        prune_empty_table("model = \"x\"\n\n[agents]\n", "agents").unwrap(),
+        "model = \"x\"\n"
+    );
+    assert_eq!(
+        prune_empty_table("a = 1\n\n[agents]\n\n[tui]\nn = 1\n", "agents").unwrap(),
+        "a = 1\n[tui]\nn = 1\n"
+    );
+    let used = "[agents]\nx = 1\n";
+    assert_eq!(prune_empty_table(used, "agents").unwrap(), used);
+    assert_eq!(prune_empty_table("a = 1\n", "agents").unwrap(), "a = 1\n");
+}
+
+#[test]
+fn an_agents_header_inside_a_multiline_string_is_not_a_table() {
+    use super::toml_edit::prune_empty_table;
+    let text = "developer_instructions = \"\"\"\n[agents]\n\n[example]\nx = 1\n\"\"\"\n";
+    assert_eq!(prune_empty_table(text, "agents").unwrap(), text);
+    let both = format!("{text}\n[agents]\n");
+    assert_eq!(prune_empty_table(&both, "agents").unwrap(), text);
+}

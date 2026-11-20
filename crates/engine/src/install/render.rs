@@ -4,6 +4,7 @@ use serde_json::Value;
 pub enum Json {
     Str(String),
     Num(u64),
+    Raw(String),
     Arr(Vec<Json>),
     Obj(Vec<(String, Json)>),
 }
@@ -26,6 +27,7 @@ impl Json {
         match self {
             Json::Str(s) => string(s),
             Json::Num(n) => n.to_string(),
+            Json::Raw(text) => text.clone(),
             Json::Arr(items) => {
                 let inner: Vec<String> = items.iter().map(Json::compact).collect();
                 format!("[{}]", inner.join(", "))
@@ -66,6 +68,7 @@ impl Json {
         match self {
             Json::Str(s) => Value::String(s.clone()),
             Json::Num(n) => Value::from(*n),
+            Json::Raw(text) => serde_json::from_str(text).unwrap_or(Value::Null),
             Json::Arr(items) => Value::Array(items.iter().map(Json::to_value).collect()),
             Json::Obj(members) => Value::Object(
                 members
