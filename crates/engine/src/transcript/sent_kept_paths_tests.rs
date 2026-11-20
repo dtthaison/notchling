@@ -182,3 +182,28 @@ fn a_path_that_is_not_a_picture_is_not_cut_from_the_line() {
     let stored = format!("is it right\n\n'/tmp/notes.txt' '{SHOT}'");
     assert_eq!(counted(&message, &stored, 0), Some(Seen::default()));
 }
+
+#[test]
+fn a_kept_path_of_another_picture_is_not_the_row() {
+    let message = message(&the_row());
+    let stored = format!("is it right\n\n'{OTHER}'");
+    assert_eq!(counted(&message, &stored, 0), Some(Seen::default()));
+    let stored = "is it right\n\n'/tmp/never-sent.png'";
+    assert_eq!(counted(&message, stored, 0), Some(Seen::default()));
+}
+
+#[test]
+fn a_queue_entry_with_fewer_pictures_than_the_row_is_not_listed() {
+    let row = format!("look\n\n'{SHOT}' '{OTHER}'");
+    let message = message(&row);
+    let one = QueueState {
+        waiting: vec![format!("look '{SHOT}'")],
+        unknown: 0,
+    };
+    assert_eq!(one.listed(&message), 0);
+    let chip_and_path = QueueState {
+        waiting: vec![format!("[Image #3]look '{OTHER}'")],
+        unknown: 0,
+    };
+    assert_eq!(chip_and_path.listed(&message), 1);
+}

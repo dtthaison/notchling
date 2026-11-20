@@ -1,4 +1,4 @@
-use super::message::{cut_chips, image_spans, Message};
+use super::message::{chip_count, cut_chips, image_spans, Message};
 use super::restart::{carries_result, flag, WINDOW_BYTES};
 use super::stored::as_stored;
 use super::tail::read_lines;
@@ -8,6 +8,7 @@ use super::util::{parse_object, str_of};
 use super::window::read_window;
 use crate::sessions::iso::parse_iso_ms;
 use serde_json::Value;
+use std::path::PathBuf;
 
 const EDGE_CHARS: usize = 40;
 
@@ -121,7 +122,7 @@ fn plain(text: &str) -> String {
     squeezed(&cut_chips(&unpasted(text)))
 }
 
-fn without_paths(text: &str) -> (String, usize) {
+fn without_paths(text: &str) -> (String, Vec<PathBuf>) {
     let text = cut_chips(&unpasted(text));
     let spans = image_spans(&text);
     let mut words = String::with_capacity(text.len());
@@ -132,15 +133,21 @@ fn without_paths(text: &str) -> (String, usize) {
         at = range.end;
     }
     words.push_str(&text[at..]);
-    (squeezed(&words), spans.len())
+    (
+        squeezed(&words),
+        spans.into_iter().map(|(_, path)| path).collect(),
+    )
 }
 
-fn kept_as_text(message: &Message, text: &str, images: Option<usize>) -> bool {
+fn kept_as_text(message: &Message, text: &str, shown: usize) -> bool {
     if message.pictures == 0 {
         return false;
     }
     let (words, kept) = without_paths(text);
-    kept > 0 && words == message.text && images.is_none_or(|n| kept + n >= message.pictures)
+    !kept.is_empty()
+        && kept.iter().all(|path| message.paths.contains(path))
+        && kept.len() + shown >= message.pictures
+        && words == message.text
 }
 
 pub(super) fn names(entry: &str, line: &str) -> bool {
@@ -265,7 +272,7 @@ pub(super) fn entry_matches(message: &Message, content: &str) -> bool {
     let text = plain(content);
     text == message.text
         || message.bash.as_deref() == Some(text.as_str())
-        || kept_as_text(message, content, None)
+        || kept_as_text(message, content, chip_count(content))
 }
 
 fn line_matches(message: &Message, text: &str, images: usize) -> bool {
@@ -281,7 +288,7 @@ fn line_matches(message: &Message, text: &str, images: usize) -> bool {
         }
     }
     (plain(text) == message.text && images >= message.pictures)
-        || kept_as_text(message, text, Some(images))
+        || kept_as_text(message, text, images)
 }
 
 fn command_matches(message: &Message, text: &str) -> bool {

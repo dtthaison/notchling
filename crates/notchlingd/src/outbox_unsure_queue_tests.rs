@@ -26,11 +26,17 @@ fn unsure_first(r: &Rig, text: &str) -> (String, Postman) {
 }
 
 #[test]
-fn a_row_queued_behind_an_unsure_one_goes_at_the_next_pass_while_the_session_is_idle() {
+fn a_row_queued_behind_an_unsure_one_goes_once_the_session_has_stayed_idle() {
     let r = rig();
     let (first, mut p) = unsure_first(&r, "is it right");
     let second = r.send("job-idle", "add id to the lists");
     p.pass(r.at(T0 + 1_000));
+    assert_eq!(
+        state(&r, &second.id),
+        Some((State::Queued, None)),
+        "a short grace first"
+    );
+    p.pass(r.at(T0 + 4_000));
     assert_eq!(r.row(&second.id), None, "typed and settled as sent");
     assert_eq!(r.returns(), 2);
     assert!(r.typed().contains("add id to the lists"));
@@ -40,7 +46,7 @@ fn a_row_queued_behind_an_unsure_one_goes_at_the_next_pass_while_the_session_is_
         State::Unsure,
         "the unsure row stays, with its buttons"
     );
-    assert_eq!(kept.aside_ms, Some(T0 + 1_000), "it stepped aside early");
+    assert_eq!(kept.aside_ms, Some(T0 + 4_000), "it stepped aside early");
 }
 
 #[test]
@@ -67,11 +73,9 @@ fn the_unsure_row_keeps_holding_while_the_session_is_in_a_turn() {
     assert_eq!(r.row(&first).unwrap().aside_ms, None);
     r.files.set_status(IDLE, "idle");
     p.pass(r.at(T0 + 31_000));
-    assert_eq!(
-        r.row(&second.id),
-        None,
-        "it went as soon as the turn was over"
-    );
+    assert_eq!(r.returns(), 1, "one reading of idle is not enough");
+    p.pass(r.at(T0 + 35_000));
+    assert_eq!(r.row(&second.id), None, "it went once the turn stayed over");
     assert_eq!(r.returns(), 2);
 }
 
@@ -82,6 +86,7 @@ fn the_unsure_row_keeps_holding_while_the_session_waits_on_a_dialog() {
     r.files.set_status(IDLE, "waiting");
     r.send("job-idle", "add id to the lists");
     p.pass(r.at(T0 + 1_000));
+    p.pass(r.at(T0 + 10_000));
     assert_eq!(r.returns(), 1, "nothing is typed into a dialog");
     assert_eq!(r.row(&first).unwrap().aside_ms, None);
 }
@@ -93,15 +98,45 @@ fn a_second_unsure_in_a_row_still_holds_the_rows_behind_it() {
     r.verifier.waits.lock().unwrap().push_back(Verdict::Unsure);
     let second = r.send("job-idle", "second message");
     p.pass(r.at(T0 + 1_000));
+    p.pass(r.at(T0 + 4_000));
     assert_eq!(
         state(&r, &second.id),
         Some((State::Unsure, Some(Why::NotFound)))
     );
     let third = r.send("job-idle", "third message");
     p.pass(r.at(T0 + 10_000));
+    p.pass(r.at(T0 + 20_000));
     assert_eq!(state(&r, &third.id), Some((State::Queued, None)));
     assert!(!r.typed().contains("third message"));
     assert_eq!(r.row(&second.id).unwrap().aside_ms, None);
+}
+
+#[test]
+fn a_held_row_behind_does_not_make_the_unsure_row_step_aside() {
+    let r = rig();
+    let (first, mut p) = unsure_first(&r, "is it right");
+    let second = r.send("job-idle", "add id to the lists");
+    call(&r, "outbox.hold", json!({"id": second.id, "on": true})).unwrap();
+    p.pass(r.at(T0 + 1_000));
+    p.pass(r.at(T0 + 10_000));
+    assert_eq!(r.returns(), 1);
+    assert_eq!(r.row(&first).unwrap().aside_ms, None);
+}
+
+#[test]
+fn a_row_backing_off_behind_does_not_make_the_unsure_row_step_aside() {
+    let r = rig();
+    let (first, mut p) = unsure_first(&r, "is it right");
+    let second = r.send("job-idle", "add id to the lists");
+    r.ops.store().run_sql_for_tests(&format!(
+        "UPDATE outbox SET next_ms = {} WHERE id = '{}'",
+        T0 + 60_000,
+        second.id
+    ));
+    p.pass(r.at(T0 + 1_000));
+    p.pass(r.at(T0 + 10_000));
+    assert_eq!(r.returns(), 1);
+    assert_eq!(r.row(&first).unwrap().aside_ms, None);
 }
 
 #[test]
@@ -146,7 +181,7 @@ fn rows_that_join_into_one_message_are_all_in_what_was_typed() {
         .map(|text| r.send("job-idle", text))
         .collect();
     p.pass(r.at(T0 + 1_000));
-    p.pass(r.at(T0 + 2_000));
+    p.pass(r.at(T0 + 4_000));
     let typed = r.typed();
     for (row, text) in rows.iter().zip(["add id", "to the accounts list", "done"]) {
         assert_eq!(r.row(&row.id), None);

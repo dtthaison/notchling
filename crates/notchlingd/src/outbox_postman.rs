@@ -3,7 +3,7 @@ use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
     after, gate, idle_at_prompt, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd,
-    Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
+    Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX, TURN_SETTLE_MS,
 };
 use notchling_engine::transcript::sent::Seen;
 use notchling_events::kinds::agents::OutboxThen;
@@ -370,6 +370,7 @@ pub(crate) struct Postman {
     cut_short: Option<String>,
     looked: HashMap<String, (i64, i64)>,
     aside_timer: Option<i64>,
+    idle_since: Option<i64>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -392,6 +393,7 @@ impl Postman {
             cut_short: None,
             looked: HashMap::new(),
             aside_timer: None,
+            idle_since: None,
         }
     }
 
@@ -423,11 +425,15 @@ impl Postman {
                     if self.step_aside(&row, now) {
                         continue;
                     }
+                    let looked = self.look_again(&row, now);
+                    if matches!(looked, Again::Landed) {
+                        continue;
+                    }
                     let early = self.early_aside(&row, now);
                     if early == Early::Stepped {
                         continue;
                     }
-                    let timer = match self.look_again(&row, now) {
+                    let timer = match looked {
                         Again::Landed => None,
                         Again::At(at) => Some(earliest(Some(at), row.aside_at_ms).unwrap_or(at)),
                         Again::Never => match row.aside_at_ms {
@@ -527,23 +533,34 @@ impl Postman {
         }
         let store = self.inner.ops.store();
         let behind = store.list(Some(&self.session)).is_ok_and(|rows| {
-            rows.iter()
-                .any(|r| matches!(r.state, State::Queued | State::Waiting))
+            rows.iter().any(|r| {
+                matches!(r.state, State::Queued | State::Waiting)
+                    && r.hold_ms.is_none_or(|until| until <= now)
+                    && r.next_ms.is_none_or(|next| next <= now)
+            })
         });
         if !behind {
+            self.idle_since = None;
             return Early::Alone;
         }
         let facts = self.courier().facts(row, now);
         if !idle_at_prompt(&facts) {
+            self.idle_since = None;
             return Early::Waits;
         }
+        let since = *self.idle_since.get_or_insert(now);
+        if now - since < TURN_SETTLE_MS || now - row.updated_ms < TURN_SETTLE_MS {
+            return Early::Waits;
+        }
+        self.idle_since = None;
         match store.step_aside_now(&row.id, now) {
             Ok(true) => {
                 self.publish(&row.id);
                 self.inner.ops.emit_then(row, OutboxThen::Aside);
                 Early::Stepped
             }
-            _ => Early::Waits,
+            Ok(false) => Early::Stepped,
+            Err(_) => Early::Waits,
         }
     }
 

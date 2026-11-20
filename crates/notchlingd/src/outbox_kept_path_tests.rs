@@ -227,3 +227,23 @@ fn a_late_look_settles_the_picture_row_that_went_unsure() {
     assert!(e.sent());
     assert_eq!(e.r.returns(), 1, "never typed again");
 }
+
+#[test]
+fn an_unsure_row_that_already_landed_is_settled_as_sent_and_not_stepped_aside() {
+    let e = env();
+    let text = e.row_text();
+    let row = e.r.send("job-idle", &text);
+    let mut postman = e.postmen.postman(IDLE);
+    postman.pass(e.r.at(T0));
+    assert_eq!(e.state(&row.id), Some((State::Unsure, Some(Why::NotFound))));
+    append(&e.path, &[user(40_000, &text, 0)]);
+    e.r.send("job-idle", "next message");
+    postman.pass(e.r.at(T0 + 45_000));
+    assert_eq!(e.state(&row.id), None);
+    let gone = e.r.room.named("outbox.removed");
+    assert!(
+        gone.iter()
+            .any(|g| g["id"] == json!(row.id) && g["why"] == "sent"),
+        "{gone:?}"
+    );
+}
