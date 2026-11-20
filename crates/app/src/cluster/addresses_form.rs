@@ -2,6 +2,7 @@ use notchling_engine::machines::addresses::{
     infer_kind, list_problems, AddressKind, MachineAddress,
 };
 use notchling_engine::machines::forms::{is_host, is_user};
+use notchling_engine::machines::ssh_command::parse_ssh_command;
 use notchling_locale as t;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -17,9 +18,15 @@ impl RowMeta {
     }
 
     pub fn kind_for(&self, text: &str) -> AddressKind {
-        self.kind
-            .unwrap_or_else(|| infer_kind(&split_row(text).map(|r| r.host).unwrap_or_default()))
+        self.kind.unwrap_or_else(|| infer_kind(&host_of(text)))
     }
+}
+
+fn host_of(text: &str) -> String {
+    split_row(text)
+        .map(|r| r.host)
+        .or_else(|_| parse_ssh_command(text).map(|t| t.host))
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -183,6 +190,10 @@ pub fn cycle(options: &[Option<String>], current: &Option<String>) -> Option<Str
         Some(i) => options[(i + 1) % options.len()].clone(),
         None => options[0].clone(),
     }
+}
+
+pub fn may_swap(len: usize, a: usize, b: usize, first_is_elsewhere: bool) -> bool {
+    a < len && b < len && a != b && !(first_is_elsewhere && (a == 0 || b == 0))
 }
 
 pub fn swap_rows(rows: &mut [RowDraft], a: usize, b: usize) -> bool {

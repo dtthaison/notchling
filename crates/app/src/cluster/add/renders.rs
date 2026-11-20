@@ -36,6 +36,9 @@ pub(in crate::cluster) fn adds(which: Shown) -> bool {
             | Shown::Update
             | Shown::Machines
             | Shown::MachinesAdd
+            | Shown::MachinesAddEmpty
+            | Shown::MachinesAddPaste
+            | Shown::MachinesAddMore
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
             | Shown::MachinesTest
@@ -235,6 +238,9 @@ pub(in crate::cluster) fn feed_for(which: Shown, model: ClusterModel) -> Cluster
         which,
         Shown::Machines
             | Shown::MachinesAdd
+            | Shown::MachinesAddEmpty
+            | Shown::MachinesAddPaste
+            | Shown::MachinesAddMore
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
             | Shown::MachinesTest
@@ -414,6 +420,9 @@ impl ClusterSheetView {
         let flow = match which {
             Shown::Add
             | Shown::MachinesAdd
+            | Shown::MachinesAddEmpty
+            | Shown::MachinesAddPaste
+            | Shown::MachinesAddMore
             | Shown::MachinesAddresses
             | Shown::MachinesTailscale
             | Shown::MachinesTest
@@ -495,6 +504,19 @@ impl ClusterSheetView {
                 .name
                 .update(cx, |editor, cx| editor.set_text("app-3", cx));
         }
+        if matches!(which, Shown::MachinesAddPaste | Shown::MachinesAddMore) {
+            let typed = if which == Shown::MachinesAddMore {
+                "ssh -i ~/.ssh/id_x -J app-1 -p 234 stackops@203.0.113.7"
+            } else {
+                "ssh -i ~/.ssh/id_x -p 234 stackops@203.0.113.7"
+            };
+            sheet
+                .address
+                .update(cx, |editor, cx| editor.set_text(typed, cx));
+            sheet
+                .name
+                .update(cx, |editor, cx| editor.set_text("machine-7", cx));
+        }
         if which == Shown::Add {
             let typed = format!("{USER}@{HOST}");
             sheet
@@ -504,6 +526,8 @@ impl ClusterSheetView {
                 .name
                 .update(cx, |editor, cx| editor.set_text("m2", cx));
         }
+        let mut sheet = sheet;
+        sheet.more = matches!(which, Shown::MachinesAddMore | Shown::MachinesAddresses);
         self.add.sheet = Some(sheet);
         if which == Shown::MachinesAddresses {
             self.preview_addresses(cx);
