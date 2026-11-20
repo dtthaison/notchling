@@ -16,6 +16,7 @@ mod live;
 pub mod permission_dialog;
 pub mod pty;
 mod screen;
+pub mod screen_dialog;
 pub mod shell_output;
 mod width;
 

@@ -14,6 +14,7 @@ pub enum TryEnd {
     NotIdle,
     AttachFailed,
     Cut,
+    Asked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,10 @@ pub fn after(end: &TryEnd, tried: Tried, tries: u32, now_ms: i64) -> After {
     match end {
         TryEnd::Cut => After::Unsure(Why::Restart),
         TryEnd::Ok => After::Verify,
+        TryEnd::Asked => After::Wait {
+            why: Why::Answer,
+            next_ms: None,
+        },
         _ if tried.entered => After::Verify,
         TryEnd::NotIdle => After::Wait {
             why: Why::Turn,

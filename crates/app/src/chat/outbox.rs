@@ -8,6 +8,7 @@ use notchling_engine::transcript::stored::{is_blank, same_words, squeezed as squ
 use notchling_local_api::{topics, Event};
 use serde_json::Value;
 
+use super::busy::Busy;
 use super::outgoing::{sent_since, Outgoing, Turns, Wanted, GRACE_MS};
 use crate::acting::Request;
 
@@ -76,6 +77,8 @@ pub enum Status {
     Queued,
     QueuedRetry,
     WaitingDialog,
+    NeedsAnswer,
+    Busy(Busy),
     WaitsForTurn,
     WaitsForQueue(Tool),
     WaitsForPrevious,
@@ -99,12 +102,13 @@ pub enum Button {
     MarkAsSent,
     ClearBoxAndSend,
     ResumeAndSend,
+    ShowTerminal,
 }
 
 impl Button {
     pub fn request(self, id: &str, session: &str) -> Option<Request> {
         match self {
-            Button::Edit => None,
+            Button::Edit | Button::ShowTerminal => None,
             Button::Remove => Some(Request::outbox_remove(id, session)),
             Button::MarkAsSent => Some(Request::outbox_mark_sent(id, session)),
             Button::Retry => Some(Request::outbox_resend(id, session, false, false)),
@@ -133,6 +137,9 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
             (Status::Editing, Vec::new())
         }
         State::Queued => (Status::Queued, vec![Button::Edit, Button::Remove]),
+        State::Waiting if row.why == Some(Why::Answer) => {
+            (Status::NeedsAnswer, vec![Button::Remove])
+        }
         State::Waiting => {
             let status = match row.why {
                 Some(Why::Retry) => Status::QueuedRetry,
@@ -185,8 +192,18 @@ fn blocks_next(row: &OutboxRow) -> bool {
     match row.state {
         State::Unsure => row.aside_ms.is_none(),
         State::Box | State::Stopped | State::Gone | State::InQueue => true,
+        State::Waiting if row.why == Some(Why::Answer) => true,
         State::Queued | State::Waiting => row.held_until_ms.is_some(),
         State::Sending => false,
+    }
+}
+
+pub fn offer_terminal(bubbles: &mut [Bubble]) {
+    for bubble in bubbles {
+        let asks = matches!(bubble.status, Status::WaitingDialog | Status::NeedsAnswer);
+        if asks && !bubble.buttons.contains(&Button::ShowTerminal) {
+            bubble.buttons.insert(0, Button::ShowTerminal);
+        }
     }
 }
 

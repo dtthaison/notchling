@@ -120,7 +120,7 @@
   "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|\"Postgres\".into(),",
   "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|\"SQLite\".into(),",
   "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|Prompt::Permission(_) => \"Permission Card\",",
-  "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|Prompt::Question(_) => \"Question Card\",",
+  "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|Prompt::Question(_) | Prompt::Dialog(_) => \"Question Card\",",
   "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|header: \"Checks\".into(),",
   "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|header: \"Database\".into(),",
   "LINT-LOCALE-LITERAL|crates/app/src/chat/prompts.rs|id: format!(\"{NEEDS_PREFIX}preview:approve Write {PREVIEW_PATH}\"),",

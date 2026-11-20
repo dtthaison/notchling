@@ -14,6 +14,10 @@ impl ChatView {
             self.begin_edit(id, cx);
             return;
         }
+        if button == Button::ShowTerminal {
+            self.open_session_terminal(cx);
+            return;
+        }
         let Some(session) = self.selected_session().map(|s| s.agent.outbox_key()) else {
             return;
         };

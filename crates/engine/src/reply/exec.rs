@@ -1,8 +1,9 @@
 use super::keys::{self, timing::*, ENTER, LEFT, SUBMIT};
-use super::plan::{Plan, Step, Until};
+use super::plan::{DialogPick, Plan, Step, Until};
 use super::popall;
 use crate::terminal::input_box::{self, Fill, Input};
 use crate::terminal::permission_dialog::{self, Decision, PermissionDialog};
+use crate::terminal::screen_dialog::{self, ScreenDialog};
 use crate::terminal::Shade;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -275,6 +276,7 @@ pub fn execute_clearing(
         clearing,
         taken: false,
         pressed: None,
+        pressed_dialog: None,
         pasted: String::new(),
         intended: plan.steps.iter().find_map(|step| match step {
             Step::Paste(text) => Some(keys::paste_safe(text)),
@@ -365,6 +367,7 @@ struct Run<'a> {
     clearing: &'a Clearing,
     taken: bool,
     pressed: Option<PermissionDialog>,
+    pressed_dialog: Option<ScreenDialog>,
     pasted: String,
     intended: Option<String>,
     doing: &'static str,
@@ -497,6 +500,29 @@ impl Run<'_> {
             },
             _ => Ok(()),
         }
+    }
+
+    fn dialog_still_open(&self, lines: &[String]) -> bool {
+        match (&self.pressed_dialog, screen_dialog::read(lines)) {
+            (Some(pressed), Some(now)) => pressed.same_as(&now),
+            _ => false,
+        }
+    }
+
+    fn press_dialog(&mut self, pick: &DialogPick) -> Result<(), Failure> {
+        let mut lines = self.pty.screen();
+        if screen_dialog::read(&lines).is_none() {
+            self.wait_until(PERMISSION_DRAW_WAIT_MS, |_, lines| {
+                screen_dialog::read(lines).is_some()
+            });
+            lines = self.pty.screen();
+        }
+        let dialog = screen_dialog::read(&lines).ok_or(Failure::QuestionGone)?;
+        if !dialog.offers(pick) || !(1..=9).contains(&pick.number) {
+            return Err(Failure::QuestionMismatch);
+        }
+        self.pressed_dialog = Some(dialog);
+        self.write(&pick.number.to_string())
     }
 
     fn highlight_in_box(&mut self) -> bool {
@@ -698,10 +724,11 @@ impl Run<'_> {
                         run.check.is_review(lines) || !run.check.dialog_open(lines)
                     }
                     Until::PermissionGone => permission_dialog::read(lines) != run.pressed,
+                    Until::DialogGone => !run.dialog_still_open(lines),
                 });
                 if !moved {
                     return Err(match until {
-                        Until::PermissionGone => Failure::PermissionStillOpen,
+                        Until::PermissionGone | Until::DialogGone => Failure::PermissionStillOpen,
                         _ => Failure::QuestionMismatch,
                     });
                 }
@@ -729,6 +756,7 @@ impl Run<'_> {
                 self.pressed = Some(dialog);
                 self.write(&digit)?;
             }
+            Step::PressDialog { pick } => self.press_dialog(pick)?,
             Step::SubmitIfReview { timeout_ms } => {
                 let lines = self.pty.screen();
                 if self.check.is_review(&lines) {

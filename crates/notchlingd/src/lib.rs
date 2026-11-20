@@ -228,6 +228,8 @@ mod accounts_ops_log_tests;
 #[cfg(test)]
 mod accounts_ops_tests;
 #[cfg(test)]
+mod acting_dialog_tests;
+#[cfg(test)]
 mod acting_events_tests;
 #[cfg(test)]
 mod acting_login_tests;

@@ -5,6 +5,7 @@ use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use serde_json::Value;
 
+use super::dialog_card::{self, DialogCard};
 use super::markers::{self, DIALOG, NO_ALWAYS};
 use super::remote;
 use crate::acting::{Decision, Request};
@@ -17,6 +18,7 @@ use crate::notch::requests::{HookRequest, RequestKind};
 pub enum Prompt {
     Question(PendingQuestion),
     Permission(Box<HookRequest>),
+    Dialog(Box<DialogCard>),
 }
 
 impl Prompt {
@@ -24,12 +26,13 @@ impl Prompt {
         match self {
             Prompt::Question(q) => question_key(q),
             Prompt::Permission(r) => r.id.clone(),
+            Prompt::Dialog(d) => d.key.clone(),
         }
     }
 
     pub fn part(&self) -> &'static str {
         match self {
-            Prompt::Question(_) => "Question Card",
+            Prompt::Question(_) | Prompt::Dialog(_) => "Question Card",
             Prompt::Permission(_) => "Permission Card",
         }
     }
@@ -92,6 +95,7 @@ pub enum Preview {
     PermissionSending,
     PermissionFailed,
     PermissionNext,
+    Dialog,
 }
 
 impl Preview {
@@ -104,6 +108,7 @@ impl Preview {
             "permission-sending" => Some(Preview::PermissionSending),
             "permission-failed" => Some(Preview::PermissionFailed),
             "permission-next" => Some(Preview::PermissionNext),
+            "dialog" => Some(Preview::Dialog),
             _ => None,
         }
     }
@@ -201,6 +206,7 @@ pub fn screen_question(reply: &Value) -> Option<PendingQuestion> {
 pub fn preview_prompt(preview: Preview) -> Prompt {
     use notchling_engine::transcript::snapshot::QuestionItem;
     match preview {
+        Preview::Dialog => Prompt::Dialog(Box::new(dialog_card::preview())),
         Preview::Question => Prompt::Question(PendingQuestion {
             tool_use_id: "hook:preview".into(),
             items: vec![

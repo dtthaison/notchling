@@ -12,6 +12,7 @@ use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
 use notchling_engine::terminal::input_box;
+use notchling_engine::terminal::screen_dialog;
 use notchling_engine::transcript::locate::{find_in_folders, find_transcript, project_folders};
 use notchling_engine::transcript::queue_state::{queue_state, QueueState};
 use notchling_engine::transcript::restart;
@@ -22,8 +23,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 const CALM_GAP_MS: i64 = 3_000;
+const ASKED_QUIET_MS: u64 = 400;
+const ASKED_WAIT_MS: u64 = 1_500;
 
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
@@ -238,6 +242,14 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+fn asks_something(pty: &mut dyn Pty) -> bool {
+    pty.wait_quiet(
+        Duration::from_millis(ASKED_QUIET_MS),
+        Duration::from_millis(ASKED_WAIT_MS),
+    );
+    screen_dialog::read(&pty.screen()).is_some()
+}
+
 fn calm(files: &dyn JobFiles, fresh: &Agent, now_ms: i64) -> bool {
     fresh.takes_held_text()
         && (fresh.group != AgentGroup::Working || !files.restarted(fresh, now_ms))
@@ -366,6 +378,11 @@ impl ClaudeCourier {
             return (TryEnd::NotIdle, tried, None);
         }
         match played {
+            Ok(_) if row.kind == Kind::Command && asks_something(pty.as_mut()) => {
+                self.acting.attempts.forget(&agent.id);
+                self.note(row, agent, None);
+                (TryEnd::Asked, tried, None)
+            }
             Ok(_) => {
                 self.acting.attempts.forget(&agent.id);
                 lock(&self.attaches).insert(row.session.clone(), pty);

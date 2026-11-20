@@ -33,6 +33,16 @@ pub(crate) const DRAFT: &[&str] = &[
 
 pub(crate) const DIALOG: &[&str] = &["Do you want to proceed?", " 1. Yes", " 2. No"];
 
+pub(crate) const SWITCH_MODEL: &[&str] = &[
+    "────────────────────────────────────────",
+    " Switch model?",
+    " Your next response will be slower and use more tokens",
+    " This conversation is cached for the current model. Switching to Opus 5.5 means the full history gets re-read.",
+    " ❯ 1. Yes, switch to Opus 5.5",
+    "   2. No, go back",
+    " Enter to confirm · Esc to cancel",
+];
+
 pub(crate) const NO_BOX: &[&str] = &["Resume a session", "  1. fix-hook"];
 
 #[derive(Default)]
@@ -183,6 +193,7 @@ pub(crate) struct Rig {
     pub launched: Arc<Recorder>,
     pub safe: Arc<SafeModes>,
     pub sink: Arc<MemorySink>,
+    pub dialog: crate::acting_ops_tests::DialogSlot,
 }
 
 pub(crate) struct Options {
@@ -238,6 +249,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         starting,
         screen,
         human,
+        dialog,
         ..
     } = setup_in(
         true,
@@ -313,6 +325,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         launched,
         safe,
         sink,
+        dialog,
     }
 }
 
@@ -366,6 +379,10 @@ impl Rig {
 
     pub(crate) fn show(&self, lines: &[&str]) {
         *self.screen.lock().unwrap() = lines.iter().map(|l| l.to_string()).collect();
+    }
+
+    pub(crate) fn open_dialog_after_a_command(&self, lines: &[&str]) {
+        *self.dialog.lock().unwrap() = Some((lines.iter().map(|l| l.to_string()).collect(), false));
     }
 
     pub(crate) fn acting_switch(&self) -> Arc<Acting> {

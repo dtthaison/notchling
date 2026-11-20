@@ -14,6 +14,7 @@ pub const QUEUE_STALE_MS: i64 = 10_000;
 pub const GONE_AFTER_MS: i64 = 60_000;
 pub const GONE_RECHECK_MS: i64 = 10_000;
 pub const DIALOG_RECHECK_MS: i64 = 30_000;
+pub const ANSWER_GRACE_MS: i64 = 3_000;
 pub const REPLY_WAIT_MS: i64 = 50_000;
 pub const POSTMEN_MAX: usize = 32;
 pub const UNSURE_HOLD_MS: i64 = 120_000;
@@ -28,6 +29,9 @@ pub use refusal::{is_settled, BEING_SENT, CHANGED, IN_QUEUE, NO_MESSAGE};
 pub use store::OutboxStore;
 pub use verdict::{line_within, queued_verdict, verdict, QueuedVerdict, Verdict};
 
+#[cfg(test)]
+#[path = "gate_answer_tests.rs"]
+mod gate_answer_tests;
 #[cfg(test)]
 #[path = "gate_tests.rs"]
 mod gate_tests;

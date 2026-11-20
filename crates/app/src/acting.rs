@@ -23,6 +23,8 @@ pub mod ops {
     pub const SESSION_MOVE: &str = "session.move";
     pub const SESSION_COMMAND: &str = "session.command";
     pub const SESSION_QUESTION: &str = "session.question";
+    pub const SESSION_DIALOG: &str = "session.dialog";
+    pub const SESSION_DIALOG_PICK: &str = "session.dialog_pick";
     pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
     pub const SESSION_CHROME: &str = "session.chrome";
     pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
@@ -306,6 +308,17 @@ impl Request {
 
     pub fn question(id: &str) -> Request {
         Request::new(ops::SESSION_QUESTION, json!({ "id": id }))
+    }
+
+    pub fn dialog(id: &str) -> Request {
+        Request::new(ops::SESSION_DIALOG, json!({ "id": id }))
+    }
+
+    pub fn dialog_pick(id: &str, title: &str, number: u64, label: &str) -> Request {
+        Request::new(
+            ops::SESSION_DIALOG_PICK,
+            json!({ "id": id, "title": title, "number": number, "label": label }),
+        )
     }
 
     pub fn shell_output(id: &str, command: &str) -> Request {

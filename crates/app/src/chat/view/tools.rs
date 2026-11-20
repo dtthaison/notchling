@@ -253,15 +253,18 @@ impl ChatView {
     }
 
     pub(super) fn outbox_bubbles(&self) -> Vec<Bubble> {
-        if let Some(preview) = &self.outbox_preview {
-            return preview.clone();
-        }
-        match self.selected_session() {
-            Some(session) => self
+        let mut bubbles = match (&self.outbox_preview, self.selected_session()) {
+            (Some(preview), _) => preview.clone(),
+            (None, Some(session)) => self
                 .source
                 .outbox_bubbles(&session.agent, &self.conversation),
-            None => Vec::new(),
+            (None, None) => Vec::new(),
+        };
+        if !self.dialog_card_shown() {
+            crate::chat::outbox::offer_terminal(&mut bubbles);
         }
+        self.explain_busy(&mut bubbles);
+        bubbles
     }
 
     pub(super) fn acting(&self, cx: &mut Context<Self>) -> Acting {

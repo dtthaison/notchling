@@ -28,8 +28,12 @@ pub struct FakePrompt {
     own_cursor: bool,
     chips: u32,
     human: Vec<(u64, String)>,
+    dialog: Vec<String>,
+    dialog_up: bool,
+    on_command: bool,
     pub writes: Vec<String>,
     pub sent: Vec<String>,
+    pub picked: Vec<String>,
 }
 
 impl FakePrompt {
@@ -110,6 +114,22 @@ impl FakePrompt {
     pub fn typing(mut self, at_ms: u64, text: &str) -> FakePrompt {
         self.human.push((at_ms, text.to_string()));
         self
+    }
+
+    pub fn with_dialog(mut self, lines: &[&str]) -> FakePrompt {
+        self.dialog = lines.iter().map(|l| l.to_string()).collect();
+        self.dialog_up = true;
+        self
+    }
+
+    pub fn opening_dialog_on_command(mut self, lines: &[&str]) -> FakePrompt {
+        self.dialog = lines.iter().map(|l| l.to_string()).collect();
+        self.on_command = true;
+        self
+    }
+
+    pub fn dialog_shown(&self) -> bool {
+        self.dialog_up
     }
 
     pub fn holding(mut self, text: &str) -> FakePrompt {
@@ -220,7 +240,11 @@ impl FakePrompt {
         if self.deaf || self.landing.is_some() || !self.boxed || self.text.is_empty() {
             return;
         }
-        self.sent.push(std::mem::take(&mut self.text));
+        let text = std::mem::take(&mut self.text);
+        if self.on_command && text.starts_with('/') {
+            self.dialog_up = true;
+        }
+        self.sent.push(text);
     }
 }
 
@@ -228,6 +252,14 @@ impl Pty for FakePrompt {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         let typed = String::from_utf8_lossy(bytes).into_owned();
         if self.starting() {
+            self.writes.push(typed);
+            return Ok(());
+        }
+        if self.dialog_up {
+            if typed.len() == 1 && typed.chars().all(|c| c.is_ascii_digit()) {
+                self.dialog_up = false;
+                self.picked.push(typed.clone());
+            }
             self.writes.push(typed);
             return Ok(());
         }
@@ -259,6 +291,9 @@ impl Pty for FakePrompt {
     }
 
     fn screen(&mut self) -> Vec<String> {
+        if self.dialog_up {
+            return self.dialog.clone();
+        }
         if self.starting() {
             return ["⏺ ok", "", RULE, "❯", RULE, self.notice.as_str()]
                 .map(String::from)
@@ -273,7 +308,7 @@ impl Pty for FakePrompt {
     }
 
     fn shades(&mut self) -> Vec<Vec<Shade>> {
-        if !self.own_cursor || !self.boxed || self.starting() {
+        if !self.own_cursor || !self.boxed || self.starting() || self.dialog_up {
             return Vec::new();
         }
         let hinted = self.text.is_empty() && !self.hint.is_empty();
@@ -297,7 +332,7 @@ impl Pty for FakePrompt {
     }
 
     fn cursor(&mut self) -> Option<(usize, usize)> {
-        if !self.boxed || self.starting() || self.own_cursor {
+        if !self.boxed || self.starting() || self.own_cursor || self.dialog_up {
             return None;
         }
         let rows = self.rows();

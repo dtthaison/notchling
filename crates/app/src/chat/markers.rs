@@ -5,6 +5,7 @@ pub const GONE: &str = "isn't showing that permission";
 pub const DIALOG: &str = "The session is asking you something";
 pub const ANSWER_IN_TERMINAL: &str = "Answer it in the terminal";
 pub const APPROVE: &str = "approve ";
+pub const ANSWER_PREFIX: &str = "answer:";
 pub const DIDNT_ANSWER: &str = "didn't answer in time";
 pub const CLOSED_CONNECTION: &str = "closed the connection";
 

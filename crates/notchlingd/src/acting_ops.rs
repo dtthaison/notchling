@@ -34,7 +34,7 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(290);
 
 pub const STOPPING_FOR: Duration = Duration::from_secs(20);
 
-pub const ACTING_OPS: [&str; 12] = [
+pub const ACTING_OPS: [&str; 13] = [
     ops::SESSION_REPLY,
     ops::SESSION_ANSWER,
     ops::SESSION_PERMISSION,
@@ -47,6 +47,7 @@ pub const ACTING_OPS: [&str; 12] = [
     ops::SESSION_MOVE,
     ops::SESSION_COMMAND,
     ops::SESSION_HELD_DISCARD,
+    ops::SESSION_DIALOG_PICK,
 ];
 
 pub const CONTROL_OPS: [&str; 6] = [
@@ -284,7 +285,9 @@ impl ActingOps {
             ops::SETTINGS_GET_ACTING | ops::SESSION_QUESTION | ops::HOOK_REQUEST => {
                 Some(OpSpec::AGENT)
             }
-            ops::SESSION_SHELL_OUTPUT | ops::SESSION_CHROME => Some(OpSpec::APP),
+            ops::SESSION_SHELL_OUTPUT | ops::SESSION_DIALOG | ops::SESSION_CHROME => {
+                Some(OpSpec::APP)
+            }
             op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -310,6 +313,8 @@ impl ActingOps {
             }
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
+            ops::SESSION_DIALOG => self.dialog(caller, args),
+            ops::SESSION_DIALOG_PICK => self.dialog_pick(caller, args),
             ops::SESSION_CHROME => {
                 app_only(caller)?;
                 self.chrome_state(args)
@@ -781,57 +786,10 @@ impl ActingOps {
             })
         })
     }
-
-    fn shell_output(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        if !self.acting.is_on() {
-            return Err(forbidden(ACTING_OFF));
-        }
-        if caller.tier != Tier::App {
-            return Err(forbidden("reading a session's screen is for the app only"));
-        }
-        let command = text_arg(args, "command")?;
-        if command.trim().is_empty() || command.len() > SHELL_COMMAND_MAX {
-            return Err(bad("command is the shell command the session is running"));
-        }
-        let agent = self.agent(args)?;
-        let no_terminal = || bad("this session has no terminal to read");
-        if !matches!(&agent.target, AgentTarget::Job(_) if agent.can_reply()) {
-            return Err(no_terminal());
-        }
-        let read = self.try_locked(&agent, |agent| {
-            let job = match &agent.target {
-                AgentTarget::Job(now) if agent.can_reply() => now.clone(),
-                _ => return Err(no_terminal()),
-            };
-            if !self.running_now(&job) {
-                return Ok(None);
-            }
-            let config_dir =
-                config_dir_for_job(&self.roots, &job).or_else(|| agent.config_dir.clone());
-            let mut pty = self.attacher.attach(&job, config_dir.as_deref())?;
-            let lines = read_shell_output(pty.as_mut(), command);
-            Ok(Some((lines, pty)))
-        });
-        match read {
-            None => Ok(json!({"lines": [], "busy": true})),
-            Some(Err(e)) => Err(e),
-            Some(Ok(None)) => Ok(json!({"lines": []})),
-            Some(Ok(Some((lines, pty)))) => {
-                drop(pty);
-                Ok(json!({ "lines": lines }))
-            }
-        }
-    }
-
-    fn running_now(&self, job: &str) -> bool {
-        matches!(
-            fresh::job_status(&self.roots, &Probes::from_proc(), job).as_deref(),
-            Some("busy" | "shell")
-        )
-    }
 }
 
-const SHELL_COMMAND_MAX: usize = 64 * 1024;
+#[path = "acting_screen.rs"]
+mod screen;
 
 fn answer_of(decision: &str) -> AnswerKind {
     match decision {

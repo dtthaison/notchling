@@ -1,5 +1,6 @@
 use super::{
-    Kind, Row, State, Why, DIALOG_RECHECK_MS, GONE_AFTER_MS, QUEUE_STALE_MS, TURN_SETTLE_MS,
+    Kind, Row, State, Why, ANSWER_GRACE_MS, DIALOG_RECHECK_MS, GONE_AFTER_MS, QUEUE_STALE_MS,
+    TURN_SETTLE_MS,
 };
 
 const RECHECK_MS: i64 = 1_000;
@@ -26,6 +27,7 @@ pub enum Gate {
     Go { guarded: bool },
     Wait { why: Why, until_ms: i64 },
     NeedsUser(State),
+    Delivered,
 }
 
 pub fn gate(row: &Row, facts: &Facts) -> Gate {
@@ -43,6 +45,9 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         Job::Stopped => return Gate::NeedsUser(State::Stopped),
         Job::Live { status } => status.as_deref(),
     };
+    if row.why == Some(Why::Answer) {
+        return answer_gate(row, status, facts);
+    }
     if status == Some("waiting") || facts.dialog_on_screen {
         return Gate::Wait {
             why: Why::Dialog,
@@ -68,6 +73,17 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         };
     }
     Gate::Go { guarded: false }
+}
+
+fn answer_gate(row: &Row, status: Option<&str>, facts: &Facts) -> Gate {
+    let asked = status == Some("waiting") || facts.now_ms - row.updated_ms < ANSWER_GRACE_MS;
+    match asked {
+        true => Gate::Wait {
+            why: Why::Answer,
+            until_ms: facts.now_ms + RECHECK_MS,
+        },
+        false => Gate::Delivered,
+    }
 }
 
 fn queue_is_stale(status: Option<&str>, facts: &Facts) -> bool {

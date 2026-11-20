@@ -68,6 +68,7 @@ words!(Why {
     Dropped => "dropped",
     NotCleared => "not_cleared",
     Mixed => "mixed",
+    Answer => "answer",
 });
 
 impl Kind {

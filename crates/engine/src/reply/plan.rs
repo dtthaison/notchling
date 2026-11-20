@@ -2,6 +2,7 @@ use super::keys::{self, timing::*, ENTER, ESC, SUBMIT, UP};
 use super::question::{page_keys, Choice, PendingQuestion};
 use super::shell;
 pub use crate::terminal::permission_dialog::{self, Decision, Expected};
+pub use crate::terminal::screen_dialog::DialogPick;
 use crate::transcript::stored::precleaned;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +51,9 @@ pub enum Step {
         decision: Decision,
         expect: Expected,
     },
+    PressDialog {
+        pick: DialogPick,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +61,7 @@ pub enum Until {
     Shows(String),
     ReviewOrGone,
     PermissionGone,
+    DialogGone,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -86,6 +91,7 @@ impl Step {
             Step::AwaitPopAll { .. } => "await pop all",
             Step::EndUnlessTaken => "end unless taken",
             Step::PressPermission { .. } => "press permission",
+            Step::PressDialog { .. } => "press dialog",
         }
     }
 }
@@ -277,6 +283,21 @@ pub fn permission(decision: Decision, expect: &Expected) -> Plan {
             Step::Pause(KEY_PAUSE_MS),
             Step::WaitFor {
                 until: Until::PermissionGone,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}
+
+pub fn dialog(pick: &DialogPick) -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::PressDialog { pick: pick.clone() },
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::DialogGone,
                 timeout_ms: PERMISSION_WAIT_MS,
             },
         ],
