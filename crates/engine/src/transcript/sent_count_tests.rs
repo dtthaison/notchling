@@ -91,6 +91,7 @@ fn image_message_matches_chip_line() {
         pictures: 1,
         bash: None,
         command: None,
+        paths: Vec::new(),
     };
     assert_eq!(
         count_since(&fixture("images.jsonl"), &with_picture, at(0)),
@@ -233,6 +234,7 @@ fn picture_only_message_is_taken_by_an_image_only_line() {
         pictures: 1,
         bash: None,
         command: None,
+        paths: Vec::new(),
     };
     let image = json!({"type": "image", "source": {"type": "base64", "data": "x"}});
     let lines = [
@@ -266,10 +268,11 @@ fn merged_line_needs_the_pictures_too() {
         pictures: 1,
         bash: None,
         command: None,
+        paths: Vec::new(),
     };
     assert_eq!(
         count_since(&fixture("merged.jsonl"), &with_picture, at(0)),
-        seen(2, 0)
+        seen(0, 0)
     );
 }
 

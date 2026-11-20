@@ -7,6 +7,7 @@ pub struct Message {
     pub pictures: usize,
     pub bash: Option<String>,
     pub command: Option<(String, String)>,
+    pub paths: Vec<PathBuf>,
 }
 
 impl Message {
@@ -25,6 +26,7 @@ impl Message {
         Message {
             text: squeezed(&words),
             pictures: pictures.len(),
+            paths: pictures,
             bash,
             command,
         }
@@ -47,6 +49,22 @@ pub fn cut_chips(text: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+pub fn chip_count(text: &str) -> usize {
+    let mut count = 0;
+    let mut rest = text;
+    while let Some(start) = rest.find("[Image #") {
+        let after = &rest[start + "[Image #".len()..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && after[digits..].starts_with(']') {
+            count += 1;
+            rest = &after[digits + 1..];
+        } else {
+            rest = after;
+        }
+    }
+    count
 }
 
 const PICTURE_KINDS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];

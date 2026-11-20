@@ -70,6 +70,13 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
     Gate::Go { guarded: false }
 }
 
+pub fn idle_at_prompt(facts: &Facts) -> bool {
+    matches!(&facts.job, Job::Live { status: Some(status) } if status == "idle")
+        && !facts.dialog_on_screen
+        && !facts.safe
+        && facts.queue_waiting == 0
+}
+
 fn queue_is_stale(status: Option<&str>, facts: &Facts) -> bool {
     matches!(status, Some("idle" | "shell"))
         && facts
