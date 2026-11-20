@@ -32,6 +32,7 @@ struct Log {
     sleeps: Vec<u64>,
     hold: bool,
     slow: bool,
+    gate: bool,
     now: u64,
     moved_to: Option<String>,
 }
@@ -65,8 +66,16 @@ impl Host for FakeHost {
             .unwrap_or(Some(0))
     }
     fn restart(&mut self) -> Result<bool, String> {
-        (self.0).0.lock().unwrap().restarts += 1;
-        Ok(true)
+        loop {
+            {
+                let mut log = (self.0).0.lock().unwrap();
+                if !log.gate {
+                    log.restarts += 1;
+                    return Ok(true);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
     fn sleep(&mut self, ms: u64) {
         let hold = {
@@ -81,6 +90,9 @@ impl Host for FakeHost {
     }
     fn now_ms(&mut self) -> u64 {
         (self.0).0.lock().unwrap().now
+    }
+    fn real_time(&self) -> bool {
+        (self.0).0.lock().unwrap().slow
     }
 }
 
@@ -650,4 +662,127 @@ fn a_cancelled_reload_can_be_started_again_at_once_and_the_old_worker_cannot_tou
             &json!({"id": "job-a", "cancel": true}),
         )
         .unwrap();
+}
+
+fn until_phase(s: &Setup, id: &str, phase: &str) {
+    for _ in 0..1000 {
+        if phase_of(s, id)["phase"] == phase {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("never reached {phase}");
+}
+
+fn cancel(s: &Setup, id: &str) -> Result<Value, (ErrorCode, String)> {
+    s.ops
+        .call(
+            &app(),
+            ops::SESSION_RELOAD,
+            &json!({"id": id, "cancel": true}),
+        )
+        .map_err(|e| (e.code, e.message))
+}
+
+#[test]
+fn a_reload_inside_the_restart_cannot_be_cancelled_and_finishes() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().gate = true;
+    let (_d, s) = faked("working-cancel", &fake, false);
+    reload(&s, "job-a", true).unwrap();
+    until_phase(&s, "job-a", "working");
+    let refused = cancel(&s, "job-a").unwrap_err();
+    assert_eq!(refused.0, ErrorCode::BadRequest);
+    assert!(refused.1.contains("restarting"), "{}", refused.1);
+    assert_eq!(phase_of(&s, "job-a")["phase"], "working");
+    fake.0.lock().unwrap().gate = false;
+    assert_eq!(until_over(&s, "job-a")["phase"], "done");
+    assert_eq!(fake.0.lock().unwrap().restarts, 1);
+}
+
+#[test]
+fn a_second_start_while_a_worker_is_inside_the_restart_starts_nothing() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().gate = true;
+    let (_d, s) = faked("working-start", &fake, false);
+    reload(&s, "job-a", true).unwrap();
+    until_phase(&s, "job-a", "working");
+    let again = reload(&s, "job-a", true).unwrap();
+    assert_eq!(again["task"]["phase"], "working");
+    fake.0.lock().unwrap().gate = false;
+    assert_eq!(until_over(&s, "job-a")["phase"], "done");
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(fake.0.lock().unwrap().restarts, 1);
+}
+
+#[test]
+fn the_flags_swap_never_writes_a_pending_record() {
+    let launcher = Arc::new(FakeLauncher::new());
+    launcher.set_delay(std::time::Duration::from_millis(300));
+    let (dir, ops, state) = live("no-pending", launcher, IDLE);
+    let flags = r#"["--model","opus","--bg","--permission-mode","plan"]"#;
+    with_mode_in_transcript(&dir, &state, flags, "acceptEdits");
+    let watched = state.clone();
+    let seen = Arc::new(Mutex::new(false));
+    let flag = seen.clone();
+    let watcher = std::thread::spawn(move || {
+        for _ in 0..150 {
+            if status::read_pending(&watched).is_some() {
+                *flag.lock().unwrap() = true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+    });
+    let hosts = LiveHosts::new(&ops);
+    let mut host = hosts.host(&job_a(&ops));
+    assert_eq!(host.restart(), Ok(true));
+    watcher.join().unwrap();
+    assert!(!*seen.lock().unwrap());
+    let after = status::read_flags(&state).unwrap();
+    assert_eq!(
+        &after[after.len() - 2..],
+        ["--permission-mode", "acceptEdits"]
+    );
+}
+
+#[test]
+fn cancel_wakes_a_waiting_worker_at_once_and_the_next_start_follows() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().tasks = VecDeque::from(vec![Some(2); 50]);
+    fake.0.lock().unwrap().slow = true;
+    let (_d, s) = faked("wake", &fake, false);
+    reload(&s, "job-a", true).unwrap();
+    until_phase(&s, "job-a", "waiting");
+    let started = std::time::Instant::now();
+    cancel(&s, "job-a").unwrap();
+    let again = reload(&s, "job-a", true).unwrap();
+    assert_eq!(again["task"]["phase"], "waiting");
+    assert!(started.elapsed() < std::time::Duration::from_millis(1_500));
+    cancel(&s, "job-a").unwrap();
+}
+
+#[test]
+fn the_app_can_list_the_reloads_that_are_running() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().gate = true;
+    let (_d, s) = faked("active", &fake, false);
+    let none = s
+        .ops
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"active": true}))
+        .unwrap();
+    assert_eq!(none["active"], json!([]));
+    reload(&s, "job-a", true).unwrap();
+    until_phase(&s, "job-a", "working");
+    let some = s
+        .ops
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"active": true}))
+        .unwrap();
+    assert_eq!(some["active"], json!(["job-a"]));
+    fake.0.lock().unwrap().gate = false;
+    until_over(&s, "job-a");
+    let after = s
+        .ops
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"active": true}))
+        .unwrap();
+    assert_eq!(after["active"], json!([]));
 }

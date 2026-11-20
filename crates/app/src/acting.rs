@@ -410,6 +410,10 @@ impl Request {
         Request::new(ops::SESSION_RELOAD_STATE, args)
     }
 
+    pub fn reload_active() -> Request {
+        Request::new(ops::SESSION_RELOAD_STATE, json!({ "active": true }))
+    }
+
     pub fn command(id: &str, command: &str) -> Request {
         Request::new(
             ops::SESSION_COMMAND,

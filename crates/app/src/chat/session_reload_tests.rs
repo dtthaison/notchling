@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 
 use super::data::{Session, Tool};
 use super::session_reload::{
-    lead, mode, parse, Act, Applied, Card, Mode, Stage, State, Status, Task, NOTE_MS, POLL_MS,
+    lead, mode, parse, Act, Applied, Card, Mode, Stage, State, Status, Task, Via, NOTE_MS, POLL_MS,
+    SCAN_MS,
 };
 use crate::acting::{ops, Request};
 
@@ -362,7 +363,104 @@ fn polls_run_only_while_the_card_is_live_and_a_failing_poll_gives_up() {
     assert!(!state.due(10_000 + POLL_MS - 1));
     assert!(state.due(10_000 + POLL_MS));
     for _ in 0..4 {
-        assert!(!state.poll_failed());
+        assert!(!state.poll_failed("s1"));
     }
-    assert!(state.poll_failed());
+    assert!(state.poll_failed("s1"));
+}
+
+fn waiting() -> Status {
+    status(json!({"phase": "waiting", "by": {"why": "turn"}}))
+}
+
+#[test]
+fn a_late_start_reply_cannot_rearm_watching_after_cancel() {
+    let mut state = State::default();
+    let start = state.start("s1", 0);
+    let cancel = state.cancelling("s1");
+    assert_ne!(start, cancel);
+    state.watching.remove("s1");
+    assert_eq!(
+        state.apply_via("s1", &waiting(), 0, Via::Start, start),
+        Applied::Nothing
+    );
+    assert!(!state.live("s1"));
+    let cancelled = status(json!({"phase": "cancelled"}));
+    assert_eq!(
+        state.apply_via("s1", &cancelled, 0, Via::Cancel, cancel),
+        Applied::Finished { followed: None }
+    );
+}
+
+#[test]
+fn a_cancel_that_fails_keeps_watching() {
+    let mut state = State::default();
+    state.start("s1", 0);
+    state.cancelling("s1");
+    assert!(state.live("s1"));
+}
+
+#[test]
+fn a_poll_in_flight_cannot_drop_what_a_new_start_added() {
+    let mut state = State::default();
+    let old = state.generation("s1");
+    let fresh = state.start("s1", 0);
+    assert_ne!(old, fresh);
+    let none = status(Value::Null);
+    assert_eq!(
+        state.apply_via("s1", &none, 0, Via::Poll, old),
+        Applied::Nothing
+    );
+    assert!(state.live("s1"));
+}
+
+#[test]
+fn poll_failures_are_counted_per_session() {
+    let mut state = State::default();
+    state.watching.insert("a".into());
+    state.watching.insert("b".into());
+    for _ in 0..4 {
+        assert!(!state.poll_failed("b"));
+        state.apply("a", &waiting(), 0);
+    }
+    assert!(state.poll_failed("b"));
+    assert!(!state.live("b"));
+    assert!(state.live("a"));
+}
+
+#[test]
+fn opening_keeps_a_task_that_just_finished_but_drops_a_stale_cancel() {
+    let mut state = State {
+        card: Some(open_card()),
+        ..State::default()
+    };
+    let gen = state.generation("s1");
+    let cancelled = status(json!({"phase": "cancelled"}));
+    assert_eq!(
+        state.apply_via("s1", &cancelled, 0, Via::Open, gen),
+        Applied::Stale
+    );
+    assert!(state.card.is_some());
+    let done = status(json!({"phase": "done", "result": "reloaded", "session": "n2"}));
+    assert_eq!(
+        state.apply_via("s1", &done, 0, Via::Open, gen),
+        Applied::Finished {
+            followed: Some("n2".into())
+        }
+    );
+    assert!(state.note("n2", 1).is_some());
+}
+
+#[test]
+fn reloads_the_daemon_runs_for_an_agent_are_discovered_and_shown() {
+    let mut state = State::default();
+    assert!(state.scan_due(SCAN_MS));
+    state.last_scan_ms = SCAN_MS;
+    assert!(!state.scan_due(SCAN_MS + 1));
+    state.scanning = true;
+    assert!(!state.scan_due(SCAN_MS * 3));
+    state.scanning = false;
+    assert_eq!(state.row_line("s9"), None);
+    state.seen_active(&["s9".to_string()]);
+    assert_eq!(state.row_line("s9"), Some("Reloading…"));
+    assert!(state.due(1_000_000));
 }

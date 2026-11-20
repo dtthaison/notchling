@@ -3,17 +3,9 @@ use serde_json::Value;
 
 use super::ChatView;
 use crate::acting::Request;
-use crate::chat::session_reload::{self, Act, Applied, Card, Stage};
+use crate::chat::session_reload::{self, Act, Applied, Card, Stage, Via};
 use crate::sheets::reload_view::{ReloadChoice, ReloadView};
 use crate::sheets::view::Dismiss;
-use notchling_engine::reload::Phase;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Sent {
-    Start,
-    Poll,
-    Open,
-}
 
 impl ChatView {
     pub(super) fn reload_mode(&self, id: &str) -> Option<session_reload::Mode> {
@@ -70,10 +62,12 @@ impl ChatView {
         let ask = card.stage != Stage::Terminal;
         self.reload_show(card, cx);
         if ask && self.reload.asking.insert(id.to_owned()) {
+            let gen = self.reload.generation(id);
             self.reload_send(
                 Request::reload_state(id, false),
                 id.to_owned(),
-                Sent::Open,
+                Via::Open,
+                gen,
                 cx,
             );
         }
@@ -119,8 +113,8 @@ impl ChatView {
             Act::Reload | Act::TryAgain => self.reload_start(&id, cx),
             Act::Cancel | Act::Close => self.reload_close(cx),
             Act::CancelReload => {
-                self.reload.stop(&id);
-                self.reload_send(Request::reload_cancel(&id), id, Sent::Poll, cx);
+                let gen = self.reload.cancelling(&id);
+                self.reload_send(Request::reload_cancel(&id), id, Via::Cancel, gen, cx);
                 self.reload_close(cx);
             }
             Act::CopyCommand => {
@@ -143,13 +137,26 @@ impl ChatView {
         if let Some(card) = self.reload.card.as_mut() {
             card.stage = Stage::Waiting(notchling_engine::reload::Wait::Turn);
         }
-        self.reload.start(id, super::now_ms());
+        let gen = self.reload.start(id, super::now_ms());
         self.reload_sync(cx);
-        self.reload_send(Request::reload(id, true), id.to_owned(), Sent::Start, cx);
+        self.reload_send(
+            Request::reload(id, true),
+            id.to_owned(),
+            Via::Start,
+            gen,
+            cx,
+        );
         cx.notify();
     }
 
-    fn reload_send(&mut self, request: Request, row: String, sent: Sent, cx: &mut Context<Self>) {
+    fn reload_send(
+        &mut self,
+        request: Request,
+        row: String,
+        via: Via,
+        gen: u64,
+        cx: &mut Context<Self>,
+    ) {
         let actions = self.acts(cx).actions;
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -157,36 +164,41 @@ impl ChatView {
                 .spawn(async move { actions.send(&request) })
                 .await;
             this.update(cx, |view, cx| {
-                view.reload.asking.remove(&row);
-                view.reload_answered(&row, result, sent, cx);
+                if view.reload.generation(&row) == gen {
+                    view.reload.asking.remove(&row);
+                }
+                view.reload_answered(&row, result, via, gen, cx);
             })
             .ok();
         })
         .detach();
     }
 
+    fn reload_shown(&self, id: &str) -> bool {
+        self.reload_view.is_some() && self.reload.card.as_ref().is_some_and(|c| c.session == id)
+    }
+
     fn reload_answered(
         &mut self,
         id: &str,
         result: Result<Value, String>,
-        sent: Sent,
+        via: Via,
+        gen: u64,
         cx: &mut Context<Self>,
     ) {
+        let shown = self.reload_shown(id);
         match result {
             Ok(reply) => {
                 if let Some(status) = session_reload::parse(&reply) {
-                    let live = status.task.as_ref().is_some_and(|t| {
-                        matches!(t.phase, Phase::Waiting { .. } | Phase::Working { .. })
-                    });
-                    if sent == Sent::Open && !live {
-                        cx.notify();
-                        return;
-                    }
-                    match self.reload.apply(id, &status, super::now_ms()) {
+                    match self
+                        .reload
+                        .apply_via(id, &status, super::now_ms(), via, gen)
+                    {
                         Applied::Changed => self.reload_sync(cx),
+                        Applied::Stale => self.reload_ack(id, cx),
                         Applied::Finished { followed } => {
                             self.reload_ack(id, cx);
-                            if self.reload_view.is_some() {
+                            if shown {
                                 self.reload_close(cx);
                             }
                             if let Some(next) = followed {
@@ -199,24 +211,25 @@ impl ChatView {
                     }
                 }
             }
-            Err(message) => match sent {
-                Sent::Start => {
+            Err(message) if self.reload.generation(id) == gen => match via {
+                Via::Start => {
                     self.reload.stop(id);
-                    self.reload.card = None;
-                    self.reload_view = None;
-                    self.sheet = None;
+                    if shown {
+                        self.reload_close(cx);
+                    }
                     self.tools.error = Some(message);
                 }
-                Sent::Poll | Sent::Open => {
-                    if self.reload.poll_failed() {
-                        self.reload.stop(id);
+                Via::Cancel => self.tools.error = Some(message),
+                Via::Poll | Via::Open => {
+                    if self.reload.poll_failed(id) {
                         self.tools.error = Some(message);
-                        if self.reload_view.is_some() {
+                        if shown {
                             self.reload_close(cx);
                         }
                     }
                 }
             },
+            Err(_) => {}
         }
         cx.notify();
     }
@@ -250,14 +263,45 @@ impl ChatView {
     pub(super) fn reload_tick(&mut self, cx: &mut Context<Self>) {
         self.reload_refresh_lead(cx);
         let now = super::now_ms();
+        self.reload_scan(now, cx);
         if !self.reload.due(now) {
             return;
         }
         self.reload.last_poll_ms = now;
         for id in self.reload.polls() {
             if self.reload.asking.insert(id.clone()) {
-                self.reload_send(Request::reload_state(&id, false), id, Sent::Poll, cx);
+                let gen = self.reload.generation(&id);
+                self.reload_send(Request::reload_state(&id, false), id, Via::Poll, gen, cx);
             }
         }
+    }
+
+    fn reload_scan(&mut self, now: i64, cx: &mut Context<Self>) {
+        if !self.reload.scan_due(now) {
+            return;
+        }
+        self.reload.scanning = true;
+        self.reload.last_scan_ms = now;
+        let actions = self.acts(cx).actions;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions.send(&Request::reload_active()) })
+                .await;
+            this.update(cx, |view, cx| {
+                view.reload.scanning = false;
+                let ids: Vec<String> = result
+                    .ok()
+                    .and_then(|reply| reply.get("active").cloned())
+                    .and_then(|active| serde_json::from_value(active).ok())
+                    .unwrap_or_default();
+                if !ids.is_empty() {
+                    view.reload.seen_active(&ids);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 }

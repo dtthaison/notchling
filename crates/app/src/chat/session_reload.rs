@@ -204,35 +204,76 @@ impl Card {
     }
 }
 
+pub const SCAN_MS: i64 = 3_000;
+
 #[derive(Default)]
 pub struct State {
     pub card: Option<Card>,
     pub notes: HashMap<String, (String, i64)>,
     pub watching: HashSet<String>,
     pub asking: HashSet<String>,
-    pub poll_fails: u32,
+    pub poll_fails: HashMap<String, u32>,
+    pub gens: HashMap<String, u64>,
     pub last_poll_ms: i64,
+    pub last_scan_ms: i64,
+    pub scanning: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Via {
+    Start,
+    Poll,
+    Open,
+    Cancel,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Applied {
     Nothing,
     Changed,
+    Stale,
     Finished { followed: Option<String> },
 }
 
 impl State {
-    pub fn poll_failed(&mut self) -> bool {
-        self.poll_fails += 1;
-        if self.poll_fails >= POLL_FAILS {
-            self.poll_fails = 0;
+    pub fn generation(&self, id: &str) -> u64 {
+        self.gens.get(id).copied().unwrap_or(0)
+    }
+
+    fn bump(&mut self, id: &str) -> u64 {
+        let next = self.generation(id) + 1;
+        self.gens.insert(id.to_owned(), next);
+        next
+    }
+
+    pub fn poll_failed(&mut self, id: &str) -> bool {
+        let fails = self.poll_fails.entry(id.to_owned()).or_insert(0);
+        *fails += 1;
+        if *fails >= POLL_FAILS {
+            self.poll_fails.remove(id);
+            self.watching.remove(id);
             return true;
         }
         false
     }
 
     pub fn apply(&mut self, id: &str, status: &Status, now_ms: i64) -> Applied {
-        self.poll_fails = 0;
+        let gen = self.generation(id);
+        self.apply_via(id, status, now_ms, Via::Poll, gen)
+    }
+
+    pub fn apply_via(
+        &mut self,
+        id: &str,
+        status: &Status,
+        now_ms: i64,
+        via: Via,
+        gen: u64,
+    ) -> Applied {
+        if gen != self.generation(id) {
+            return Applied::Nothing;
+        }
+        self.poll_fails.remove(id);
         let Some(task) = &status.task else {
             self.watching.remove(id);
             return Applied::Nothing;
@@ -243,6 +284,9 @@ impl State {
             Phase::Working { .. } => Stage::Working,
             Phase::NeedsYou { need } => Stage::Needs(need.clone()),
             Phase::Cancelled => {
+                if via == Via::Open {
+                    return Applied::Stale;
+                }
                 self.watching.remove(id);
                 if shown {
                     self.card = None;
@@ -286,6 +330,16 @@ impl State {
         Applied::Changed
     }
 
+    pub fn seen_active(&mut self, ids: &[String]) {
+        for id in ids {
+            self.watching.insert(id.clone());
+        }
+    }
+
+    pub fn scan_due(&self, now_ms: i64) -> bool {
+        !self.scanning && now_ms - self.last_scan_ms >= SCAN_MS
+    }
+
     pub fn live(&self, id: &str) -> bool {
         self.watching.contains(id)
             || self
@@ -294,14 +348,20 @@ impl State {
                 .is_some_and(|c| c.session == id && c.live())
     }
 
-    pub fn start(&mut self, id: &str, now_ms: i64) {
+    pub fn start(&mut self, id: &str, now_ms: i64) -> u64 {
         self.watching.insert(id.to_owned());
         self.asking.insert(id.to_owned());
         self.last_poll_ms = now_ms;
+        self.bump(id)
+    }
+
+    pub fn cancelling(&mut self, id: &str) -> u64 {
+        self.bump(id)
     }
 
     pub fn stop(&mut self, id: &str) {
         self.watching.remove(id);
+        self.poll_fails.remove(id);
     }
 
     pub fn row_line(&self, id: &str) -> Option<&'static str> {

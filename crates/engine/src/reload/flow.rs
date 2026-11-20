@@ -62,6 +62,9 @@ pub trait Host {
     fn cancelled(&mut self) -> bool {
         false
     }
+    fn real_time(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]

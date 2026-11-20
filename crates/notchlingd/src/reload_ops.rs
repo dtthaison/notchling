@@ -10,8 +10,9 @@ use notchling_events::kinds::choices::DoneOrFailed;
 use notchling_local_api::{ApiError, Caller, ClientKind, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
+use std::time::{Duration, Instant};
 
 const TIMED_OUT: &str = "didn't finish in";
 const SLOW: &str =
@@ -30,8 +31,89 @@ struct Task {
     after_turn: bool,
     since_ms: i64,
     serial: u64,
-    cancel: Arc<AtomicBool>,
+    worker: Arc<Worker>,
     session: Option<String>,
+}
+
+#[derive(Debug)]
+struct WorkerState {
+    cancel: bool,
+    alive: bool,
+}
+
+#[derive(Debug)]
+struct Worker {
+    state: Mutex<WorkerState>,
+    wake: Condvar,
+}
+
+impl Worker {
+    fn new() -> Arc<Worker> {
+        Arc::new(Worker {
+            state: Mutex::new(WorkerState {
+                cancel: false,
+                alive: true,
+            }),
+            wake: Condvar::new(),
+        })
+    }
+
+    fn cancel(&self) {
+        lock(&self.state).cancel = true;
+        self.wake.notify_all();
+    }
+
+    fn cancelled(&self) -> bool {
+        lock(&self.state).cancel
+    }
+
+    fn alive(&self) -> bool {
+        lock(&self.state).alive
+    }
+
+    fn finish(&self) {
+        lock(&self.state).alive = false;
+        self.wake.notify_all();
+    }
+
+    fn nap(&self, ms: u64) {
+        let end = Instant::now() + Duration::from_millis(ms);
+        let mut state = lock(&self.state);
+        while !state.cancel {
+            let Some(left) = end.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            state = self
+                .wake
+                .wait_timeout(state, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+    }
+
+    fn wait_gone(&self, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        let mut state = lock(&self.state);
+        while state.alive {
+            let Some(left) = end.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            state = self
+                .wake
+                .wait_timeout(state, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        true
+    }
+}
+
+struct Finish(Arc<Worker>);
+
+impl Drop for Finish {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
 }
 
 pub type Audit = Arc<dyn Fn(&Agent, &str, DoneOrFailed) + Send + Sync>;
@@ -80,7 +162,7 @@ pub fn kind_of(agent: &Agent) -> Kind {
 
 struct Cancelable {
     inner: Box<dyn Host + Send>,
-    cancel: Arc<AtomicBool>,
+    worker: Arc<Worker>,
 }
 
 impl Host for Cancelable {
@@ -100,13 +182,20 @@ impl Host for Cancelable {
         self.inner.restart()
     }
     fn sleep(&mut self, ms: u64) {
-        self.inner.sleep(ms)
+        if self.inner.real_time() {
+            self.worker.nap(ms)
+        } else {
+            self.inner.sleep(ms)
+        }
     }
     fn now_ms(&mut self) -> u64 {
         self.inner.now_ms()
     }
     fn cancelled(&mut self) -> bool {
-        self.cancel.load(Ordering::SeqCst) || self.inner.cancelled()
+        self.worker.cancelled() || self.inner.cancelled()
+    }
+    fn real_time(&self) -> bool {
+        self.inner.real_time()
     }
 }
 
@@ -135,10 +224,22 @@ impl ReloadOps {
     }
 
     pub fn start(self: &Arc<Self>, agent: &Agent, after_turn: bool) -> Value {
-        let cancel = Arc::new(AtomicBool::new(false));
+        let old = lock(&self.tasks)
+            .get(&agent.id)
+            .filter(|t| t.phase.is_over())
+            .map(|t| t.worker.clone());
+        if let Some(old) = old {
+            if !old.wait_gone(Duration::from_secs(2)) {
+                return self.state(agent, false);
+            }
+        }
+        let worker = Worker::new();
         let serial = {
             let mut tasks = lock(&self.tasks);
-            if tasks.get(&agent.id).is_some_and(|t| !t.phase.is_over()) {
+            if tasks
+                .get(&agent.id)
+                .is_some_and(|t| !t.phase.is_over() || t.worker.alive())
+            {
                 drop(tasks);
                 return self.state(agent, false);
             }
@@ -152,17 +253,19 @@ impl ReloadOps {
                     after_turn,
                     since_ms: now_ms(),
                     serial,
-                    cancel: cancel.clone(),
+                    worker: worker.clone(),
                     session: None,
                 },
             );
             serial
         };
         let (me, agent_now) = (self.clone(), agent.clone());
+        let finisher = worker.clone();
         let work = move || {
+            let _finish = Finish(worker.clone());
             let mut host = Cancelable {
                 inner: me.hosts.host(&agent_now),
-                cancel: cancel.clone(),
+                worker: worker.clone(),
             };
             let id = agent_now.id.clone();
             let sink = me.clone();
@@ -192,6 +295,7 @@ impl ReloadOps {
             .spawn(work)
             .is_err()
         {
+            finisher.finish();
             self.set(
                 &agent.id,
                 serial,
@@ -213,17 +317,32 @@ impl ReloadOps {
         }
     }
 
-    pub fn cancel(&self, agent: &Agent) -> Value {
-        if let Some(task) = lock(&self.tasks)
-            .get_mut(&agent.id)
-            .filter(|t| !t.phase.is_over())
+    pub fn cancel(&self, agent: &Agent) -> Result<Value, ApiError> {
         {
-            task.cancel.store(true, Ordering::SeqCst);
-            task.serial = self.serial.fetch_add(1, Ordering::SeqCst);
-            task.phase = Phase::Cancelled;
-            task.since_ms = now_ms();
+            let mut tasks = lock(&self.tasks);
+            if let Some(task) = tasks.get_mut(&agent.id).filter(|t| !t.phase.is_over()) {
+                if matches!(task.phase, Phase::Working { .. }) {
+                    return Err(bad(
+                        "The session is restarting now, so the reload can't be cancelled. It finishes by itself.",
+                    ));
+                }
+                task.worker.cancel();
+                task.serial = self.serial.fetch_add(1, Ordering::SeqCst);
+                task.phase = Phase::Cancelled;
+                task.since_ms = now_ms();
+            }
         }
-        self.state(agent, false)
+        Ok(self.state(agent, false))
+    }
+
+    pub fn active(&self) -> Vec<String> {
+        let mut ids: Vec<String> = lock(&self.tasks)
+            .iter()
+            .filter(|(_, t)| !t.phase.is_over())
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
     }
 
     fn set(&self, id: &str, serial: u64, phase: Phase) {
@@ -358,20 +477,7 @@ impl LiveHost {
             return self.respawn(acting, None);
         };
         let wanted = status::with_mode(&before, &mode);
-        status::write_pending(
-            &file,
-            &status::Pending {
-                at_ms: now_ms(),
-                on: status::flag_of(&wanted).unwrap_or(false),
-                before: before.clone(),
-                wanted: wanted.clone(),
-            },
-        )
-        .map_err(|e| e.to_string())?;
-        if let Err(e) = status::set_flags(&file, &wanted) {
-            status::clear_pending(&file);
-            return Err(e.to_string());
-        }
+        status::set_flags(&file, &wanted).map_err(|e| e.to_string())?;
         self.respawn(acting, Some((&file, before, wanted)))
     }
 
@@ -381,19 +487,13 @@ impl LiveHost {
         edited: Option<(&std::path::Path, Vec<String>, Vec<String>)>,
     ) -> Result<(), String> {
         match acting.run_raw(&plan_respawn(&self.job, &acting.roots)) {
-            Ok(_) => {
-                if let Some((file, _, _)) = edited {
-                    status::clear_pending(file);
-                }
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(e) => {
                 let text = e.to_string();
                 if let Some((file, before, wanted)) = edited {
                     if status::read_flags(file).as_ref() == Some(&wanted) {
                         let _ = status::set_flags(file, &before);
                     }
-                    status::clear_pending(file);
                 }
                 if text.contains(TIMED_OUT) {
                     return Err(SLOW.to_string());
@@ -443,7 +543,11 @@ impl Host for LiveHost {
     }
 
     fn sleep(&mut self, ms: u64) {
-        std::thread::sleep(std::time::Duration::from_millis(ms));
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+
+    fn real_time(&self) -> bool {
+        true
     }
 
     fn now_ms(&mut self) -> u64 {
@@ -487,7 +591,7 @@ impl ActingOps {
             .ok_or_else(|| ApiError::internal("Reload is not wired".to_string()))?;
         let (agent, after_turn) = self.reload_target(caller, args)?;
         if args.get("cancel").and_then(Value::as_bool) == Some(true) {
-            return Ok(reload.cancel(&agent));
+            return reload.cancel(&agent);
         }
         match kind_of(&agent) {
             Kind::Job => Ok(reload.start(&agent, after_turn)),
@@ -501,11 +605,14 @@ impl ActingOps {
     }
 
     pub(crate) fn reload_state(&self, args: &Value) -> Result<Value, ApiError> {
-        let agent = self.agent(args)?;
-        let ack = args.get("ack").and_then(Value::as_bool).unwrap_or(false);
         let reload = self
             .reload()
             .ok_or_else(|| ApiError::internal("Reload is not wired".to_string()))?;
+        if args.get("active").and_then(Value::as_bool) == Some(true) {
+            return Ok(json!({ "active": reload.active() }));
+        }
+        let agent = self.agent(args)?;
+        let ack = args.get("ack").and_then(Value::as_bool).unwrap_or(false);
         Ok(reload.state(&agent, ack))
     }
 }
