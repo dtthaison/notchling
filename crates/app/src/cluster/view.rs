@@ -884,6 +884,13 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
             }
         }
         sheet.preview_add(which, cx);
+        if which == Shown::MachinesAdd && std::env::var_os("NOTCHLING_RENDER_SELECT").is_some() {
+            if let Some(add) = sheet.add.sheet.as_ref() {
+                let len = add.address.read(cx).text().len();
+                add.address
+                    .update(cx, |editor, cx| editor.preview_selection(7, len, cx));
+            }
+        }
         if which == Shown::Secrets {
             sheet.editing = Some(secrets_fixture(&sheet.feed.snapshot()));
         }

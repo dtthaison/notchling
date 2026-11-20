@@ -2,15 +2,16 @@ use std::cell::RefCell;
 use std::ops::Range;
 
 use gpui::{
-    canvas, fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element,
-    ElementId, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Styled, TextLayout,
-    WeakEntity, Window,
+    canvas, div, fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Div,
+    Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Point, Styled, StyledText, TextLayout, WeakEntity, Window,
 };
-use notchling_kit::ui::hsla;
-use notchling_kit::{Appearance, Ink};
+use notchling_kit::ui::{hsla, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
 
 use super::copy_menu::selects;
+use super::occlusion::{pick, reachable, Hit};
 use super::ChatView;
 use crate::chat::selection::{copied as copy_of, floor, ordered, range_in, word_at, At};
 
@@ -29,6 +30,7 @@ struct Spot {
 
 #[derive(Default)]
 struct State {
+    hits: std::collections::HashMap<String, Hitbox>,
     notes: Vec<Note>,
     at: std::collections::HashMap<String, usize>,
     anchor: Option<Spot>,
@@ -45,8 +47,18 @@ enum Unit {
     Block,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    File,
+    Details,
+}
+
 thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
+    static STATES: [RefCell<State>; 2] = [RefCell::new(State::default()), RefCell::new(State::default())];
+}
+
+fn state<R>(scope: Scope, f: impl FnOnce(&RefCell<State>) -> R) -> R {
+    STATES.with(|all| f(&all[scope as usize]))
 }
 
 impl State {
@@ -98,6 +110,21 @@ impl State {
         })
     }
 
+    fn hit_at(&self, position: Point<Pixels>, window: &Window) -> Hit<String> {
+        let candidates: Vec<(String, bool, bool)> = self
+            .notes
+            .iter()
+            .map(|n| {
+                (
+                    n.key.clone(),
+                    n.layout.bounds().contains(&position),
+                    reachable(self.hits.get(&n.key), window),
+                )
+            })
+            .collect();
+        pick(&candidates)
+    }
+
     fn note_drawn(&mut self, note: Note) {
         match self.at.get(&note.key) {
             Some(&i) if i < self.notes.len() => self.notes[i] = note,
@@ -136,7 +163,11 @@ impl State {
 }
 
 pub fn copied() -> Option<String> {
-    STATE.with(|s| {
+    copied_in(Scope::File).or_else(|| copied_in(Scope::Details))
+}
+
+pub fn copied_in(scope: Scope) -> Option<String> {
+    state(scope, |s| {
         let s = s.borrow();
         let (start, end) = s.ends()?;
         let blocks: Vec<&str> = s.notes.iter().map(|n| n.text.as_str()).collect();
@@ -146,36 +177,40 @@ pub fn copied() -> Option<String> {
 }
 
 pub fn clear() {
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        s.anchor = None;
-        s.focus = None;
-        s.dragging = false;
-    });
+    for scope in [Scope::File, Scope::Details] {
+        state(scope, |s| {
+            let mut s = s.borrow_mut();
+            s.anchor = None;
+            s.focus = None;
+            s.dragging = false;
+        });
+    }
 }
 
 pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
+    listener_in(Scope::File, chat)
+}
+
+pub fn listener_in(scope: Scope, chat: WeakEntity<ChatView>) -> impl IntoElement {
     canvas(
-        |_, _, _| {
-            STATE.with(|s| {
+        move |_, _, _| {
+            state(scope, |s| {
                 let mut s = s.borrow_mut();
                 s.notes.clear();
                 s.at.clear();
+                s.hits.clear();
             })
         },
         move |_, _, window, _| {
             let view = window.current_view();
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture {
                     return;
                 }
                 if event.button == MouseButton::Right {
-                    let (over, enabled, link) = STATE.with(|s| {
+                    let (over, enabled, link) = state(scope, |s| {
                         let s = s.borrow();
-                        let over = s
-                            .notes
-                            .iter()
-                            .any(|n| n.layout.bounds().contains(&event.position));
+                        let over = matches!(s.hit_at(event.position, window), Hit::Text(_));
                         (
                             over,
                             selects(s.anchor.as_ref(), s.focus.as_ref()),
@@ -198,19 +233,18 @@ pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
                 {
                     return;
                 }
-                STATE.with(|s| {
+                state(scope, |s| {
                     let mut s = s.borrow_mut();
-                    let over = s
-                        .notes
-                        .iter()
-                        .find(|n| n.layout.bounds().contains(&event.position))
-                        .map(|n| n.key.clone());
-                    let Some(key) = over else {
-                        if s.anchor.take().is_some() {
-                            s.focus = None;
-                            cx.notify(view);
+                    let key = match s.hit_at(event.position, window) {
+                        Hit::Text(key) => key,
+                        Hit::Covered => return,
+                        Hit::Empty => {
+                            if s.anchor.take().is_some() {
+                                s.focus = None;
+                                cx.notify(view);
+                            }
+                            return;
                         }
-                        return;
                     };
                     let Some(spot) = s.spot_at(event.position).filter(|p| p.key == key) else {
                         return;
@@ -238,7 +272,7 @@ pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
                 if phase != DispatchPhase::Capture {
                     return;
                 }
-                STATE.with(|s| {
+                state(scope, |s| {
                     let mut s = s.borrow_mut();
                     if !s.dragging {
                         return;
@@ -259,7 +293,7 @@ pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
             });
             window.on_mouse_event(|event: &MouseUpEvent, phase, _, _| {
                 if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
-                    STATE.with(|s| s.borrow_mut().dragging = false);
+                    state(scope, |s| s.borrow_mut().dragging = false);
                 }
             });
         },
@@ -275,7 +309,19 @@ pub fn selectable(
     child: AnyElement,
     a: Appearance,
 ) -> Selectable {
+    selectable_in(Scope::File, key, text, layout, child, a)
+}
+
+pub fn selectable_in(
+    scope: Scope,
+    key: impl Into<String>,
+    text: impl Into<String>,
+    layout: TextLayout,
+    child: AnyElement,
+    a: Appearance,
+) -> Selectable {
     Selectable {
+        scope,
         key: key.into(),
         text: text.into(),
         layout,
@@ -285,7 +331,22 @@ pub fn selectable(
     }
 }
 
+pub fn detail_text(text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
+    let shown = role.display(text);
+    let styled = StyledText::new(shown.clone());
+    let layout = styled.layout().clone();
+    div().kit_type(role).ink(ink, a).child(selectable_in(
+        Scope::Details,
+        shown.clone(),
+        shown,
+        layout,
+        styled.into_any_element(),
+        a,
+    ))
+}
+
 pub struct Selectable {
+    scope: Scope,
     key: String,
     text: String,
     layout: TextLayout,
@@ -351,8 +412,14 @@ impl Element for Selectable {
             layout: self.layout.clone(),
             links: std::mem::take(&mut self.links),
         };
-        STATE.with(|s| s.borrow_mut().note_drawn(note));
-        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let key = note.key.clone();
+        state(self.scope, |s| {
+            let mut s = s.borrow_mut();
+            s.note_drawn(note);
+            s.hits.insert(key, hitbox.clone());
+        });
+        hitbox
     }
 
     fn paint(
@@ -366,7 +433,7 @@ impl Element for Selectable {
         cx: &mut App,
     ) {
         window.set_cursor_style(CursorStyle::IBeam, hitbox);
-        let selected = STATE.with(|s| {
+        let selected = state(self.scope, |s| {
             let s = s.borrow();
             let (start, end) = s.ends()?;
             let order = *s.at.get(&self.key)?;

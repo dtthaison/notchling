@@ -253,6 +253,7 @@ impl TextElement {
                 && hitbox.is_hovered(window)
             {
                 editor.update(cx, |editor, cx| editor.mouse_down(event, window, cx));
+                cx.stop_propagation();
             }
         });
         let editor = self.editor.clone();

@@ -5,8 +5,7 @@ use gpui::{
     UTF16Selection, Window,
 };
 
-use super::{Drag, TextEditor};
-use crate::text_edit::Unit;
+use super::TextEditor;
 
 impl TextEditor {
     pub(super) fn index_at(&self, position: Point<Pixels>) -> Option<usize> {
@@ -31,56 +30,22 @@ impl TextEditor {
             return;
         };
         self.focus(window);
-        let anchor = match event.click_count {
-            0 | 1 => {
-                if event.modifiers.shift {
-                    self.edit.select_to(index);
-                } else {
-                    self.edit.move_to(index);
-                }
-                index..index
-            }
-            2 => {
-                let word = self.edit.word_range_at(index);
-                self.edit.set_selection(word.start, word.end);
-                word
-            }
-            _ => {
-                let line = self.edit.line_range_at(index);
-                self.edit.set_selection(line.start, line.end);
-                line
-            }
-        };
-        let by = match event.click_count {
-            0 | 1 => Unit::Grapheme,
-            2 => Unit::Word,
-            _ => Unit::Line,
-        };
-        self.drag = Some(Drag { anchor, by });
+        let press = self
+            .edit
+            .press_at(index, event.click_count, event.modifiers.shift);
+        self.drag = Some(press);
         self.goal_x = None;
         self.touched(false, cx);
     }
 
     pub(super) fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
-        let Some(drag) = &self.drag else {
+        let Some(press) = self.drag.clone() else {
             return;
         };
         let Some(index) = self.index_at(event.position) else {
             return;
         };
-        let target = match drag.by {
-            Unit::Word => self.edit.word_range_at(index),
-            Unit::Line => self.edit.line_range_at(index),
-            Unit::Grapheme | Unit::Document => index..index,
-        };
-        let anchor = drag.anchor.clone();
-        if target.start < anchor.start {
-            self.edit.set_selection(anchor.end, target.start);
-        } else if target.end > anchor.end {
-            self.edit.set_selection(anchor.start, target.end);
-        } else {
-            self.edit.set_selection(anchor.start, anchor.end);
-        }
+        self.edit.drag_to(&press, index);
         self.touched(false, cx);
     }
 

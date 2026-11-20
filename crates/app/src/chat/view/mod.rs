@@ -26,6 +26,7 @@ mod load;
 mod markdown;
 mod message_actions;
 mod native_spin;
+mod occlusion;
 mod opinions;
 mod outbox_edit;
 mod outbox_rows;

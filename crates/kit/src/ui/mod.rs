@@ -25,6 +25,7 @@ pub use spin_layer::{drop_spinner_host, host_spinners, spin_host, SpinLayer, Spi
 pub use spin_native::{
     diff as spin_diff, spin_period, spin_phase, Diff as SpinDiff, SpinGate, SpinSink,
 };
+pub use text_editor::actions as edit;
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use tool_images::{first_installed, set_tool_image};
 pub use widgets::{

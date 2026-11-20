@@ -1,3 +1,6 @@
+mod click;
+#[cfg(test)]
+mod click_tests;
 mod history;
 mod moves;
 #[cfg(test)]
@@ -6,6 +9,7 @@ mod tests;
 use std::ops::Range;
 
 use history::{Group, History, State};
+pub use click::{dragged, target_range, unit_for, Press};
 pub use moves::Unit;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -15,6 +15,7 @@ use notchling_kit::{Appearance, Ink};
 
 use super::conversation_view::ConversationView;
 use super::copy_menu::selects;
+use super::occlusion::{pick, reachable, Hit};
 use crate::chat::rows::Row;
 use crate::chat::selection::{floor, ordered, range_in, word_at, At};
 
@@ -56,6 +57,7 @@ pub struct SelFrame {
     pub selection: Selection,
     notes: Vec<Note>,
     at: HashMap<(SharedString, u16), usize>,
+    hits: HashMap<(SharedString, u16), Hitbox>,
     pub rows: HashMap<SharedString, usize>,
     pub pointer: Option<Point<Pixels>>,
     pub scrolling: bool,
@@ -137,6 +139,19 @@ impl SelFrame {
     fn note(&self, row: &SharedString, block: u16) -> Option<&Note> {
         let i = *self.at.get(&(row.clone(), block))?;
         self.notes.get(i)
+    }
+
+    fn hit_at(&self, position: Point<Pixels>, window: &Window) -> Hit<(SharedString, u16)> {
+        let candidates: Vec<((SharedString, u16), bool, bool)> = self
+            .notes
+            .iter()
+            .map(|n| {
+                let key = (n.row.clone(), n.block);
+                let reach = reachable(self.hits.get(&key), window);
+                (key, n.layout.bounds().contains(&position), reach)
+            })
+            .collect();
+        pick(&candidates)
     }
 
     fn note_drawn(&mut self, note: Note) {
@@ -278,11 +293,12 @@ pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl Int
             let mut frame = begin.borrow_mut();
             frame.notes.clear();
             frame.at.clear();
+            frame.hits.clear();
         },
         move |_, _, window, _| {
             let (down, drag, up) = (state.clone(), state.clone(), state);
             let (down_view, drag_view) = (view.clone(), view);
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture {
                     return;
                 }
@@ -293,11 +309,14 @@ pub fn listener(state: SelState, view: WeakEntity<ConversationView>) -> impl Int
                     return;
                 }
                 let mut frame = down.borrow_mut();
-                let over = frame
-                    .notes
-                    .iter()
-                    .find(|n| n.layout.bounds().contains(&event.position))
-                    .map(|n| (n.row.clone(), n.block));
+                let hit = frame.hit_at(event.position, window);
+                if hit == Hit::Covered {
+                    return;
+                }
+                let over = match hit {
+                    Hit::Text(key) => Some(key),
+                    Hit::Covered | Hit::Empty => None,
+                };
                 if event.button == MouseButton::Right {
                     if over.is_some() {
                         let enabled = selects(
@@ -454,14 +473,18 @@ impl Element for Selectable {
         cx: &mut App,
     ) -> Hitbox {
         child.prepaint(window, cx);
-        self.state.borrow_mut().note_drawn(Note {
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let mut frame = self.state.borrow_mut();
+        frame.hits.insert((self.row.clone(), self.block), hitbox.clone());
+        frame.note_drawn(Note {
             row: self.row.clone(),
             block: self.block,
             text: std::mem::take(&mut self.text),
             layout: self.layout.clone(),
             links: std::mem::take(&mut self.links),
         });
-        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+        drop(frame);
+        hitbox
     }
 
     fn paint(

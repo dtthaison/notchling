@@ -16,6 +16,7 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 
 use super::paged_rows::{group_more_row, more_row, subagent_row, More};
+use super::select::{self, Scope};
 use super::{repo_section, worktrees_ask, ChatView};
 use crate::chat::format::short_path;
 use crate::chat::inspector::{
@@ -267,6 +268,7 @@ impl RenderOnce for Panel {
             .border_color(hsla(Ink::Hairline.color(a)))
             .flex()
             .flex_col()
+            .child(select::listener_in(Scope::Details, self.chat.clone()))
             .child(scrollable(column))
             .part_inside("Details Panel", Corner::TopTrailing, a, cx)
     }
@@ -337,6 +339,14 @@ fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
 }
 
 pub(super) fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
+    fact_with(
+        shape,
+        select::detail_text(text, TypeRole::Meta, Ink::Text, a),
+        a,
+    )
+}
+
+fn fact_with(shape: Icon, body: Div, a: Appearance) -> Div {
     div()
         .flex()
         .items_start()
@@ -355,16 +365,20 @@ pub(super) fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(label(text, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE))),
+                .child(body.line_height(px(ROW_LINE))),
         )
 }
 
 fn folder_row(shown: &str, full: &str, reveal: bool, a: Appearance) -> Div {
     let full = full.to_owned();
-    let row = fact_row(Icon::Folder, shown, a);
     if !reveal {
-        return div().child(row);
+        return div().child(fact_row(Icon::Folder, shown, a));
     }
+    let row = fact_with(
+        Icon::Folder,
+        label(shown, TypeRole::Meta, Ink::Text, a),
+        a,
+    );
     div().child(
         row.id("inspector-folder")
             .cursor_pointer()
@@ -407,7 +421,10 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(label(&task.subject, TypeRole::Meta, ink, a).line_height(px(ROW_LINE))),
+                .child(
+                    select::detail_text(&task.subject, TypeRole::Meta, ink, a)
+                        .line_height(px(ROW_LINE)),
+                ),
         )
 }
 
@@ -415,7 +432,7 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
         text = text.child(
-            label(&s.title, TypeRole::Meta, Ink::Text, a)
+            select::detail_text(&s.title, TypeRole::Meta, Ink::Text, a)
                 .line_height(px(ROW_LINE))
                 .w_full()
                 .elide(),
@@ -428,7 +445,7 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
         .child(mark_box(s.mark, &format!("shell-{index}"), a))
         .child(
             text.child(
-                label(&s.command, TypeRole::Mono, Ink::TextMuted, a)
+                select::detail_text(&s.command, TypeRole::Mono, Ink::TextMuted, a)
                     .line_height(px(ROW_LINE))
                     .w_full()
                     .elide()
@@ -440,7 +457,7 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                     .items_center()
                     .gap(px(8.0))
                     .child(
-                        label(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)
+                        select::detail_text(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)
                             .line_height(px(ROW_LINE)),
                     )
                     .children(

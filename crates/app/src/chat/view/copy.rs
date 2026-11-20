@@ -1,5 +1,6 @@
 use gpui::{div, prelude::*, ClipboardItem, Context, Div, FocusHandle, Window};
 
+use super::occlusion::copy_text;
 use super::{row_select, select, ChatView};
 
 pub struct Keys {
@@ -34,18 +35,22 @@ pub fn text_to_copy(
 
 impl ChatView {
     pub(super) fn shown_selection(&self, cx: &gpui::App) -> Option<String> {
-        let conversation = self.parts.conversation.read(cx).copied(cx);
-        text_to_copy(conversation, select::copied, || None)
+        copy_text(self.overlay_open, || {
+            let conversation = self.parts.conversation.read(cx).copied(cx);
+            text_to_copy(conversation, select::copied, || None)
+        })
     }
 
     pub(super) fn selection_text(&self, window: &Window, cx: &gpui::App) -> Option<String> {
-        let conversation = self.parts.conversation.read(cx).copied(cx);
-        text_to_copy(conversation, select::copied, || {
-            let editor = self.tools.editor.read(cx);
-            editor
-                .is_focused(window)
-                .then(|| editor.selected_text())
-                .flatten()
+        copy_text(self.overlay_open, || {
+            let conversation = self.parts.conversation.read(cx).copied(cx);
+            text_to_copy(conversation, select::copied, || {
+                let editor = self.tools.editor.read(cx);
+                editor
+                    .is_focused(window)
+                    .then(|| editor.selected_text())
+                    .flatten()
+            })
         })
     }
 

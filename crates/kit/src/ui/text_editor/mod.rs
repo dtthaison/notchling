@@ -1,3 +1,4 @@
+pub mod actions;
 mod element;
 mod input;
 
@@ -9,7 +10,7 @@ use gpui::{
     KeyDownEvent, Modifiers, Pixels, Render, ScrollWheelEvent, SharedString, Window,
 };
 
-use crate::text_edit::{return_key, ReturnKey, TextEdit, Unit};
+use crate::text_edit::{return_key, Press, ReturnKey, TextEdit, Unit};
 use element::{Layout, TextElement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,9 +21,18 @@ pub enum TextEditorEvent {
 
 const BLINK: Duration = Duration::from_millis(500);
 
-struct Drag {
-    anchor: Range<usize>,
-    by: Unit,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Command {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    Undo,
+    Redo,
+}
+
+pub(crate) fn takes(command: Command, selection_empty: bool) -> bool {
+    !matches!(command, Command::Copy | Command::Cut) || !selection_empty
 }
 
 pub struct TextEditor {
@@ -37,11 +47,14 @@ pub struct TextEditor {
     scroll_top: Pixels,
     reveal_caret: bool,
     goal_x: Option<Pixels>,
-    drag: Option<Drag>,
+    drag: Option<Press>,
     caret_on: bool,
     hold_caret: bool,
     focused: bool,
 }
+
+#[cfg(test)]
+mod command_tests;
 
 impl EventEmitter<TextEditorEvent> for TextEditor {}
 
@@ -133,6 +146,11 @@ impl TextEditor {
     pub fn select(&mut self, anchor: usize, head: usize, cx: &mut Context<Self>) {
         self.edit.set_selection(anchor, head);
         self.touched(false, cx);
+    }
+
+    pub fn preview_selection(&mut self, anchor: usize, head: usize, cx: &mut Context<Self>) {
+        self.preview = true;
+        self.select(anchor, head, cx);
     }
 
     pub fn mark(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
@@ -250,18 +268,36 @@ impl TextEditor {
             }
             "home" => self.edit.move_left(Unit::Document, extend),
             "end" => self.edit.move_right(Unit::Document, extend),
-            "a" if cmd && !m.shift && !m.alt => self.edit.select_all(),
-            "c" if cmd => {
+            "a" if cmd && !m.shift && !m.alt => self.apply(Command::SelectAll, cx),
+            "c" if cmd => self.apply(Command::Copy, cx),
+            "x" if cmd => self.apply(Command::Cut, cx),
+            "v" if cmd => self.apply(Command::Paste, cx),
+            "z" | "Z" if cmd => {
+                self.apply(if m.shift { Command::Redo } else { Command::Undo }, cx)
+            }
+            _ => return,
+        }
+        if !vertical {
+            self.goal_x = None;
+        }
+        self.touched(before != self.edit.text(), cx);
+        cx.stop_propagation();
+    }
+
+    fn apply(&mut self, command: Command, cx: &mut Context<Self>) {
+        match command {
+            Command::SelectAll => self.edit.select_all(),
+            Command::Copy => {
                 if let Some(text) = self.selected_text() {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
             }
-            "x" if cmd => {
+            Command::Cut => {
                 if let Some(text) = self.edit.cut() {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
             }
-            "v" if cmd => {
+            Command::Paste => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     let text = if self.multiline {
                         text
@@ -271,20 +307,24 @@ impl TextEditor {
                     self.edit.paste(&text);
                 }
             }
-            "z" | "Z" if cmd => {
-                if m.shift {
-                    self.edit.redo();
-                } else {
-                    self.edit.undo();
-                }
+            Command::Undo => {
+                self.edit.undo();
             }
-            _ => return,
+            Command::Redo => {
+                self.edit.redo();
+            }
         }
-        if !vertical {
-            self.goal_x = None;
+    }
+
+    fn on_command(&mut self, command: Command, cx: &mut Context<Self>) {
+        if !self.enabled || !takes(command, self.edit.selection().is_empty()) {
+            cx.propagate();
+            return;
         }
+        let before = self.edit.text().to_owned();
+        self.apply(command, cx);
+        self.goal_x = None;
         self.touched(before != self.edit.text(), cx);
-        cx.stop_propagation();
     }
 
     fn vertical(&mut self, direction: i32, extend: bool) {
@@ -369,6 +409,24 @@ impl Render for TextEditor {
                 .track_focus(&self.focus)
                 .cursor_text()
                 .on_key_down(cx.listener(Self::key_down))
+                .on_action(cx.listener(|this, _: &actions::Cut, _, cx| {
+                    this.on_command(Command::Cut, cx)
+                }))
+                .on_action(cx.listener(|this, _: &actions::Copy, _, cx| {
+                    this.on_command(Command::Copy, cx)
+                }))
+                .on_action(cx.listener(|this, _: &actions::Paste, _, cx| {
+                    this.on_command(Command::Paste, cx)
+                }))
+                .on_action(cx.listener(|this, _: &actions::SelectAll, _, cx| {
+                    this.on_command(Command::SelectAll, cx)
+                }))
+                .on_action(cx.listener(|this, _: &actions::Undo, _, cx| {
+                    this.on_command(Command::Undo, cx)
+                }))
+                .on_action(cx.listener(|this, _: &actions::Redo, _, cx| {
+                    this.on_command(Command::Redo, cx)
+                }))
                 .on_scroll_wheel(cx.listener(Self::wheel))
                 .into_any_element()
         } else {

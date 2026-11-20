@@ -12,15 +12,11 @@ actions!(
         OpenSearch,
         Quit,
         Minimize,
-        CloseWindow,
-        Undo,
-        Redo,
-        Cut,
-        Copy,
-        Paste,
-        SelectAll
+        CloseWindow
     ]
 );
+
+pub use notchling_kit::ui::edit::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 pub fn apply(policy: Policy) {
     let Some(mtm) = MainThreadMarker::new() else {
