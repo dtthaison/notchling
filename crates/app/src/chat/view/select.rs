@@ -291,7 +291,7 @@ pub fn listener_in(scope: Scope, chat: WeakEntity<ChatView>) -> impl IntoElement
                     }
                 });
             });
-            window.on_mouse_event(|event: &MouseUpEvent, phase, _, _| {
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
                 if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
                     state(scope, |s| s.borrow_mut().dragging = false);
                 }

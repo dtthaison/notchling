@@ -475,7 +475,9 @@ impl Element for Selectable {
         child.prepaint(window, cx);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let mut frame = self.state.borrow_mut();
-        frame.hits.insert((self.row.clone(), self.block), hitbox.clone());
+        frame
+            .hits
+            .insert((self.row.clone(), self.block), hitbox.clone());
         frame.note_drawn(Note {
             row: self.row.clone(),
             block: self.block,

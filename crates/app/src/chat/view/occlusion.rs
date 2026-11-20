@@ -29,10 +29,7 @@ pub fn pick<K: Clone>(candidates: &[(K, bool, bool)]) -> Hit<K> {
     }
 }
 
-pub fn copy_text(
-    overlay_open: bool,
-    behind: impl FnOnce() -> Option<String>,
-) -> Option<String> {
+pub fn copy_text(overlay_open: bool, behind: impl FnOnce() -> Option<String>) -> Option<String> {
     if overlay_open {
         None
     } else {

@@ -374,11 +374,7 @@ fn folder_row(shown: &str, full: &str, reveal: bool, a: Appearance) -> Div {
     if !reveal {
         return div().child(fact_row(Icon::Folder, shown, a));
     }
-    let row = fact_with(
-        Icon::Folder,
-        label(shown, TypeRole::Meta, Ink::Text, a),
-        a,
-    );
+    let row = fact_with(Icon::Folder, label(shown, TypeRole::Meta, Ink::Text, a), a);
     div().child(
         row.id("inspector-folder")
             .cursor_pointer()
@@ -417,15 +413,9 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
         .items_start()
         .gap(px(6.0))
         .child(mark_box(mark, &format!("task-{index}"), a))
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .child(
-                    select::detail_text(&task.subject, TypeRole::Meta, ink, a)
-                        .line_height(px(ROW_LINE)),
-                ),
-        )
+        .child(div().flex_1().min_w(px(0.0)).child(
+            select::detail_text(&task.subject, TypeRole::Meta, ink, a).line_height(px(ROW_LINE)),
+        ))
 }
 
 fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Div {

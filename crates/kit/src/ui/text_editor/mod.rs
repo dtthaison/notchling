@@ -272,9 +272,14 @@ impl TextEditor {
             "c" if cmd => self.apply(Command::Copy, cx),
             "x" if cmd => self.apply(Command::Cut, cx),
             "v" if cmd => self.apply(Command::Paste, cx),
-            "z" | "Z" if cmd => {
-                self.apply(if m.shift { Command::Redo } else { Command::Undo }, cx)
-            }
+            "z" | "Z" if cmd => self.apply(
+                if m.shift {
+                    Command::Redo
+                } else {
+                    Command::Undo
+                },
+                cx,
+            ),
             _ => return,
         }
         if !vertical {
@@ -409,24 +414,30 @@ impl Render for TextEditor {
                 .track_focus(&self.focus)
                 .cursor_text()
                 .on_key_down(cx.listener(Self::key_down))
-                .on_action(cx.listener(|this, _: &actions::Cut, _, cx| {
-                    this.on_command(Command::Cut, cx)
-                }))
-                .on_action(cx.listener(|this, _: &actions::Copy, _, cx| {
-                    this.on_command(Command::Copy, cx)
-                }))
+                .on_action(
+                    cx.listener(|this, _: &actions::Cut, _, cx| this.on_command(Command::Cut, cx)),
+                )
+                .on_action(
+                    cx.listener(|this, _: &actions::Copy, _, cx| {
+                        this.on_command(Command::Copy, cx)
+                    }),
+                )
                 .on_action(cx.listener(|this, _: &actions::Paste, _, cx| {
                     this.on_command(Command::Paste, cx)
                 }))
                 .on_action(cx.listener(|this, _: &actions::SelectAll, _, cx| {
                     this.on_command(Command::SelectAll, cx)
                 }))
-                .on_action(cx.listener(|this, _: &actions::Undo, _, cx| {
-                    this.on_command(Command::Undo, cx)
-                }))
-                .on_action(cx.listener(|this, _: &actions::Redo, _, cx| {
-                    this.on_command(Command::Redo, cx)
-                }))
+                .on_action(
+                    cx.listener(|this, _: &actions::Undo, _, cx| {
+                        this.on_command(Command::Undo, cx)
+                    }),
+                )
+                .on_action(
+                    cx.listener(|this, _: &actions::Redo, _, cx| {
+                        this.on_command(Command::Redo, cx)
+                    }),
+                )
                 .on_scroll_wheel(cx.listener(Self::wheel))
                 .into_any_element()
         } else {
