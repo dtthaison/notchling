@@ -1,26 +1,30 @@
 use gpui::{
-    div, prelude::*, px, Context, Div, EventEmitter, FocusHandle, Render, SharedString, Stateful,
-    Window,
+    div, prelude::*, px, Context, Div, Entity, EventEmitter, Render, SharedString, Stateful,
+    Subscription, Window,
 };
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, hsla, label, scrollable, window_appearance, KitStyled};
+use notchling_kit::ui::{
+    button, hsla, label, scrollable, window_appearance, KitStyled, TextEditor, TextEditorEvent,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::header::sheet_header;
 use super::view::{Acts, Dismiss};
 use crate::mac::gate;
-use crate::notch::answer::{type_key, Typed};
 use crate::tools::second_opinion::{tool_name, SecondOpinionSheet, Stage, NO_TOOLS};
 use notchling_engine::delegate::options::Tool;
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
+
+const PROMPT_LINES: usize = 10_000;
 
 pub struct SecondOpinionView {
     pub model: SecondOpinionSheet,
     acts: Acts,
     store: Option<SecondOpinionStore>,
-    focus: FocusHandle,
+    prompt: Entity<TextEditor>,
+    _prompt_events: Subscription,
 }
 
 impl EventEmitter<Dismiss> for SecondOpinionView {}
@@ -32,11 +36,21 @@ impl SecondOpinionView {
         store: Option<SecondOpinionStore>,
         cx: &mut Context<Self>,
     ) -> SecondOpinionView {
+        let prompt = cx.new(|cx| TextEditor::new("", PROMPT_LINES, cx));
+        prompt.update(cx, |editor, cx| editor.set_text(&model.prompt, cx));
+        let events = cx.subscribe(&prompt, |this, editor, event: &TextEditorEvent, cx| {
+            if matches!(event, TextEditorEvent::Submit) {
+                editor.update(cx, |editor, cx| editor.insert("\n", cx));
+            }
+            this.model.prompt = editor.read(cx).text().to_owned();
+            cx.notify();
+        });
         SecondOpinionView {
             model,
             acts,
             store,
-            focus: cx.focus_handle(),
+            prompt,
+            _prompt_events: events,
         }
     }
 
@@ -131,7 +145,7 @@ impl SecondOpinionView {
     }
 
     fn prompt_box(&self, a: Appearance, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        let focused = self.focus.is_focused(window);
+        let focused = self.prompt.read(cx).is_focused(window);
         div()
             .id("second-opinion-prompt")
             .flex_1()
@@ -144,28 +158,14 @@ impl SecondOpinionView {
             .border_color(hsla(
                 if focused { Ink::Accent } else { Ink::Hairline }.color(a),
             ))
-            .track_focus(&self.focus)
-            .cursor_text()
-            .child(label(&self.model.prompt, TypeRole::Mono, Ink::Text, a))
+            .child(
+                div()
+                    .kit_type(TypeRole::Mono)
+                    .ink(Ink::Text, a)
+                    .child(self.prompt.clone()),
+            )
             .on_click(cx.listener(|this, _, window, cx| {
-                window.focus(&this.focus);
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
-                let k = &event.keystroke;
-                let modified = k.modifiers.platform || k.modifiers.control;
-                match type_key(
-                    &mut this.model.prompt,
-                    &k.key,
-                    k.key_char.as_deref(),
-                    modified,
-                ) {
-                    Typed::Submit => this.model.prompt.push('\n'),
-                    Typed::Changed => {}
-                    Typed::Ignored => return,
-                }
-                cx.stop_propagation();
-                cx.notify();
+                this.prompt.read(cx).focus(window);
             }))
     }
 

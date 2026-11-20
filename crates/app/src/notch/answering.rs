@@ -2,12 +2,16 @@ use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_kit::metric::{CONTROL, OPTION_BADGE, RADIUS_MD, RADIUS_SM};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, field, hsla, icon as kit_icon, option_row, KitStyled};
+use notchling_kit::ui::{
+    button, editor_field, hsla, icon as kit_icon, option_row, KitStyled, TextEditorEvent,
+};
 use notchling_kit::{sentence, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::answer::{permission_choices, type_key, QuestionDraft, Typed};
+use super::answer::{permission_choices, QuestionDraft};
 use super::cards::{line, text, A};
+use super::layout::NotchState;
+use super::model::Card;
 use super::requests::HookRequest;
 use super::view::NotchView;
 use crate::acting::{Control, Request};
@@ -238,7 +242,7 @@ impl NotchView {
             .child(text(item.question.clone(), TypeRole::Heading, Ink::Text).line_clamp(3))
             .children(hint)
             .children(options)
-            .child(self.answer_box(id, q, cx))
+            .child(self.answer_box())
             .children(submit)
             .children(self.card_status(gate))
     }
@@ -278,49 +282,34 @@ impl NotchView {
             }))
     }
 
-    fn answer_box(&self, id: &str, q: &PendingQuestion, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn answer_box(&self) -> Stateful<Div> {
         let gate = self.gate();
         let tab = self.draft.tab;
-        let typed = self.draft.typed(tab).to_owned();
-        let shown = match self.draft.text_answer(tab) {
-            Some(answer) if typed.is_empty() => answer.to_owned(),
-            _ => typed,
-        };
-        let focused = self.focused;
-        let (session, question) = (id.to_owned(), q.clone());
         let element = div()
             .id(SharedString::from(format!("answer-box-{tab}")))
-            .child(field(&shown, t::notch::type_else(), focused, A).w_full())
+            .child(editor_field(self.answer.editor(), self.focused, A).w_full())
             .when(!gate.enabled, |b| b.opacity(0.4));
-        gate::tip(element, gate, A).when(gate.enabled, |b| {
-            b.track_focus(&self.focus)
-                .cursor_text()
-                .on_click(cx.listener(|this, _, window, cx| {
-                    window.focus(&this.focus);
-                    cx.notify();
-                }))
-                .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
-                    let k = &event.keystroke;
-                    let modified = k.modifiers.platform || k.modifiers.control;
-                    let Some(typed) = this.draft.typed_mut() else {
-                        return;
-                    };
-                    match type_key(typed, &k.key, k.key_char.as_deref(), modified) {
-                        Typed::Submit => {
-                            if let Some(answers) = this.draft.submit_text(&question) {
-                                let request =
-                                    super::ask::request_for(&session, &question, &answers);
-                                let key = super::ask::answer_key(&this.model, &session, &question);
-                                this.send_for(key, request, Sending::Answer, cx);
-                            }
-                        }
-                        Typed::Changed => {}
-                        Typed::Ignored => return,
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }))
-        })
+        gate::tip(element, gate, A)
+    }
+
+    pub(super) fn answer_event(&mut self, event: &TextEditorEvent, cx: &mut Context<Self>) {
+        let id = match &self.model.state {
+            NotchState::Peek(id) | NotchState::Detail(id) => id.clone(),
+            _ => return,
+        };
+        let Some(Card::Question(question)) = self.model.card(&id) else {
+            return;
+        };
+        let text = self.answer.editor().read(cx).text().to_owned();
+        self.draft.set_typed(&text);
+        if matches!(event, TextEditorEvent::Submit) && self.gate().enabled {
+            if let Some(answers) = self.draft.submit_text(&question) {
+                let request = super::ask::request_for(&id, &question, &answers);
+                let key = super::ask::answer_key(&self.model, &id, &question);
+                self.send_for(key, request, Sending::Answer, cx);
+            }
+        }
+        cx.notify();
     }
 
     fn submit_row(&self, id: &str, q: &PendingQuestion, cx: &mut Context<Self>) -> Div {

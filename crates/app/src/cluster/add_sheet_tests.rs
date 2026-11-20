@@ -236,7 +236,6 @@ fn the_password_is_hidden_everywhere_it_is_printed() {
     let mut password = AddPassword::default();
     password.field().push_str("hunter2");
     assert_eq!(password.len(), 7);
-    assert_eq!(password.dots(), "•••••••");
     let printed = format!(
         "{password:?} {:?}",
         view(None, &draft("", ""), password.len(), "me", &[])

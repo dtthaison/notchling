@@ -2,18 +2,21 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use gpui::{
-    div, prelude::*, px, Context, Div, FocusHandle, KeyDownEvent, SharedString, Stateful, Window,
+    div, prelude::*, px, Context, Div, Entity, SharedString, Stateful, Subscription, Window,
 };
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{CONTROL, RADIUS_COMPOSER, SIDE_PADDING};
 use notchling_kit::part::ButtonKind;
-use notchling_kit::ui::{button, field, hsla, icon, label, option_row, KitPart, KitStyled};
+use notchling_kit::ui::{
+    button, editor_field, hsla, icon, label, option_row, KitPart, KitStyled, TextEditor,
+    TextEditorEvent,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::ChatView;
 use crate::acting::Control;
-use crate::chat::ask_drafts::{Act, Drafts, Keyed};
+use crate::chat::ask_drafts::{Act, Drafts};
 use crate::chat::asks::{card, AskRow, Card};
 use crate::mac::gate;
 use crate::phone::bridge::now_ms;
@@ -26,7 +29,7 @@ const FOCUS_WAIT_MS: i64 = 5_000;
 #[derive(Default)]
 pub struct State {
     drafts: Drafts,
-    focus: HashMap<String, FocusHandle>,
+    focus: HashMap<String, (Entity<TextEditor>, Subscription)>,
     preview: Option<Vec<AskRow>>,
     drawn_minute: Cell<Option<i64>>,
     wanted: Option<(String, i64)>,
@@ -97,15 +100,26 @@ impl ChatView {
             .collect();
         self.asks.drafts.keep_only(&kept);
         self.asks.focus.retain(|id, _| ids.contains(&id.as_str()));
+        let enabled = self.ask_gate(cx).enabled;
         for row in rows.iter().filter(|r| r.is_open()) {
             if !self.asks.focus.contains_key(&row.id) {
-                self.asks.focus.insert(row.id.clone(), cx.focus_handle());
+                let editor =
+                    cx.new(|cx| TextEditor::new(t::chat::ask_type_answer(), 1, cx).single_line());
+                let id = row.id.clone();
+                let events =
+                    cx.subscribe(&editor, move |this, editor, event: &TextEditorEvent, cx| {
+                        this.ask_typed(&id, &editor, event, cx)
+                    });
+                self.asks.focus.insert(row.id.clone(), (editor, events));
             }
+        }
+        for (editor, _) in self.asks.focus.values() {
+            editor.update(cx, |editor, cx| editor.set_enabled(enabled, cx));
         }
         if let Some((id, until)) = self.asks.wanted.clone() {
             match self.asks.focus.get(&id) {
-                Some(handle) => {
-                    window.focus(handle);
+                Some((editor, _)) => {
+                    editor.read(cx).focus(window);
                     self.asks.wanted = None;
                 }
                 None if now_ms() > until => self.asks.wanted = None,
@@ -159,30 +173,34 @@ impl ChatView {
         .detach();
     }
 
-    fn ask_key(&mut self, id: &str, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+    fn ask_typed(
+        &mut self,
+        id: &str,
+        editor: &Entity<TextEditor>,
+        event: &TextEditorEvent,
+        cx: &mut Context<Self>,
+    ) {
         let Some(row) = self.ask_rows().into_iter().find(|r| r.id == id) else {
-            return false;
+            return;
         };
         if !self.ask_gate(cx).enabled {
-            return false;
+            return;
         }
-        let k = &event.keystroke;
-        let modified = k.modifiers.platform || k.modifiers.control;
-        match self
-            .asks
-            .drafts
-            .key(&row, &k.key, k.key_char.as_deref(), modified)
-        {
-            Keyed::Ignored => return false,
-            Keyed::Changed => {}
-            Keyed::Send(request) => {
-                if let Some(request) = request {
+        match event {
+            TextEditorEvent::Changed => {
+                let text = editor.read(cx).text().to_owned();
+                self.asks.drafts.set_typed(&row, &text);
+            }
+            TextEditorEvent::Submit => {
+                let text = editor.read(cx).text().to_owned();
+                self.asks.drafts.set_typed(&row, &text);
+                if let Some(request) = self.asks.drafts.act(&row, Act::Send) {
+                    editor.update(cx, |editor, cx| editor.set_text("", cx));
                     self.send_ask(row.id, request, cx);
                 }
             }
         }
         cx.notify();
-        true
     }
 }
 
@@ -253,36 +271,19 @@ fn answer_box(
     window: &Window,
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
-    let typed = view.asks.drafts.typed(&row.id).to_owned();
-    let focus = view.asks.focus.get(&row.id);
-    let focused = focus.is_some_and(|handle| handle.is_focused(window));
+    let editor = view.asks.focus.get(&row.id).map(|(editor, _)| editor);
+    let focused = editor.is_some_and(|editor| editor.read(cx).is_focused(window));
+    let boxed = match editor {
+        Some(editor) => editor_field(editor, focused, a).w_full(),
+        None => div(),
+    };
     let element = div()
         .id(SharedString::from(format!("ask-answer-{}", row.id)))
         .flex_1()
         .min_w(px(0.0))
-        .child(field(&typed, t::chat::ask_type_answer(), focused, a).w_full())
+        .child(boxed)
         .when(!gate.enabled, |b| b.opacity(0.4));
-    let id = row.id.clone();
-    let click_id = row.id.clone();
-    let focus = focus.cloned();
-    gate::tip(element, gate, a).when(gate.enabled, move |b| {
-        let b = match &focus {
-            Some(handle) => b.track_focus(handle),
-            None => b,
-        };
-        b.cursor_text()
-            .on_click(cx.listener(move |this, _, window, cx| {
-                if let Some(handle) = this.asks.focus.get(&click_id) {
-                    window.focus(handle);
-                }
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if this.ask_key(&id, event, cx) {
-                    cx.stop_propagation();
-                }
-            }))
-    })
+    gate::tip(element, gate, a)
 }
 
 fn open_card(

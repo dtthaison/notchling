@@ -6,6 +6,7 @@ use notchling_kit::ui::{hsla, icon, label, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::inspector::{MARK_BOX, ROW_LINE};
+use super::select::{self, Scope};
 use super::ChatView;
 use crate::chat::changes_target::Target;
 use crate::chat::worktrees::{CurrentRow, GitSection, OtherRow, SubPart};
@@ -43,6 +44,9 @@ fn clickable(
     row.cursor_pointer()
         .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
         .on_click(move |_, _, cx| {
+            if select::selected_in(Scope::Details) {
+                return;
+            }
             let target = target.clone();
             chat.update(cx, |this, cx| this.open_changes_for(target, false, cx))
                 .ok();
@@ -80,7 +84,10 @@ fn counts(right: Option<(u64, u64)>, a: Appearance) -> Div {
     row
 }
 
-pub(super) fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
+fn sub_parts(
+    parts: &[SubPart],
+    a: Appearance,
+) -> (String, Vec<(std::ops::Range<usize>, HighlightStyle)>) {
     let mut text = String::new();
     let mut marks: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
     for part in parts {
@@ -110,6 +117,18 @@ pub(super) fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
             marks.push((start..text.len(), style));
         }
     }
+    (text, marks)
+}
+
+fn detail_sub_line(key: String, parts: &[SubPart], a: Appearance) -> Div {
+    let (text, marks) = sub_parts(parts, a);
+    select::detail_marked(key, &text, TypeRole::Meta, Ink::TextFaint, marks, a)
+        .w_full()
+        .line_height(px(ROW_LINE))
+}
+
+pub(super) fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
+    let (text, marks) = sub_parts(parts, a);
     div()
         .w_full()
         .kit_type(TypeRole::Meta)
@@ -118,13 +137,13 @@ pub(super) fn sub_line(parts: &[SubPart], a: Appearance) -> Div {
         .child(StyledText::new(SharedString::from(text)).with_highlights(marks))
 }
 
-fn name_line(branch: &str, ink: Ink, extra: Option<Div>, a: Appearance) -> Div {
+fn name_line(key: String, branch: &str, ink: Ink, extra: Option<Div>, a: Appearance) -> Div {
     let mut line = div().w_full().flex().items_center().gap(px(6.0));
     if let Some(extra) = extra {
         line = line.child(extra);
     }
     line.child(
-        label(branch, TypeRole::Meta, ink, a)
+        select::detail_keyed(key, branch, TypeRole::Meta, ink, a)
             .line_height(px(ROW_LINE))
             .min_w(px(0.0))
             .elide(),
@@ -152,7 +171,7 @@ pub(super) fn working_dot(a: Appearance) -> Div {
         .bg(hsla(Ink::Working.color(a)))
 }
 
-fn body(name: Div, sub: &[SubPart], right: Option<(u64, u64)>, a: Appearance) -> Div {
+fn body(key: &str, name: Div, sub: &[SubPart], right: Option<(u64, u64)>, a: Appearance) -> Div {
     div()
         .w_full()
         .flex()
@@ -168,7 +187,11 @@ fn body(name: Div, sub: &[SubPart], right: Option<(u64, u64)>, a: Appearance) ->
                 .child(div().flex_1().min_w(px(0.0)).child(name))
                 .child(counts(right, a)),
         )
-        .child(div().pl(px(MARK_BOX + 7.0)).child(sub_line(sub, a)))
+        .child(
+            div()
+                .pl(px(MARK_BOX + 7.0))
+                .child(detail_sub_line(format!("{key}-sub"), sub, a)),
+        )
 }
 
 fn current_row(row: &CurrentRow, chat: &WeakEntity<ChatView>, a: Appearance) -> Stateful<Div> {
@@ -178,13 +201,19 @@ fn current_row(row: &CurrentRow, chat: &WeakEntity<ChatView>, a: Appearance) -> 
         .items_center()
         .gap(px(6.0))
         .child(
-            label(&row.branch, TypeRole::Meta, Ink::Text, a)
-                .line_height(px(ROW_LINE))
-                .min_w(px(0.0))
-                .elide(),
+            select::detail_keyed(
+                "git-current-branch".to_owned(),
+                &row.branch,
+                TypeRole::Meta,
+                Ink::Text,
+                a,
+            )
+            .line_height(px(ROW_LINE))
+            .min_w(px(0.0))
+            .elide(),
         )
         .child(pill(notchling_locale::chat::git_this_session(), a));
-    let item = shell("git-current").child(body(name, &row.sub, row.right, a));
+    let item = shell("git-current").child(body("git-current", name, &row.sub, row.right, a));
     clickable(item, chat, Target::Own, a)
 }
 
@@ -200,9 +229,10 @@ fn other_row(
         Ink::Text
     };
     let dot = row.working.then(|| working_dot(a));
-    let name = name_line(&row.branch, ink, dot, a);
-    let item = shell(SharedString::from(format!("git-worktree-{index}")))
-        .child(body(name, &row.sub, row.right, a));
+    let key = format!("git-worktree-{index}");
+    let name = name_line(format!("{key}-branch"), &row.branch, ink, dot, a);
+    let item =
+        shell(SharedString::from(key.clone())).child(body(&key, name, &row.sub, row.right, a));
     if row.missing {
         return item;
     }

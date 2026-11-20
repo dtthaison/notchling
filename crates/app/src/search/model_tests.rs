@@ -268,29 +268,12 @@ fn command_keys_copy_and_close_and_never_type() {
 }
 
 #[test]
-fn plain_keys_type_into_the_query() {
+fn plain_keys_are_left_to_the_field() {
     let mut m = SearchModel::new();
-    assert_eq!(m.press(&Press::plain("b", Some("b"))), Outcome::Typed);
-    assert_eq!(m.press(&Press::plain("space", Some(" "))), Outcome::Typed);
-    assert_eq!(m.press(&Press::plain("é", Some("é"))), Outcome::Typed);
-    assert_eq!(m.query, "b é");
-    assert_eq!(m.press(&Press::plain("backspace", None)), Outcome::Typed);
-    assert_eq!(m.query, "b ");
-    assert_eq!(m.press(&Press::plain("tab", Some("\t"))), Outcome::Ignored);
-    assert_eq!(m.press(&Press::plain("left", None)), Outcome::Ignored);
-    let mut empty = SearchModel::new();
-    assert_eq!(
-        empty.press(&Press::plain("backspace", None)),
-        Outcome::Ignored
-    );
-    let mut m = SearchModel::new();
-    let mut ctrl = Press::plain("a", Some("a"));
-    ctrl.control = true;
-    assert_eq!(m.press(&ctrl), Outcome::Ignored);
-    let mut alt = Press::plain("a", Some("å"));
-    alt.alt = true;
-    assert_eq!(m.press(&alt), Outcome::Typed);
-    assert_eq!(m.query, "å");
+    for key in ["b", "space", "é", "backspace", "tab", "left"] {
+        assert_eq!(m.press(&Press::plain(key, Some(key))), Outcome::Ignored);
+    }
+    assert_eq!(m.query, "");
 }
 
 #[test]

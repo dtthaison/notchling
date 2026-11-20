@@ -143,6 +143,23 @@ impl QuestionDraft {
         self.typed.get_mut(self.tab)
     }
 
+    pub fn set_typed(&mut self, text: &str) {
+        if let Some(typed) = self.typed.get_mut(self.tab) {
+            *typed = text.to_owned();
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.tool_use_id
+    }
+
+    pub fn shown_text(&self, tab: usize) -> String {
+        match self.text_answer(tab) {
+            Some(answer) if self.typed(tab).is_empty() => answer.to_owned(),
+            _ => self.typed(tab).to_owned(),
+        }
+    }
+
     pub fn submit_text(&mut self, q: &PendingQuestion) -> Option<Vec<Answer>> {
         let text = self.typed.get(self.tab)?.trim().to_owned();
         if text.is_empty() || self.tab >= q.items.len() {
@@ -194,59 +211,10 @@ impl QuestionDraft {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Typed {
-    Changed,
-    Submit,
-    Ignored,
-}
-
-pub fn type_key(text: &mut String, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
-    match key {
-        "enter" => Typed::Submit,
-        "backspace" => match text.pop() {
-            Some(_) => Typed::Changed,
-            None => Typed::Ignored,
-        },
-        _ if modified => Typed::Ignored,
-        _ => match key_char {
-            Some(c) if !c.is_empty() && !c.chars().any(char::is_control) => {
-                text.push_str(c);
-                Typed::Changed
-            }
-            _ => Typed::Ignored,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use notchling_engine::transcript::snapshot::QuestionItem;
-
-    #[test]
-    fn keys_type_delete_and_submit_but_never_control_characters() {
-        let mut t = String::new();
-        assert_eq!(type_key(&mut t, "a", Some("a"), false), Typed::Changed);
-        assert_eq!(type_key(&mut t, "space", Some(" "), false), Typed::Changed);
-        assert_eq!(type_key(&mut t, "é", Some("é"), false), Typed::Changed);
-        assert_eq!(t, "a é");
-        assert_eq!(type_key(&mut t, "v", Some("v"), true), Typed::Ignored, "⌘V");
-        assert_eq!(
-            type_key(&mut t, "escape", Some("\u{1b}"), false),
-            Typed::Ignored
-        );
-        assert_eq!(type_key(&mut t, "tab", Some("\t"), false), Typed::Ignored);
-        assert_eq!(type_key(&mut t, "left", None, false), Typed::Ignored);
-        assert_eq!(type_key(&mut t, "backspace", None, false), Typed::Changed);
-        assert_eq!(t, "a ");
-        assert_eq!(type_key(&mut t, "enter", Some("\r"), false), Typed::Submit);
-        let mut empty = String::new();
-        assert_eq!(
-            type_key(&mut empty, "backspace", None, false),
-            Typed::Ignored
-        );
-    }
 
     fn item(header: &str, options: &[&str], multi: bool) -> QuestionItem {
         QuestionItem {
@@ -350,6 +318,25 @@ mod tests {
             typed.submit_text(&q),
             Some(vec![Answer::Text("Local".into())])
         );
+    }
+
+    #[test]
+    fn the_field_text_follows_the_tab_and_shows_a_sent_answer() {
+        let q = three();
+        let mut d = QuestionDraft::new(&q);
+        assert_eq!(d.shown_text(0), "");
+        d.set_typed("  MySQL ");
+        assert_eq!(d.typed(0), "  MySQL ");
+        assert_eq!(d.shown_text(0), "  MySQL ");
+        d.submit_text(&q);
+        assert_eq!(d.typed(0), "");
+        assert_eq!(d.shown_text(0), "MySQL", "a sent answer stays in the field");
+        d.select_tab(1);
+        assert_eq!(d.shown_text(1), "");
+        d.set_typed("x");
+        d.select_tab(0);
+        assert_eq!(d.typed(1), "x");
+        assert_eq!(d.id(), "hook:q1");
     }
 
     #[test]

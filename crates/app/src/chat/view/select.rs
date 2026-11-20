@@ -3,9 +3,9 @@ use std::ops::Range;
 
 use gpui::{
     canvas, div, fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Div,
-    Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Styled, StyledText, TextLayout, WeakEntity, Window,
+    Element, ElementId, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior,
+    InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Point, Styled, StyledText, TextLayout, WeakEntity, Window,
 };
 use notchling_kit::ui::{hsla, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
@@ -201,8 +201,11 @@ pub fn listener_in(scope: Scope, chat: WeakEntity<ChatView>) -> impl IntoElement
                 s.hits.clear();
             })
         },
-        move |_, _, window, _| {
+        move |_, _, window, cx| {
             let view = window.current_view();
+            if scope == Scope::Details {
+                preview_select(scope, cx, view);
+            }
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture {
                     return;
@@ -333,16 +336,70 @@ pub fn selectable_in(
 
 pub fn detail_text(text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
     let shown = role.display(text);
-    let styled = StyledText::new(shown.clone());
+    detail_marked(shown.to_string(), text, role, ink, Vec::new(), a)
+}
+
+pub fn detail_keyed(key: String, text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
+    detail_marked(key, text, role, ink, Vec::new(), a)
+}
+
+pub fn detail_marked(
+    key: String,
+    text: &str,
+    role: TypeRole,
+    ink: Ink,
+    marks: Vec<(Range<usize>, HighlightStyle)>,
+    a: Appearance,
+) -> Div {
+    let shown = role.display(text);
+    let styled = StyledText::new(shown.clone()).with_highlights(marks);
     let layout = styled.layout().clone();
     div().kit_type(role).ink(ink, a).child(selectable_in(
         Scope::Details,
-        shown.clone(),
+        key,
         shown,
         layout,
         styled.into_any_element(),
         a,
     ))
+}
+
+fn preview_select(scope: Scope, cx: &mut App, view: gpui::EntityId) {
+    let Some(prefix) = std::env::var_os("NOTCHLING_RENDER_SELECT") else {
+        return;
+    };
+    let prefix = prefix.to_string_lossy().into_owned();
+    state(scope, |s| {
+        let mut s = s.borrow_mut();
+        if s.anchor.is_some() {
+            return;
+        }
+        let mut keyed = s.notes.iter().filter(|n| n.key.starts_with(&prefix));
+        let (Some(first), last) = (keyed.next(), keyed.next_back()) else {
+            return;
+        };
+        let last = last.unwrap_or(first);
+        let (anchor, focus) = (
+            Spot {
+                key: first.key.clone(),
+                index: 0,
+            },
+            Spot {
+                key: last.key.clone(),
+                index: last.text.len(),
+            },
+        );
+        s.anchor = Some(anchor);
+        s.focus = Some(focus);
+        cx.notify(view);
+    });
+}
+
+pub fn selected_in(scope: Scope) -> bool {
+    state(scope, |s| {
+        let s = s.borrow();
+        selects(s.anchor.as_ref(), s.focus.as_ref())
+    })
 }
 
 pub struct Selectable {

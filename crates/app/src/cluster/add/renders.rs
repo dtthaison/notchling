@@ -536,6 +536,9 @@ impl ClusterSheetView {
         if which == Shown::AddPlan {
             if let Some(sheet) = self.add.sheet.as_mut() {
                 sheet.password.field().push_str("xxxxxxxxxx");
+                sheet
+                    .secret
+                    .update(cx, |editor, cx| editor.set_text("xxxxxxxxxx", cx));
             }
         }
     }

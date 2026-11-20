@@ -31,9 +31,37 @@ pub struct Layout {
     pub line_height: Pixels,
     pub bounds: Bounds<Pixels>,
     pub scroll_top: Pixels,
+    pub mask: Option<Vec<usize>>,
+}
+
+pub const MASK_DOT: &str = "\u{2022}";
+
+pub fn mask_starts(text: &str) -> Vec<usize> {
+    text.char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(text.len()))
+        .collect()
 }
 
 impl Layout {
+    pub fn show(&self, index: usize) -> usize {
+        match &self.mask {
+            Some(starts) => starts.partition_point(|&s| s < index) * MASK_DOT.len(),
+            None => index,
+        }
+    }
+
+    pub fn hide(&self, index: usize) -> usize {
+        match &self.mask {
+            Some(starts) => starts
+                .get(index / MASK_DOT.len())
+                .or(starts.last())
+                .copied()
+                .unwrap_or(0),
+            None => index,
+        }
+    }
+
     pub fn content_height(&self) -> Pixels {
         self.line_height * self.rows.len() as f32
     }
@@ -70,6 +98,7 @@ impl Layout {
     }
 
     pub fn position_for_index(&self, index: usize) -> Point<Pixels> {
+        let index = self.show(index);
         let row = self.row_at(index);
         point(self.x_on_row(&row, index), row.y)
     }
@@ -95,11 +124,12 @@ impl Layout {
         let local_y = self.line_height * (row_ix - first_row) as f32 + self.line_height / 2.0;
         let local = point(p.x.max(px(0.0)), local_y);
         match line.closest_index_for_position(local, self.line_height) {
-            Ok(i) | Err(i) => start + i,
+            Ok(i) | Err(i) => self.hide(start + i),
         }
     }
 
     pub fn selection_quads(&self, selection: &Range<usize>) -> Vec<Bounds<Pixels>> {
+        let selection = &(self.show(selection.start)..self.show(selection.end));
         let mut quads = Vec::new();
         for row in &self.rows {
             if selection.end < row.start || selection.start > row.end || selection.is_empty() {
@@ -204,6 +234,7 @@ fn paragraph_starts(text: &str) -> Vec<usize> {
 struct Shown {
     text: SharedString,
     placeholder: bool,
+    mask: Option<Vec<usize>>,
     marked: Option<Range<usize>>,
     max_lines: usize,
 }
@@ -225,14 +256,18 @@ impl TextElement {
     fn shown(&self, cx: &App) -> Shown {
         let editor = self.editor.read(cx);
         let placeholder = editor.edit.is_empty();
+        let mask = (editor.masked && !placeholder).then(|| mask_starts(editor.edit.text()));
         Shown {
             text: if placeholder {
                 editor.placeholder.clone()
+            } else if let Some(starts) = &mask {
+                SharedString::from(MASK_DOT.repeat(starts.len() - 1))
             } else {
                 SharedString::from(editor.edit.text().to_owned())
             },
             placeholder,
-            marked: editor.edit.marked(),
+            marked: editor.edit.marked().filter(|_| mask.is_none()),
+            mask,
             max_lines: editor.max_lines,
         }
     }
@@ -362,7 +397,7 @@ impl Element for TextElement {
             Some(bounds.size.width),
         );
         let editor = self.editor.read(cx);
-        let paragraphs = if shown.placeholder {
+        let paragraphs = if shown.placeholder || shown.mask.is_some() {
             vec![0]
         } else {
             paragraph_starts(editor.edit.text())
@@ -377,6 +412,7 @@ impl Element for TextElement {
             line_height,
             bounds,
             scroll_top: px(0.0),
+            mask: shown.mask,
         };
         scroll_top = scroll_top.clamp(px(0.0), layout.max_scroll());
         if reveal {
@@ -491,6 +527,7 @@ mod tests {
             line_height,
             bounds: Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(32.0))),
             scroll_top: px(0.0),
+            mask: None,
         }
     }
 
@@ -519,5 +556,24 @@ mod tests {
         );
         assert_eq!(across[0].origin.y, px(16.0));
         assert_eq!(across[0].size.width, px(NEWLINE_MARK));
+    }
+
+    #[test]
+    fn a_masked_layout_maps_text_offsets_to_dots_and_back() {
+        let text = "a\u{e9}\u{4e2d}b";
+        let mut l = layout(&[(0, 0, 12)]);
+        l.mask = Some(mask_starts(text));
+        assert_eq!(l.mask.as_deref(), Some(&[0, 1, 3, 6, 7][..]));
+        let shown: Vec<usize> = [0, 1, 3, 6, 7].iter().map(|&i| l.show(i)).collect();
+        assert_eq!(shown, vec![0, 3, 6, 9, 12]);
+        let hidden: Vec<usize> = [0, 3, 6, 9, 12, 99].iter().map(|&i| l.hide(i)).collect();
+        assert_eq!(hidden, vec![0, 1, 3, 6, 7, 7]);
+    }
+
+    #[test]
+    fn an_unmasked_layout_keeps_offsets() {
+        let l = layout(&[(0, 0, 5)]);
+        assert_eq!(l.show(4), 4);
+        assert_eq!(l.hide(4), 4);
     }
 }

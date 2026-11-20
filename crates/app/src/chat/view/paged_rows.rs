@@ -5,6 +5,7 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::inspector::{MARK_BOX, ROW_LINE};
+use super::select::{self, Scope};
 use super::ChatView;
 use crate::chat::inspector::SubagentRow;
 
@@ -107,6 +108,9 @@ fn plain_row(s: &SubagentRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Sta
         .cursor_pointer()
         .hover(|style| style.bg(hsla(Ink::Raised.color(a).with_alpha(0.6))))
         .on_click(move |_, _, cx| {
+            if select::selected_in(Scope::Details) {
+                return;
+            }
             chat.update(cx, |this, cx| this.open_subagent(&agent, cx))
                 .ok();
         })
@@ -131,16 +135,36 @@ fn plain_row(s: &SubagentRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Sta
                 .flex_col()
                 .gap(px(2.0))
                 .child(
-                    label(&s.description, TypeRole::Meta, Ink::Text, a).line_height(px(ROW_LINE)),
+                    select::detail_keyed(
+                        format!("subagent-{}-name", s.id),
+                        &s.description,
+                        TypeRole::Meta,
+                        Ink::Text,
+                        a,
+                    )
+                    .line_height(px(ROW_LINE)),
                 )
                 .child(
-                    label(&s.detail, TypeRole::Meta, Ink::TextFaint, a).line_height(px(ROW_LINE)),
+                    select::detail_keyed(
+                        format!("subagent-{}-detail", s.id),
+                        &s.detail,
+                        TypeRole::Meta,
+                        Ink::TextFaint,
+                        a,
+                    )
+                    .line_height(px(ROW_LINE)),
                 )
                 .children(s.doing.as_ref().map(|doing| {
-                    label(doing, TypeRole::Meta, Ink::TextMuted, a)
-                        .line_height(px(ROW_LINE))
-                        .w_full()
-                        .elide()
+                    select::detail_keyed(
+                        format!("subagent-{}-result", s.id),
+                        doing,
+                        TypeRole::Meta,
+                        Ink::TextMuted,
+                        a,
+                    )
+                    .line_height(px(ROW_LINE))
+                    .w_full()
+                    .elide()
                 })),
         )
 }

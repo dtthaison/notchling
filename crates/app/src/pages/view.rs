@@ -3,15 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, px, AnyView, ClipboardItem, Context, Div, FocusHandle, KeyDownEvent, Render,
-    ScrollHandle, SharedString, Window,
+    div, prelude::*, px, AnyView, ClipboardItem, Context, Div, Entity, FocusHandle, KeyDownEvent,
+    Render, ScrollHandle, SharedString, Subscription, Window,
 };
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{row_look, ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    button, card, field, hsla, label, resize_edges, scrollable, window_appearance, KitStyled,
-    TopBorder,
+    button, card, editor_field, hsla, label, resize_edges, scrollable, window_appearance,
+    KitStyled, TextEditor, TextEditorEvent, TopBorder,
 };
 use notchling_kit::{Appearance, Ink, TypeRole};
 
@@ -31,10 +31,30 @@ pub struct PagesView {
     pub model: PagesModel,
     library: Arc<Library>,
     focus: FocusHandle,
+    search: Entity<TextEditor>,
     scroll: ScrollHandle,
     fixed: bool,
     pending: Option<String>,
     note: Option<String>,
+    _search_events: Subscription,
+}
+
+const SEARCH_PLACEHOLDER: &str = "Search or Paste Artifact ID";
+
+fn search_editor(text: &str, cx: &mut Context<PagesView>) -> (Entity<TextEditor>, Subscription) {
+    let editor = cx.new(|cx| {
+        TextEditor::new(SEARCH_PLACEHOLDER, 1, cx)
+            .single_line()
+            .arrows_pass()
+    });
+    editor.update(cx, |editor, cx| editor.set_text(text, cx));
+    let events = cx.subscribe(&editor, |this, editor, event: &TextEditorEvent, cx| {
+        if matches!(event, TextEditorEvent::Changed) {
+            this.model.search = editor.read(cx).text().to_owned();
+            cx.notify();
+        }
+    });
+    (editor, events)
 }
 
 impl PagesView {
@@ -44,14 +64,17 @@ impl PagesView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> PagesView {
+        let (search, events) = search_editor("", cx);
         let view = PagesView {
             model: PagesModel::new(),
             library,
             focus: cx.focus_handle(),
+            search,
             scroll: ScrollHandle::new(),
             fixed: false,
             pending: select,
             note: None,
+            _search_events: events,
         };
         view.refresh(cx);
         cx.spawn(async move |this, cx| loop {
@@ -65,14 +88,17 @@ impl PagesView {
     }
 
     pub fn fixed(model: PagesModel, cx: &mut Context<Self>) -> PagesView {
+        let (search, events) = search_editor(&model.search, cx);
         PagesView {
             model,
             library: Arc::new(Library::fixed(Default::default())),
             focus: cx.focus_handle(),
+            search,
             scroll: ScrollHandle::new(),
             fixed: true,
             pending: None,
             note: None,
+            _search_events: events,
         }
     }
 
@@ -92,6 +118,7 @@ impl PagesView {
                         view.model.set_list(list);
                         if let Some(key) = view.pending.take() {
                             view.model.select(&key);
+                            view.sync_search(cx);
                         }
                     }
                     Err(e) => view.note = Some(e),
@@ -106,11 +133,18 @@ impl PagesView {
     pub fn select(&mut self, key: &str, cx: &mut Context<Self>) {
         if self.model.pages().iter().any(|p| p.key() == key) {
             self.model.select(key);
+            self.sync_search(cx);
             self.pending = None;
         } else {
             self.pending = Some(key.to_owned());
         }
         cx.notify();
+    }
+
+    fn sync_search(&self, cx: &mut Context<Self>) {
+        let text = self.model.search.clone();
+        self.search
+            .update(cx, |editor, cx| editor.set_text(&text, cx));
     }
 
     fn open_page(&mut self, page: &Page, cx: &mut Context<Self>) {
@@ -147,7 +181,7 @@ impl PagesView {
                 }
             }
             Outcome::Open(page) => self.open_page(&page, cx),
-            Outcome::Typed | Outcome::Cleared => {}
+            Outcome::Cleared => self.sync_search(cx),
             Outcome::Ignored => return,
         }
         cx.stop_propagation();
@@ -249,15 +283,10 @@ impl PagesView {
             .border_r(px(1.0))
             .border_color(hsla(Ink::Hairline.color(a)))
             .child(
-                div().p(px(12.0)).flex_shrink_0().child(
-                    field(
-                        &self.model.search,
-                        "Search or Paste Artifact ID",
-                        focused,
-                        a,
-                    )
-                    .w_full(),
-                ),
+                div()
+                    .p(px(12.0))
+                    .flex_shrink_0()
+                    .child(editor_field(&self.search, focused, a).w_full()),
             )
             .child(hairline(a))
             .child(scrollable(rows).tracking(&self.scroll))
@@ -361,10 +390,10 @@ impl PagesView {
 impl Render for PagesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if !self.fixed && !self.focus.is_focused(window) {
-            window.focus(&self.focus);
+        if !self.fixed && !self.search.read(cx).is_focused(window) {
+            self.search.read(cx).focus(window);
         }
-        let focused = !self.fixed && self.focus.is_focused(window);
+        let focused = !self.fixed && self.search.read(cx).is_focused(window);
         let selected = self.model.selected().cloned();
         let right = match &selected {
             Some(page) => self.detail(page, a, cx),

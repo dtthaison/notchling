@@ -104,7 +104,7 @@ impl EntityInputHandler for TextEditor {
         let text = if self.multiline {
             text.to_owned()
         } else {
-            text.replace(['\n', '\r'], " ")
+            super::single_line_text(text, self.masked)
         };
         self.edit.replace_text(range_utf16, &text);
         self.goal_x = None;

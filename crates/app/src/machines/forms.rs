@@ -3,9 +3,8 @@ use notchling_engine::machines::forms::{
 };
 
 use super::pieces::DraftCheck;
-use crate::notch::answer::{type_key, Typed};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AddField {
     Name,
     Host,
@@ -53,10 +52,6 @@ pub struct AddForm {
     pub error: Option<String>,
 }
 
-fn printable(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
 impl AddForm {
     pub fn new() -> AddForm {
         AddForm {
@@ -85,26 +80,17 @@ impl AddForm {
         vec![self.name.clone(), self.host.clone(), self.user.clone()]
     }
 
-    pub fn type_key(&mut self, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
-        if key == "tab" {
-            self.focus = Some(self.focus.map_or(AddField::Name, AddField::next));
-            return Typed::Changed;
-        }
-        let Some(field) = self.focus else {
-            return Typed::Ignored;
-        };
-        let typed = type_key(self.text_mut(field), key, key_char, modified);
-        if typed == Typed::Changed {
+    pub fn set_text(&mut self, field: AddField, text: &str) {
+        if self.text(field) != text {
+            *self.text_mut(field) = text.to_owned();
             self.changed();
         }
-        typed
     }
 
-    pub fn paste(&mut self, text: &str) {
-        if let Some(field) = self.focus {
-            self.text_mut(field).push_str(&printable(text));
-            self.changed();
-        }
+    pub fn tab_from(&mut self, from: Option<AddField>) -> AddField {
+        let next = from.or(self.focus).map_or(AddField::Name, AddField::next);
+        self.focus = Some(next);
+        next
     }
 
     fn changed(&mut self) {
@@ -147,7 +133,7 @@ impl AddForm {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RepoField {
     Github,
     LocalPath,
@@ -186,7 +172,7 @@ impl RepoField {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum JobField {
     Repo(usize, RepoField),
     Health,
@@ -246,7 +232,7 @@ impl JobForm {
         }
     }
 
-    fn fields(&self) -> Vec<JobField> {
+    pub fn fields(&self) -> Vec<JobField> {
         let mut out = Vec::new();
         for i in 0..self.draft.repos.len() {
             out.extend(RepoField::ALL.iter().map(|f| JobField::Repo(i, *f)));
@@ -255,36 +241,25 @@ impl JobForm {
         out
     }
 
-    pub fn type_key(&mut self, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
-        if key == "tab" {
-            let fields = self.fields();
-            let at = self.focus.and_then(|f| fields.iter().position(|x| *x == f));
-            self.focus = fields
-                .get(at.map_or(0, |i| (i + 1) % fields.len()))
-                .copied();
-            return Typed::Changed;
+    pub fn set_text(&mut self, field: JobField, text: &str) {
+        if self.text(field) == text {
+            return;
         }
-        let Some(field) = self.focus else {
-            return Typed::Ignored;
-        };
-        let Some(text) = self.text_mut(field) else {
-            return Typed::Ignored;
-        };
-        let typed = type_key(text, key, key_char, modified);
-        if typed == Typed::Changed {
+        if let Some(current) = self.text_mut(field) {
+            *current = text.to_owned();
             self.error = None;
         }
-        typed
     }
 
-    pub fn paste(&mut self, text: &str) {
-        let Some(field) = self.focus else {
-            return;
-        };
-        if let Some(t) = self.text_mut(field) {
-            t.push_str(&printable(text));
-            self.error = None;
-        }
+    pub fn tab_from(&mut self, from: Option<JobField>) -> Option<JobField> {
+        let fields = self.fields();
+        let at = from
+            .or(self.focus)
+            .and_then(|f| fields.iter().position(|x| *x == f));
+        self.focus = fields
+            .get(at.map_or(0, |i| (i + 1) % fields.len()))
+            .copied();
+        self.focus
     }
 
     pub fn add_repo(&mut self) {
@@ -335,11 +310,8 @@ impl JobForm {
 mod tests {
     use super::*;
 
-    fn type_text(form: &mut AddForm, text: &str) {
-        for c in text.chars() {
-            let s = c.to_string();
-            form.type_key(&s, Some(&s), false);
-        }
+    fn type_text(form: &mut AddForm, field: AddField, text: &str) {
+        form.set_text(field, text);
     }
 
     #[test]
@@ -350,11 +322,12 @@ mod tests {
             f.problems(&existing).is_empty(),
             "nothing typed, nothing said"
         );
-        type_text(&mut f, "m1");
-        f.type_key("tab", None, false);
-        type_text(&mut f, "m1.test");
-        f.type_key("tab", None, false);
-        type_text(&mut f, "worker");
+        type_text(&mut f, AddField::Name, "m1");
+        assert_eq!(f.tab_from(None), AddField::Host);
+        type_text(&mut f, AddField::Host, "m1.test");
+        assert_eq!(f.tab_from(None), AddField::User);
+        type_text(&mut f, AddField::User, "worker");
+        assert_eq!(f.tab_from(Some(AddField::User)), AddField::Name);
         assert_eq!(
             (f.name.as_str(), f.host.as_str(), f.user.as_str()),
             ("m1", "m1.test", "worker")
@@ -373,7 +346,7 @@ mod tests {
         f.checking = true;
         f.checked(check);
         assert!(f.can_add(&existing, true));
-        f.type_key("backspace", None, false);
+        type_text(&mut f, AddField::User, "worke");
         assert_eq!(f.check, None);
         assert!(!f.can_add(&existing, true));
         let stale = DraftCheck {
@@ -386,16 +359,17 @@ mod tests {
     }
 
     #[test]
-    fn add_form_names_problems_and_pastes_printable_text_only() {
+    fn add_form_names_problems_and_forgets_a_check_when_a_field_changes() {
         let mut f = AddForm::new();
-        type_text(&mut f, "M1");
+        type_text(&mut f, AddField::Name, "M1");
         let problems = f.problems(&[]);
         assert_eq!(problems.len(), 3, "{problems:?}");
-        f.focus = Some(AddField::Host);
-        f.paste("m1.\x1btest\n");
+        f.check = Some(DraftCheck::default());
+        f.set_text(AddField::Name, "M1");
+        assert!(f.check.is_some(), "the same text is no change");
+        f.set_text(AddField::Host, "m1.test");
+        assert_eq!(f.check, None);
         assert_eq!(f.host, "m1.test");
-        assert_eq!(f.type_key("escape", Some("\u{1b}"), false), Typed::Ignored);
-        assert_eq!(f.type_key("enter", Some("\r"), false), Typed::Submit);
     }
 
     #[test]
@@ -406,15 +380,15 @@ mod tests {
         assert_eq!(f.problems(), ["Add at least one repository"]);
         f.add_repo();
         assert_eq!(f.focus, Some(JobField::Repo(0, RepoField::Github)));
-        for c in "me/app".chars() {
-            let s = c.to_string();
-            f.type_key(&s, Some(&s), false);
-        }
-        f.type_key("tab", None, false);
+        f.set_text(JobField::Repo(0, RepoField::Github), "me/app");
+        f.tab_from(None);
         assert_eq!(f.focus, Some(JobField::Repo(0, RepoField::LocalPath)));
-        f.paste("/Users/me/code/app");
-        f.type_key("tab", None, false);
-        f.paste("just check");
+        f.set_text(
+            JobField::Repo(0, RepoField::LocalPath),
+            "/Users/me/code/app",
+        );
+        f.tab_from(None);
+        f.set_text(JobField::Repo(0, RepoField::CheckCommand), "just check");
         assert!(f.can_save(), "{:?}", f.problems());
         f.toggle_kind("ios");
         assert!(f.has_kind("ios"));
@@ -423,11 +397,11 @@ mod tests {
         f.toggle_all_repos();
         assert!(f.draft.token_all_repos);
         f.focus = Some(JobField::Repo(0, RepoField::VerifySkill));
-        f.type_key("tab", None, false);
+        f.tab_from(None);
         assert_eq!(f.focus, Some(JobField::Health));
-        f.paste("ftp://x");
+        f.set_text(JobField::Health, "ftp://x");
         assert_eq!(f.problems(), ["Health URL: http or https"]);
-        f.type_key("tab", None, false);
+        f.tab_from(Some(JobField::Health));
         assert_eq!(f.focus, Some(JobField::Repo(0, RepoField::Github)));
         f.remove_repo(0);
         assert!(f.draft.repos.is_empty() && f.focus.is_none());

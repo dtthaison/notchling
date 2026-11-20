@@ -3,9 +3,10 @@ use notchling_engine::machines::merge::MergeOutcome;
 use notchling_engine::machines::morning::{MorningItem, MorningKind};
 use notchling_engine::machines::status::{NeedsYouEntry, ReadyEntry, StuckEntry};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, icon, label};
+use notchling_kit::ui::{button, card, editor_field, icon, label};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::editors::Key;
 use super::view::{busy_line, mono_box, text_line, Confirming, MachinesView, CARD_PADDING};
 
 fn state(busy: bool) -> PartState {
@@ -73,19 +74,13 @@ impl MachinesView {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let text = self.notes.get(item_id).cloned().unwrap_or_default();
-        let focused = self.typing.as_deref() == Some(item_id);
-        let id = item_id.to_owned();
+        let key = Key::Note(item_id.to_owned());
+        let editor = self.editor(key.clone(), placeholder, false, &text, cx);
         div()
             .id(SharedString::from(format!("note-{item_id}")))
             .flex_1()
             .min_w(px(0.0))
-            .cursor_text()
-            .child(field(&text, placeholder, focused, a).w_full())
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.typing = Some(id.clone());
-                window.focus(&this.focus);
-                cx.notify();
-            }))
+            .child(editor_field(&editor, self.editors.is_focus(&key), a).w_full())
     }
 
     pub(super) fn send_note(&mut self, item_id: &str, cx: &mut Context<Self>) {
@@ -101,6 +96,7 @@ impl MachinesView {
             return;
         }
         self.notes.remove(item_id);
+        self.editors.forget_note(item_id);
         self.sending_back.remove(item_id);
         self.typing = None;
         let i = item.clone();
@@ -178,11 +174,11 @@ impl MachinesView {
                     a,
                 )
                 .when(!busy, |b| {
-                    b.on_click(cx.listener(move |this, _, window, cx| {
+                    b.on_click(cx.listener(move |this, _, _, cx| {
                         if !this.sending_back.remove(&i3.id) {
                             this.sending_back.insert(i3.id.clone());
                             this.typing = Some(i3.id.clone());
-                            window.focus(&this.focus);
+                            this.editors.want(Key::Note(i3.id.clone()));
                         }
                         cx.notify();
                     }))

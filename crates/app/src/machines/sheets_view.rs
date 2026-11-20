@@ -1,9 +1,10 @@
 use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, hsla, icon, label, scrollable, KitStyled};
+use notchling_kit::ui::{button, card, editor_field, hsla, icon, label, scrollable, KitStyled};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
+use super::editors::Key;
 use super::forms::{
     AddField, AddForm, JobField, JobForm, RepoField, ADD_INTRO, ALL_REPOS_NOTE, HEALTH_PLACEHOLDER,
 };
@@ -139,20 +140,18 @@ impl MachinesView {
                 a,
             ));
         } else if prompt.needs_password() {
-            let dots = "•".repeat(self.model.password_len());
-            column = column.child(
-                div()
-                    .id("fix-password")
-                    .w_full()
-                    .cursor_text()
-                    .child(field(
-                        &dots,
-                        &format!("Admin password for {}@{}", prompt.user, prompt.host),
-                        true,
-                        a,
-                    ))
-                    .on_click(cx.listener(|this, _, window, _| window.focus(&this.focus))),
+            let editor = self.editor(
+                Key::Password,
+                &format!("Admin password for {}@{}", prompt.user, prompt.host),
+                true,
+                self.model.password_text(),
+                cx,
             );
+            column = column.child(div().id("fix-password").w_full().child(editor_field(
+                &editor,
+                self.editors.is_focus(&Key::Password),
+                a,
+            )));
             column = column.child(pick_block(
                 "fix",
                 &self.model.vault_pick,
@@ -181,7 +180,14 @@ impl MachinesView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
-        let focused = form.focus == Some(which);
+        let key = Key::Add(which);
+        let editor = self.editor(
+            key.clone(),
+            which.placeholder(),
+            false,
+            form.text(which),
+            cx,
+        );
         div()
             .flex()
             .items_center()
@@ -191,15 +197,7 @@ impl MachinesView {
                 div()
                     .id(SharedString::from(format!("add-field-{which:?}")))
                     .flex_1()
-                    .cursor_text()
-                    .child(field(form.text(which), which.placeholder(), focused, a).w_full())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(Sheet::Add(form)) = this.model.sheet_mut() {
-                            form.focus = Some(which);
-                        }
-                        window.focus(&this.focus);
-                        cx.notify();
-                    })),
+                    .child(editor_field(&editor, self.editors.is_focus(&key), a).w_full()),
             )
     }
 
@@ -298,7 +296,8 @@ impl MachinesView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
-        let focused = form.focus == Some(which);
+        let key = Key::Job(which);
+        let editor = self.editor(key.clone(), placeholder, false, form.text(which), cx);
         let id = match which {
             JobField::Health => "job-field-health".to_owned(),
             JobField::Repo(i, f) => format!("job-field-{i}-{f:?}"),
@@ -312,15 +311,7 @@ impl MachinesView {
                 div()
                     .id(SharedString::from(id))
                     .flex_1()
-                    .cursor_text()
-                    .child(field(form.text(which), placeholder, focused, a).w_full())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(Sheet::Job(form)) = this.model.sheet_mut() {
-                            form.focus = Some(which);
-                        }
-                        window.focus(&this.focus);
-                        cx.notify();
-                    })),
+                    .child(editor_field(&editor, self.editors.is_focus(&key), a).w_full()),
             )
     }
 
@@ -387,6 +378,7 @@ impl MachinesView {
                 form.add_repo();
             }
             window.focus(&this.focus);
+            this.want_sheet_focus();
             cx.notify();
         }));
         body = body.child(div().child(add_repo));

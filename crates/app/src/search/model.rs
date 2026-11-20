@@ -1,5 +1,4 @@
 use super::wire::{Page, Results, SessionRow};
-use crate::notch::answer::{type_key, Typed};
 
 pub mod layout {
     pub const WIDTH: f32 = 680.0;
@@ -103,7 +102,6 @@ pub enum Outcome {
     Open(Item),
     Hide { returning: bool },
     Cleared,
-    Typed,
     Copy { text: String, note: &'static str },
     Ignored,
 }
@@ -337,15 +335,7 @@ impl SearchModel {
                 _ => Outcome::Ignored,
             };
         }
-        match type_key(
-            &mut self.query,
-            &press.key,
-            press.key_char.as_deref(),
-            press.control,
-        ) {
-            Typed::Changed => Outcome::Typed,
-            Typed::Submit | Typed::Ignored => Outcome::Ignored,
-        }
+        Outcome::Ignored
     }
 }
 

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, prelude::*, px, relative, Context, Div, FocusHandle, Render, ScrollHandle, SharedString,
-    Stateful, Window,
+    div, prelude::*, px, relative, Context, Div, Render, ScrollHandle, SharedString, Stateful,
+    Window,
 };
 use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_kit::labels::Corner;
@@ -17,6 +17,7 @@ use objc2_app_kit::NSWindow;
 
 use super::agy_card::agy_permission_height;
 use super::answer::QuestionDraft;
+use super::answer_editor::AnswerEditor;
 use super::answering::{permission_height, question_height};
 use super::cards::{bubble, needs_box, tag, text, A};
 use super::layout::{Geometry, NotchState, FLARE, TAB_BAR};
@@ -46,7 +47,7 @@ pub struct NotchView {
     pub(super) draft: QuestionDraft,
     pub(super) sending: Option<Sending>,
     pub(super) send_error: Option<String>,
-    pub(super) focus: FocusHandle,
+    pub(super) answer: AnswerEditor,
     pub(super) focused: bool,
     pub(super) prefs: NotchPrefs,
     pub(super) walk: Walk,
@@ -76,7 +77,7 @@ impl NotchView {
             draft: QuestionDraft::default(),
             sending: None,
             send_error: None,
-            focus: cx.focus_handle(),
+            answer: AnswerEditor::new(t::notch::type_else(), cx, NotchView::answer_event),
             focused: false,
             prefs: NotchPrefs::default(),
             walk: Walk::default(),
@@ -126,7 +127,7 @@ impl NotchView {
         Some((card, height))
     }
 
-    pub(super) fn sync_draft(&mut self) {
+    pub(super) fn sync_draft(&mut self, cx: &mut Context<Self>) {
         let id = match &self.model.state {
             NotchState::Peek(id) | NotchState::Detail(id) => id.clone(),
             _ => return,
@@ -137,6 +138,8 @@ impl NotchView {
             }
             self.draft.follow(&q);
         }
+        let enabled = self.gate().enabled;
+        self.answer.show(&self.draft, enabled, cx);
     }
 
     pub(super) fn fold_peek(&mut self) {
@@ -174,7 +177,7 @@ fn flare(left: bool) -> Div {
 
 impl NotchView {
     fn shape(&mut self, cx: &mut Context<Self>) -> Div {
-        self.sync_draft();
+        self.sync_draft(cx);
         let state = self.model.state.clone();
         self.model.card_height = match &state {
             NotchState::Peek(id) => self.card(id).map(|(_, h)| f64::from(h)),
@@ -575,7 +578,7 @@ impl NotchView {
 
 impl Render for NotchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.focused = self.focus.is_focused(window);
+        self.focused = self.answer.editor().read(cx).is_focused(window);
         let shape = self.shape(cx);
         div()
             .relative()

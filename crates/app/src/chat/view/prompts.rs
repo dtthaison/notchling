@@ -3,15 +3,14 @@ use std::collections::HashMap;
 
 use std::time::Duration;
 
-use gpui::{
-    div, prelude::*, px, Context, Div, FocusHandle, KeyDownEvent, SharedString, Stateful, Window,
-};
+use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful, Window};
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{CONTROL, MENU_GAP, RADIUS_COMPOSER, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{
-    button, code_block, field, hsla, icon, label, option_row, KitPart, KitStyled, MenuItem,
+    button, code_block, editor_field, hsla, icon, label, option_row, KitPart, KitStyled, MenuItem,
+    TextEditorEvent,
 };
 use notchling_kit::{sentence, Appearance, Icon, Ink, TypeRole};
 
@@ -31,7 +30,8 @@ use crate::chat::prompts::{
 };
 use crate::chat::remote_control::Action;
 use crate::mac::gate;
-use crate::notch::answer::{type_key, QuestionDraft, Typed};
+use crate::notch::answer::QuestionDraft;
+use crate::notch::answer_editor::AnswerEditor;
 use crate::notch::requests::HookRequest;
 use crate::phone::bridge::now_ms;
 
@@ -50,7 +50,7 @@ pub struct State {
     error: Option<String>,
     command_open: Option<String>,
     confirmed: Option<(String, Confirmed)>,
-    focus: FocusHandle,
+    answer: AnswerEditor,
     pub(super) preview: Option<Preview>,
 }
 
@@ -69,7 +69,7 @@ impl State {
             error: None,
             command_open: None,
             confirmed: None,
-            focus: cx.focus_handle(),
+            answer: AnswerEditor::new(t::chat::type_something_else(), cx, ChatView::answer_typed),
             preview,
         }
     }
@@ -192,8 +192,27 @@ impl ChatView {
         }
         if let Some(Prompt::Question(q)) = &shown {
             self.prompt.draft.follow(q);
+            let enabled = self.prompt_gate(cx).enabled;
+            self.prompt.answer.show(&self.prompt.draft, enabled, cx);
         }
         self.prompt.shown = shown;
+    }
+
+    fn answer_typed(&mut self, event: &TextEditorEvent, cx: &mut Context<Self>) {
+        let (Some(row), Some(Prompt::Question(question))) =
+            (self.selected.clone(), self.prompt.shown.clone())
+        else {
+            return;
+        };
+        let text = self.prompt.answer.editor().read(cx).text().to_owned();
+        self.prompt.draft.set_typed(&text);
+        if matches!(event, TextEditorEvent::Submit) && self.prompt_gate(cx).enabled {
+            if let Some(answers) = self.prompt.draft.submit_text(&question) {
+                let request = Request::answer_for(&row, &question, &answers);
+                self.answer_prompt(question_key(&question), request, Sending::Answer, None, cx);
+            }
+        }
+        cx.notify();
     }
 
     fn prompt_gate(&self, cx: &mut Context<Self>) -> Control {
@@ -466,7 +485,7 @@ fn question(
         .children(hint)
         .children(failed(view, a, cx))
         .children(options)
-        .child(answer_box(view, row, q, gate, a, window, cx))
+        .child(answer_box(view, tab, gate, a, window, cx))
         .children(submit)
         .children(status(view, gate, a))
 }
@@ -513,59 +532,19 @@ fn tabs(view: &ChatView, q: &PendingQuestion, a: Appearance, cx: &mut Context<Ch
 
 fn answer_box(
     view: &ChatView,
-    row: &str,
-    q: &PendingQuestion,
+    tab: usize,
     gate: Control,
     a: Appearance,
     window: &Window,
     cx: &mut Context<ChatView>,
 ) -> Stateful<Div> {
-    let draft = &view.prompt.draft;
-    let tab = draft.tab;
-    let typed = draft.typed(tab).to_owned();
-    let shown = match draft.text_answer(tab) {
-        Some(answer) if typed.is_empty() => answer.to_owned(),
-        _ => typed,
-    };
-    let focused = view.prompt.focus.is_focused(window);
-    let (session, question) = (row.to_owned(), q.clone());
+    let editor = view.prompt.answer.editor();
+    let focused = editor.read(cx).is_focused(window);
     let element = div()
         .id(SharedString::from(format!("prompt-answer-{tab}")))
-        .child(field(&shown, t::chat::type_something_else(), focused, a).w_full())
+        .child(editor_field(editor, focused, a).w_full())
         .when(!gate.enabled, |b| b.opacity(0.4));
-    gate::tip(element, gate, a).when(gate.enabled, |b| {
-        b.track_focus(&view.prompt.focus)
-            .cursor_text()
-            .on_click(cx.listener(|this, _, window, cx| {
-                window.focus(&this.prompt.focus);
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                let k = &event.keystroke;
-                let modified = k.modifiers.platform || k.modifiers.control;
-                let Some(typed) = this.prompt.draft.typed_mut() else {
-                    return;
-                };
-                match type_key(typed, &k.key, k.key_char.as_deref(), modified) {
-                    Typed::Submit => {
-                        if let Some(answers) = this.prompt.draft.submit_text(&question) {
-                            let request = Request::answer_for(&session, &question, &answers);
-                            this.answer_prompt(
-                                question_key(&question),
-                                request,
-                                Sending::Answer,
-                                None,
-                                cx,
-                            );
-                        }
-                    }
-                    Typed::Changed => {}
-                    Typed::Ignored => return,
-                }
-                cx.stop_propagation();
-                cx.notify();
-            }))
-    })
+    gate::tip(element, gate, a)
 }
 
 fn submit_row(

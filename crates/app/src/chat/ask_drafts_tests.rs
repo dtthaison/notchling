@@ -20,7 +20,8 @@ fn closed(id: &str) -> AskRow {
 fn type_all(drafts: &mut Drafts, r: &AskRow, text: &str) {
     for c in text.chars() {
         let s = c.to_string();
-        assert_eq!(drafts.key(r, &s, Some(&s), false), Keyed::Changed);
+        let at = drafts.typed(&r.id).to_owned() + &s;
+        assert!(drafts.set_typed(r, &at));
     }
 }
 
@@ -101,7 +102,7 @@ fn a_card_in_flight_or_closed_sends_nothing_more() {
     let gone = closed("q2");
     assert_eq!(drafts.act(&gone, Act::Choose(1)), None);
     assert_eq!(drafts.act(&gone, Act::Dismiss), None);
-    assert_eq!(drafts.key(&gone, "a", Some("a"), false), Keyed::Ignored);
+    assert!(!drafts.set_typed(&gone, "a"));
 }
 
 #[test]
@@ -113,16 +114,15 @@ fn return_in_a_cards_box_sends_that_cards_text_only() {
     type_all(&mut drafts, &b, "second");
     assert_eq!(drafts.typed("qa"), "first");
     assert_eq!(
-        drafts.key(&b, "enter", Some("\r"), false),
-        Keyed::Send(Some(Request::ask_answer("qb", AskAnswer::Text("second"))))
+        drafts.act(&b, Act::Send),
+        Some(Request::ask_answer("qb", AskAnswer::Text("second")))
     );
     assert_eq!(drafts.typed("qa"), "first", "the other box is untouched");
-    assert_eq!(drafts.key(&a, "backspace", None, false), Keyed::Changed);
+    assert!(drafts.set_typed(&a, "firs"));
     assert_eq!(drafts.typed("qa"), "firs");
-    assert_eq!(drafts.key(&a, "v", Some("v"), true), Keyed::Ignored);
     assert_eq!(
-        drafts.key(&row("qc", &[]), "enter", Some("\r"), false),
-        Keyed::Send(None),
+        drafts.act(&row("qc", &[]), Act::Send),
+        None,
         "Return on an empty box does nothing"
     );
 }

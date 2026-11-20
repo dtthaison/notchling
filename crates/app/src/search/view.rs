@@ -2,12 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, px, AnyView, ClipboardItem, Context, Div, FocusHandle, FontWeight,
+    div, prelude::*, px, AnyView, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight,
     KeyDownEvent, Render, ScrollHandle, SharedString, Subscription, Window,
 };
 use notchling_kit::metric::RADIUS_CARD;
 use notchling_kit::scrollbar::GUTTER;
-use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitStyled, Scrollable};
+use notchling_kit::ui::{
+    hsla, icon, label, scrollable, window_appearance, KitStyled, Scrollable, TextEditor,
+    TextEditorEvent,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -19,6 +22,7 @@ use super::panel;
 use super::renders::{model, results, shown};
 use super::rows::{hairline, page_row, secret_row, section_header, session_row};
 
+const SEARCH_PLACEHOLDER: &str = "Search Pages and Sessions";
 const PLACE_EVERY: Duration = Duration::from_millis(100);
 const INDEXING_RETRY: Duration = Duration::from_millis(700);
 
@@ -26,6 +30,7 @@ pub struct SearchPanelView {
     pub model: SearchModel,
     library: Arc<Library>,
     focus: FocusHandle,
+    query: Entity<TextEditor>,
     scroll: ScrollHandle,
     pacer: Pacer,
     fixed: bool,
@@ -33,6 +38,7 @@ pub struct SearchPanelView {
     top: (f64, f64),
     seen_active: bool,
     _activation: Option<Subscription>,
+    _query_events: Subscription,
 }
 
 fn now_ms() -> i64 {
@@ -54,10 +60,28 @@ impl SearchPanelView {
                 panel::close(cx, window, false);
             }
         });
+        let query = cx.new(|cx| {
+            TextEditor::new(SEARCH_PLACEHOLDER, 1, cx)
+                .single_line()
+                .arrows_pass()
+        });
+        let events = cx.subscribe_in(
+            &query,
+            window,
+            |this, _, event: &TextEditorEvent, window, cx| match event {
+                TextEditorEvent::Changed => this.query_changed(cx),
+                TextEditorEvent::Submit => {
+                    if let Some(item) = this.model.current().cloned() {
+                        this.open(item, window, cx);
+                    }
+                }
+            },
+        );
         let mut view = SearchPanelView {
             model: SearchModel::new(),
             library,
             focus: cx.focus_handle(),
+            query,
             scroll: ScrollHandle::new(),
             pacer: Pacer::default(),
             fixed: false,
@@ -65,6 +89,7 @@ impl SearchPanelView {
             top,
             seen_active: false,
             _activation: Some(activation),
+            _query_events: events,
         };
         view.search(Duration::ZERO, cx);
         cx.spawn(async move |this, cx| loop {
@@ -78,10 +103,27 @@ impl SearchPanelView {
     }
 
     pub fn fixed(model: SearchModel, library: Arc<Library>, cx: &mut Context<Self>) -> Self {
+        let query = cx.new(|cx| {
+            TextEditor::new(SEARCH_PLACEHOLDER, 1, cx)
+                .single_line()
+                .preview()
+        });
+        query.update(cx, |editor, cx| {
+            editor.set_text(&model.query, cx);
+            if std::env::var_os("NOTCHLING_RENDER_SELECT").is_some() {
+                editor.preview_selection(0, model.query.len(), cx);
+            }
+        });
+        let events = cx.subscribe(&query, |this, _, event: &TextEditorEvent, cx| {
+            if matches!(event, TextEditorEvent::Changed) {
+                this.query_changed(cx);
+            }
+        });
         SearchPanelView {
             model,
             library,
             focus: cx.focus_handle(),
+            query,
             scroll: ScrollHandle::new(),
             pacer: Pacer::default(),
             fixed: true,
@@ -89,7 +131,16 @@ impl SearchPanelView {
             top: (0.0, 0.0),
             seen_active: false,
             _activation: None,
+            _query_events: events,
         }
+    }
+
+    fn query_changed(&mut self, cx: &mut Context<Self>) {
+        let text = self.query.read(cx).text().to_owned();
+        if self.model.query != text {
+            self.model.query = text;
+        }
+        self.search(DEBOUNCE, cx);
     }
 
     fn place(&self) {
@@ -214,7 +265,7 @@ impl SearchPanelView {
                     panel::close(cx, window, returning);
                 }
             }
-            Outcome::Cleared | Outcome::Typed => self.search(DEBOUNCE, cx),
+            Outcome::Cleared => self.query.update(cx, |editor, cx| editor.set_text("", cx)),
             Outcome::Copy { text, note } => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 self.model.flash(note, now_ms());
@@ -242,12 +293,6 @@ impl SearchPanelView {
 
 impl SearchPanelView {
     fn field(&self, a: Appearance) -> Div {
-        let empty = self.model.query.is_empty();
-        let text = if empty {
-            "Search Pages and Sessions".to_owned()
-        } else {
-            self.model.query.clone()
-        };
         div()
             .h(px(layout::FIELD))
             .flex_shrink_0()
@@ -262,28 +307,15 @@ impl SearchPanelView {
                 a,
             ))
             .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .items_center()
-                    .child(
-                        label(
-                            &text,
-                            TypeRole::Title,
-                            if empty { Ink::TextFaint } else { Ink::Text },
-                            a,
-                        )
+                div().flex_1().min_w(px(0.0)).flex().items_center().child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .kit_type(TypeRole::Title)
+                        .ink(Ink::Text, a)
                         .font_weight(FontWeight::NORMAL)
-                        .elide(),
-                    )
-                    .child(
-                        div()
-                            .w(px(1.5))
-                            .h(px(22.0))
-                            .ml(px(1.0))
-                            .fill(Ink::Accent, a),
-                    ),
+                        .child(self.query.clone()),
+                ),
             )
     }
 
@@ -382,8 +414,8 @@ impl SearchPanelView {
 impl Render for SearchPanelView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if !self.fixed && !self.focus.is_focused(window) {
-            window.focus(&self.focus);
+        if !self.fixed && !self.query.read(cx).is_focused(window) {
+            self.query.read(cx).focus(window);
         }
         self.place();
         let now = now_ms();

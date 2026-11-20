@@ -1,7 +1,7 @@
-use gpui::{div, prelude::*, px, Context, Div, KeyDownEvent, SharedString, Window};
+use gpui::{div, prelude::*, px, Context, Div, SharedString, Window};
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, icon, label, KitPart};
+use notchling_kit::ui::{button, card, editor_field, icon, label, KitPart};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
@@ -32,7 +32,11 @@ impl ClusterSheetView {
         list = list.child(self.choices(plan, a, cx));
         if let Some(sheet) = &self.add.sheet {
             if plan.needs_password {
-                let focused = sheet.focus.is_focused(window);
+                let focused = sheet.secret.read(cx).is_focused(window);
+                let placeholder = t::cluster::add_password_placeholder(&target);
+                sheet
+                    .secret
+                    .update(cx, |editor, cx| editor.set_placeholder(&placeholder, cx));
                 list = list
                     .child(label(
                         t::cluster::add_password_label(),
@@ -40,27 +44,11 @@ impl ClusterSheetView {
                         Ink::TextFaint,
                         a,
                     ))
-                    .child(
-                        div()
-                            .id("add-password")
-                            .w_full()
-                            .cursor_text()
-                            .track_focus(&sheet.focus)
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                this.add_key(event, cx)
-                            }))
-                            .child(field(
-                                &sheet.password.dots(),
-                                &t::cluster::add_password_placeholder(&target),
-                                focused,
-                                a,
-                            ))
-                            .on_click(cx.listener(|this, _, window, _| {
-                                if let Some(sheet) = &this.add.sheet {
-                                    window.focus(&sheet.focus);
-                                }
-                            })),
-                    )
+                    .child(div().id("add-password").w_full().child(editor_field(
+                        &sheet.secret,
+                        focused,
+                        a,
+                    )))
                     .child(pick_block(
                         "add",
                         &sheet.vault,

@@ -1,7 +1,6 @@
 use notchling_engine::search::{find_pages, PageEntry};
 
 use super::dates;
-use crate::notch::answer::{type_key, Typed};
 use crate::search::model::Press;
 use crate::search::wire::{Page, PageList};
 
@@ -9,7 +8,6 @@ use crate::search::wire::{Page, PageList};
 pub enum Outcome {
     Moved,
     Open(Box<Page>),
-    Typed,
     Cleared,
     Ignored,
 }
@@ -158,15 +156,7 @@ impl PagesModel {
         if press.platform {
             return Outcome::Ignored;
         }
-        match type_key(
-            &mut self.search,
-            &press.key,
-            press.key_char.as_deref(),
-            press.control,
-        ) {
-            Typed::Changed => Outcome::Typed,
-            Typed::Submit | Typed::Ignored => Outcome::Ignored,
-        }
+        Outcome::Ignored
     }
 }
 
@@ -307,9 +297,8 @@ mod tests {
             m.press(&Press::plain("enter", Some("\r"))),
             Outcome::Open(Box::new(three()[1].clone()))
         );
-        assert_eq!(m.press(&Press::plain("k", Some("k"))), Outcome::Typed);
-        assert_eq!(m.press(&Press::plain("i", Some("i"))), Outcome::Typed);
-        assert_eq!(m.search, "ki");
+        assert_eq!(m.press(&Press::plain("k", Some("k"))), Outcome::Ignored);
+        m.search = "ki".into();
         assert_eq!(m.shown().len(), 1);
         assert_eq!(m.press(&Press::plain("down", None)), Outcome::Moved);
         assert_eq!(m.selection.as_deref(), Some("c-3"));
@@ -318,6 +307,7 @@ mod tests {
         assert_eq!(m.press(&Press::plain("escape", None)), Outcome::Ignored);
         assert_eq!(m.press(&Press::command("c")), Outcome::Ignored);
         assert_eq!(m.press(&Press::plain("backspace", None)), Outcome::Ignored);
+        assert_eq!(m.search, "", "typing belongs to the field");
         let mut empty = PagesModel::new();
         assert_eq!(empty.press(&Press::plain("enter", None)), Outcome::Ignored);
         assert_eq!(empty.press(&Press::plain("down", None)), Outcome::Ignored);

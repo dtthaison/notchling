@@ -31,8 +31,34 @@ pub(crate) enum Command {
     Redo,
 }
 
-pub(crate) fn takes(command: Command, selection_empty: bool) -> bool {
-    !matches!(command, Command::Copy | Command::Cut) || !selection_empty
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    Run,
+    Swallow,
+    Pass,
+}
+
+pub(crate) fn route(command: Command, selection_empty: bool, masked: bool) -> Route {
+    if !matches!(command, Command::Copy | Command::Cut) {
+        Route::Run
+    } else if masked {
+        Route::Swallow
+    } else if selection_empty {
+        Route::Pass
+    } else {
+        Route::Run
+    }
+}
+
+pub fn single_line_text(text: &str, masked: bool) -> String {
+    text.chars()
+        .filter_map(|c| match c {
+            '\n' | '\r' if masked => None,
+            '\n' | '\r' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
 }
 
 pub struct TextEditor {
@@ -43,6 +69,8 @@ pub struct TextEditor {
     max_lines: usize,
     multiline: bool,
     preview: bool,
+    masked: bool,
+    arrows_pass: bool,
     layout: Option<Layout>,
     scroll_top: Pixels,
     reveal_caret: bool,
@@ -81,6 +109,8 @@ impl TextEditor {
             max_lines,
             multiline: true,
             preview: false,
+            masked: false,
+            arrows_pass: false,
             layout: None,
             scroll_top: px(0.0),
             reveal_caret: true,
@@ -96,6 +126,20 @@ impl TextEditor {
         self.multiline = false;
         self.max_lines = 1;
         self
+    }
+
+    pub fn masked(mut self) -> TextEditor {
+        self.masked = true;
+        self
+    }
+
+    pub fn arrows_pass(mut self) -> TextEditor {
+        self.arrows_pass = true;
+        self
+    }
+
+    pub fn is_masked(&self) -> bool {
+        self.masked
     }
 
     pub fn preview(mut self) -> TextEditor {
@@ -191,7 +235,8 @@ impl TextEditor {
     }
 
     pub fn selected_text(&self) -> Option<String> {
-        (!self.edit.selection().is_empty()).then(|| self.edit.selected_text().to_owned())
+        (!self.masked && !self.edit.selection().is_empty())
+            .then(|| self.edit.selected_text().to_owned())
     }
 
     fn touched(&mut self, changed: bool, cx: &mut Context<Self>) {
@@ -256,6 +301,7 @@ impl TextEditor {
             "right" if cmd => self.row_edge(true, extend),
             "left" => self.edit.move_left(Self::unit(m), extend),
             "right" => self.edit.move_right(Self::unit(m), extend),
+            "up" | "down" if self.arrows_pass => return,
             "up" if cmd => self.edit.move_left(Unit::Document, extend),
             "down" if cmd => self.edit.move_right(Unit::Document, extend),
             "up" => {
@@ -269,6 +315,18 @@ impl TextEditor {
             "home" => self.edit.move_left(Unit::Document, extend),
             "end" => self.edit.move_right(Unit::Document, extend),
             "a" if cmd && !m.shift && !m.alt => self.apply(Command::SelectAll, cx),
+            "c" if cmd
+                && route(Command::Copy, self.edit.selection().is_empty(), self.masked)
+                    == Route::Pass =>
+            {
+                return
+            }
+            "x" if cmd
+                && route(Command::Cut, self.edit.selection().is_empty(), self.masked)
+                    == Route::Pass =>
+            {
+                return
+            }
             "c" if cmd => self.apply(Command::Copy, cx),
             "x" if cmd => self.apply(Command::Cut, cx),
             "v" if cmd => self.apply(Command::Paste, cx),
@@ -298,6 +356,9 @@ impl TextEditor {
                 }
             }
             Command::Cut => {
+                if self.masked {
+                    return;
+                }
                 if let Some(text) = self.edit.cut() {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
@@ -307,7 +368,7 @@ impl TextEditor {
                     let text = if self.multiline {
                         text
                     } else {
-                        text.replace(['\n', '\r'], " ")
+                        single_line_text(&text, self.masked)
                     };
                     self.edit.paste(&text);
                 }
@@ -322,9 +383,17 @@ impl TextEditor {
     }
 
     fn on_command(&mut self, command: Command, cx: &mut Context<Self>) {
-        if !self.enabled || !takes(command, self.edit.selection().is_empty()) {
+        if !self.enabled {
             cx.propagate();
             return;
+        }
+        match route(command, self.edit.selection().is_empty(), self.masked) {
+            Route::Run => {}
+            Route::Swallow => return,
+            Route::Pass => {
+                cx.propagate();
+                return;
+            }
         }
         let before = self.edit.text().to_owned();
         self.apply(command, cx);
@@ -333,7 +402,7 @@ impl TextEditor {
     }
 
     fn vertical(&mut self, direction: i32, extend: bool) {
-        let Some(layout) = &self.layout else {
+        let Some(layout) = self.layout.as_ref().filter(|_| !self.masked) else {
             return self.edit.move_left(Unit::Document, extend);
         };
         let caret = layout.position_for_index(self.edit.caret());
@@ -354,7 +423,7 @@ impl TextEditor {
     }
 
     fn row_edge(&mut self, end: bool, extend: bool) {
-        let target = match &self.layout {
+        let target = match self.layout.as_ref().filter(|_| !self.masked) {
             Some(layout) => {
                 let row = layout.row_at(self.edit.caret());
                 if end {

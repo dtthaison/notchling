@@ -5,20 +5,12 @@ use serde_json::Value;
 use crate::acting::{AskAnswer, Request};
 use crate::chat::asks::{lost_line, AskRow};
 use crate::chat::prompt_flow::failure_text;
-use crate::notch::answer::{type_key, Typed};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Act {
     Choose(usize),
     Send,
     Dismiss,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Keyed {
-    Ignored,
-    Changed,
-    Send(Option<Request>),
 }
 
 #[derive(Default)]
@@ -68,20 +60,16 @@ impl Drafts {
         Some(request)
     }
 
-    pub fn key(&mut self, row: &AskRow, key: &str, ch: Option<&str>, modified: bool) -> Keyed {
+    pub fn set_typed(&mut self, row: &AskRow, text: &str) -> bool {
         if !row.is_open() {
-            return Keyed::Ignored;
+            return false;
         }
-        let typed = self.typed.entry(row.id.clone()).or_default();
-        let result = match type_key(typed, key, ch, modified) {
-            Typed::Submit => return Keyed::Send(self.act(row, Act::Send)),
-            Typed::Changed => Keyed::Changed,
-            Typed::Ignored => Keyed::Ignored,
-        };
-        if self.typed(&row.id).is_empty() {
+        if text.is_empty() {
             self.typed.remove(&row.id);
+        } else {
+            self.typed.insert(row.id.clone(), text.to_owned());
         }
-        result
+        true
     }
 
     pub fn settle(&mut self, id: &str, reply: Result<Value, String>) {

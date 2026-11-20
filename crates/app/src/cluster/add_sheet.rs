@@ -45,10 +45,6 @@ impl AddPassword {
     pub fn secret(&self) -> Option<Secret> {
         (!self.0.is_empty()).then(|| Secret::new(self.0.clone()))
     }
-
-    pub fn dots(&self) -> String {
-        "•".repeat(self.len())
-    }
 }
 
 impl fmt::Debug for AddPassword {

@@ -61,6 +61,10 @@ impl MachinesModel {
         }
     }
 
+    pub fn password_text(&self) -> &str {
+        &self.password.0
+    }
+
     pub fn password_len(&self) -> usize {
         self.password.0.chars().count()
     }

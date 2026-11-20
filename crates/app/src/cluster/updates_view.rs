@@ -2,13 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use gpui::{div, prelude::*, px, Context, Div, FocusHandle, KeyDownEvent, SharedString, Window};
+use gpui::{div, prelude::*, px, Context, Div, Entity, SharedString, Subscription, Window};
 use notchling_engine::machines::node_updates::UpdateRow;
 use notchling_engine::vault::entry::VaultEntry;
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SPACE, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, card, field, hsla, icon, label, spinner, KitPart};
+use notchling_kit::ui::{
+    button, card, editor_field, hsla, icon, label, spinner, KitPart, TextEditor, TextEditorEvent,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
@@ -22,7 +24,6 @@ use super::updates_state::{Offered, UpdateSession};
 use super::view::ClusterSheetView;
 use crate::machines::sheets_view::checkbox;
 use crate::machines::view::mono_lines;
-use crate::notch::answer::{type_key, Typed};
 use crate::sheets::header::{card_title, close_button};
 use crate::vault::pick::VaultPick;
 use crate::vault::pick_view::{pick_list, PickEvent};
@@ -39,7 +40,7 @@ pub(super) struct UpdateUi {
     offered: Offered,
     commands: bool,
     passwords: BTreeMap<String, AddPassword>,
-    focus: BTreeMap<String, FocusHandle>,
+    editors: BTreeMap<String, (Entity<TextEditor>, Subscription)>,
     vault: VaultPick,
     picking: Option<String>,
     entries: VaultState,
@@ -67,7 +68,7 @@ impl UpdateUi {
             offered: Offered::default(),
             commands: false,
             passwords: BTreeMap::new(),
-            focus: BTreeMap::new(),
+            editors: BTreeMap::new(),
             vault: VaultPick::default(),
             picking: None,
             entries: VaultState::Reading,
@@ -108,6 +109,7 @@ impl UpdateUi {
 
     fn forget_passwords(&mut self) {
         self.passwords.clear();
+        self.editors.clear();
         self.picking = None;
         self.vault.close();
     }
@@ -398,6 +400,7 @@ impl ClusterSheetView {
                     Ok(()) => {
                         self.update.notice = None;
                         self.update.passwords.remove(&machine);
+                        self.update.editors.remove(&machine);
                         self.update.picking = None;
                         self.update.vault.close();
                         self.refresh_needs();
@@ -413,33 +416,25 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn update_key(&mut self, machine: &str, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let k = &event.keystroke;
-        let modified = k.modifiers.platform || k.modifiers.control;
-        let paste = k.modifiers.platform && !k.modifiers.control && k.key == "v";
-        let pasted = paste
-            .then(|| cx.read_from_clipboard().and_then(|c| c.text()))
-            .flatten()
-            .map(|t| t.chars().filter(|c| !c.is_control()).collect::<String>());
+    fn update_typed(
+        &mut self,
+        machine: &str,
+        editor: &Entity<TextEditor>,
+        event: &TextEditorEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let text = editor.read(cx).text().to_owned();
         let field = self
             .update
             .passwords
             .entry(machine.to_owned())
             .or_default()
             .field();
-        let typed = match pasted {
-            Some(text) => {
-                field.push_str(&text);
-                Typed::Changed
-            }
-            None => type_key(field, &k.key, k.key_char.as_deref(), modified),
-        };
-        match typed {
-            Typed::Ignored => return,
-            Typed::Changed => {}
-            Typed::Submit => self.start_update(cx),
+        field.clear();
+        field.push_str(&text);
+        if matches!(event, TextEditorEvent::Submit) {
+            self.start_update(cx);
         }
-        cx.stop_propagation();
         cx.notify();
     }
 
@@ -463,9 +458,26 @@ impl ClusterSheetView {
         let mut shown = lines(&rows, &self.update.anyway);
         shown.extend(idle_lines(&model, &rows));
         for need in &self.update.needs {
-            if !self.update.focus.contains_key(&need.machine) {
-                let handle = cx.focus_handle();
-                self.update.focus.insert(need.machine.clone(), handle);
+            if !self.update.editors.contains_key(&need.machine) {
+                let editor = cx.new(|cx| {
+                    TextEditor::new(t::cluster::update_password_placeholder(), 1, cx)
+                        .single_line()
+                        .masked()
+                });
+                let typed = self
+                    .update
+                    .passwords
+                    .get_mut(&need.machine)
+                    .map(|password| password.field().clone())
+                    .unwrap_or_default();
+                editor.update(cx, |editor, cx| editor.set_text(&typed, cx));
+                let machine = need.machine.clone();
+                let events = cx.subscribe(&editor, move |this, editor, event, cx| {
+                    this.update_typed(&machine, &editor, event, cx)
+                });
+                self.update
+                    .editors
+                    .insert(need.machine.clone(), (editor, events));
             }
         }
         let mut body = div().flex().flex_col().gap(px(SPACE[1])).child(label(
@@ -821,36 +833,16 @@ impl ClusterSheetView {
                 a,
             ));
         }
-        if let Some(handle) = self.update.focus.get(&need.machine) {
-            let focused = handle.is_focused(window);
-            let machine = need.machine.clone();
-            let dots = self
-                .update
-                .passwords
-                .get(&need.machine)
-                .map(AddPassword::dots)
-                .unwrap_or_default();
-            let on_click_machine = need.machine.clone();
+        if let Some((editor, _)) = self.update.editors.get(&need.machine) {
+            let focused = editor.read(cx).is_focused(window);
             prompt = prompt.child(
                 div()
-                    .id(SharedString::from(format!("update-password-{machine}")))
+                    .id(SharedString::from(format!(
+                        "update-password-{}",
+                        need.machine
+                    )))
                     .w_full()
-                    .cursor_text()
-                    .track_focus(handle)
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        this.update_key(&machine, event, cx)
-                    }))
-                    .child(field(
-                        &dots,
-                        t::cluster::update_password_placeholder(),
-                        focused,
-                        a,
-                    ))
-                    .on_click(cx.listener(move |this, _, window, _| {
-                        if let Some(handle) = this.update.focus.get(&on_click_machine) {
-                            window.focus(handle);
-                        }
-                    })),
+                    .child(editor_field(editor, focused, a)),
             );
         }
         let (note, ink) = match &ask.saves_as {

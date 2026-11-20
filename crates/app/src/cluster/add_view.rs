@@ -1,9 +1,7 @@
 use std::collections::BTreeSet;
 use std::time::Instant;
 
-use gpui::{
-    div, prelude::*, px, Context, Div, Entity, FocusHandle, KeyDownEvent, Subscription, Window,
-};
+use gpui::{div, prelude::*, px, Context, Div, Entity, Subscription, Window};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::{SPACE, SPINNER_SMALL};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -29,7 +27,6 @@ use super::not_joined::NotJoined;
 use super::view::ClusterSheetView;
 use crate::mac::gate;
 use crate::machines::view::mono_lines;
-use crate::notch::answer::{type_key, Typed};
 use crate::sheets::header::{card_title, close_button};
 use crate::sheets::view::Dismiss;
 use crate::vault::form::Form;
@@ -57,11 +54,12 @@ pub(super) struct AddSheet {
     pub(super) names: Vec<String>,
     pub(super) password: AddPassword,
     pub(super) vault: VaultPick,
-    pub(super) focus: FocusHandle,
+    pub(super) secret: Entity<TextEditor>,
     pub(super) commands: BTreeSet<String>,
     pub(super) error: Option<String>,
     _address_events: Subscription,
     _name_events: Subscription,
+    _secret_events: Subscription,
 }
 
 pub(super) struct NestedVault {
@@ -120,6 +118,10 @@ impl AddSheet {
             TextEditorEvent::Changed => this.add_name_changed(cx),
             TextEditorEvent::Submit => this.add_submit(Button::Add, cx),
         });
+        let secret = cx.new(|cx| TextEditor::new("", 1, cx).single_line().masked());
+        let secret_events = cx.subscribe(&secret, |this, _, event: &TextEditorEvent, cx| {
+            this.add_secret_typed(event, cx)
+        });
         let (user, names) = parts
             .as_ref()
             .map(|p| (p.this.user.clone(), p.names()))
@@ -144,11 +146,12 @@ impl AddSheet {
             names,
             password: AddPassword::default(),
             vault: VaultPick::default(),
-            focus: cx.focus_handle(),
+            secret,
             commands: BTreeSet::new(),
             error: None,
             _address_events: address_events,
             _name_events: name_events,
+            _secret_events: secret_events,
         }
     }
 }
@@ -357,7 +360,12 @@ impl ClusterSheetView {
                     return;
                 };
                 match install(&mut sheet.password, |password| runs.run(&name, password)) {
-                    Ok(()) => sheet.error = None,
+                    Ok(()) => {
+                        sheet.error = None;
+                        sheet
+                            .secret
+                            .update(cx, |editor, cx| editor.set_text("", cx));
+                    }
                     Err(why) => sheet.error = Some(why),
                 }
             }
@@ -425,37 +433,17 @@ impl ClusterSheetView {
         .detach();
     }
 
-    pub(super) fn add_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let k = &event.keystroke;
-        let modified = k.modifiers.platform || k.modifiers.control;
-        let paste = k.modifiers.platform && !k.modifiers.control && k.key == "v";
-        let pasted = paste
-            .then(|| cx.read_from_clipboard().and_then(|c| c.text()))
-            .flatten()
-            .map(|t| t.chars().filter(|c| !c.is_control()).collect::<String>());
-        let typed = {
-            let Some(sheet) = self.add.sheet.as_mut() else {
-                return;
-            };
-            match pasted {
-                Some(text) => {
-                    sheet.password.field().push_str(&text);
-                    Typed::Changed
-                }
-                None => type_key(
-                    sheet.password.field(),
-                    &k.key,
-                    k.key_char.as_deref(),
-                    modified,
-                ),
-            }
+    fn add_secret_typed(&mut self, event: &TextEditorEvent, cx: &mut Context<Self>) {
+        let Some(sheet) = self.add.sheet.as_mut() else {
+            return;
         };
-        match typed {
-            Typed::Ignored => return,
-            Typed::Changed => {}
-            Typed::Submit => self.add_submit(Button::Install, cx),
+        let text = sheet.secret.read(cx).text().to_owned();
+        let field = sheet.password.field();
+        field.clear();
+        field.push_str(&text);
+        if matches!(event, TextEditorEvent::Submit) {
+            self.add_submit(Button::Install, cx);
         }
-        cx.stop_propagation();
         cx.notify();
     }
 
@@ -482,6 +470,9 @@ impl ClusterSheetView {
                 sheet.error = runs.set_admin_entry(&name, Some(id)).err();
                 if sheet.error.is_none() {
                     sheet.password.clear();
+                    sheet
+                        .secret
+                        .update(cx, |editor, cx| editor.set_text("", cx));
                 }
                 sheet.vault.close();
             }

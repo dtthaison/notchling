@@ -28,7 +28,7 @@ pub fn build_scene(scene: renders::Scene, cx: &mut App) -> AnyView {
         view.walk.motion = scene.motion;
         view.perch = scene.perch;
         view.scene_window = scene.window;
-        view.sync_draft();
+        view.sync_draft(cx);
         if let Some(q) = scene.question {
             for (tab, option) in scene.picks {
                 view.draft.select_tab(tab);

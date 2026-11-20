@@ -547,6 +547,22 @@ pub fn field(text: &str, placeholder: &str, focused: bool, appearance: Appearanc
         .child(if empty { placeholder } else { text }.to_owned())
 }
 
+pub fn editor_field(
+    editor: &gpui::Entity<super::TextEditor>,
+    focused: bool,
+    appearance: Appearance,
+) -> Div {
+    div()
+        .min_h(px(CONTROL))
+        .px(px(10.0))
+        .flex()
+        .items_center()
+        .rounded(px(RADIUS_SM))
+        .kit_type(TypeRole::Body)
+        .look(&field_look(focused, appearance))
+        .child(div().flex_1().min_w(px(0.0)).child(editor.clone()))
+}
+
 #[cfg(test)]
 mod press_tests {
     use super::*;

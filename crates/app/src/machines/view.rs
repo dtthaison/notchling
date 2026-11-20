@@ -19,7 +19,6 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::forms::AddForm;
 use super::model::{MachinesModel, Parts, Run, Sheet, Tab};
 use super::renders;
-use crate::notch::answer::{type_key, Typed};
 use crate::vault::pick_view::PickEvent;
 
 const TICK: Duration = Duration::from_millis(500);
@@ -34,6 +33,7 @@ pub enum Confirming {
 pub struct MachinesView {
     pub model: MachinesModel,
     pub(super) focus: FocusHandle,
+    pub(super) editors: super::editors::Editors,
     pub(super) typing: Option<String>,
     pub(super) notes: BTreeMap<String, String>,
     pub(super) sending_back: BTreeSet<String>,
@@ -85,6 +85,7 @@ impl MachinesView {
             seen_revision: model.engine().revision(),
             model,
             focus: cx.focus_handle(),
+            editors: Default::default(),
             typing: None,
             notes: BTreeMap::new(),
             sending_back: BTreeSet::new(),
@@ -284,6 +285,7 @@ impl MachinesView {
     pub(super) fn open_sheet(&mut self, sheet: Sheet, window: &mut Window, cx: &mut Context<Self>) {
         if self.model.open_sheet(sheet) {
             window.focus(&self.focus);
+            self.want_sheet_focus();
         }
         cx.notify();
     }
@@ -394,14 +396,8 @@ impl MachinesView {
         cx.notify();
     }
 
-    fn key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &event.keystroke;
-        let modified = k.modifiers.platform || k.modifiers.control;
-        let paste = k.modifiers.platform && !k.modifiers.control && k.key == "v";
-        let pasted = paste
-            .then(|| cx.read_from_clipboard().and_then(|c| c.text()))
-            .flatten()
-            .map(|t| t.chars().filter(|c| !c.is_control()).collect::<String>());
         if k.key == "escape" {
             if self.confirming.take().is_some() || self.model.diff.take().is_some() {
             } else if self.model.sheet().is_some() {
@@ -413,66 +409,13 @@ impl MachinesView {
             cx.notify();
             return;
         }
-        let typed = if let Some(password) = self.model.password_field() {
-            match pasted {
-                Some(text) => {
-                    password.push_str(&text);
-                    Typed::Changed
-                }
-                None => type_key(password, &k.key, k.key_char.as_deref(), modified),
-            }
-        } else {
-            self.type_into_sheet(pasted, &k.key, k.key_char.as_deref(), modified)
-        };
-        match typed {
-            Typed::Ignored => return,
-            Typed::Changed => {}
-            Typed::Submit => self.submit(cx),
-        }
-        cx.stop_propagation();
-        cx.notify();
-    }
-
-    fn type_into_sheet(
-        &mut self,
-        pasted: Option<String>,
-        key: &str,
-        key_char: Option<&str>,
-        modified: bool,
-    ) -> Typed {
-        match self.model.sheet_mut() {
-            Some(Sheet::Fix(_)) => Typed::Ignored,
-            Some(Sheet::Add(form)) => match pasted {
-                Some(text) => {
-                    form.paste(&text);
-                    Typed::Changed
-                }
-                None => form.type_key(key, key_char, modified),
-            },
-            Some(Sheet::Job(form)) => match pasted {
-                Some(text) => {
-                    form.paste(&text);
-                    Typed::Changed
-                }
-                None => form.type_key(key, key_char, modified),
-            },
-            None => match self.typing.clone() {
-                Some(id) => {
-                    let note = self.notes.entry(id).or_default();
-                    match pasted {
-                        Some(text) => {
-                            note.push_str(&text);
-                            Typed::Changed
-                        }
-                        None => type_key(note, key, key_char, modified),
-                    }
-                }
-                None => Typed::Ignored,
-            },
+        if k.key == "tab" && self.model.sheet().is_some() && self.tab_sheet(window, cx) {
+            cx.stop_propagation();
+            cx.notify();
         }
     }
 
-    fn submit(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn submit(&mut self, cx: &mut Context<Self>) {
         let existing = self.model.names();
         let can_add = self.model.can_add();
         let password_given = self.model.password_ready();
@@ -502,10 +445,16 @@ impl MachinesView {
 impl Render for MachinesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if (self.model.sheet().is_some() || self.typing.is_some()) && !self.focus.is_focused(window)
+        if (self.model.sheet().is_some() || self.typing.is_some())
+            && !self.focus.contains_focused(window, cx)
         {
             window.focus(&self.focus);
         }
+        if self.model.sheet().is_none() {
+            self.editors.forget_sheet();
+        }
+        self.editors.apply_want(window, cx);
+        self.editors.note_focus(window, cx);
         let body = match self.model.tab {
             Tab::Machines => self.machines_tab(a, cx),
             Tab::Jobs => self.jobs_tab(a, cx),
@@ -513,7 +462,9 @@ impl Render for MachinesView {
         div()
             .id("machines-window")
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
+            .on_key_down(
+                cx.listener(|this, event: &KeyDownEvent, window, cx| this.key(event, window, cx)),
+            )
             .relative()
             .size_full()
             .flex()
