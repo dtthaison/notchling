@@ -55,6 +55,9 @@ pub enum Command {
     Models {
         args: Vec<String>,
     },
+    Cost {
+        args: Vec<String>,
+    },
     Secrets {
         args: Vec<String>,
     },
@@ -109,6 +112,7 @@ pub fn usage() -> &'static str {
      notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers, with what each is for\n  \
      notchling delegate-models --for <role>  the tool, model and effort for review, review-final, review-secrets or spec-check\n  \
      notchling models [check|update] [--json]  read each tool's models and efforts; update writes Notchling's copy (--force accepts a list that shrank)\n  \
+     notchling cost report [--days N] [--plan api|subscription] [--json]  what your agents spent over the last N days (14 by default) and what to change\n  \
      notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
      notchling secret <name>[,<name>…] -- <command> [args…]\n  \
      \u{20}                                           run a command with secrets, its output hidden\n  \
@@ -182,6 +186,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "models" => {
             return Ok(Command::Models {
+                args: args.collect(),
+            })
+        }
+        "cost" => {
+            return Ok(Command::Cost {
                 args: args.collect(),
             })
         }

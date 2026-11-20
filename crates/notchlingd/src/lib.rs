@@ -109,6 +109,9 @@ pub mod codex_fence;
 pub mod codex_ops;
 pub mod control_ops;
 pub mod cost_ops;
+pub mod cost_report_cli;
+pub mod cost_report_ops;
+pub mod cost_report_text;
 pub mod daemon;
 pub mod daemon_wiring;
 pub mod delegate_cli;
@@ -331,6 +334,8 @@ mod control_ops_tests;
 #[cfg(test)]
 mod cost_ops_tests;
 #[cfg(test)]
+mod cost_report_tests;
+#[cfg(test)]
 mod daemon_tests;
 #[cfg(test)]
 mod event_assert;
@@ -505,6 +510,7 @@ pub fn run(command: Command) -> i32 {
         Command::Delegate { args } => delegate_cli::run(&args),
         Command::DelegateModels { args } => delegate_cli::models(&args),
         Command::Models { args } => models_cli::run(&args),
+        Command::Cost { args } => cost_report_cli::run(&args),
         Command::Secrets { args } => vault_cli::secrets(&args),
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),

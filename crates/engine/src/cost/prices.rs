@@ -28,7 +28,10 @@ pub fn estimate(price: &Price, t: &[f64; 5]) -> f64 {
 }
 
 fn cache_writes(usage: &Value) -> (f64, f64) {
-    match usage.get("cache_creation").filter(|v| v.is_object()) {
+    let has_split = |v: &&Value| {
+        v.get("ephemeral_5m_input_tokens").is_some() || v.get("ephemeral_1h_input_tokens").is_some()
+    };
+    match usage.get("cache_creation").filter(has_split) {
         Some(split) => (
             n(split, "ephemeral_5m_input_tokens"),
             n(split, "ephemeral_1h_input_tokens"),

@@ -178,7 +178,7 @@ const NEVER_QUIET: [&str; 126] = [
     ops::TAILSCALE_SWITCH,
 ];
 
-const NEVER_QUIET_LIMITS: [&str; 2] = ["limits.set_mode", "cost.summary"];
+const NEVER_QUIET_LIMITS: [&str; 3] = ["limits.set_mode", "cost.summary", "cost.report"];
 
 fn every_op_name() -> Vec<String> {
     let wire = include_str!("../../local-api/src/wire.rs");
@@ -193,6 +193,7 @@ fn every_op_name() -> Vec<String> {
         "limits.status",
         "limits.set_mode",
         "cost.summary",
+        "cost.report",
         "limits.usage",
     ] {
         names.push(limits.to_owned());

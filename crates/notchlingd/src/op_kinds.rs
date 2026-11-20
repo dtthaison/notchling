@@ -1,3 +1,4 @@
+use crate::cost_report_ops::COST_REPORT;
 use crate::limits_ops::{COST_SUMMARY, LIMITS_SET_MODE, LIMITS_STATUS};
 use crate::limits_usage::LIMITS_USAGE;
 use notchling_local_api::{ops, OpHome};
@@ -153,6 +154,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (LIMITS_USAGE, Home::Quiet),
     (LIMITS_SET_MODE, Home::Called),
     (COST_SUMMARY, Home::Quiet),
+    (COST_REPORT, Home::Quiet),
     (ops::ASK_OPEN, Home::Kind("session.ask")),
     (ops::ASK_WAIT, Home::Called),
     (ops::ASK_MINE, Home::Called),

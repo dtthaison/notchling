@@ -1,6 +1,7 @@
 use crate::layout::Layout;
 use notchling_engine::catalog::Catalog;
 use notchling_engine::cost::account_log::AccountSwitches;
+use notchling_engine::cost::ledger::{Ledger, FILE};
 use notchling_engine::cost::summary::Summary;
 use notchling_engine::cost::tracker::{Root, ANTIGRAVITY, CLAUDE_CODE, CODEX, DESKTOP};
 use notchling_engine::cost::{CostService, Snapshot, Tracker, Window};
@@ -40,11 +41,20 @@ impl CostSetup {
     }
 
     pub fn service(&self) -> Arc<CostService> {
-        CostService::new(self.tracker())
+        CostService::with_ledger(self.tracker(), self.ledger())
     }
 
     pub fn service_with(&self, switches: Arc<dyn AccountSwitches>) -> Arc<CostService> {
-        CostService::new(self.tracker().with_switches(switches))
+        CostService::with_ledger(self.tracker().with_switches(switches), self.ledger())
+    }
+
+    fn ledger(&self) -> Option<Ledger> {
+        let roots = self.roots.clone();
+        let catalog = self.catalog.clone();
+        match &self.cache_data {
+            Some(data) => Ledger::open(&data.join("daemon").join(FILE), roots, catalog).ok(),
+            None => Ledger::in_memory(roots, catalog).ok(),
+        }
     }
 
     fn tracker(&self) -> Tracker {

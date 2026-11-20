@@ -32,7 +32,6 @@ use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
 use crate::log_ops::LogOps;
 use crate::models_ops::ModelsOps;
 use crate::op_group::OpGroup;
-use crate::op_kinds;
 use crate::organizations_ops::OrganizationsOps;
 use crate::outbox_inbox::OutboxNotice;
 use crate::outbox_ops::OutboxOps;
@@ -41,7 +40,6 @@ use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::postmen_wiring::postmen_for;
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
-use crate::quiet_ops;
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::shell_jobs::ShellJobs;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
@@ -49,6 +47,7 @@ use crate::tailscale_ops::TailscaleOps;
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
 use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
+use crate::{op_kinds, quiet_ops};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::activity::EventsDb;
@@ -903,6 +902,7 @@ impl Wired {
             .with_group(self.sidecar.clone())
             .with_group(self.providers.clone())
             .with_group(self.limits.clone())
+            .with_group(crate::cost_report_ops::shared(self.limits.cost()))
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
             .with_group(self.outbox.clone())
