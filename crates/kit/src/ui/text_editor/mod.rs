@@ -50,6 +50,14 @@ pub(crate) fn route(command: Command, selection_empty: bool, masked: bool) -> Ro
     }
 }
 
+pub(crate) fn is_shortcut(m: &Modifiers) -> bool {
+    m.platform && !m.alt && !m.control
+}
+
+pub(crate) fn shortcut_letter(key: &str) -> String {
+    key.to_ascii_lowercase()
+}
+
 pub fn single_line_text(text: &str, masked: bool) -> String {
     text.chars()
         .filter_map(|c| match c {
@@ -130,6 +138,7 @@ impl TextEditor {
 
     pub fn masked(mut self) -> TextEditor {
         self.masked = true;
+        self.edit.stop_history();
         self
     }
 
@@ -218,7 +227,10 @@ impl TextEditor {
         self.touched(true, cx);
     }
 
-    pub fn set_edit(&mut self, edit: TextEdit, cx: &mut Context<Self>) {
+    pub fn set_edit(&mut self, mut edit: TextEdit, cx: &mut Context<Self>) {
+        if self.masked {
+            edit.stop_history();
+        }
         let changed = edit.text() != self.edit.text();
         self.edit = edit;
         self.touched(changed, cx);
@@ -264,13 +276,18 @@ impl TextEditor {
         cx.notify();
     }
 
-    fn unit(m: &Modifiers) -> Unit {
-        if m.platform {
+    fn unit(m: &Modifiers, masked: bool) -> Unit {
+        let unit = if m.platform {
             Unit::Line
         } else if m.alt {
             Unit::Word
         } else {
             Unit::Grapheme
+        };
+        if masked && unit != Unit::Grapheme {
+            Unit::Document
+        } else {
+            unit
         }
     }
 
@@ -283,7 +300,9 @@ impl TextEditor {
         let (cmd, extend) = (m.platform, m.shift);
         let before = self.edit.text().to_owned();
         let mut vertical = false;
-        match k.key.as_str() {
+        let shortcut = is_shortcut(m);
+        let letter = shortcut_letter(&k.key);
+        match letter.as_str() {
             "enter" => {
                 let key = if cmd || m.control || !self.multiline {
                     ReturnKey::Submit
@@ -295,12 +314,12 @@ impl TextEditor {
                     ReturnKey::Submit => cx.emit(TextEditorEvent::Submit),
                 }
             }
-            "backspace" => self.edit.delete_backward(Self::unit(m)),
-            "delete" => self.edit.delete_forward(Self::unit(m)),
+            "backspace" => self.edit.delete_backward(Self::unit(m, self.masked)),
+            "delete" => self.edit.delete_forward(Self::unit(m, self.masked)),
             "left" if cmd => self.row_edge(false, extend),
             "right" if cmd => self.row_edge(true, extend),
-            "left" => self.edit.move_left(Self::unit(m), extend),
-            "right" => self.edit.move_right(Self::unit(m), extend),
+            "left" => self.edit.move_left(Self::unit(m, self.masked), extend),
+            "right" => self.edit.move_right(Self::unit(m, self.masked), extend),
             "up" | "down" if self.arrows_pass => return,
             "up" if cmd => self.edit.move_left(Unit::Document, extend),
             "down" if cmd => self.edit.move_right(Unit::Document, extend),
@@ -314,23 +333,23 @@ impl TextEditor {
             }
             "home" => self.edit.move_left(Unit::Document, extend),
             "end" => self.edit.move_right(Unit::Document, extend),
-            "a" if cmd && !m.shift && !m.alt => self.apply(Command::SelectAll, cx),
-            "c" if cmd
+            "a" if shortcut && !m.shift => self.apply(Command::SelectAll, cx),
+            "c" if shortcut
                 && route(Command::Copy, self.edit.selection().is_empty(), self.masked)
                     == Route::Pass =>
             {
                 return
             }
-            "x" if cmd
+            "x" if shortcut
                 && route(Command::Cut, self.edit.selection().is_empty(), self.masked)
                     == Route::Pass =>
             {
                 return
             }
-            "c" if cmd => self.apply(Command::Copy, cx),
-            "x" if cmd => self.apply(Command::Cut, cx),
-            "v" if cmd => self.apply(Command::Paste, cx),
-            "z" | "Z" if cmd => self.apply(
+            "c" if shortcut => self.apply(Command::Copy, cx),
+            "x" if shortcut => self.apply(Command::Cut, cx),
+            "v" if shortcut => self.apply(Command::Paste, cx),
+            "z" if shortcut => self.apply(
                 if m.shift {
                     Command::Redo
                 } else {
@@ -403,7 +422,7 @@ impl TextEditor {
 
     fn vertical(&mut self, direction: i32, extend: bool) {
         let Some(layout) = self.layout.as_ref().filter(|_| !self.masked) else {
-            return self.edit.move_left(Unit::Document, extend);
+            return self.edit.move_to_edge(direction > 0, extend);
         };
         let caret = layout.position_for_index(self.edit.caret());
         let x = *self.goal_x.get_or_insert(caret.x);
@@ -423,7 +442,10 @@ impl TextEditor {
     }
 
     fn row_edge(&mut self, end: bool, extend: bool) {
-        let target = match self.layout.as_ref().filter(|_| !self.masked) {
+        if self.masked {
+            return self.edit.move_to_edge(end, extend);
+        }
+        let target = match self.layout.as_ref() {
             Some(layout) => {
                 let row = layout.row_at(self.edit.caret());
                 if end {

@@ -378,14 +378,18 @@ impl VaultSheetView {
             cx.stop_propagation();
             return;
         }
-        if k.key == "tab" && !k.modifiers.platform && !k.modifiers.control {
+        if k.key == "tab" && !k.modifiers.platform && !k.modifiers.control && !k.modifiers.alt {
             let (Some(form), Some(editors)) = (self.form.as_mut(), self.editors.as_ref()) else {
                 return;
             };
             if let Some(field) = editors.focused(window, cx) {
                 form.focus = field;
             }
-            form.focus_next();
+            if k.modifiers.shift {
+                form.focus_previous();
+            } else {
+                form.focus_next();
+            }
             editors.want(form.focus);
             cx.stop_propagation();
             cx.notify();

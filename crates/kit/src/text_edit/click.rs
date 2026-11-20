@@ -21,7 +21,8 @@ pub fn target_range(text: &str, by: Unit, index: usize) -> Range<usize> {
     match by {
         Unit::Word => moves::word_at(text, index),
         Unit::Line => moves::line_start(text, index)..moves::line_end(text, index),
-        Unit::Grapheme | Unit::Document => {
+        Unit::Document => 0..text.len(),
+        Unit::Grapheme => {
             let at = moves::clamp(text, index);
             at..at
         }
@@ -42,13 +43,28 @@ pub fn dragged(text: &str, press: &Press, index: usize) -> (usize, usize) {
 
 impl TextEdit {
     pub fn press_at(&mut self, index: usize, click_count: usize, extend: bool) -> Press {
-        let by = unit_for(click_count);
-        let anchor = target_range(self.text(), by, index);
+        self.press(index, unit_for(click_count), extend)
+    }
+
+    pub fn press_at_masked(&mut self, index: usize, click_count: usize, extend: bool) -> Press {
+        let by = match unit_for(click_count) {
+            Unit::Grapheme => Unit::Grapheme,
+            _ => Unit::Document,
+        };
+        self.press(index, by, extend)
+    }
+
+    fn press(&mut self, index: usize, by: Unit, extend: bool) -> Press {
         if by == Unit::Grapheme && extend {
+            let from = self.anchor;
             self.select_to(index);
-        } else {
-            self.set_selection(anchor.start, anchor.end);
+            return Press {
+                anchor: from..from,
+                by,
+            };
         }
+        let anchor = target_range(self.text(), by, index);
+        self.set_selection(anchor.start, anchor.end);
         Press { anchor, by }
     }
 

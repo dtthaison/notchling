@@ -301,6 +301,12 @@ impl Form {
         self.focus = fields[(at + 1) % fields.len()];
     }
 
+    pub fn focus_previous(&mut self) {
+        let fields = self.fields();
+        let at = fields.iter().position(|f| *f == self.focus).unwrap_or(0);
+        self.focus = fields[(at + fields.len() - 1) % fields.len()];
+    }
+
     pub fn set_kind(&mut self, kind: Kind) {
         self.kind = kind;
         if !self.custom_vars {

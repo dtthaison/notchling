@@ -37,6 +37,14 @@ impl AddField {
             AddField::User => AddField::Name,
         }
     }
+
+    fn previous(self) -> AddField {
+        match self {
+            AddField::Name => AddField::User,
+            AddField::Host => AddField::Name,
+            AddField::User => AddField::Host,
+        }
+    }
 }
 
 pub const ADD_INTRO: &str = "Name it (m1), give its Tailscale name or address, and the user the worker runs as. Check only reads from the machine.";
@@ -91,6 +99,14 @@ impl AddForm {
         let next = from.or(self.focus).map_or(AddField::Name, AddField::next);
         self.focus = Some(next);
         next
+    }
+
+    pub fn tab_back_from(&mut self, from: Option<AddField>) -> AddField {
+        let back = from
+            .or(self.focus)
+            .map_or(AddField::User, AddField::previous);
+        self.focus = Some(back);
+        back
     }
 
     fn changed(&mut self) {
@@ -262,6 +278,19 @@ impl JobForm {
         self.focus
     }
 
+    pub fn tab_back_from(&mut self, from: Option<JobField>) -> Option<JobField> {
+        let fields = self.fields();
+        let at = from
+            .or(self.focus)
+            .and_then(|f| fields.iter().position(|x| *x == f));
+        self.focus = fields
+            .get(at.map_or(fields.len().saturating_sub(1), |i| {
+                (i + fields.len() - 1) % fields.len()
+            }))
+            .copied();
+        self.focus
+    }
+
     pub fn add_repo(&mut self) {
         self.draft.repos.push(JobRepoDraft::default());
         self.focus = Some(JobField::Repo(
@@ -328,6 +357,11 @@ mod tests {
         assert_eq!(f.tab_from(None), AddField::User);
         type_text(&mut f, AddField::User, "worker");
         assert_eq!(f.tab_from(Some(AddField::User)), AddField::Name);
+        assert_eq!(f.tab_back_from(Some(AddField::Name)), AddField::User);
+        assert_eq!(f.tab_back_from(Some(AddField::User)), AddField::Host);
+        assert_eq!(f.tab_back_from(None), AddField::Name);
+        f.focus = None;
+        assert_eq!(f.tab_back_from(None), AddField::User);
         assert_eq!(
             (f.name.as_str(), f.host.as_str(), f.user.as_str()),
             ("m1", "m1.test", "worker")
@@ -403,6 +437,13 @@ mod tests {
         assert_eq!(f.problems(), ["Health URL: http or https"]);
         f.tab_from(Some(JobField::Health));
         assert_eq!(f.focus, Some(JobField::Repo(0, RepoField::Github)));
+        assert_eq!(f.tab_back_from(None), Some(JobField::Health));
+        assert_eq!(
+            f.tab_back_from(Some(JobField::Health)),
+            Some(JobField::Repo(0, RepoField::VerifySkill))
+        );
+        f.focus = None;
+        assert_eq!(f.tab_back_from(None), Some(JobField::Health));
         f.remove_repo(0);
         assert!(f.draft.repos.is_empty() && f.focus.is_none());
         assert_eq!(

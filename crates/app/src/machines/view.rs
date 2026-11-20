@@ -409,7 +409,12 @@ impl MachinesView {
             cx.notify();
             return;
         }
-        if k.key == "tab" && self.model.sheet().is_some() && self.tab_sheet(window, cx) {
+        let plain = !k.modifiers.platform && !k.modifiers.control && !k.modifiers.alt;
+        if k.key == "tab"
+            && plain
+            && self.model.sheet().is_some()
+            && self.tab_sheet(window, k.modifiers.shift, cx)
+        {
             cx.stop_propagation();
             cx.notify();
         }
@@ -453,6 +458,8 @@ impl Render for MachinesView {
         if self.model.sheet().is_none() {
             self.editors.forget_sheet();
         }
+        self.editors
+            .retain_notes(|id| self.model.items.iter().any(|item| item.id == id));
         self.editors.apply_want(window, cx);
         self.editors.note_focus(window, cx);
         let body = match self.model.tab {

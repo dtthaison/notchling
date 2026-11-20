@@ -254,7 +254,8 @@ impl VaultRequestView {
     }
 
     fn key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
-        if !self.typing {
+        let editing = self.editors.focused(window, cx);
+        if !self.typing && editing.is_none() {
             return;
         }
         let k = &event.keystroke;
@@ -263,11 +264,15 @@ impl VaultRequestView {
             cx.stop_propagation();
             return;
         }
-        if k.key == "tab" && !k.modifiers.platform && !k.modifiers.control {
-            if let Some(field) = self.editors.focused(window, cx) {
+        if k.key == "tab" && !k.modifiers.platform && !k.modifiers.control && !k.modifiers.alt {
+            if let Some(field) = editing {
                 self.form.focus = field;
             }
-            self.form.focus_next();
+            if k.modifiers.shift {
+                self.form.focus_previous();
+            } else {
+                self.form.focus_next();
+            }
             self.editors.want(self.form.focus);
             cx.stop_propagation();
             cx.notify();

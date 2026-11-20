@@ -457,6 +457,9 @@ impl ClusterSheetView {
         let sources = self.update.sources();
         let mut shown = lines(&rows, &self.update.anyway);
         shown.extend(idle_lines(&model, &rows));
+        self.update
+            .editors
+            .retain(|machine, _| self.update.needs.iter().any(|n| &n.machine == machine));
         for need in &self.update.needs {
             if !self.update.editors.contains_key(&need.machine) {
                 let editor = cx.new(|cx| {

@@ -265,7 +265,10 @@ impl SearchPanelView {
                     panel::close(cx, window, returning);
                 }
             }
-            Outcome::Cleared => self.query.update(cx, |editor, cx| editor.set_text("", cx)),
+            Outcome::Cleared => {
+                self.query.update(cx, |editor, cx| editor.set_text("", cx));
+                self.search(DEBOUNCE, cx);
+            }
             Outcome::Copy { text, note } => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 self.model.flash(note, now_ms());

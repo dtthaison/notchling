@@ -18,9 +18,21 @@ pub struct History {
     undo: Vec<State>,
     redo: Vec<State>,
     open: Option<Group>,
+    off: bool,
 }
 
 impl History {
+    pub fn is_off(&self) -> bool {
+        self.off
+    }
+
+    pub fn stop(&mut self) {
+        *self = History {
+            off: true,
+            ..History::default()
+        };
+    }
+
     pub fn record(&mut self, before: State, group: Option<Group>) {
         self.redo.clear();
         if group.is_some() && group == self.open {

@@ -47,6 +47,13 @@ fn a_new_form_types_its_name_and_the_variables_follow() {
     );
     f.focus_next();
     assert_eq!(f.focus, Field::Url);
+    f.focus_previous();
+    assert_eq!(f.focus, Field::Name);
+    f.focus_previous();
+    assert_eq!(f.focus, Field::HowTo);
+    f.focus_next();
+    f.focus_next();
+    assert_eq!(f.focus, Field::Url);
     type_text(&mut f, "https://x.example");
     assert_eq!(
         f.vars_summary(),
