@@ -296,6 +296,10 @@ fn tree_dumps_would_be_noted() {
         "tree src",
         "git ls-files",
         "git ls-files -z",
+        "git ls-files .",
+        "git -C repo ls-files",
+        "git -C repo ls-files -z .",
+        "ls -R # a note",
     ] {
         let hits = bash_hits(command);
         assert_eq!(hits.len(), 1, "{command}");
@@ -314,6 +318,14 @@ fn bounded_tree_commands_and_side_effecting_finds_are_left_alone() {
         "find . -name '*.tmp' -delete",
         "find . -type f -exec rm {} +",
         "tree -L 2",
+        "tree -L2",
+        "tree -aL2 src",
+        "tree --level=2",
+        "tree --help",
+        "find --help",
+        "git ls-files --help",
+        "git -C repo ls-files src",
+        "ls -la # check -R",
         "git ls-files src",
         "git ls-files -- src/main.rs",
         "git status",
@@ -337,6 +349,11 @@ fn long_sleeps_and_sleep_loops_would_be_blocked() {
         "until curl -s localhost:3000; do sleep 2; done",
         "while ! gh pr checks 41; do\n  sleep 10\ndone",
         "  while [ -f lock ]; do sleep 1; done",
+        "cd dir && while true; do sleep 5; done",
+        "while true; do /bin/sleep 5; done",
+        "for ((;;)); do sleep 5; done",
+        "while true; do\n  # wait a bit\n  sleep 5\ndone",
+        "sleep 60 # let it settle",
     ] {
         let hits = bash_hits(command);
         assert_eq!(hits.len(), 1, "{command}");
@@ -359,6 +376,11 @@ fn short_sleeps_and_wrapped_commands_are_never_polls() {
         "echo sleep 60",
         "while read line; do echo $line; done < f",
         "for i in 1 2 3; do sleep 30; done",
+        "while read line; do echo checking sleep state; done < log",
+        "while read f; do grep sleep \"$f\"; done",
+        "while read x; do # check sleep\n echo \"$x\"; done",
+        "while true; do echo 'sleep 5'; done",
+        "while true; do echo done; done # sleep 5",
         "notchling wait ci 41",
     ] {
         assert_eq!(bash_rule(command), None, "{command}");

@@ -144,19 +144,21 @@ impl Ledger {
     }
 
     pub fn take_guard(&self) -> usize {
-        let Some(taken) = self
-            .guard_dir
-            .as_deref()
-            .and_then(crate::guard::spool::take)
-        else {
+        let Some(dir) = self.guard_dir.as_deref() else {
             return 0;
         };
-        let added = taken.rows.len();
-        if guard::insert_all(&self.db, &taken.rows).is_ok() {
+        let mut total = 0;
+        for _ in 0..4 {
+            let Some(taken) = crate::guard::spool::take(dir) else {
+                break;
+            };
+            let Ok(added) = guard::insert_all(&self.db, &taken) else {
+                break;
+            };
+            total += added;
             taken.done();
-            return added;
         }
-        0
+        total
     }
 
     pub fn guard_since(&self, from: f64, to: f64, days: u32) -> guard::GuardReport {

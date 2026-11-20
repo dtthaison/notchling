@@ -49,7 +49,14 @@ fn event(command: &str) -> Vec<u8> {
 }
 
 fn queue(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join("root/notchling/guard/events.log")).unwrap_or_default()
+    let mut paths: Vec<_> = std::fs::read_dir(dir.join("root/notchling/guard/spool"))
+        .map(|e| e.flatten().map(|e| e.path()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    paths.sort();
+    paths
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect()
 }
 
 #[test]

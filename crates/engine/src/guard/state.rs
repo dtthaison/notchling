@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const TTL: f64 = 1_200.0;
+pub const PENDING_TTL: f64 = 120.0;
 pub const MAX_RESERVED: usize = 32;
 pub const MAX_AGENTS: usize = 64;
 pub const MAX_FILE: u64 = 64 * 1024;
@@ -17,16 +18,25 @@ pub struct Reservation {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Call {
+    pub n: u64,
+    pub ts: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     #[serde(default)]
     pub reserved: Vec<Reservation>,
     #[serde(default)]
-    pub calls: BTreeMap<String, u64>,
+    pub calls: BTreeMap<String, Call>,
 }
 
 impl Session {
     fn expire(&mut self, now: f64) {
-        self.reserved.retain(|r| now - r.ts < TTL);
+        self.reserved.retain(|r| {
+            let limit = if r.agent.is_some() { TTL } else { PENDING_TTL };
+            now - r.ts < limit
+        });
     }
 
     pub fn working(&self) -> usize {
@@ -50,7 +60,7 @@ impl Session {
         over
     }
 
-    pub fn claim(&mut self, agent: &str, now: f64) {
+    pub fn claim(&mut self, agent: &str, now: f64, id: Option<&str>) {
         self.expire(now);
         if self
             .reserved
@@ -59,7 +69,18 @@ impl Session {
         {
             return;
         }
-        if let Some(open) = self.reserved.iter_mut().find(|r| r.agent.is_none()) {
+        let by_id = id.and_then(|id| {
+            self.reserved
+                .iter()
+                .position(|r| r.id == id && r.agent.is_none())
+        });
+        let slot = by_id.or_else(|| {
+            if id.is_some_and(|id| self.reserved.iter().any(|r| r.id == id)) {
+                return None;
+            }
+            self.reserved.iter().position(|r| r.agent.is_none())
+        });
+        if let Some(open) = slot.and_then(|i| self.reserved.get_mut(i)) {
             open.agent = Some(agent.to_string());
             open.ts = now;
         }
@@ -79,13 +100,19 @@ impl Session {
             held.ts = now;
         }
         if !self.calls.contains_key(agent) && self.calls.len() >= MAX_AGENTS {
-            if let Some(first) = self.calls.keys().next().cloned() {
-                self.calls.remove(&first);
+            let oldest = self
+                .calls
+                .iter()
+                .min_by(|a, b| a.1.ts.total_cmp(&b.1.ts))
+                .map(|(k, _)| k.clone());
+            if let Some(oldest) = oldest {
+                self.calls.remove(&oldest);
             }
         }
-        let n = self.calls.entry(agent.to_string()).or_insert(0);
-        *n += 1;
-        *n
+        let call = self.calls.entry(agent.to_string()).or_default();
+        call.n += 1;
+        call.ts = now;
+        call.n
     }
 }
 
@@ -97,22 +124,59 @@ fn paths(dir: &Path, session: &str) -> (PathBuf, PathBuf) {
     )
 }
 
+fn age_of(path: &Path) -> Option<std::time::Duration> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+}
+
+#[cfg(unix)]
 fn sweep(folder: &Path) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
     let limit = std::time::Duration::from_secs_f64(KEEP_DAYS * 86_400.0);
     for entry in entries.flatten() {
-        let old = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > limit);
-        if old {
-            let _ = std::fs::remove_file(entry.path());
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !matches!(ext, "lock" | "json" | "tmp") {
+            continue;
+        }
+        let lock = path.with_extension("lock");
+        let data = path.with_extension("json");
+        let Some(age) = age_of(&path) else {
+            continue;
+        };
+        if age <= limit {
+            continue;
+        }
+        if lock.exists() {
+            if ext != "lock" {
+                continue;
+            }
+            if age_of(&data).unwrap_or(age) <= limit {
+                continue;
+            }
+            let Ok(file) = std::fs::OpenOptions::new().write(true).open(&lock) else {
+                continue;
+            };
+            if !lock_now(&file) {
+                continue;
+            }
+            let _ = std::fs::remove_file(&data);
+            let _ = std::fs::remove_file(data.with_extension("json.tmp"));
+            let _ = std::fs::remove_file(&lock);
+        } else {
+            let _ = std::fs::remove_file(&path);
         }
     }
+}
+
+#[cfg(unix)]
+fn lock_now(file: &std::fs::File) -> bool {
+    use std::os::unix::io::AsRawFd;
+    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
 }
 
 fn load(path: &Path) -> Session {
@@ -136,43 +200,53 @@ fn store(path: &Path, session: &Session) -> bool {
 }
 
 #[cfg(unix)]
+fn open_locked(lock: &Path) -> Option<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    for _ in 0..3 {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(lock)
+            .ok()?;
+        let mut waited = 0;
+        while !lock_now(&file) {
+            if waited >= LOCK_WAIT_MS {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            waited += 5;
+        }
+        let same = match (file.metadata(), std::fs::metadata(lock)) {
+            (Ok(held), Ok(named)) => held.ino() == named.ino() && held.dev() == named.dev(),
+            _ => false,
+        };
+        if same {
+            return Some(file);
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
 pub fn with_session<T>(
     dir: &Path,
     session: &str,
     change: impl FnOnce(&mut Session) -> T,
 ) -> Option<T> {
-    use std::os::unix::fs::OpenOptionsExt;
-    use std::os::unix::io::AsRawFd;
     let (data, lock) = paths(dir, session);
     let folder = data.parent()?;
     std::fs::create_dir_all(folder).ok()?;
     let fresh = !data.exists();
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&lock)
-        .ok()?;
-    let fd = file.as_raw_fd();
-    let mut waited = 0;
-    loop {
-        if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            break;
-        }
-        if waited >= LOCK_WAIT_MS {
-            return None;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        waited += 5;
-    }
+    let _held = open_locked(&lock)?;
     if fresh {
         sweep(folder);
     }
-    let mut held = load(&data);
-    let out = change(&mut held);
-    store(&data, &held).then_some(out)
+    let mut state = load(&data);
+    let out = change(&mut state);
+    store(&data, &state).then_some(out)
 }
 
 #[cfg(not(unix))]

@@ -42,6 +42,12 @@ fn queue(dir: &TempDir, at: f64, session: &str, command: &str) {
     );
 }
 
+fn pending(dir: &TempDir) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(dir.path("data/guard/spool"))
+        .map(|e| e.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default()
+}
+
 #[test]
 fn a_database_from_before_the_guard_gains_its_table_and_keeps_its_rows() {
     let dir = TempDir::new("ledger-migrate");
@@ -102,8 +108,7 @@ fn queued_events_reach_the_database_and_the_queue_is_emptied() {
     queue(&dir, NOW - 90.0, "s1", "ls -R");
     queue(&dir, NOW - 80.0, "s2", "sleep 120");
     assert_eq!(ledger.take_guard(), 3);
-    assert!(!dir.path("data/guard/events.log").exists());
-    assert!(!dir.path("data/guard/events.log.take").exists());
+    assert!(pending(&dir).is_empty());
     assert_eq!(ledger.take_guard(), 0);
     let report = ledger.guard_since(NOW - DAY, NOW, 1);
     assert_eq!(report.total, 3);
@@ -228,7 +233,7 @@ fn rows_are_not_lost_when_the_queue_is_taken_but_the_database_refuses() {
         .execute_batch("DROP TABLE guard_events")
         .expect("drop");
     assert_eq!(ledger.take_guard(), 0);
-    assert!(dir.path("data/guard/events.log.take").exists());
+    assert_eq!(pending(&dir).len(), 1);
     assert!(spool::take(&dir.path("data/guard")).is_some());
 }
 
@@ -241,4 +246,32 @@ fn a_ledger_without_a_queue_has_an_empty_section() {
         (report.total, report.sessions, report.rules.len()),
         (0, 0, 0)
     );
+}
+
+#[test]
+fn a_crash_after_the_commit_does_not_count_the_batch_twice() {
+    let dir = TempDir::new("ledger-guard");
+    let ledger = ledger(&dir);
+    queue(&dir, NOW - 10.0, "s1", "sleep 60");
+    queue(&dir, NOW - 9.0, "s2", "ls -R");
+    let taken = spool::take(&dir.path("data/guard")).expect("rows");
+    assert_eq!(super::ledger::guard::insert_all(&ledger.db, &taken), Ok(2));
+    drop(taken);
+    assert_eq!(pending(&dir).len(), 2);
+    assert_eq!(ledger.take_guard(), 0);
+    assert!(pending(&dir).is_empty());
+    assert_eq!(ledger.guard_since(NOW - DAY, NOW, 1).total, 2);
+}
+
+#[test]
+fn a_batch_that_comes_back_after_a_failed_delete_is_counted_once() {
+    let dir = TempDir::new("ledger-guard");
+    let ledger = ledger(&dir);
+    queue(&dir, NOW - 10.0, "s1", "sleep 60");
+    let file = pending(&dir).remove(0);
+    let text = std::fs::read_to_string(&file).expect("read");
+    assert_eq!(ledger.take_guard(), 1);
+    std::fs::write(&file, text).expect("restore");
+    assert_eq!(ledger.take_guard(), 0);
+    assert_eq!(ledger.guard_since(NOW - DAY, NOW, 1).total, 1);
 }

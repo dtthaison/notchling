@@ -240,22 +240,45 @@ fn cat_target(words: &[String]) -> Option<&str> {
     (!has_glob_or_var(file)).then_some(file.as_str())
 }
 
+fn vcs_listing(args: &[String]) -> Option<&[String]> {
+    let mut at = 0;
+    while let Some(w) = args.get(at) {
+        match w.as_str() {
+            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" => at += 2,
+            "--no-pager" | "--no-optional-locks" => at += 1,
+            _ if w.starts_with("--git-dir=")
+                || w.starts_with("--work-tree=")
+                || w.starts_with("--namespace=") =>
+            {
+                at += 1
+            }
+            _ => break,
+        }
+    }
+    (args.get(at)? == "ls-files").then(|| &args[at + 1..])
+}
+
 fn tree_dump(words: &[String]) -> bool {
     let args = &words[1..];
+    if args.iter().any(|w| w == "--help" || w == "--version") {
+        return false;
+    }
     match program(&words[0]) {
         "ls" => args.iter().any(|w| {
             w == "--recursive" || (w.starts_with('-') && !w.starts_with("--") && w.contains('R'))
         }),
-        "tree" => !args.iter().any(|w| w == "-L"),
+        "tree" => !args.iter().any(|w| {
+            w == "--level"
+                || w.starts_with("--level=")
+                || (w.starts_with('-') && !w.starts_with("--") && w.contains('L'))
+        }),
         "find" => {
             let side_effects = ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint"];
             !args
                 .iter()
                 .any(|w| w == "-maxdepth" || side_effects.contains(&w.as_str()))
         }
-        "git" => {
-            args.first().is_some_and(|w| w == "ls-files") && args.iter().skip(1).all(|w| is_flag(w))
-        }
+        "git" => vcs_listing(args).is_some_and(|rest| rest.iter().all(|w| is_flag(w) || w == ".")),
         _ => false,
     }
 }

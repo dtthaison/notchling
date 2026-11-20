@@ -205,3 +205,14 @@ fn syncing_writes_and_clears_the_policy_the_hook_reads() {
     assert!(!guard::sync(&data_dir, 7));
     assert!(!policy.exists());
 }
+
+#[test]
+fn installing_the_guard_for_a_set_up_made_before_also_writes_the_policy() {
+    let dir = Dir::new("guard-policy-install");
+    set_up(&dir);
+    let policy = dir.path("data/guard/policy.json");
+    assert!(!policy.exists());
+    let (ops, _) = ops_for(setup_with_data(&dir, Some(USER_SETTINGS)), true);
+    ops.run(ops::INSTALL_APPLY, &guard_apply()).unwrap();
+    assert!(policy.exists());
+}

@@ -35,6 +35,11 @@ pub fn words(command: &str) -> Option<Vec<String>> {
                 open = true;
                 word.push(chars.next()?);
             }
+            '#' if !open && word.is_empty() => {
+                if chars.any(|c| c == '\n') {
+                    return None;
+                }
+            }
             '\n' | '\r' | ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}' => return None,
             c if is_substitution(c, chars.peek()) => return None,
             c if c.is_whitespace() => {
@@ -83,16 +88,87 @@ pub fn seconds(word: &str) -> Option<f64> {
     Some(value * scale)
 }
 
-pub fn loops_on_sleep(command: &str) -> bool {
-    let trimmed = command.trim_start();
-    let first = trimmed
-        .split(|c: char| c.is_whitespace() || c == ';')
-        .next()
-        .unwrap_or("");
-    if first != "while" && first != "until" {
-        return false;
+pub fn segments(command: &str) -> Vec<Vec<String>> {
+    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut open = false;
+    let mut chars = command.chars().peekable();
+    let flush = |words: &mut Vec<String>, word: &mut String, open: &mut bool| {
+        if *open || !word.is_empty() {
+            words.push(std::mem::take(word));
+            *open = false;
+        }
+    };
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                open = true;
+                for c in chars.by_ref() {
+                    if c == '\'' {
+                        break;
+                    }
+                    word.push(c);
+                }
+            }
+            '"' => {
+                open = true;
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' if matches!(chars.peek(), Some('"' | '\\' | '$' | '`')) => {
+                            word.extend(chars.next())
+                        }
+                        c => word.push(c),
+                    }
+                }
+            }
+            '\\' => {
+                open = true;
+                word.extend(chars.next());
+            }
+            '#' if !open && word.is_empty() => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+                flush(&mut words, &mut word, &mut open);
+                out.push(std::mem::take(&mut words));
+            }
+            '\n' | '\r' | ';' | '&' | '|' | '(' | ')' | '{' | '}' | '`' => {
+                flush(&mut words, &mut word, &mut open);
+                out.push(std::mem::take(&mut words));
+            }
+            c if c.is_whitespace() => flush(&mut words, &mut word, &mut open),
+            c => {
+                open = true;
+                word.push(c);
+            }
+        }
     }
-    trimmed
-        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')' | '`'))
-        .any(|w| w == "sleep")
+    flush(&mut words, &mut word, &mut open);
+    out.push(words);
+    out.retain(|w| !w.is_empty());
+    out
+}
+
+fn command_word(words: &[String]) -> Option<&str> {
+    words
+        .iter()
+        .map(String::as_str)
+        .find(|w| !matches!(*w, "do" | "then" | "else" | "time" | "!"))
+}
+
+pub fn loops_on_sleep(command: &str) -> bool {
+    let parts = segments(command);
+    let looping = parts.iter().any(|w| match w[0].as_str() {
+        "while" | "until" => true,
+        "for" => w.len() == 1,
+        _ => false,
+    });
+    looping
+        && parts
+            .iter()
+            .any(|w| command_word(w).is_some_and(|c| program(c) == "sleep"))
 }

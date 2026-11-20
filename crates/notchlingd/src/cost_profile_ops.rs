@@ -65,6 +65,11 @@ impl CostProfileOps {
         self
     }
 
+    pub fn sync_guard(&self) {
+        let cap = self.service.profile().habits().parallel_cap;
+        guard::sync(&self.service.data_dir, cap);
+    }
+
     fn guard_changed(&self) {
         let cap = self.service.profile().habits().parallel_cap;
         guard::sync(&self.service.data_dir, cap);
@@ -358,9 +363,7 @@ impl CostProfileOps {
             return Ok(out);
         }
         let (plan, applied, saved) = self.service.apply(&opts, (self.clock)()).map_err(failed)?;
-        if applied.results.iter().any(|r| r.done) {
-            self.guard_changed();
-        }
+        self.guard_changed();
         let mut out = json!({
             "on": true,
             "applied": applied.results.iter().any(|r| r.done),
@@ -472,8 +475,8 @@ pub fn wired(
     let after: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = install.run(ops::INSTALL_APPLY, &json!({"what": [GUARD_HOOKS]}));
     });
-    Arc::new(
-        CostProfileOps::for_daemon(layout, catalog.clone(), switches.install.clone())
-            .with_after(after),
-    )
+    let ops = CostProfileOps::for_daemon(layout, catalog.clone(), switches.install.clone())
+        .with_after(after);
+    ops.sync_guard();
+    Arc::new(ops)
 }

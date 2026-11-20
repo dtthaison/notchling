@@ -1,4 +1,4 @@
-use crate::guard::spool::Logged;
+use crate::guard::spool::Taken;
 use crate::guard::Rule;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -18,25 +18,38 @@ pub struct GuardReport {
     pub rules: Vec<RuleCount>,
 }
 
-pub fn insert_all(db: &Connection, rows: &[Logged]) -> rusqlite::Result<()> {
+pub fn insert_all(db: &Connection, taken: &Taken) -> rusqlite::Result<usize> {
     let tx = db.unchecked_transaction()?;
+    let mut added = 0;
     {
+        let mut claim =
+            tx.prepare("INSERT OR IGNORE INTO guard_batches (id, ts) VALUES (?1,?2)")?;
         let mut stmt = tx.prepare(
             "INSERT INTO guard_events (ts, session, agent, tool, rule, action)
              VALUES (?1,?2,?3,?4,?5,?6)",
         )?;
-        for row in rows {
-            stmt.execute(params![
-                row.ts,
-                row.session,
-                row.agent,
-                row.tool,
-                row.rule,
-                row.action
-            ])?;
+        for batch in &taken.batches {
+            let Some(first) = batch.rows.first() else {
+                continue;
+            };
+            if claim.execute(params![batch.id, first.ts])? == 0 {
+                continue;
+            }
+            for row in &batch.rows {
+                stmt.execute(params![
+                    row.ts,
+                    row.session,
+                    row.agent,
+                    row.tool,
+                    row.rule,
+                    row.action
+                ])?;
+                added += 1;
+            }
         }
     }
-    tx.commit()
+    tx.commit()?;
+    Ok(added)
 }
 
 pub fn summary(db: &Connection, from: f64, to: f64, days: u32) -> GuardReport {

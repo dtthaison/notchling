@@ -488,3 +488,16 @@ fn the_builder_cap_in_the_policy_follows_the_profile() {
     let text: Value = serde_json::from_str(&fs::read_to_string(policy_file(&r)).unwrap()).unwrap();
     assert_eq!(text["cap"], 3);
 }
+
+#[test]
+fn a_set_up_made_before_the_guard_gets_its_policy_at_start_and_on_any_apply() {
+    let r = build("guard-early", true, None);
+    call(&r, Tier::App, ops::COST_SETUP_APPLY, json!({})).unwrap();
+    fs::remove_file(policy_file(&r)).unwrap();
+    r.ops.sync_guard();
+    assert!(policy_file(&r).exists());
+    fs::remove_file(policy_file(&r)).unwrap();
+    let again = call(&r, Tier::App, ops::COST_SETUP_APPLY, json!({})).unwrap();
+    assert_eq!(again["applied"], false);
+    assert!(policy_file(&r).exists());
+}

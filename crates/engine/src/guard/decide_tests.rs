@@ -173,11 +173,22 @@ fn payload(command: &str) -> Vec<u8> {
     .expect("json")
 }
 
+fn queued(dir: &TempDir) -> Vec<String> {
+    let mut names: Vec<_> = std::fs::read_dir(dir.path("spool"))
+        .map(|e| e.flatten().map(|e| e.path()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    names.sort();
+    names
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect()
+}
+
 #[test]
 fn without_a_policy_nothing_is_recorded() {
     let dir = TempDir::new("guard-record");
     assert!(record(&payload("sleep 60"), dir.root(), NOW).is_empty());
-    assert!(!dir.path("events.log").exists());
+    assert!(queued(&dir).is_empty());
 }
 
 #[test]
@@ -187,7 +198,7 @@ fn with_a_policy_a_would_is_queued_without_the_command() {
     let woulds = record(&payload("ls -R SECRET-COMMAND"), dir.root(), NOW);
     assert_eq!(woulds.len(), 1);
     assert_eq!(woulds[0].rule, Rule::Tree);
-    let queued = std::fs::read_to_string(dir.path("events.log")).expect("queue");
+    let queued = queued(&dir).concat();
     for secret in ["SECRET", "ls -R", "/work", "command", "description"] {
         assert!(!queued.contains(secret), "{secret} in {queued}");
     }
@@ -204,7 +215,7 @@ fn a_call_that_would_do_nothing_leaves_no_file() {
     let dir = TempDir::new("guard-record");
     policy::write(dir.root(), 5).expect("policy");
     assert!(record(&payload("cargo test"), dir.root(), NOW).is_empty());
-    assert!(!dir.path("events.log").exists());
+    assert!(queued(&dir).is_empty());
 }
 
 #[test]
@@ -221,7 +232,7 @@ fn trouble_in_the_payload_records_nothing() {
     ] {
         assert!(record(&bytes, dir.root(), NOW).is_empty());
     }
-    assert!(!dir.path("events.log").exists());
+    assert!(queued(&dir).is_empty());
 }
 
 #[test]

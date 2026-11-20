@@ -3,11 +3,14 @@ use super::rules::{Action, Rule, Would};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const FILE: &str = "events.log";
-pub const TAKEN: &str = "events.log.take";
-pub const MAX_SPOOL: u64 = 1 << 20;
-pub const MAX_READ: u64 = 4 << 20;
+pub const DIR: &str = "spool";
+pub const EXT: &str = "ev";
+pub const MAX_FILES: usize = 2_000;
+pub const MAX_BATCH: usize = 500;
+pub const MAX_READ: u64 = 64 * 1024;
+pub const STALE_TMP_SECS: u64 = 3_600;
 pub const TOOLS: [&str; 4] = ["Bash", "Read", "Agent", "other"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,22 +44,35 @@ fn valid(row: &Logged) -> bool {
 }
 
 #[cfg(unix)]
-fn open_append(path: &Path) -> std::io::Result<std::fs::File> {
+fn create_new(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
+        .write(true)
+        .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(path)
 }
 
 #[cfg(not(unix))]
-fn open_append(path: &Path) -> std::io::Result<std::fs::File> {
+fn create_new(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
+        .write(true)
+        .create_new(true)
         .open(path)
+}
+
+fn unique_name() -> String {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "{nanos:024}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 pub fn append(dir: &Path, now: f64, event: &Event, woulds: &[Would]) -> bool {
@@ -70,27 +86,50 @@ pub fn append(dir: &Path, now: f64, event: &Event, woulds: &[Would]) -> bool {
             text.push('\n');
         }
     }
-    if std::fs::create_dir_all(dir).is_err() {
+    let folder = dir.join(DIR);
+    if std::fs::create_dir_all(&folder).is_err() {
         return false;
     }
-    let path = dir.join(FILE);
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() >= MAX_SPOOL) {
+    let backlog = std::fs::read_dir(&folder)
+        .map(|entries| entries.take(MAX_FILES).count())
+        .unwrap_or(0);
+    if backlog >= MAX_FILES {
         return false;
     }
-    open_append(&path)
+    let name = unique_name();
+    let tmp = folder.join(format!("{name}.tmp"));
+    let done = folder.join(format!("{name}.{EXT}"));
+    let written = create_new(&tmp)
         .and_then(|mut file| file.write_all(text.as_bytes()))
-        .is_ok()
+        .and_then(|_| std::fs::rename(&tmp, &done))
+        .is_ok();
+    if !written {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 #[derive(Debug)]
-pub struct Taken {
+pub struct Batch {
+    pub id: String,
     pub rows: Vec<Logged>,
-    pub file: PathBuf,
+    file: PathBuf,
+}
+
+#[derive(Debug, Default)]
+pub struct Taken {
+    pub batches: Vec<Batch>,
 }
 
 impl Taken {
+    pub fn rows(&self) -> usize {
+        self.batches.iter().map(|b| b.rows.len()).sum()
+    }
+
     pub fn done(self) {
-        let _ = std::fs::remove_file(self.file);
+        for batch in self.batches {
+            let _ = std::fs::remove_file(batch.file);
+        }
     }
 }
 
@@ -110,17 +149,50 @@ fn read_rows(path: &Path) -> Vec<Logged> {
         .collect()
 }
 
-pub fn take(dir: &Path) -> Option<Taken> {
-    let log = dir.join(FILE);
-    let taken = dir.join(TAKEN);
-    if !taken.exists() {
-        if !log.exists() {
-            return None;
+fn sweep_tmp(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    let limit = std::time::Duration::from_secs(STALE_TMP_SECS);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let stale = path.extension().is_some_and(|e| e == "tmp")
+            && entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > limit);
+        if stale {
+            let _ = std::fs::remove_file(path);
         }
-        std::fs::rename(&log, &taken).ok()?;
     }
-    Some(Taken {
-        rows: read_rows(&taken),
-        file: taken,
-    })
+}
+
+pub fn take(dir: &Path) -> Option<Taken> {
+    let folder = dir.join(DIR);
+    let entries = std::fs::read_dir(&folder).ok()?;
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == EXT))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    if names.is_empty() {
+        sweep_tmp(&folder);
+        return None;
+    }
+    names.sort();
+    names.truncate(MAX_BATCH);
+    let batches = names
+        .into_iter()
+        .map(|name| {
+            let file = folder.join(&name);
+            Batch {
+                rows: read_rows(&file),
+                id: name,
+                file,
+            }
+        })
+        .collect();
+    Some(Taken { batches })
 }

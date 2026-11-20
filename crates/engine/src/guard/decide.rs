@@ -55,7 +55,10 @@ pub fn decide(event: &Event, env: &Env) -> Vec<Would> {
         }
         Kind::SubagentStart => {
             if let Some(agent) = &event.agent {
-                with_session(env.dir, &event.session, |held| held.claim(agent, env.now));
+                let id = event.tool_use_id.as_deref();
+                with_session(env.dir, &event.session, |held| {
+                    held.claim(agent, env.now, id)
+                });
             }
             Vec::new()
         }

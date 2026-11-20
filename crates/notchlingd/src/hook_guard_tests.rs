@@ -43,6 +43,17 @@ impl Drop for TempDir {
     }
 }
 
+fn queued(dir: &TempDir) -> Vec<String> {
+    let mut paths: Vec<_> = std::fs::read_dir(dir.path("spool"))
+        .map(|e| e.flatten().map(|e| e.path()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    paths.sort();
+    paths
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect()
+}
+
 fn payload(command: &str) -> Vec<u8> {
     json!({
         "hook_event_name": "PreToolUse",
@@ -92,7 +103,7 @@ fn a_guard_on_a_log_only_policy_queues_what_it_would_have_done() {
         Duration::from_secs(2),
     );
     assert_eq!(out.map(|w| w.len()), Some(1));
-    assert!(dir.path("events.log").exists());
+    assert_eq!(queued(&dir).len(), 1);
 }
 
 #[test]
@@ -102,7 +113,7 @@ fn the_hook_passes_when_there_is_no_input_or_nothing_to_say() {
     assert_eq!(run_in(dir.root(), |_| Some(Vec::new())), 0);
     assert_eq!(run_in(dir.root(), |_| Some(b"garbage".to_vec())), 0);
     assert_eq!(run_in(dir.root(), |_| Some(payload("sleep 60"))), 0);
-    assert!(!dir.path("events.log").exists());
+    assert!(queued(&dir).is_empty());
 }
 
 #[test]
@@ -118,7 +129,7 @@ fn the_hook_queues_and_still_passes() {
     let dir = TempDir::new("hook-guard");
     policy::write(dir.root(), 5).expect("policy");
     assert_eq!(run_in(dir.root(), |_| Some(payload("sleep 60"))), 0);
-    let queued = std::fs::read_to_string(dir.path("events.log")).expect("queue");
-    assert_eq!(queued.lines().count(), 1);
-    assert!(!queued.contains("sleep"));
+    let rows = queued(&dir).concat();
+    assert_eq!(rows.lines().count(), 1);
+    assert!(!rows.contains("sleep"));
 }

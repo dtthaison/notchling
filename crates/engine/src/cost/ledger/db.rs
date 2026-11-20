@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS guard_events (
   ts REAL NOT NULL, session TEXT NOT NULL, agent TEXT NOT NULL, tool TEXT NOT NULL,
   rule TEXT NOT NULL, action TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS guard_events_ts ON guard_events(ts);
+CREATE TABLE IF NOT EXISTS guard_batches (id TEXT PRIMARY KEY, ts REAL NOT NULL);
 ";
 
 #[cfg(unix)]
@@ -299,4 +300,5 @@ pub fn prune(db: &Connection, rows_before: f64, rollups_before: &str) {
     let _ = db.execute("DELETE FROM calls WHERE ts < ?1", [rows_before]);
     let _ = db.execute("DELETE FROM rollups WHERE day < ?1", [rollups_before]);
     let _ = db.execute("DELETE FROM guard_events WHERE ts < ?1", [rows_before]);
+    let _ = db.execute("DELETE FROM guard_batches WHERE ts < ?1", [rows_before]);
 }

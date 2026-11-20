@@ -1,6 +1,7 @@
 use super::manifest::Manifest;
 use super::model::KEY_TOOLS;
 use crate::catalog::Tool;
+use crate::guard::rules::BUILDER_CAP;
 use crate::guard::{policy, DIR};
 use crate::settings::Settings;
 use std::path::{Path, PathBuf};
@@ -42,5 +43,13 @@ pub fn enabled(data_dir: &Path) -> bool {
 pub fn sync(data_dir: &Path, cap: u64) -> bool {
     let on = enabled(data_dir);
     policy::sync(&dir(data_dir), on, cap);
+    on
+}
+
+pub fn ensure_policy(data_dir: &Path) -> bool {
+    let on = enabled(data_dir);
+    if on && policy::read(&dir(data_dir)).is_none() {
+        let _ = policy::write(&dir(data_dir), BUILDER_CAP);
+    }
     on
 }

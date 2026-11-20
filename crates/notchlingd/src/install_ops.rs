@@ -358,6 +358,11 @@ impl InstallOps {
         {
             match install::apply(&self.setup.settings, &wanted, (self.clock)()) {
                 Ok(done) => {
+                    if request.guard == Want::Install {
+                        if let Some(data) = self.setup.guard_data.as_deref() {
+                            notchling_engine::cost_profile::guard::ensure_policy(data);
+                        }
+                    }
                     if done.wrote || request.prompt != Want::Leave || request.pages != Want::Leave {
                         self.note_hook(request.direction, DoneOrFailed::Done);
                     }
