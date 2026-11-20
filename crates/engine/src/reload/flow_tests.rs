@@ -1,4 +1,6 @@
-use super::flow::{run, Done, Host, Need, Options, Phase, Step, Wait, POLL_MS, WAIT_CAP_MS};
+use super::flow::{
+    run, Done, Host, Need, Options, Phase, Step, Wait, POLL_MS, RESTART_TRIES, WAIT_CAP_MS,
+};
 use std::collections::VecDeque;
 
 #[derive(Default)]
@@ -222,4 +224,30 @@ fn phases_round_trip_through_json() {
     let text = serde_json::to_string(&phase).unwrap();
     assert!(text.contains("\"phase\":\"waiting\""));
     assert_eq!(serde_json::from_str::<Phase>(&text).unwrap(), phase);
+}
+
+#[test]
+fn a_restart_that_never_goes_through_is_bounded_and_says_why() {
+    let mut host = Fake {
+        restarts: VecDeque::from(vec![Ok(false); 1_000]),
+        ..Fake::default()
+    };
+    let (end, _) = go(&mut host, true);
+    assert!(
+        matches!(end, Phase::NeedsYou { need: Need::Failed { ref text } } if !text.is_empty()),
+        "{end:?}"
+    );
+    assert_eq!(host.restarted, RESTART_TRIES);
+    assert!(host.slept <= u64::from(RESTART_TRIES) * POLL_MS);
+}
+
+#[test]
+fn a_restart_that_goes_through_after_a_few_tries_is_done() {
+    let mut host = Fake {
+        restarts: VecDeque::from([Ok(false), Ok(false), Ok(true)]),
+        ..Fake::default()
+    };
+    let (end, _) = go(&mut host, true);
+    assert_eq!(end, reloaded());
+    assert_eq!(host.restarted, 3);
 }

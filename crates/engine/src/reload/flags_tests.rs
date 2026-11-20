@@ -1,4 +1,4 @@
-use super::mode_of;
+use super::{bypasses, mode_of};
 
 fn flags(list: &[&str]) -> Vec<String> {
     list.iter().map(|f| f.to_string()).collect()
@@ -24,4 +24,12 @@ fn the_last_permission_mode_wins() {
 fn no_mode_is_none() {
     assert_eq!(mode_of(&flags(&["--model", "opus"])), None);
     assert_eq!(mode_of(&flags(&["--permission-mode"])), None);
+}
+
+#[test]
+fn skipping_permissions_is_seen_and_keeps_the_mode_unread() {
+    let flags = flags(&["--model", "opus", "--dangerously-skip-permissions"]);
+    assert!(bypasses(&flags));
+    assert_eq!(mode_of(&flags), None);
+    assert!(!bypasses(&self::flags(&["--permission-mode", "plan"])));
 }

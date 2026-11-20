@@ -1,4 +1,9 @@
 const MODE_FLAG: &str = "--permission-mode";
+const SKIP_FLAG: &str = "--dangerously-skip-permissions";
+
+pub fn bypasses(flags: &[String]) -> bool {
+    flags.iter().any(|flag| flag == SKIP_FLAG)
+}
 
 pub fn mode_of(flags: &[String]) -> Option<String> {
     let mut found = None;

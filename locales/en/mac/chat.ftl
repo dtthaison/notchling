@@ -879,6 +879,7 @@ chat-reload-wait-tasks = { $count ->
    *[other] { $count } helpers running: reload when they finish?
 }
 chat-reload-wait-note = The session reloads on its own once it can. Cancel to leave it as it is.
+chat-reload-row = Reloading…
 chat-reload-working = Reloading… the conversation is kept
 chat-reload-done = Session reloaded
 chat-reload-done-new = Session reloaded. It continues as a new session id.

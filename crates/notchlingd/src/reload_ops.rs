@@ -4,10 +4,10 @@ use crate::outbox_courier::live_files;
 use notchling_engine::chrome::status;
 use notchling_engine::control::{job_state_path, plan_respawn};
 use notchling_engine::reload::flow::{self, Host, Options, Phase};
-use notchling_engine::reload::mode_of;
+use notchling_engine::reload::{bypasses, mode_of};
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_events::kinds::choices::DoneOrFailed;
-use notchling_local_api::{ApiError, Caller, ClientKind};
+use notchling_local_api::{ApiError, Caller, ClientKind, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -215,10 +215,13 @@ impl ReloadOps {
 
     pub fn cancel(&self, agent: &Agent) -> Value {
         if let Some(task) = lock(&self.tasks)
-            .get(&agent.id)
+            .get_mut(&agent.id)
             .filter(|t| !t.phase.is_over())
         {
             task.cancel.store(true, Ordering::SeqCst);
+            task.serial = self.serial.fetch_add(1, Ordering::SeqCst);
+            task.phase = Phase::Cancelled;
+            task.since_ms = now_ms();
         }
         self.state(agent, false)
     }
@@ -349,6 +352,7 @@ impl LiveHost {
             .transcript(agent)
             .as_deref()
             .and_then(|path| status::permission_mode(std::path::Path::new(path)))
+            .filter(|_| !bypasses(&before))
             .filter(|mode| mode_of(&before).as_deref() != Some(mode.as_str()));
         let Some(mode) = mode else {
             return self.respawn(acting, None);
@@ -385,14 +389,14 @@ impl LiveHost {
             }
             Err(e) => {
                 let text = e.to_string();
-                if text.contains(TIMED_OUT) {
-                    return Err(SLOW.to_string());
-                }
                 if let Some((file, before, wanted)) = edited {
                     if status::read_flags(file).as_ref() == Some(&wanted) {
                         let _ = status::set_flags(file, &before);
                     }
                     status::clear_pending(file);
+                }
+                if text.contains(TIMED_OUT) {
+                    return Err(SLOW.to_string());
                 }
                 Err(text)
             }
@@ -457,20 +461,17 @@ impl ActingOps {
 
     fn reload_target(&self, caller: &Caller, args: &Value) -> Result<(Agent, bool), ApiError> {
         let asked = text_arg(args, "id")?;
-        let inside = caller
-            .pid
-            .filter(|_| caller.client != ClientKind::App)
-            .and_then(|pid| self.session_of(pid).map(|_| pid));
-        let Some(pid) = inside else {
+        if caller.tier == Tier::App && caller.client == ClientKind::App {
             let after = args
                 .get("afterTurn")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             return Ok((self.agent(args)?, after));
-        };
-        let own = self
-            .own_agent(pid)
-            .ok_or_else(|| forbidden("This session is not one Notchling lists."))?;
+        }
+        let own = caller
+            .pid
+            .and_then(|pid| self.own_agent(pid))
+            .ok_or_else(|| forbidden("Notchling can't tell which session this is."))?;
         if asked != "self" && asked != own.id {
             return Err(forbidden("A session may reload only itself."));
         }
@@ -492,7 +493,7 @@ impl ActingOps {
             Kind::Job => Ok(reload.start(&agent, after_turn)),
             Kind::Terminal => Err(bad(format!(
                 "This session runs in a terminal Notchling didn't start. Quit it there and run: claude --resume {}",
-                agent.id
+                notchling_engine::lanes::quote(agent.resume_session_id.as_deref().unwrap_or(&agent.id))
             ))),
             Kind::Remote => Err(bad("This session runs on another machine.")),
             Kind::Other => Err(bad("This session can't be reloaded.")),

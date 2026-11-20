@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub const POLL_MS: u64 = 3_000;
 pub const WAIT_CAP_MS: u64 = 2 * 60 * 60 * 1_000;
+pub const RESTART_TRIES: u32 = 20;
+const STUCK: &str = "The session never became free to restart. Try again.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "why", rename_all = "snake_case")]
@@ -89,6 +91,7 @@ pub fn run(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) ->
 
 fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> Phase {
     let started = host.now_ms();
+    let mut tries = 0;
     loop {
         if host.cancelled() {
             return Phase::Cancelled;
@@ -103,6 +106,7 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                         need: Need::Busy { by },
                     };
                 }
+                tries = 0;
                 say(Phase::Waiting { by });
                 host.sleep(POLL_MS);
                 continue;
@@ -118,7 +122,17 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                     result: Done::Reloaded,
                 }
             }
-            Ok(false) => host.sleep(POLL_MS),
+            Ok(false) => {
+                tries += 1;
+                if tries >= RESTART_TRIES || host.now_ms().saturating_sub(started) >= WAIT_CAP_MS {
+                    return Phase::NeedsYou {
+                        need: Need::Failed {
+                            text: STUCK.to_string(),
+                        },
+                    };
+                }
+                host.sleep(POLL_MS)
+            }
             Err(text) => {
                 if host.cancelled() {
                     return Phase::Cancelled;

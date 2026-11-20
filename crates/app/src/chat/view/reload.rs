@@ -5,11 +5,14 @@ use super::ChatView;
 use crate::acting::Request;
 use crate::chat::session_reload::{self, Act, Applied, Card, Stage};
 use crate::sheets::reload_view::{ReloadChoice, ReloadView};
+use crate::sheets::view::Dismiss;
+use notchling_engine::reload::Phase;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Sent {
     Start,
     Poll,
+    Open,
 }
 
 impl ChatView {
@@ -41,23 +44,39 @@ impl ChatView {
 
     pub fn show_reload(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.reload_offered(id) {
-            self.select(id, cx);
             self.reload_open(id, cx);
         }
     }
 
     pub(super) fn reload_open(&mut self, id: &str, cx: &mut Context<Self>) {
         self.row_menu = None;
-        let Some(session) = self.sessions.iter().find(|s| s.agent.id == id) else {
+        if !self.sessions.iter().any(|s| s.agent.id == id) {
             cx.notify();
+            return;
+        }
+        self.select(id, cx);
+        let Some(session) = self.sessions.iter().find(|s| s.agent.id == id) else {
             return;
         };
         let lead = self.reload_lead(id);
-        let Some(card) = Card::open(&session.agent, lead) else {
+        let Some(mut card) = Card::open(&session.agent, lead) else {
             cx.notify();
             return;
         };
+        let live = self.reload.live(id);
+        if live && card.stage == Stage::Ask {
+            card.stage = Stage::Waiting(notchling_engine::reload::Wait::Turn);
+        }
+        let ask = card.stage != Stage::Terminal;
         self.reload_show(card, cx);
+        if ask && self.reload.asking.insert(id.to_owned()) {
+            self.reload_send(
+                Request::reload_state(id, false),
+                id.to_owned(),
+                Sent::Open,
+                cx,
+            );
+        }
     }
 
     fn reload_show(&mut self, card: Card, cx: &mut Context<Self>) {
@@ -68,8 +87,13 @@ impl ChatView {
             this.reload_chosen(&card, choice.0, cx);
         })
         .detach();
+        cx.subscribe(&entity, |this, _, _: &Dismiss, _| {
+            this.reload.card = None;
+            this.reload_view = None;
+        })
+        .detach();
         self.reload_view = Some(entity.downgrade());
-        self.show_sheet(entity, cx);
+        self.show_fitted(entity, crate::sheets::reload_view::WIDTH, cx);
     }
 
     fn reload_sync(&mut self, cx: &mut Context<Self>) {
@@ -95,6 +119,7 @@ impl ChatView {
             Act::Reload | Act::TryAgain => self.reload_start(&id, cx),
             Act::Cancel | Act::Close => self.reload_close(cx),
             Act::CancelReload => {
+                self.reload.stop(&id);
                 self.reload_send(Request::reload_cancel(&id), id, Sent::Poll, cx);
                 self.reload_close(cx);
             }
@@ -118,7 +143,7 @@ impl ChatView {
         if let Some(card) = self.reload.card.as_mut() {
             card.stage = Stage::Waiting(notchling_engine::reload::Wait::Turn);
         }
-        self.reload.last_poll_ms = super::now_ms();
+        self.reload.start(id, super::now_ms());
         self.reload_sync(cx);
         self.reload_send(Request::reload(id, true), id.to_owned(), Sent::Start, cx);
         cx.notify();
@@ -150,11 +175,25 @@ impl ChatView {
         match result {
             Ok(reply) => {
                 if let Some(status) = session_reload::parse(&reply) {
+                    let live = status.task.as_ref().is_some_and(|t| {
+                        matches!(t.phase, Phase::Waiting { .. } | Phase::Working { .. })
+                    });
+                    if sent == Sent::Open && !live {
+                        cx.notify();
+                        return;
+                    }
                     match self.reload.apply(id, &status, super::now_ms()) {
                         Applied::Changed => self.reload_sync(cx),
-                        Applied::Finished { .. } => {
+                        Applied::Finished { followed } => {
                             self.reload_ack(id, cx);
-                            self.reload_close(cx);
+                            if self.reload_view.is_some() {
+                                self.reload_close(cx);
+                            }
+                            if let Some(next) = followed {
+                                if self.selected.as_deref() == Some(id) {
+                                    self.select(&next, cx);
+                                }
+                            }
                         }
                         Applied::Nothing => {}
                     }
@@ -162,15 +201,19 @@ impl ChatView {
             }
             Err(message) => match sent {
                 Sent::Start => {
+                    self.reload.stop(id);
                     self.reload.card = None;
                     self.reload_view = None;
                     self.sheet = None;
                     self.tools.error = Some(message);
                 }
-                Sent::Poll => {
+                Sent::Poll | Sent::Open => {
                     if self.reload.poll_failed() {
+                        self.reload.stop(id);
                         self.tools.error = Some(message);
-                        self.reload_close(cx);
+                        if self.reload_view.is_some() {
+                            self.reload_close(cx);
+                        }
                     }
                 }
             },
@@ -211,11 +254,10 @@ impl ChatView {
             return;
         }
         self.reload.last_poll_ms = now;
-        let Some(id) = self.reload.card.as_ref().map(|c| c.session.clone()) else {
-            return;
-        };
-        if self.reload.asking.insert(id.clone()) {
-            self.reload_send(Request::reload_state(&id, false), id, Sent::Poll, cx);
+        for id in self.reload.polls() {
+            if self.reload.asking.insert(id.clone()) {
+                self.reload_send(Request::reload_state(&id, false), id, Sent::Poll, cx);
+            }
         }
     }
 }

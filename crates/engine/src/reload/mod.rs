@@ -10,5 +10,5 @@ mod flags_tests;
 mod flow_tests;
 
 pub use estimate::{estimate, Estimate};
-pub use flags::mode_of;
+pub use flags::{bypasses, mode_of};
 pub use flow::{run, Done, Host, Need, Options, Phase, Step, Wait};

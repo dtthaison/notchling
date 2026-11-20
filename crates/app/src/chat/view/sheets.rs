@@ -31,6 +31,7 @@ use crate::welcome::hooks::Hooks;
 
 pub struct Sheet {
     pub view: AnyView,
+    pub fit: Option<f32>,
     _closing: gpui::Subscription,
 }
 
@@ -106,9 +107,27 @@ impl ChatView {
         self.show(entity, cx);
     }
 
+    pub(super) fn show_fitted<V: gpui::Render + gpui::EventEmitter<Dismiss>>(
+        &mut self,
+        entity: Entity<V>,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_in(entity, Some(width), cx);
+    }
+
     fn show<V: gpui::Render + gpui::EventEmitter<Dismiss>>(
         &mut self,
         entity: Entity<V>,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_in(entity, None, cx);
+    }
+
+    fn show_in<V: gpui::Render + gpui::EventEmitter<Dismiss>>(
+        &mut self,
+        entity: Entity<V>,
+        fit: Option<f32>,
         cx: &mut Context<Self>,
     ) {
         let closing = cx.subscribe(&entity, |this, _, _: &Dismiss, cx| {
@@ -117,6 +136,7 @@ impl ChatView {
         });
         self.sheet = Some(Sheet {
             view: entity.into(),
+            fit,
             _closing: closing,
         });
         cx.notify();
@@ -281,8 +301,8 @@ pub fn render(view: &ChatView, a: Appearance) -> Option<Div> {
             .bg(hsla(Ink::Shadow.color(a)))
             .child(
                 div()
-                    .w(px(680.0))
-                    .h(px(560.0))
+                    .w(px(sheet.fit.unwrap_or(680.0)))
+                    .when(sheet.fit.is_none(), |d| d.h(px(560.0)))
                     .rounded(px(14.0))
                     .border(px(1.0))
                     .border_color(hsla(Ink::Hairline.color(a)))

@@ -9,6 +9,8 @@ use super::header::sheet_header;
 use super::view::Dismiss;
 use crate::chat::session_reload::{Act, Card};
 
+pub const WIDTH: f32 = 560.0;
+
 pub struct ReloadChoice(pub Act);
 
 pub struct ReloadView {
@@ -112,7 +114,7 @@ impl Render for ReloadView {
         let a = window_appearance(window);
         div()
             .relative()
-            .size_full()
+            .w_full()
             .flex()
             .flex_col()
             .rounded(px(RADIUS_CARD))
@@ -125,13 +127,7 @@ impl Render for ReloadView {
                 a,
                 cx,
             ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .p(px(SIDE_PADDING))
-                    .child(body(&self.card, a)),
-            )
+            .child(div().p(px(SIDE_PADDING)).child(body(&self.card, a)))
             .child(self.footer(a, cx))
     }
 }

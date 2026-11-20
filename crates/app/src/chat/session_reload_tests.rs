@@ -116,7 +116,7 @@ fn with_nothing_read_yet_it_says_only_that_the_conversation_is_re_read() {
 fn a_terminal_session_gets_instructions_and_no_reload_button() {
     let card = Card::open(&agent(AgentTarget::Process(42)), "Lead.".into()).unwrap();
     assert_eq!(card.stage, Stage::Terminal);
-    assert_eq!(card.command, "claude --resume s1");
+    assert_eq!(card.command, "claude --resume 's1'");
     assert!(card.intro().contains("terminal Notchling didn't start"));
     assert_eq!(card.acts(), [Act::CopyCommand, Act::Close]);
     assert!(!card.acts().contains(&Act::Reload));
@@ -237,7 +237,75 @@ fn a_session_that_took_a_new_id_is_said_to_continue() {
             followed: Some("n2".into())
         }
     );
-    assert!(state.note("s1", 1).unwrap().contains("new session id"));
+    assert!(state.note("n2", 1).unwrap().contains("new session id"));
+    assert_eq!(state.note("s1", 1), None);
+}
+
+#[test]
+fn a_reload_goes_on_being_watched_with_the_sheet_closed_until_it_ends() {
+    let mut state = State::default();
+    state.start("s1", 5_000);
+    assert!(state.live("s1"));
+    assert_eq!(state.row_line("s1"), Some("Reloading…"));
+    assert_eq!(state.row_line("s2"), None);
+    assert_eq!(state.polls(), ["s1"]);
+    assert!(!state.due(5_000));
+    assert!(state.due(5_000 + POLL_MS));
+    let waiting = status(json!({"phase": "waiting", "by": {"why": "turn"}}));
+    assert_eq!(state.apply("s1", &waiting, 0), Applied::Nothing);
+    assert!(state.live("s1"));
+    let done = status(json!({"phase": "done", "result": "reloaded", "session": "n2"}));
+    assert_eq!(
+        state.apply("s1", &done, 0),
+        Applied::Finished {
+            followed: Some("n2".into())
+        }
+    );
+    assert!(!state.live("s1"));
+    assert!(state.polls().is_empty());
+    assert!(!state.due(1_000_000));
+}
+
+#[test]
+fn a_problem_with_no_sheet_open_is_a_note_and_stops_the_watch() {
+    let mut state = State::default();
+    state.start("s1", 0);
+    let needs = status(json!({
+        "phase": "needs_you", "need": {"need": "failed", "text": "no such job"}
+    }));
+    assert_eq!(
+        state.apply("s1", &needs, 0),
+        Applied::Finished { followed: None }
+    );
+    assert!(!state.live("s1"));
+    assert_eq!(state.note("s1", 1).unwrap(), "no such job");
+}
+
+#[test]
+fn a_cancelled_reload_with_no_sheet_is_acked_and_forgotten() {
+    let mut state = State::default();
+    state.start("s1", 0);
+    let cancelled = status(json!({"phase": "cancelled"}));
+    assert_eq!(
+        state.apply("s1", &cancelled, 0),
+        Applied::Finished { followed: None }
+    );
+    assert!(!state.live("s1"));
+}
+
+#[test]
+fn the_terminal_command_quotes_the_id_and_prefers_the_resume_id() {
+    let mut a = agent(AgentTarget::Process(7));
+    a.id = "it's".into();
+    assert_eq!(
+        Card::open(&a, String::new()).unwrap().command,
+        "claude --resume 'it'\\''s'"
+    );
+    a.resume_session_id = Some("old-conv".into());
+    assert_eq!(
+        Card::open(&a, String::new()).unwrap().command,
+        "claude --resume 'old-conv'"
+    );
 }
 
 #[test]

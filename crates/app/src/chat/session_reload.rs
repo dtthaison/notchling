@@ -139,8 +139,9 @@ impl Card {
             Mode::Terminal => Stage::Terminal,
         };
         let id = agent.id.clone();
+        let resume = agent.resume_session_id.as_deref().unwrap_or(&agent.id);
         Some(Card {
-            command: t::chat::reload_terminal_command(&id),
+            command: t::chat::reload_terminal_command(&notchling_engine::lanes::quote(resume)),
             session: id,
             lead,
             stage,
@@ -154,6 +155,18 @@ impl Card {
         }
     }
 
+    pub fn problem_text(need: &Need) -> String {
+        match need {
+            Need::Busy { by: Wait::Turn } => t::chat::reload_busy_turn().to_owned(),
+            Need::Busy { by: Wait::Dialog } => t::chat::reload_busy_dialog().to_owned(),
+            Need::Busy {
+                by: Wait::Tasks { .. },
+            } => t::chat::reload_busy_tasks().to_owned(),
+            Need::TasksUnknown => t::chat::reload_tasks_unknown().to_owned(),
+            Need::Failed { text } => t::chat::reload_failed(text),
+        }
+    }
+
     pub fn status(&self) -> Option<String> {
         Some(match &self.stage {
             Stage::Ask | Stage::Terminal => return None,
@@ -161,15 +174,7 @@ impl Card {
             Stage::Waiting(Wait::Dialog) => t::chat::reload_wait_dialog().to_owned(),
             Stage::Waiting(Wait::Tasks { count }) => t::chat::reload_wait_tasks(*count),
             Stage::Working => t::chat::reload_working().to_owned(),
-            Stage::Needs(need) => match need {
-                Need::Busy { by: Wait::Turn } => t::chat::reload_busy_turn().to_owned(),
-                Need::Busy { by: Wait::Dialog } => t::chat::reload_busy_dialog().to_owned(),
-                Need::Busy {
-                    by: Wait::Tasks { .. },
-                } => t::chat::reload_busy_tasks().to_owned(),
-                Need::TasksUnknown => t::chat::reload_tasks_unknown().to_owned(),
-                Need::Failed { text } => t::chat::reload_failed(text),
-            },
+            Stage::Needs(need) => Card::problem_text(need),
         })
     }
 
@@ -229,36 +234,50 @@ impl State {
     pub fn apply(&mut self, id: &str, status: &Status, now_ms: i64) -> Applied {
         self.poll_fails = 0;
         let Some(task) = &status.task else {
+            self.watching.remove(id);
             return Applied::Nothing;
         };
-        let Some(card) = self.card.as_mut().filter(|c| c.session == id) else {
-            return match &task.phase {
-                Phase::Done { .. } => Applied::Finished {
-                    followed: task.session.clone(),
-                },
-                _ => Applied::Nothing,
-            };
-        };
+        let shown = self.card.as_ref().is_some_and(|c| c.session == id);
         let stage = match &task.phase {
             Phase::Waiting { by } => Stage::Waiting(*by),
             Phase::Working { .. } => Stage::Working,
             Phase::NeedsYou { need } => Stage::Needs(need.clone()),
             Phase::Cancelled => {
-                self.card = None;
+                self.watching.remove(id);
+                if shown {
+                    self.card = None;
+                }
                 return Applied::Finished { followed: None };
             }
             Phase::Done { .. } => {
-                self.card = None;
+                self.watching.remove(id);
+                if shown {
+                    self.card = None;
+                }
                 let text = match &task.session {
                     Some(_) => t::chat::reload_done_new(),
                     None => t::chat::reload_done(),
                 };
+                let under = task.session.as_deref().unwrap_or(id);
                 self.notes
-                    .insert(id.to_owned(), (text.to_owned(), now_ms + NOTE_MS));
+                    .insert(under.to_owned(), (text.to_owned(), now_ms + NOTE_MS));
                 return Applied::Finished {
                     followed: task.session.clone(),
                 };
             }
+        };
+        if matches!(stage, Stage::Waiting(_) | Stage::Working) {
+            self.watching.insert(id.to_owned());
+        } else {
+            self.watching.remove(id);
+        }
+        let Some(card) = self.card.as_mut().filter(|c| c.session == id) else {
+            if let Stage::Needs(need) = &stage {
+                let text = Card::problem_text(need);
+                self.notes.insert(id.to_owned(), (text, now_ms + NOTE_MS));
+                return Applied::Finished { followed: None };
+            }
+            return Applied::Nothing;
         };
         if card.stage == stage {
             return Applied::Nothing;
@@ -267,11 +286,47 @@ impl State {
         Applied::Changed
     }
 
+    pub fn live(&self, id: &str) -> bool {
+        self.watching.contains(id)
+            || self
+                .card
+                .as_ref()
+                .is_some_and(|c| c.session == id && c.live())
+    }
+
+    pub fn start(&mut self, id: &str, now_ms: i64) {
+        self.watching.insert(id.to_owned());
+        self.asking.insert(id.to_owned());
+        self.last_poll_ms = now_ms;
+    }
+
+    pub fn stop(&mut self, id: &str) {
+        self.watching.remove(id);
+    }
+
+    pub fn row_line(&self, id: &str) -> Option<&'static str> {
+        self.live(id).then(t::chat::reload_row)
+    }
+
+    pub fn polls(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.watching.iter().cloned().collect();
+        if let Some(card) = self.card.as_ref().filter(|c| c.live()) {
+            if !ids.contains(&card.session) {
+                ids.push(card.session.clone());
+            }
+        }
+        ids.sort();
+        ids
+    }
+
     pub fn note(&self, id: &str, now_ms: i64) -> Option<String> {
         if let Some(card) = self.card.as_ref().filter(|c| c.session == id) {
             if card.live() {
                 return card.status();
             }
+        }
+        if self.watching.contains(id) {
+            return Some(t::chat::reload_row().to_owned());
         }
         self.notes
             .get(id)
@@ -280,6 +335,18 @@ impl State {
     }
 
     pub fn due(&self, now_ms: i64) -> bool {
-        self.card.as_ref().is_some_and(Card::live) && now_ms - self.last_poll_ms >= POLL_MS
+        (self.card.as_ref().is_some_and(Card::live) || !self.watching.is_empty())
+            && now_ms - self.last_poll_ms >= POLL_MS
+    }
+}
+
+impl super::sidebar::SidebarModel {
+    pub fn with_reload(mut self, state: &State) -> Self {
+        for row in self.sections.iter_mut().flat_map(|s| &mut s.rows) {
+            if let Some(line) = state.row_line(&row.id) {
+                row.status_line = line.to_owned();
+            }
+        }
+        self
     }
 }

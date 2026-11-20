@@ -111,17 +111,17 @@ pub const VIEWS: [ViewSpec; 22] = [
     },
     ViewSpec {
         name: "reload-card",
-        size: (560.0, 280.0),
+        size: (560.0, 176.0),
         about: "the Reload Session card: what it does, the conversation's tokens and the catalog price on its model, Reload and Cancel (made-up data)",
     },
     ViewSpec {
         name: "reload-waiting",
-        size: (560.0, 280.0),
+        size: (560.0, 252.0),
         about: "the Reload Session card while three helpers run: the question, the note and Cancel Reload (made-up data)",
     },
     ViewSpec {
         name: "reload-terminal",
-        size: (560.0, 300.0),
+        size: (560.0, 236.0),
         about: "the Reload Session card for a terminal session the user owns: the instructions, the command and Copy Command (made-up data)",
     },
     ViewSpec {

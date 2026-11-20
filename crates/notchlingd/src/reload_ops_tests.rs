@@ -1,5 +1,5 @@
 use crate::acting_ops::ActingOps;
-use crate::acting_ops_tests::{app, caller, code, sessions, setup_in, Setup, PROMPT};
+use crate::acting_ops_tests::{app, caller, code, sessions, setup_in, Setup, GONE, PROMPT};
 use crate::op_group::OpGroup;
 use crate::outbox_ops::OutboxOps;
 use crate::reload_ops::{Hosts, LiveHosts, ReloadOps};
@@ -9,7 +9,7 @@ use notchling_engine::outbox::{OutboxStore, State};
 use notchling_engine::reload::flow::{Host, POLL_MS};
 use notchling_engine::sessions::{Agent, Roots};
 use notchling_events::kinds::choices::DoneOrFailed;
-use notchling_local_api::{ops, ClientKind, ErrorCode};
+use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -241,7 +241,7 @@ fn a_terminal_session_the_user_owns_is_never_restarted() {
             .call(&app(), ops::SESSION_RELOAD, &json!({"id": "term"})),
     );
     assert_eq!(error, ErrorCode::BadRequest);
-    assert!(message.contains("claude --resume term"), "{message}");
+    assert!(message.contains("claude --resume 'term'"), "{message}");
     assert_eq!(fake.0.lock().unwrap().restarts, 0);
     let state = s
         .ops
@@ -508,4 +508,146 @@ fn a_queued_reply_stays_queued_through_a_reload() {
     assert_eq!(rows[0].state, State::Queued);
     assert!(s.writes.lock().unwrap().is_empty());
     assert!(s.attached.lock().unwrap().is_empty());
+}
+
+fn agent_tier(pid: Option<u32>) -> Caller {
+    Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Cli,
+        peer: None,
+        pid,
+    }
+}
+
+#[test]
+fn an_agent_whose_session_cannot_be_resolved_may_reload_nothing() {
+    let fake = Fake::default();
+    let (_d, s) = faked("unresolved", &fake, true);
+    for who in [
+        agent_tier(None),
+        agent_tier(Some(GONE)),
+        caller(ClientKind::Cli),
+    ] {
+        for args in [
+            json!({"id": "job-a", "afterTurn": false}),
+            json!({"id": "self"}),
+            json!({"id": "job-a", "afterTurn": true}),
+            json!({"id": "job-a", "cancel": true}),
+        ] {
+            let refused = code(s.ops.call(&who, ops::SESSION_RELOAD, &args));
+            assert_eq!(refused.0, ErrorCode::Forbidden, "{args}");
+        }
+    }
+    assert_eq!(fake.0.lock().unwrap().restarts, 0);
+    assert!(phase_of(&s, "job-a").is_null());
+}
+
+#[test]
+fn an_agent_naming_another_session_is_refused_even_with_its_own_resolved() {
+    let fake = Fake::default();
+    let (d, s) = faked("another", &fake, true);
+    inside(&s, &d, "job-a");
+    let refused = code(s.ops.call(
+        &caller(ClientKind::Cli),
+        ops::SESSION_RELOAD,
+        &json!({"id": "job-idle", "afterTurn": false}),
+    ));
+    assert_eq!(refused.0, ErrorCode::Forbidden);
+    assert_eq!(fake.0.lock().unwrap().restarts, 0);
+}
+
+#[test]
+fn the_app_may_reload_any_session_it_lists() {
+    let fake = Fake::default();
+    let (_d, s) = faked("app-any", &fake, true);
+    let reply = s
+        .ops
+        .call(
+            &app(),
+            ops::SESSION_RELOAD,
+            &json!({"id": "job-a", "afterTurn": true}),
+        )
+        .unwrap();
+    assert_eq!(reply["task"]["phase"], "done");
+}
+
+fn with_mode_in_transcript(dir: &Dir, state: &PathBuf, flags: &str, mode: &str) {
+    let transcript = dir.0.join("t.jsonl");
+    std::fs::write(
+        &transcript,
+        format!("{{\"type\":\"permission-mode\",\"permissionMode\":\"{mode}\"}}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        state,
+        format!(
+            "{{\"state\":\"done\",\"linkScanPath\":\"{}\",\"respawnFlags\":{flags},\"inFlight\":{{\"tasks\":0}}}}",
+            transcript.display()
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn skipping_permissions_is_kept_exactly_whatever_the_transcript_says() {
+    let launcher = Arc::new(FakeLauncher::new());
+    let (dir, ops, state) = live("skip", launcher.clone(), IDLE);
+    let flags = r#"["--model","opus","--bg","--dangerously-skip-permissions"]"#;
+    with_mode_in_transcript(&dir, &state, flags, "default");
+    let before = status::read_flags(&state).unwrap();
+    let hosts = LiveHosts::new(&ops);
+    let mut host = hosts.host(&job_a(&ops));
+    assert_eq!(host.restart(), Ok(true));
+    assert_eq!(status::read_flags(&state).unwrap(), before);
+    assert!(status::read_pending(&state).is_none());
+    assert_eq!(launcher.commands().len(), 1);
+}
+
+#[test]
+fn a_respawn_that_times_out_restores_the_flags_and_clears_pending() {
+    let launcher = Arc::new(FakeLauncher::new());
+    launcher.push_output(Err(notchling_engine::control::LaunchError::Timeout(60)));
+    let (dir, ops, state) = live("timeout", launcher, IDLE);
+    let flags = r#"["--model","opus","--bg","--permission-mode","plan"]"#;
+    with_mode_in_transcript(&dir, &state, flags, "acceptEdits");
+    let before = status::read_flags(&state).unwrap();
+    let hosts = LiveHosts::new(&ops);
+    let mut host = hosts.host(&job_a(&ops));
+    let failed = host.restart().unwrap_err();
+    assert!(
+        failed.to_lowercase().contains("time") || failed.contains("slow"),
+        "{failed}"
+    );
+    assert_eq!(status::read_flags(&state).unwrap(), before);
+    assert!(status::read_pending(&state).is_none());
+}
+
+#[test]
+fn a_cancelled_reload_can_be_started_again_at_once_and_the_old_worker_cannot_touch_it() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().tasks = VecDeque::from(vec![Some(2); 400]);
+    fake.0.lock().unwrap().slow = true;
+    let (_d, s) = faked("again", &fake, false);
+    reload(&s, "job-a", true).unwrap();
+    let cancelled = s
+        .ops
+        .call(
+            &app(),
+            ops::SESSION_RELOAD,
+            &json!({"id": "job-a", "cancel": true}),
+        )
+        .unwrap();
+    assert_eq!(cancelled["task"]["phase"], "cancelled");
+    let again = reload(&s, "job-a", true).unwrap();
+    assert_eq!(again["task"]["phase"], "waiting");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    assert_eq!(phase_of(&s, "job-a")["phase"], "waiting");
+    assert_eq!(fake.0.lock().unwrap().restarts, 0);
+    s.ops
+        .call(
+            &app(),
+            ops::SESSION_RELOAD,
+            &json!({"id": "job-a", "cancel": true}),
+        )
+        .unwrap();
 }
