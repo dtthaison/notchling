@@ -10,7 +10,7 @@ pub enum Job {
     Missing { since_ms: i64 },
     Stopped,
     Unknown { since_ms: i64 },
-    Done,
+    Done { failed: u32 },
     Live { status: Option<String> },
 }
 
@@ -47,20 +47,22 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         }
         Job::Stopped => return Gate::NeedsUser(State::Stopped),
         Job::Unknown { since_ms } => {
-            let why = if now - since_ms >= UNREADABLE_AFTER_MS {
+            let age = now - since_ms;
+            let why = if age >= UNREADABLE_AFTER_MS {
                 Why::Unreadable
             } else {
                 Why::Checking
             };
-            return Gate::Wait {
-                why,
-                until_ms: now + RECHECK_MS,
-            };
+            let mut until_ms = now + unknown_recheck_ms(age);
+            if why == Why::Checking {
+                until_ms = until_ms.min(since_ms + UNREADABLE_AFTER_MS);
+            }
+            return Gate::Wait { why, until_ms };
         }
-        Job::Done if row.tries >= DONE_STOPS_AFTER_TRIES => {
+        Job::Done { failed } if *failed >= DONE_STOPS_AFTER_TRIES => {
             return Gate::NeedsUser(State::Stopped);
         }
-        Job::Done => None,
+        Job::Done { .. } => None,
         Job::Live { status } => status.as_deref(),
     };
     if row.why == Some(Why::Answer) {
@@ -91,6 +93,16 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         };
     }
     Gate::Go { guarded: false }
+}
+
+fn unknown_recheck_ms(age_ms: i64) -> i64 {
+    match age_ms {
+        ..5_000 => RECHECK_MS,
+        5_000..15_000 => 2 * RECHECK_MS,
+        15_000..30_000 => 5 * RECHECK_MS,
+        30_000..60_000 => 15 * RECHECK_MS,
+        _ => 30 * RECHECK_MS,
+    }
 }
 
 pub fn idle_at_prompt(facts: &Facts) -> bool {

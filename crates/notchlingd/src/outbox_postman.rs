@@ -697,16 +697,32 @@ impl Postman {
 
     fn gate(&mut self, row: &Row, now: i64) -> Option<i64> {
         let facts = self.courier().facts(row, now);
-        match gate(row, &facts) {
+        let verdict = gate(row, &facts);
+        let shown = match verdict {
+            Gate::Wait {
+                why: why @ (Why::Checking | Why::Unreadable),
+                ..
+            } => Some(why),
+            _ => None,
+        };
+        let ops = &self.inner.ops;
+        if shown.is_none() {
+            ops.set_shown(&row.id, None);
+        }
+        match verdict {
             Gate::Wait { why, until_ms } => {
-                if row.state != State::Waiting || row.why != Some(why) {
-                    let store = self.inner.ops.store();
+                if row.state != State::Waiting || row.why != why.stored() {
+                    let store = ops.store();
                     let from = [State::Queued, State::Waiting];
                     if let Ok(true) =
                         store.set_state(&row.id, &from, State::Waiting, Some(why), row.next_ms, now)
                     {
+                        ops.set_shown(&row.id, shown);
                         self.publish(&row.id);
                     }
+                } else if ops.shown(&row.id) != shown {
+                    ops.set_shown(&row.id, shown);
+                    self.publish(&row.id);
                 }
                 Some(until_ms)
             }

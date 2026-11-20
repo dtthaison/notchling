@@ -468,6 +468,58 @@ fn sending_lists_only_sending_rows() {
 }
 
 #[test]
+fn a_waiting_row_never_stores_a_why_an_older_daemon_would_refuse() {
+    let tmp = TempDir::new("outbox-why-old");
+    let dir = tmp.path("data");
+    let old = [
+        "dialog",
+        "queue",
+        "turn",
+        "retry",
+        "not_found",
+        "restart",
+        "dropped",
+        "not_cleared",
+        "mixed",
+        "answer",
+    ];
+    let store = OutboxStore::open(&dir).unwrap();
+    let mut ids = Vec::new();
+    for why in [Why::Checking, Why::Unreadable, Why::Dialog] {
+        let row = store.insert(&new("s", "hi"), 1).unwrap();
+        assert!(store
+            .set_state(
+                &row.id,
+                &[State::Queued],
+                State::Waiting,
+                Some(why),
+                None,
+                2
+            )
+            .unwrap());
+        ids.push(row.id);
+    }
+    let whys: Vec<Option<Why>> = ids
+        .iter()
+        .map(|id| store.get(id).unwrap().unwrap().why)
+        .collect();
+    assert_eq!(whys, vec![None, None, Some(Why::Dialog)]);
+    let db = rusqlite::Connection::open(store::db_path(&dir)).unwrap();
+    let mut query = db.prepare("SELECT why FROM outbox ORDER BY n").unwrap();
+    let words: Vec<Option<String>> = query
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(words.len(), 3);
+    for word in words.into_iter().flatten() {
+        assert!(old.contains(&word.as_str()), "{word}");
+    }
+    let reopened = OutboxStore::open(&dir).unwrap();
+    assert_eq!(reopened.list(None).unwrap().len(), 3);
+}
+
+#[test]
 fn migrate_from_v3_keeps_rows() {
     let tmp = TempDir::new("outbox-v3");
     let dir = tmp.path("data");

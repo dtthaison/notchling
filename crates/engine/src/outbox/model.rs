@@ -73,6 +73,15 @@ words!(Why {
     Unreadable => "unreadable",
 });
 
+impl Why {
+    pub fn stored(self) -> Option<Why> {
+        match self {
+            Why::Checking | Why::Unreadable => None,
+            other => Some(other),
+        }
+    }
+}
+
 impl Kind {
     pub fn of(tool: Tool, text: &str) -> Kind {
         if tool == Tool::Claude && text.trim_start().starts_with('/') {

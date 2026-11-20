@@ -4,7 +4,7 @@ use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
-    AnswerWatch, Facts, Job, Kind, Row, Seen, Tried, TryEnd, Why, ANSWER_GRACE_MS,
+    AnswerWatch, Facts, Job, Kind, Row, Seen, State, Tried, TryEnd, Why, ANSWER_GRACE_MS,
     DIALOG_RECHECK_MS, GONE_AFTER_MS, SLOW_READ_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
@@ -234,6 +234,7 @@ pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
 struct Memo {
     missing_since: Option<i64>,
     unknown_since: Option<i64>,
+    done_from: Option<(String, u32)>,
     dialog_at: Option<i64>,
     calm_since: Option<i64>,
     last_seen: Option<i64>,
@@ -314,7 +315,7 @@ impl ClaudeCourier {
     fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
         let status = match job {
             Job::Live { status } => status.as_deref(),
-            Job::Done => None,
+            Job::Done { .. } => None,
             _ => return true,
         };
         if now_ms - row.updated_ms < ANSWER_GRACE_MS {
@@ -358,6 +359,8 @@ impl ClaudeCourier {
             (_, _, Ended::Unknown) => (unknown, false),
             (_, _, Ended::Stopped) if late => (unknown, false),
             (_, _, Ended::Stopped) => (Job::Stopped, false),
+            (_, _, Ended::Done) if late => (unknown, false),
+            (_, _, Ended::Done) => (Job::Done { failed: 0 }, false),
             (None, None, _) => (Job::Missing { since_ms: now_ms }, true),
             (Some(agent), _, _) if !agent.can_reply() => (
                 Job::Missing {
@@ -365,7 +368,6 @@ impl ClaudeCourier {
                 },
                 false,
             ),
-            (_, _, Ended::Done) if !late => (Job::Done, false),
             (Some(_), _, _) => (
                 Job::Live {
                     status: self.files.status(&row.session),
@@ -524,13 +526,31 @@ impl Courier for ClaudeCourier {
             },
             Job::Unknown { .. } => {
                 memo.missing_since = None;
+                let started = if row.state == State::Waiting && row.why.is_none() {
+                    row.updated_ms.min(now_ms)
+                } else {
+                    now_ms
+                };
                 Job::Unknown {
-                    since_ms: *memo.unknown_since.get_or_insert(now_ms),
+                    since_ms: *memo.unknown_since.get_or_insert(started),
+                }
+            }
+            Job::Done { .. } => {
+                memo.missing_since = None;
+                memo.unknown_since = None;
+                let from = match memo.done_from.take() {
+                    Some((id, from)) if id == row.id => from.min(row.tries),
+                    _ => row.tries,
+                };
+                memo.done_from = Some((row.id.clone(), from));
+                Job::Done {
+                    failed: row.tries - from,
                 }
             }
             other => {
                 memo.missing_since = None;
                 memo.unknown_since = None;
+                memo.done_from = None;
                 other
             }
         };

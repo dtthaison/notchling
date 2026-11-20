@@ -97,7 +97,7 @@ fn an_unknown_job_for_long_is_unreadable_and_keeps_waiting() {
         gate(&row(Kind::Prompt), &f),
         Gate::Wait {
             why: Why::Unreadable,
-            until_ms: 10_000 + UNREADABLE_AFTER_MS + 1_000
+            until_ms: 10_000 + UNREADABLE_AFTER_MS + 15_000
         }
     );
     f.now_ms += 3_600_000;
@@ -111,15 +111,57 @@ fn an_unknown_job_for_long_is_unreadable_and_keeps_waiting() {
 }
 
 #[test]
-fn a_done_job_is_tried_and_is_stopped_only_after_the_tries_fail() {
+fn an_unknown_job_is_looked_at_less_often_the_longer_it_lasts() {
+    let since = 10_000;
+    let until = |age: i64| {
+        let mut f = facts(since + age);
+        f.job = Job::Unknown { since_ms: since };
+        match gate(&row(Kind::Prompt), &f) {
+            Gate::Wait { until_ms, .. } => until_ms - (since + age),
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(until(0), 1_000);
+    assert_eq!(until(4_999), 1_000);
+    assert_eq!(until(5_000), 2_000);
+    assert_eq!(until(15_000), 5_000);
+    assert_eq!(until(UNREADABLE_AFTER_MS), 15_000);
+    assert_eq!(until(60_000), 30_000);
+    assert_eq!(until(3_600_000), 30_000);
+}
+
+#[test]
+fn an_unknown_job_is_looked_at_again_when_it_turns_unreadable() {
+    let since = 10_000;
+    let mut f = facts(since + UNREADABLE_AFTER_MS - 1_000);
+    f.job = Job::Unknown { since_ms: since };
+    assert_eq!(
+        gate(&row(Kind::Prompt), &f),
+        Gate::Wait {
+            why: Why::Checking,
+            until_ms: since + UNREADABLE_AFTER_MS
+        }
+    );
+}
+
+#[test]
+fn a_done_job_is_tried_and_is_stopped_only_after_the_tries_on_it_fail() {
     let mut f = facts(1_000);
-    f.job = Job::Done;
-    let mut r = row(Kind::Prompt);
+    let r = row(Kind::Prompt);
+    f.job = Job::Done { failed: 0 };
     assert_eq!(gate(&r, &f), Gate::Go { guarded: false });
-    r.tries = DONE_STOPS_AFTER_TRIES - 1;
+    f.job = Job::Done {
+        failed: DONE_STOPS_AFTER_TRIES - 1,
+    };
     assert_eq!(gate(&r, &f), Gate::Go { guarded: false });
-    r.tries = DONE_STOPS_AFTER_TRIES;
+    f.job = Job::Done {
+        failed: DONE_STOPS_AFTER_TRIES,
+    };
     assert_eq!(gate(&r, &f), Gate::NeedsUser(State::Stopped));
+    let mut tried = row(Kind::Prompt);
+    tried.tries = 9;
+    f.job = Job::Done { failed: 0 };
+    assert_eq!(gate(&tried, &f), Gate::Go { guarded: false });
 }
 
 #[test]

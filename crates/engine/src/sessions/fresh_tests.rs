@@ -180,10 +180,81 @@ fn a_stopped_job_is_unknown_while_a_session_file_is_caught_mid_write() {
     let dead = live("idle").replace(&std::process::id().to_string(), "99999999");
     dir.write("claude/sessions/1.json", &dead);
     assert_eq!(ended(&dir), Ended::Stopped);
-    dir.write("claude/sessions/2.json", "{\"pid\": 12");
+    let mine = format!("claude/sessions/{}.json", std::process::id());
+    dir.write(&mine, "{\"pid\": 12");
     assert_eq!(ended(&dir), Ended::Unknown);
-    dir.write("claude/sessions/2.json", &dead);
+    dir.write(&mine, &dead);
     assert_eq!(ended(&dir), Ended::Stopped);
+}
+
+#[test]
+fn a_session_file_of_a_dead_process_that_cannot_be_read_does_not_hold_a_stop_back() {
+    let dir = TempDir::new("fresh-ended-torn-dead");
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "x"));
+    dir.write("claude/sessions/99999999.json", "{\"pid\": 99999");
+    assert_eq!(ended(&dir), Ended::Stopped);
+    dir.write("claude/sessions/odd-name.json", "{\"pid\": 12");
+    assert_eq!(ended(&dir), Ended::Unknown);
+}
+
+#[test]
+fn a_done_job_with_a_session_file_caught_mid_write_is_unknown_not_done() {
+    let dir = TempDir::new("fresh-ended-done-torn");
+    dir.write(
+        "claude/jobs/be50d36a/state.json",
+        &job("done", 0, "finished"),
+    );
+    assert_eq!(ended(&dir), Ended::Done);
+    let mine = format!("claude/sessions/{}.json", std::process::id());
+    dir.write(&mine, "{\"pid\": 12");
+    assert_eq!(ended(&dir), Ended::Unknown);
+    dir.write("claude/sessions/99999999.json", "{\"pid\": 99999");
+    dir.write(&mine, &live("idle"));
+    assert_eq!(ended(&dir), Ended::No);
+}
+
+fn two_lanes(dir: &TempDir) -> Roots {
+    let lane = dir.path("lane-b");
+    let lanes = json!([{
+        "name": "b", "path": lane.to_string_lossy(), "accountID": "a2", "email": "b@example.com"
+    }]);
+    dir.write("lanes.json", &lanes.to_string());
+    Roots {
+        main_dir: dir.path("claude"),
+        lanes_file: dir.path("lanes.json"),
+    }
+}
+
+fn aged(dir: &TempDir, relative: &str, secs: u64) {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(dir.path(relative))
+        .unwrap();
+    file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+        .unwrap();
+}
+
+#[test]
+fn a_done_job_whose_newest_state_copy_cannot_be_read_is_unknown_not_done() {
+    let dir = TempDir::new("fresh-ended-done-copy");
+    let roots = two_lanes(&dir);
+    let probes = Probes::from_proc();
+    dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "old"));
+    assert_eq!(job_ended(&roots, &probes, "be50d36a"), Ended::Done);
+    dir.write("lane-b/jobs/be50d36a/state.json", "{ half a wri");
+    assert_eq!(job_ended(&roots, &probes, "be50d36a"), Ended::Unknown);
+}
+
+#[test]
+fn a_state_copy_older_than_the_newest_one_that_cannot_be_read_is_ignored() {
+    let dir = TempDir::new("fresh-ended-old-copy");
+    let roots = two_lanes(&dir);
+    let probes = Probes::from_proc();
+    dir.write("claude/jobs/be50d36a/state.json", &job("stopped", 0, "new"));
+    dir.write("lane-b/jobs/be50d36a/state.json", "{ half a wri");
+    assert_eq!(job_ended(&roots, &probes, "be50d36a"), Ended::Unknown);
+    aged(&dir, "lane-b/jobs/be50d36a/state.json", 1_000);
+    assert_eq!(job_ended(&roots, &probes, "be50d36a"), Ended::Stopped);
 }
 
 #[test]

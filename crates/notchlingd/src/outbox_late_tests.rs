@@ -437,11 +437,11 @@ fn an_unsure_row_tells_the_app_when_its_attempt_began() {
     let e = env(true);
     let (id, _postman) = e.unsure("hello there");
     let unsure = e.r.row(&id).unwrap();
-    let wire = crate::outbox_rows::wire(&unsure, 1, None);
+    let wire = crate::outbox_rows::wire(&unsure, 1, None, None);
     assert_eq!(wire["attemptMs"], json!(T0));
     assert_eq!(wire["updatedMs"], json!(T0 + 30_000));
     let queued = e.r.send("job-idle", "and then this");
-    let behind = crate::outbox_rows::wire(&queued, 2, None);
+    let behind = crate::outbox_rows::wire(&queued, 2, None, None);
     assert!(behind.get("attemptMs").is_none());
 }
 

@@ -1,4 +1,6 @@
 use super::*;
+use crate::acting_ops_tests::app;
+use crate::op_group::OpGroup;
 use crate::outbox_testkit::{rig, rig_with, Options, Rig, BUSY, IDLE, T0};
 use notchling_engine::outbox::{
     gate, Gate, State, Why, DONE_STOPS_AFTER_TRIES, QUEUE_STALE_MS, SLOW_READ_MS, TURN_SETTLE_MS,
@@ -6,6 +8,7 @@ use notchling_engine::outbox::{
 };
 use notchling_engine::reply::keys::timing::{ATTACH_QUIET_MS, KEY_PAUSE_MS};
 use notchling_engine::sessions::fresh::Ended;
+use serde_json::json;
 use std::sync::atomic::Ordering;
 
 fn taken(r: &Rig, id: &str, text: &str) -> Row {
@@ -166,23 +169,126 @@ fn a_state_file_caught_in_a_rename_is_unknown_and_the_next_read_decides() {
 }
 
 #[test]
-fn a_done_job_with_no_process_is_tried_then_stopped_when_the_tries_fail() {
+fn a_done_job_is_stopped_only_after_the_tries_on_it_fail_not_the_tries_before() {
+    let r = rig();
+    let mut row = r.send("job-a", "hi");
+    row.tries = 5;
+    r.files.set_state(BUSY, "done");
+    let facts = r.courier.facts(&row, T0);
+    assert_eq!(facts.job, Job::Done { failed: 0 });
+    assert_eq!(gate(&row, &facts), Gate::Go { guarded: false });
+    row.tries = 5 + DONE_STOPS_AFTER_TRIES - 1;
+    let second = r.courier.facts(&row, T0 + 1);
+    assert_eq!(
+        second.job,
+        Job::Done {
+            failed: DONE_STOPS_AFTER_TRIES - 1
+        }
+    );
+    assert_eq!(gate(&row, &second), Gate::Go { guarded: false });
+    row.tries = 5 + DONE_STOPS_AFTER_TRIES;
+    let third = r.courier.facts(&row, T0 + 2);
+    assert_eq!(gate(&row, &third), Gate::NeedsUser(State::Stopped));
+}
+
+#[test]
+fn a_resend_that_zeroes_the_tries_gives_a_done_job_its_tries_again() {
+    let r = rig();
+    let mut row = r.send("job-a", "hi");
+    row.tries = 4;
+    r.files.set_state(BUSY, "done");
+    r.courier.facts(&row, T0);
+    row.tries = 4 + DONE_STOPS_AFTER_TRIES;
+    let stopped = r.courier.facts(&row, T0 + 1);
+    assert_eq!(gate(&row, &stopped), Gate::NeedsUser(State::Stopped));
+    row.tries = 0;
+    let again = r.courier.facts(&row, T0 + 2);
+    assert_eq!(again.job, Job::Done { failed: 0 });
+    row.tries = DONE_STOPS_AFTER_TRIES - 1;
+    let second = r.courier.facts(&row, T0 + 3);
+    assert_eq!(gate(&row, &second), Gate::Go { guarded: false });
+}
+
+#[test]
+fn a_done_job_that_lived_in_between_counts_from_the_tries_it_has_then() {
     let r = rig();
     let mut row = r.send("job-a", "hi");
     r.files.set_state(BUSY, "done");
-    let facts = r.courier.facts(&row, T0);
-    assert_eq!(facts.job, Job::Done);
-    assert_eq!(gate(&row, &facts), Gate::Go { guarded: false });
-    row.tries = DONE_STOPS_AFTER_TRIES;
-    assert_eq!(gate(&row, &facts), Gate::NeedsUser(State::Stopped));
+    r.courier.facts(&row, T0);
     r.files
         .processes
         .lock()
         .unwrap()
         .insert(BUSY.into(), (4242, Some(1)));
+    row.tries = 9;
     let alive = r.courier.facts(&row, T0 + 1);
     assert!(matches!(alive.job, Job::Live { .. }));
     assert!(matches!(gate(&row, &alive), Gate::Go { .. }));
+    r.files.processes.lock().unwrap().clear();
+    let done = r.courier.facts(&row, T0 + 2);
+    assert_eq!(done.job, Job::Done { failed: 0 });
+}
+
+#[test]
+fn a_done_answer_that_came_back_late_is_unknown_not_a_live_job() {
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.set_state(BUSY, "done");
+    r.files.reads_take(&r.clock, SLOW_READ_MS);
+    let late = r.courier.facts(&row, T0);
+    assert_eq!(late.job, checking(T0));
+    r.files.reads_take(&r.clock, SLOW_READ_MS - 1);
+    assert_eq!(
+        r.courier.facts(&row, T0 + 1_000).job,
+        Job::Done { failed: 0 }
+    );
+}
+
+#[test]
+fn a_done_job_is_done_even_when_the_session_cannot_take_replies_or_has_no_row() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.files.set_state(IDLE, "done");
+    let mut agent = r.files.rows.lock().unwrap()[IDLE].clone();
+    agent.command = Some("make".into());
+    r.files.put(IDLE, agent);
+    assert_eq!(r.courier.facts(&row, T0).job, Job::Done { failed: 0 });
+    r.files.vanish(IDLE);
+    r.files.read_as(IDLE, Ended::Done);
+    assert_eq!(r.courier.facts(&row, T0 + 1).job, Job::Done { failed: 0 });
+}
+
+#[test]
+fn an_unknown_job_keeps_its_start_across_a_daemon_restart() {
+    let r = rig();
+    let mut row = r.send("job-a", "hi");
+    r.files.read_as(BUSY, Ended::Unknown);
+    row.state = State::Waiting;
+    row.why = None;
+    row.updated_ms = T0;
+    let first = r.courier.facts(&row, T0 + UNREADABLE_AFTER_MS + 5_000);
+    assert_eq!(first.job, checking(T0));
+    assert!(matches!(
+        gate(&row, &first),
+        Gate::Wait {
+            why: Why::Unreadable,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn an_unknown_job_of_a_row_that_was_not_waiting_for_it_starts_now() {
+    let r = rig();
+    let mut row = r.send("job-a", "hi");
+    r.files.read_as(BUSY, Ended::Unknown);
+    row.updated_ms = T0 - 3_600_000;
+    assert_eq!(r.courier.facts(&row, T0).job, checking(T0));
+    row.state = State::Waiting;
+    row.why = Some(Why::Retry);
+    let other = rig();
+    other.files.read_as(BUSY, Ended::Unknown);
+    assert_eq!(other.courier.facts(&row, T0).job, checking(T0));
 }
 
 #[test]
@@ -194,19 +300,61 @@ fn an_unreadable_job_waits_in_the_outbox_with_its_reason_and_goes_on_when_it_rea
     p.pass(r.at(T0));
     assert_eq!(
         r.row(&row.id).map(|row| (row.state, row.why)),
-        Some((State::Waiting, Some(Why::Checking)))
+        Some((State::Waiting, None))
     );
+    assert_eq!(shown(&r, &row.id), Some("checking".into()));
     p.pass(r.at(T0 + UNREADABLE_AFTER_MS));
     assert_eq!(
         r.row(&row.id).map(|row| (row.state, row.why)),
-        Some((State::Waiting, Some(Why::Unreadable)))
+        Some((State::Waiting, None))
     );
+    assert_eq!(shown(&r, &row.id), Some("unreadable".into()));
     p.pass(r.at(T0 + 3_600_000));
     assert_eq!(r.row(&row.id).unwrap().state, State::Waiting);
     r.files.ended.lock().unwrap().clear();
     p.pass(r.at(T0 + 3_601_000));
     assert_eq!(r.row(&row.id), None, "read again, typed");
     assert!(r.typed().contains("hi"));
+}
+
+fn shown(r: &Rig, id: &str) -> Option<String> {
+    let list = r
+        .ops
+        .call(&app(), "outbox.list", &json!({"session": "job-idle"}))
+        .unwrap();
+    let wire = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(id))?
+        .clone();
+    wire["why"].as_str().map(String::from)
+}
+
+#[test]
+fn a_row_that_waits_to_check_is_shown_as_checking_and_stored_as_a_word_an_older_daemon_knows() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    r.files.read_as(IDLE, Ended::Unknown);
+    let mut p = r.postmen.postman(IDLE);
+    p.pass(r.at(T0));
+    let stored = r.row(&row.id).unwrap();
+    assert_eq!((stored.state, stored.why), (State::Waiting, None));
+    let changed = r.room.named("outbox.changed");
+    let last = changed.last().unwrap();
+    assert_eq!(last["row"]["why"], json!("checking"));
+    let before = changed.len();
+    p.pass(r.at(T0 + 1_000));
+    assert_eq!(r.room.named("outbox.changed").len(), before);
+    assert_eq!(r.row(&row.id).unwrap().updated_ms, stored.updated_ms);
+    p.pass(r.at(T0 + UNREADABLE_AFTER_MS));
+    let changed = r.room.named("outbox.changed");
+    assert_eq!(changed.last().unwrap()["row"]["why"], json!("unreadable"));
+    r.files.ended.lock().unwrap().clear();
+    r.files.set_status(IDLE, "waiting");
+    p.pass(r.at(T0 + UNREADABLE_AFTER_MS + 40_000));
+    assert_eq!(r.row(&row.id).unwrap().why, Some(Why::Dialog));
+    assert_eq!(shown(&r, &row.id), Some("dialog".into()));
 }
 
 #[test]

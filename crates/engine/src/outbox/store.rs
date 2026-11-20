@@ -331,7 +331,7 @@ impl OutboxStore {
                 params![
                     id,
                     to.as_str(),
-                    why.map(Why::as_str),
+                    why.and_then(Why::stored).map(Why::as_str),
                     next_ms,
                     now_ms,
                     aside_at

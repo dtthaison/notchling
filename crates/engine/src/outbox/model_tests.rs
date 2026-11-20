@@ -70,3 +70,23 @@ fn kind_is_command_only_for_claude_slash_text() {
     assert_eq!(Kind::of(Tool::Codex, "/clear"), Kind::Prompt);
     assert_eq!(Kind::of(Tool::Antigravity, "/clear"), Kind::Prompt);
 }
+
+#[test]
+fn only_the_words_an_older_daemon_knows_are_stored() {
+    assert_eq!(Why::Checking.stored(), None);
+    assert_eq!(Why::Unreadable.stored(), None);
+    for why in [
+        Why::Dialog,
+        Why::Queue,
+        Why::Turn,
+        Why::Retry,
+        Why::NotFound,
+        Why::Restart,
+        Why::Dropped,
+        Why::NotCleared,
+        Why::Mixed,
+        Why::Answer,
+    ] {
+        assert_eq!(why.stored(), Some(why));
+    }
+}

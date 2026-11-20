@@ -71,15 +71,16 @@ pub fn job_ended(roots: &Roots, probes: &Probes, short_id: &str) -> Ended {
     if !named(short_id) {
         return Ended::No;
     }
-    let mut unreadable = false;
+    let mut unreadable: Vec<Option<i64>> = Vec::new();
     let mut best: Option<(Rank, String)> = None;
     for config in config_dirs(roots) {
         let dir = config.dir.join("jobs").join(short_id);
         if !dir.is_dir() {
             continue;
         }
-        let Some(job) = read_json(&dir.join("state.json")) else {
-            unreadable = true;
+        let path = dir.join("state.json");
+        let Some(job) = read_json(&path) else {
+            unreadable.push(modified_ms(&path));
             continue;
         };
         let this = rank(&job);
@@ -88,28 +89,39 @@ pub fn job_ended(roots: &Roots, probes: &Probes, short_id: &str) -> Ended {
             best = Some((this, state.to_string()));
         }
     }
-    let Some((_, state)) = best else {
-        return if unreadable {
-            Ended::Unknown
-        } else {
+    let Some((newest, state)) = best else {
+        return if unreadable.is_empty() {
             Ended::No
+        } else {
+            Ended::Unknown
         };
     };
+    let unreadable = unreadable
+        .iter()
+        .any(|at| at.is_none_or(|at| at >= newest.updated_ms));
     let alive = || live_file(roots, probes.is_alive, short_id).is_some();
     let torn = || {
         config_dirs(roots)
             .iter()
-            .any(|c| session_file_unreadable(&c.dir))
+            .any(|c| session_file_unreadable(&c.dir, probes.is_alive))
     };
     match state.as_str() {
         "stopped" if unreadable || alive() || torn() => Ended::Unknown,
         "stopped" => Ended::Stopped,
-        "done" if !alive() => Ended::Done,
+        "done" if alive() => Ended::No,
+        "done" if unreadable || torn() => Ended::Unknown,
+        "done" => Ended::Done,
         _ => Ended::No,
     }
 }
 
-fn session_file_unreadable(base: &std::path::Path) -> bool {
+fn modified_ms(path: &std::path::Path) -> Option<i64> {
+    let at = std::fs::metadata(path).ok()?.modified().ok()?;
+    let since = at.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(since.as_millis()).ok()
+}
+
+fn session_file_unreadable(base: &std::path::Path, alive: &dyn Fn(u32) -> bool) -> bool {
     let Ok(entries) = std::fs::read_dir(base.join("sessions")) else {
         return false;
     };
@@ -117,7 +129,13 @@ fn session_file_unreadable(base: &std::path::Path) -> bool {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
-        .any(|p| read_json(&p).is_none())
+        .filter(|p| read_json(p).is_none())
+        .any(|p| {
+            p.file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<u32>().ok())
+                .is_none_or(alive)
+        })
 }
 
 fn live_file(roots: &Roots, alive: &dyn Fn(u32) -> bool, short_id: &str) -> Option<Value> {

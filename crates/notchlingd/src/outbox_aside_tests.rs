@@ -163,7 +163,7 @@ fn retry_on_a_row_that_stepped_aside_puts_it_back_in_the_queue_once() {
 fn an_unsure_row_tells_the_app_when_it_steps_aside() {
     let r = rig();
     let (first, mut p) = unsure_first(&r, "first message");
-    let holding = crate::outbox_rows::wire(&r.row(&first).unwrap(), 1, None);
+    let holding = crate::outbox_rows::wire(&r.row(&first).unwrap(), 1, None, None);
     assert_eq!(
         holding["asideAtMs"],
         json!(T0 + UNSURE_HOLD_MS),
@@ -172,7 +172,7 @@ fn an_unsure_row_tells_the_app_when_it_steps_aside() {
     assert!(holding.get("asideMs").is_none());
     r.send("job-idle", "second message");
     p.pass(r.at(T0 + UNSURE_HOLD_MS + 1_000));
-    let aside = crate::outbox_rows::wire(&r.row(&first).unwrap(), 1, None);
+    let aside = crate::outbox_rows::wire(&r.row(&first).unwrap(), 1, None, None);
     assert!(aside.get("asideMs").is_some(), "{aside}");
     assert!(aside.get("asideAtMs").is_none());
 }
