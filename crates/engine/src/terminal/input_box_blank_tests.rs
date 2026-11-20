@@ -135,3 +135,43 @@ fn a_symbol_on_a_row_under_the_mark_is_not_guessed_away() {
         assert_eq!(beside.input().fill("hi"), Fill::Foreign, "{symbol}");
     }
 }
+
+#[test]
+fn only_a_prompt_mark_is_skipped_so_a_lone_symbol_on_the_first_row_is_text() {
+    for symbol in ["?", "x", "#", "👍", ">", "."] {
+        for rows in [vec![symbol], vec![symbol, ""], vec![symbol, "  "]] {
+            for cursor in [None, Some((2, 2))] {
+                let screen = drawn(&rows, cursor);
+                let input = screen.input();
+                assert!(!input.empty, "{rows:?} {cursor:?}: {input:?}");
+                assert_eq!(input.fill("hi"), Fill::Foreign, "{rows:?} {cursor:?}");
+            }
+            let blind = read(&drawn(&rows, None).lines, None).expect("a box");
+            assert!(!blind.empty, "{rows:?}: {blind:?}");
+        }
+    }
+}
+
+#[test]
+fn the_shell_mark_and_an_unmarked_blank_first_row_still_read_as_empty() {
+    for rows in [
+        vec!["!", ""],
+        vec!["!\u{a0}", "  "],
+        vec![MARK, ""],
+        vec!["", ""],
+        vec!["   ", ""],
+    ] {
+        let screen = drawn(&rows, None);
+        let input = screen.input();
+        assert!(input.empty, "{rows:?}: {input:?}");
+        assert_eq!(input.fill("hi"), Fill::Empty, "{rows:?}");
+    }
+}
+
+#[test]
+fn a_mark_with_a_symbol_after_it_is_text_whatever_is_under_it() {
+    for rows in [vec!["❯\u{a0}?", ""], vec!["!\u{a0}x"]] {
+        let screen = drawn(&rows, None);
+        assert!(!screen.input().empty, "{rows:?}");
+    }
+}
