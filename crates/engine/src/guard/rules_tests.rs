@@ -354,6 +354,11 @@ fn long_sleeps_and_sleep_loops_would_be_blocked() {
         "for ((;;)); do sleep 5; done",
         "while true; do\n  # wait a bit\n  sleep 5\ndone",
         "sleep 60 # let it settle",
+        "while sleep 5; do echo waiting; done",
+        "until ! sleep 5; do :; done",
+        "while true; do if [ -f x ]; then echo; else sleep 5; fi; done",
+        "while true; do time sleep 5; done",
+        "while true; do ! sleep 5; done",
     ] {
         let hits = bash_hits(command);
         assert_eq!(hits.len(), 1, "{command}");
@@ -381,6 +386,9 @@ fn short_sleeps_and_wrapped_commands_are_never_polls() {
         "while read x; do # check sleep\n echo \"$x\"; done",
         "while true; do echo 'sleep 5'; done",
         "while true; do echo done; done # sleep 5",
+        "sleep 5; while read l; do echo $l; done",
+        "while read l; do echo $l; done; sleep 5",
+        "for i in 1 2; do while read l; do echo $l; done; sleep 5; done",
         "notchling wait ci 41",
     ] {
         assert_eq!(bash_rule(command), None, "{command}");

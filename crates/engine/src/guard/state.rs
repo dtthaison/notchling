@@ -131,45 +131,49 @@ fn age_of(path: &Path) -> Option<std::time::Duration> {
         .and_then(|t| t.elapsed().ok())
 }
 
+fn expired(data: &Path, lock: &Path, limit: std::time::Duration) -> bool {
+    age_of(data)
+        .or_else(|| age_of(lock))
+        .is_some_and(|age| age > limit)
+}
+
+#[cfg(unix)]
+fn sweep_one(folder: &Path, stem: &str, limit: std::time::Duration) {
+    let data = folder.join(format!("{stem}.json"));
+    let lock = folder.join(format!("{stem}.lock"));
+    if !expired(&data, &lock, limit) {
+        return;
+    }
+    let Some(_held) = open_locked_within(&lock, 0) else {
+        return;
+    };
+    if !expired(&data, &lock, limit) {
+        return;
+    }
+    let _ = std::fs::remove_file(&data);
+    let _ = std::fs::remove_file(folder.join(format!("{stem}.json.tmp")));
+    let _ = std::fs::remove_file(&lock);
+}
+
 #[cfg(unix)]
 fn sweep(folder: &Path) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
     let limit = std::time::Duration::from_secs_f64(KEEP_DAYS * 86_400.0);
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !matches!(ext, "lock" | "json" | "tmp") {
-            continue;
-        }
-        let lock = path.with_extension("lock");
-        let data = path.with_extension("json");
-        let Some(age) = age_of(&path) else {
-            continue;
-        };
-        if age <= limit {
-            continue;
-        }
-        if lock.exists() {
-            if ext != "lock" {
-                continue;
-            }
-            if age_of(&data).unwrap_or(age) <= limit {
-                continue;
-            }
-            let Ok(file) = std::fs::OpenOptions::new().write(true).open(&lock) else {
-                continue;
-            };
-            if !lock_now(&file) {
-                continue;
-            }
-            let _ = std::fs::remove_file(&data);
-            let _ = std::fs::remove_file(data.with_extension("json.tmp"));
-            let _ = std::fs::remove_file(&lock);
-        } else {
-            let _ = std::fs::remove_file(&path);
-        }
+    let mut stems: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            [".json.tmp", ".json", ".lock"]
+                .iter()
+                .find_map(|ext| name.strip_suffix(ext).map(str::to_string))
+        })
+        .collect();
+    stems.sort();
+    stems.dedup();
+    for stem in stems {
+        sweep_one(folder, &stem, limit);
     }
 }
 
@@ -201,6 +205,11 @@ fn store(path: &Path, session: &Session) -> bool {
 
 #[cfg(unix)]
 fn open_locked(lock: &Path) -> Option<std::fs::File> {
+    open_locked_within(lock, LOCK_WAIT_MS)
+}
+
+#[cfg(unix)]
+fn open_locked_within(lock: &Path, wait_ms: u64) -> Option<std::fs::File> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     for _ in 0..3 {
         let file = std::fs::OpenOptions::new()
@@ -213,7 +222,7 @@ fn open_locked(lock: &Path) -> Option<std::fs::File> {
             .ok()?;
         let mut waited = 0;
         while !lock_now(&file) {
-            if waited >= LOCK_WAIT_MS {
+            if waited >= wait_ms {
                 return None;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));

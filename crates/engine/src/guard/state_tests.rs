@@ -248,3 +248,72 @@ fn a_session_whose_lock_was_swept_while_waiting_still_gets_exclusive_use() {
     assert_eq!(with_session(dir.root(), "s1", |s| s.working()), Some(1));
     assert!(lock.exists());
 }
+
+#[test]
+fn a_session_file_in_the_old_shape_starts_that_session_fresh() {
+    let dir = TempDir::new("guard-state");
+    dir.write(
+        "sessions/s1.json",
+        r#"{"reserved":[{"id":"t0","ts":1.0,"agent":null}],"calls":{"a":3}}"#,
+    );
+    assert_eq!(with_session(dir.root(), "s1", |s| s.working()), Some(0));
+    assert_eq!(
+        with_session(dir.root(), "s1", |s| s.count("a", NOW)),
+        Some(1)
+    );
+}
+
+#[test]
+fn a_session_that_woke_up_is_not_swept_from_under_itself() {
+    let dir = TempDir::new("guard-state");
+    let data = dir.write("sessions/old.json", "{}");
+    let lock = dir.write("sessions/old.lock", "");
+    age(&data, 5);
+    age(&lock, 5);
+    let fresh = std::fs::File::options()
+        .write(true)
+        .open(&data)
+        .expect("open");
+    fresh
+        .set_modified(std::time::SystemTime::now())
+        .expect("time");
+    drop(fresh);
+    with_session(dir.root(), "other", |s| s.working());
+    assert!(data.exists() && lock.exists());
+}
+
+#[test]
+fn an_old_file_without_a_lock_is_swept_under_a_lock_and_leaves_none_behind() {
+    let dir = TempDir::new("guard-state");
+    let data = dir.write("sessions/gone.json", "{}");
+    let tmp = dir.write("sessions/gone.json.tmp", "{");
+    age(&data, 5);
+    age(&tmp, 5);
+    with_session(dir.root(), "other", |s| s.working());
+    assert!(!data.exists() && !tmp.exists());
+    assert!(!dir.path("sessions/gone.lock").exists());
+}
+
+#[test]
+fn a_file_with_a_lock_somebody_holds_is_left_for_later() {
+    let dir = TempDir::new("guard-state");
+    let data = dir.write("sessions/held.json", "{}");
+    age(&data, 5);
+    let lock = dir.write("sessions/held.lock", "");
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&lock)
+        .expect("open");
+    assert_eq!(
+        unsafe {
+            libc::flock(
+                std::os::unix::io::AsRawFd::as_raw_fd(&held),
+                libc::LOCK_EX | libc::LOCK_NB,
+            )
+        },
+        0
+    );
+    with_session(dir.root(), "other", |s| s.working());
+    assert!(data.exists() && lock.exists());
+    drop(held);
+}

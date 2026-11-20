@@ -153,22 +153,40 @@ pub fn segments(command: &str) -> Vec<Vec<String>> {
     out
 }
 
-fn command_word(words: &[String]) -> Option<&str> {
-    words
+const LEADING: [&str; 6] = ["then", "else", "elif", "do", "!", "time"];
+
+fn after_keywords(words: &[String]) -> &[String] {
+    let start = words
         .iter()
-        .map(String::as_str)
-        .find(|w| !matches!(*w, "do" | "then" | "else" | "time" | "!"))
+        .position(|w| !LEADING.contains(&w.as_str()))
+        .unwrap_or(words.len());
+    &words[start..]
+}
+
+fn is_sleep(words: &[String]) -> bool {
+    after_keywords(words)
+        .first()
+        .is_some_and(|c| program(c) == "sleep")
 }
 
 pub fn loops_on_sleep(command: &str) -> bool {
-    let parts = segments(command);
-    let looping = parts.iter().any(|w| match w[0].as_str() {
-        "while" | "until" => true,
-        "for" => w.len() == 1,
-        _ => false,
-    });
-    looping
-        && parts
-            .iter()
-            .any(|w| command_word(w).is_some_and(|c| program(c) == "sleep"))
+    let mut loops: Vec<bool> = Vec::new();
+    for part in segments(command) {
+        let words = after_keywords(&part);
+        match words.first().map(String::as_str) {
+            Some("while" | "until") => {
+                loops.push(true);
+                if is_sleep(&words[1..]) {
+                    return true;
+                }
+            }
+            Some("for") => loops.push(words.len() == 1),
+            Some("done") => {
+                loops.pop();
+            }
+            Some(_) if loops.contains(&true) && is_sleep(words) => return true,
+            Some(_) | None => {}
+        }
+    }
+    false
 }
