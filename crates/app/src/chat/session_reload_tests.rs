@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use super::data::{Session, Tool};
 use super::reload_feed::ReloadFeed;
 use super::session_reload::{
-    lead, mode, parse_task, Act, Card, Intent, Mode, Settle, Stage, State, Task, NOTE_MS,
+    lead, mode, parse_task, Act, Card, Intent, Mode, Settle, Stage, State, Task, ACK_RETRY_MS,
+    NOTE_MS,
 };
 use crate::acting::{ops, Request};
 
@@ -428,4 +429,45 @@ fn an_agents_reload_shows_on_its_row_from_the_push_alone() {
     push(&mut feed, "s3", 6, done());
     state.sync(&feed, 0);
     assert_eq!(state.row_line("s3"), None);
+}
+
+#[test]
+fn a_failed_ack_is_tried_again_after_a_pause_and_a_sent_one_never_twice() {
+    let mut state = State::default();
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s1", 5, done());
+    assert_eq!(state.sync(&feed, 0).acks, [("s1".to_string(), 5)]);
+    assert!(state.due_acks(10).is_empty());
+    state.ack_failed("s1", 5, 10);
+    assert!(state.due_acks(10 + ACK_RETRY_MS - 1).is_empty());
+    assert_eq!(state.due_acks(10 + ACK_RETRY_MS), [("s1".to_string(), 5)]);
+    assert!(state.due_acks(10 + 3 * ACK_RETRY_MS).is_empty());
+    state.ack_failed("s1", 4, 0);
+    assert!(state.due_acks(i64::MAX - 1).is_empty());
+    assert_eq!(state.note("s1", 20).as_deref(), Some("Session reloaded"));
+}
+
+#[test]
+fn a_new_daemon_run_starts_the_handled_revs_and_the_card_floor_over() {
+    let mut state = State::default();
+    let feed = ReloadFeed::seed(&json!({"boot": "run-1", "tasks": [
+        {"id": "s1", "rev": 900, "task": done()}
+    ]}));
+    assert_eq!(state.sync(&feed, 0).acks.len(), 1);
+    state.open(card_for("s1", 900));
+    assert_eq!(state.card.as_ref().unwrap().floor, 900);
+    let fresh = ReloadFeed::seed(&json!({"boot": "run-2", "tasks": [
+        {"id": "s1", "rev": 40, "task": waiting()}
+    ]}));
+    state.sync(&fresh, 0);
+    assert_eq!(state.card.as_ref().unwrap().floor, 0);
+    assert_eq!(
+        state.card.as_ref().unwrap().stage,
+        Stage::Waiting(Wait::Turn)
+    );
+    let mut fresh = fresh;
+    push(&mut fresh, "s1", 41, done());
+    let synced = state.sync(&fresh, 0);
+    assert_eq!(synced.acks, [("s1".to_string(), 41)]);
+    assert_eq!(synced.settle, Some(Settle::Close));
 }

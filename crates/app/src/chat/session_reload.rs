@@ -15,6 +15,7 @@ use crate::chat::format::tokens;
 use crate::chat::reload_feed::ReloadFeed;
 
 pub const NOTE_MS: i64 = 6_000;
+pub const ACK_RETRY_MS: i64 = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -281,6 +282,7 @@ pub struct State {
     pub card: Option<Card>,
     pub notes: HashMap<String, (String, i64)>,
     pub handled: HashMap<String, u64>,
+    pub acks: HashMap<String, (u64, i64)>,
     pub feed: ReloadFeed,
 }
 
@@ -297,12 +299,18 @@ impl State {
 
     pub fn sync(&mut self, feed: &ReloadFeed, now_ms: i64) -> Synced {
         let mut out = Synced::default();
+        if feed.boot != self.feed.boot {
+            self.handled.clear();
+            self.acks.clear();
+            if let Some(card) = self.card.as_mut() {
+                card.floor = 0;
+            }
+        }
         for (id, rev, task) in feed.ended() {
             if self.handled.get(id).is_some_and(|seen| *seen >= rev) {
                 continue;
             }
             self.handled.insert(id.to_owned(), rev);
-            out.acks.push((id.to_owned(), rev));
             let carded = self
                 .card
                 .as_ref()
@@ -335,7 +343,29 @@ impl State {
             out.settle = Some(settle);
         }
         self.feed = feed.clone();
+        out.acks = self.due_acks(now_ms);
         out
+    }
+
+    pub fn due_acks(&mut self, now_ms: i64) -> Vec<(String, u64)> {
+        let mut due = Vec::new();
+        for (id, rev, _) in self.feed.ended() {
+            let send = self
+                .acks
+                .get(id)
+                .is_none_or(|(seen, at)| *seen < rev || (*seen == rev && now_ms >= *at));
+            if send {
+                self.acks.insert(id.to_owned(), (rev, i64::MAX));
+                due.push((id.to_owned(), rev));
+            }
+        }
+        due
+    }
+
+    pub fn ack_failed(&mut self, id: &str, rev: u64, now_ms: i64) {
+        if let Some(entry) = self.acks.get_mut(id).filter(|(seen, _)| *seen == rev) {
+            entry.1 = now_ms + ACK_RETRY_MS;
+        }
     }
 
     pub fn live(&self, id: &str) -> bool {

@@ -220,16 +220,27 @@ impl ChatView {
         self.reload_apply(synced, cx);
     }
 
-    fn reload_apply(&mut self, synced: Synced, cx: &mut Context<Self>) {
-        for (id, rev) in synced.acks {
+    fn reload_ack(&mut self, acks: Vec<(String, u64)>, cx: &mut Context<Self>) {
+        for (id, rev) in acks {
             let actions = self.acts(cx).actions;
             let request = Request::reload_ack(&id, rev);
-            cx.background_executor()
-                .spawn(async move {
-                    let _ = actions.send(&request);
+            cx.spawn(async move |this, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { actions.send(&request) })
+                    .await;
+                this.update(cx, |view, _| match result {
+                    Ok(reply) => view.source.absorb_reload(&id, &reply),
+                    Err(_) => view.reload.ack_failed(&id, rev, super::now_ms()),
                 })
-                .detach();
+                .ok();
+            })
+            .detach();
         }
+    }
+
+    fn reload_apply(&mut self, synced: Synced, cx: &mut Context<Self>) {
+        self.reload_ack(synced.acks, cx);
         for (old, new) in synced.follows {
             if self.selected.as_deref() == Some(old.as_str()) {
                 self.select(&new, cx);
@@ -268,5 +279,9 @@ impl ChatView {
         }
         self.reload_refresh_lead(cx);
         self.reload_follow_feed(cx);
+        let due = self.reload.due_acks(super::now_ms());
+        if !due.is_empty() {
+            self.reload_ack(due, cx);
+        }
     }
 }

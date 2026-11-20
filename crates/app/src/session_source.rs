@@ -249,6 +249,16 @@ impl Shared {
         }
     }
 
+    fn lose_link(&self, link: Link) {
+        self.set_prompts(None);
+        self.set_shells(Vec::new());
+        self.set_remote_codex(Vec::new());
+        self.clear_outbox_rows();
+        self.reseed_asks(AskFeed::default());
+        self.reset_tools();
+        self.set(link, None);
+    }
+
     fn reseed_reloads(&self, fresh: ReloadFeed) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.reloads != fresh {
@@ -495,14 +505,7 @@ fn run(config: SourceConfig, shared: &Shared) {
         if shared.stopped() {
             return;
         }
-        shared.set_prompts(None);
-        shared.set_shells(Vec::new());
-        shared.set_remote_codex(Vec::new());
-        shared.clear_outbox_rows();
-        shared.reseed_asks(AskFeed::default());
-        shared.reseed_reloads(ReloadFeed::default());
-        shared.reset_tools();
-        shared.set(link, None);
+        shared.lose_link(link);
         sleep(config.backoff.delay(failures.saturating_sub(1)), shared);
     }
 }
@@ -572,6 +575,11 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Ok(_) | Err(ClientError::Api(_)) => {}
         Err(e) => return Err(e),
     }
+    let reloading = match client.subscribe(&[topics::RELOADS]) {
+        Ok(_) => true,
+        Err(ClientError::Api(_)) => false,
+        Err(e) => return Err(e),
+    };
     let outboxed = match client.subscribe(&[topics::OUTBOX]) {
         Ok(_) => true,
         Err(ClientError::Api(_)) => false,
@@ -598,7 +606,7 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         },
         false => None,
     };
-    let mut reloads = match followed {
+    let mut reloads = match reloading {
         true => match client.call(ops::SESSION_RELOAD_STATE, serde_json::json!({"all": true})) {
             Ok(reply) => ReloadFeed::seed(&reply),
             Err(ClientError::Api(_)) => ReloadFeed::default(),

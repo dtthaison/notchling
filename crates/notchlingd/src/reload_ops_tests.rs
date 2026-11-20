@@ -9,6 +9,7 @@ use notchling_engine::outbox::{OutboxStore, State};
 use notchling_engine::reload::flow::{Host, POLL_MS};
 use notchling_engine::sessions::{Agent, Roots};
 use notchling_events::kinds::choices::DoneOrFailed;
+use notchling_local_api::Handler;
 use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -148,14 +149,7 @@ fn faked(tag: &str, fake: &Fake, inline: bool) -> (Dir, Setup) {
     } else {
         ReloadOps::new(Arc::new(fake.clone()))
     };
-    let room = s.room.clone();
-    reload.set_publish(Arc::new(move |data| {
-        room.publish(
-            notchling_local_api::topics::PROMPTS,
-            notchling_local_api::topics::RELOAD_CHANGED,
-            data,
-        )
-    }));
+    reload.set_publish(crate::reload_ops::publisher(s.room.clone()));
     s.ops.attach_reload(reload);
     (dir, s)
 }
@@ -871,4 +865,69 @@ fn a_worker_that_crashes_leaves_a_failure_and_the_next_start_runs() {
     assert!(wait_over(&s, "job-a"));
     assert_eq!(phase_of(&s, "job-a")["phase"], "done");
     assert_eq!(fake.0.lock().unwrap().restarts, 1);
+}
+
+#[derive(Default)]
+struct Topics(Mutex<Vec<(String, String)>>);
+
+impl Room for Topics {
+    fn publish(&self, topic: &str, event: &str, _: &Value) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((topic.to_string(), event.to_string()));
+    }
+    fn can_answer(&self) -> bool {
+        true
+    }
+    fn can_follow(&self, _: &str) -> bool {
+        true
+    }
+}
+
+#[test]
+fn reload_changes_go_on_their_own_app_tier_topic_never_on_prompts() {
+    let room = Arc::new(Topics::default());
+    let publish = crate::reload_ops::publisher(room.clone());
+    publish(&json!({"id": "job-a", "rev": 1, "task": null}));
+    assert_eq!(
+        *room.0.lock().unwrap(),
+        [("reloads".to_string(), "reload.changed".to_string())]
+    );
+    let launcher = Arc::new(FakeLauncher::new());
+    let (_d, acting, _) = live("topic", launcher, IDLE);
+    let daemon = crate::daemon::Ops::with_acting(Arc::new(Mutex::new(json!([]))), acting);
+    assert!(daemon.topics().contains(&"reloads"));
+    assert_eq!(daemon.topic_tier("reloads"), Tier::App);
+    assert_eq!(daemon.topic_tier("prompts"), Tier::App);
+}
+
+#[test]
+fn an_ack_without_a_rev_still_clears_a_finished_task_for_older_callers() {
+    let fake = Fake::default();
+    let (_d, s) = faked("ack-any", &fake, true);
+    reload(&s, "job-a", true).unwrap();
+    s.ops
+        .call(
+            &app(),
+            ops::SESSION_RELOAD_STATE,
+            &json!({"id": "job-a", "ack": true}),
+        )
+        .unwrap();
+    assert!(phase_of(&s, "job-a").is_null());
+}
+
+#[test]
+fn the_full_read_names_the_daemon_run_so_the_app_can_tell_a_restart() {
+    let fake = Fake::default();
+    let (_d, s) = faked("boot", &fake, true);
+    let all = s
+        .ops
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"all": true}))
+        .unwrap();
+    let boot = all["boot"].as_str().unwrap();
+    assert!(
+        boot.starts_with(&format!("{}-", std::process::id())),
+        "{boot}"
+    );
 }

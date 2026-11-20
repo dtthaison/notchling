@@ -6,12 +6,20 @@ use super::session_reload::{parse_task, Task};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReloadFeed {
+    pub boot: String,
     slots: BTreeMap<String, (u64, Option<Task>)>,
 }
 
 impl ReloadFeed {
     pub fn seed(reply: &Value) -> ReloadFeed {
-        let mut feed = ReloadFeed::default();
+        let mut feed = ReloadFeed {
+            boot: reply
+                .get("boot")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            ..ReloadFeed::default()
+        };
         for item in reply
             .get("tasks")
             .and_then(Value::as_array)

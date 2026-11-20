@@ -195,7 +195,6 @@ pub mod topics {
     pub const PROMPTS: &str = "prompts";
     pub const PROMPT_PENDING: &str = "prompt.pending";
     pub const PROMPT_RESOLVED: &str = "prompt.resolved";
-    pub const RELOAD_CHANGED: &str = "reload.changed";
     pub const SETTINGS: &str = "settings";
     pub const ACTING_CHANGED: &str = "settings.acting";
     pub const SWITCH_CHANGED: &str = "settings.switch";
@@ -244,6 +243,9 @@ pub mod topics {
     pub const OUTBOX: &str = "outbox";
     pub const OUTBOX_CHANGED: &str = "outbox.changed";
     pub const OUTBOX_REMOVED: &str = "outbox.removed";
+
+    pub const RELOADS: &str = "reloads";
+    pub const RELOAD_CHANGED: &str = "reload.changed";
 
     pub const ASKS: &str = "asks";
     pub const ASK_CHANGED: &str = "ask.changed";

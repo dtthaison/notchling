@@ -141,6 +141,23 @@ fn a_pushed_reload_change_reaches_the_view_and_an_older_one_is_dropped() {
 }
 
 #[test]
+fn a_lost_link_keeps_the_last_reload_feed_until_a_fresh_one_replaces_it() {
+    let source = SessionSource::files();
+    source.shared.apply(Event {
+        event: topics::RELOAD_CHANGED.to_string(),
+        data: serde_json::json!({"id": "s1", "rev": 7, "task": {"phase": "working", "step": "restarting"}}),
+    });
+    source.shared.lose_link(Link::Down);
+    assert_eq!(source.view().link, Link::Down);
+    assert!(source.reloads().live("s1"));
+    source.shared.reseed_reloads(ReloadFeed::seed(
+        &serde_json::json!({"boot": "b2", "tasks": []}),
+    ));
+    assert!(!source.reloads().live("s1"));
+    assert_eq!(source.reloads().boot, "b2");
+}
+
+#[test]
 fn a_fixture_source_reads_files_and_says_nothing_about_a_daemon() {
     let source = SessionSource::for_run(
         Some(&DataRoot::fixture(Path::new("/f"))),

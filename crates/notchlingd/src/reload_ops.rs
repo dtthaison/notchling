@@ -1,5 +1,5 @@
 use crate::acting::ACTING_OFF;
-use crate::acting_ops::{bad, forbidden, now_ms, text_arg, ActingOps};
+use crate::acting_ops::{bad, forbidden, now_ms, text_arg, ActingOps, Room};
 use crate::outbox_courier::live_files;
 use notchling_engine::chrome::status;
 use notchling_engine::control::{job_state_path, plan_respawn};
@@ -7,7 +7,7 @@ use notchling_engine::reload::flow::{self, Host, Need, Options, Phase};
 use notchling_engine::reload::{bypasses, mode_of};
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_events::kinds::choices::DoneOrFailed;
-use notchling_local_api::{ApiError, Caller, ClientKind, Tier};
+use notchling_local_api::{topics, ApiError, Caller, ClientKind, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
@@ -29,6 +29,16 @@ pub trait Hosts: Send + Sync {
 
 pub type Audit = Arc<dyn Fn(&Agent, &str, DoneOrFailed) + Send + Sync>;
 pub type Publish = Arc<dyn Fn(&Value) + Send + Sync>;
+
+pub fn publisher(room: Arc<dyn Room>) -> Publish {
+    Arc::new(move |data| room.publish(topics::RELOADS, topics::RELOAD_CHANGED, data))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ack {
+    Any,
+    Rev(u64),
+}
 
 #[derive(Clone, Debug)]
 struct Entry {
@@ -92,6 +102,7 @@ pub struct ReloadOps {
     book: Mutex<Book>,
     wake: Condvar,
     inline: bool,
+    boot: String,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -251,6 +262,7 @@ impl ReloadOps {
             }),
             wake: Condvar::new(),
             inline,
+            boot: format!("{}-{first}", std::process::id()),
         })
     }
 
@@ -400,16 +412,20 @@ impl ReloadOps {
         let mut ids: Vec<&String> = book.entries.keys().collect();
         ids.sort();
         let tasks: Vec<Value> = ids.into_iter().map(|id| book.report(id)).collect();
-        json!({ "rev": book.rev, "tasks": tasks })
+        json!({ "boot": self.boot, "rev": book.rev, "tasks": tasks })
     }
 
-    pub fn state(&self, agent: &Agent, ack: Option<u64>) -> Value {
+    pub fn state(&self, agent: &Agent, ack: Option<Ack>) -> Value {
         let (report, removed) = {
             let mut book = lock(&self.book);
-            let over = book
-                .entries
-                .get(&agent.id)
-                .is_some_and(|e| e.phase.is_over() && ack.is_some_and(|rev| rev == e.rev));
+            let over = book.entries.get(&agent.id).is_some_and(|e| {
+                e.phase.is_over()
+                    && match ack {
+                        Some(Ack::Any) => true,
+                        Some(Ack::Rev(rev)) => rev == e.rev,
+                        None => false,
+                    }
+            });
             if over {
                 book.entries.remove(&agent.id);
                 book.next();
@@ -682,9 +698,11 @@ impl ActingOps {
             return Ok(reload.all());
         }
         let agent = self.agent(args)?;
-        let ack = (args.get("ack").and_then(Value::as_bool) == Some(true))
-            .then(|| args.get("rev").and_then(Value::as_u64))
-            .flatten();
+        let ack = (args.get("ack").and_then(Value::as_bool) == Some(true)).then(|| {
+            args.get("rev")
+                .and_then(Value::as_u64)
+                .map_or(Ack::Any, Ack::Rev)
+        });
         Ok(reload.state(&agent, ack))
     }
 }
