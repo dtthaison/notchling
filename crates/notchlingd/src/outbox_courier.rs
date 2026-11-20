@@ -317,14 +317,18 @@ impl ClaudeCourier {
             .answer
             .take();
         let mut watch = taken.unwrap_or_default();
-        let open = watch.open(&row.id, status.as_deref(), now_ms, || match fresh {
-            Some(agent) => self.acting.dialog_seen(agent),
-            None => Seen::Unknown,
+        let key = (row.id.as_str(), row.updated_ms);
+        let open = watch.open(key, status.as_deref(), now_ms, || {
+            let seen = match fresh {
+                Some(agent) => self.acting.dialog_seen(agent),
+                None => Seen::Unknown,
+            };
+            (seen, (self.clock)())
         });
         lock(&self.memos)
             .entry(row.session.clone())
             .or_default()
-            .answer = Some(watch);
+            .answer = open.then_some(watch);
         open
     }
 

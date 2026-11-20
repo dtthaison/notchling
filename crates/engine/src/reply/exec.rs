@@ -504,8 +504,12 @@ impl Run<'_> {
         }
     }
 
+    fn closable(&self, lines: &[String]) -> Option<screen_dialog::Shown> {
+        screen_dialog::closable(lines, self.check.dialog_open(lines))
+    }
+
     fn closing_still_shown(&self, lines: &[String]) -> bool {
-        match (&self.closing, screen_dialog::shown(lines)) {
+        match (&self.closing, self.closable(lines)) {
             (Some(before), Some(now)) => before.same_as(&now),
             _ => false,
         }
@@ -693,7 +697,7 @@ impl Run<'_> {
             }
             Step::RequireAnyDialog => {
                 let lines = self.pty.screen();
-                self.closing = Some(screen_dialog::shown(&lines).ok_or(Failure::QuestionGone)?);
+                self.closing = Some(self.closable(&lines).ok_or(Failure::QuestionGone)?);
             }
             Step::AwaitInput { timeout_ms } => {
                 self.await_prompt(*timeout_ms)?;

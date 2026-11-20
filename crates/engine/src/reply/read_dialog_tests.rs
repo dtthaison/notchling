@@ -126,3 +126,18 @@ fn prose_that_names_a_key_is_no_dialog_for_the_probe() {
     ]);
     assert!(!dialog_up(&mut pty));
 }
+
+#[test]
+fn holding_keeps_anything_that_might_be_a_dialog() {
+    for screen in [
+        &[" Do you want to proceed?", " Something drawn oddly"][..],
+        &[
+            "⏺ The menu you will see:",
+            "  ↑/↓ to navigate · Esc to close",
+        ][..],
+        &[" Odd", " Enter to confirm · Esc to cancel"][..],
+    ] {
+        let mut pty = FakePrompt::new(&[]).with_dialog(screen);
+        assert!(dialog_up(&mut pty), "{screen:?}");
+    }
+}

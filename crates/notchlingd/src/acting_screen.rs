@@ -1,4 +1,5 @@
 use super::*;
+use crate::acting_events::NOT_AT_A_PROMPT;
 use notchling_engine::outbox::Seen;
 use notchling_engine::reply::read::{dialog_up, read_dialog};
 use notchling_engine::terminal::screen_dialog::{DialogPick, ScreenDialog};
@@ -165,6 +166,13 @@ impl ActingOps {
         }
         let first = self.agent(args)?;
         self.locked(&first, |agent| {
+            let AgentTarget::Job(job) = &agent.target else {
+                return Err(bad("this session has no terminal to read").into());
+            };
+            let status = fresh::job_status(&self.roots, &Probes::from_proc(), job);
+            if !matches!(status.as_deref(), Some("waiting" | "idle")) {
+                return Err(ApiError::new(ErrorCode::Failed, NOT_AT_A_PROMPT).into());
+            }
             self.play_locked(agent, &plan::dismiss(), &mut NoLog, None)
         })?;
         Ok(json!({"dismissed": true}))

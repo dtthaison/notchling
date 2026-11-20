@@ -1,10 +1,10 @@
 use super::*;
 use std::cell::Cell;
 
-const ROW: &str = "row-1";
+const ROW: (&str, i64) = ("row-1", 0);
 
 fn read(watch: &mut AnswerWatch, status: &str, now_ms: i64, seen: Seen) -> bool {
-    watch.open(ROW, Some(status), now_ms, || seen)
+    watch.open(ROW, Some(status), now_ms, || (seen, now_ms))
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn the_screen_is_not_read_while_the_session_waits() {
     let looked = Cell::new(0);
     let look = || {
         looked.set(looked.get() + 1);
-        Seen::Open
+        (Seen::Open, 0)
     };
     assert!(watch.open(ROW, Some("waiting"), 0, look));
     assert_eq!(looked.get(), 0);
@@ -102,7 +102,7 @@ fn a_dialog_seen_or_a_failed_read_is_not_read_again_for_a_while() {
         let looked = Cell::new(0);
         let look = || {
             looked.set(looked.get() + 1);
-            first
+            (first, 0)
         };
         let mut now = 0;
         while now < ANSWER_RECHECK_MS {
@@ -124,5 +124,41 @@ fn another_row_starts_a_fresh_watch() {
     let mut watch = AnswerWatch::default();
     assert!(read(&mut watch, "idle", 0, Seen::Closed));
     assert!(read(&mut watch, "idle", 1_000, Seen::Closed));
-    assert!(watch.open("row-2", Some("idle"), 2_000, || Seen::Closed));
+    assert!(watch.open(("row-2", 0), Some("idle"), 2_000, || (Seen::Closed, 2_000)));
+}
+
+#[test]
+fn a_retried_row_starts_a_fresh_watch() {
+    let mut watch = AnswerWatch::default();
+    assert!(read(&mut watch, "waiting", 0, Seen::Open));
+    assert!(!read(&mut watch, "idle", 1_000, Seen::Closed));
+    let retried = (ROW.0, 60_000);
+    assert!(
+        watch.open(retried, Some("idle"), 61_000, || (Seen::Closed, 61_000)),
+        "the old wait and its reads do not carry over"
+    );
+    assert!(watch.open(retried, Some("idle"), 62_000, || (Seen::Closed, 62_000)));
+    assert!(!watch.open(retried, Some("idle"), 63_000, || (Seen::Closed, 63_000)));
+}
+
+#[test]
+fn the_next_look_counts_from_when_the_probe_ended() {
+    let mut watch = AnswerWatch::default();
+    let slow = 3_000;
+    assert!(watch.open(ROW, Some("idle"), 0, || (Seen::Open, slow)));
+    let looked = Cell::new(false);
+    let look = |now| {
+        looked.set(true);
+        (Seen::Open, now)
+    };
+    assert!(watch.open(ROW, Some("idle"), ANSWER_RECHECK_MS, || look(
+        ANSWER_RECHECK_MS
+    )));
+    assert!(
+        !looked.get(),
+        "not again {ANSWER_RECHECK_MS} ms after the slow look began"
+    );
+    let due = slow + ANSWER_RECHECK_MS;
+    assert!(watch.open(ROW, Some("idle"), due, || look(due)));
+    assert!(looked.get());
 }

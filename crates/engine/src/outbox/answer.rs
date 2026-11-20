@@ -9,7 +9,7 @@ pub enum Seen {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AnswerWatch {
-    row: String,
+    row: (String, i64),
     closed: u32,
     look_after: i64,
     was_waiting: bool,
@@ -18,14 +18,14 @@ pub struct AnswerWatch {
 impl AnswerWatch {
     pub fn open(
         &mut self,
-        row: &str,
+        row: (&str, i64),
         status: Option<&str>,
         now_ms: i64,
-        look: impl FnOnce() -> Seen,
+        look: impl FnOnce() -> (Seen, i64),
     ) -> bool {
-        if self.row != row {
+        if self.row.0 != row.0 || self.row.1 != row.1 {
             *self = AnswerWatch {
-                row: row.to_owned(),
+                row: (row.0.to_owned(), row.1),
                 ..AnswerWatch::default()
             };
         }
@@ -37,14 +37,15 @@ impl AnswerWatch {
         if now_ms < self.look_after {
             return true;
         }
-        match look() {
+        let (seen, looked_ms) = look();
+        match seen {
             Seen::Open => {
                 self.closed = 0;
-                self.look_after = now_ms + ANSWER_RECHECK_MS;
+                self.look_after = looked_ms.max(now_ms) + ANSWER_RECHECK_MS;
                 true
             }
             Seen::Unknown => {
-                self.look_after = now_ms + ANSWER_RECHECK_MS;
+                self.look_after = looked_ms.max(now_ms) + ANSWER_RECHECK_MS;
                 true
             }
             Seen::Closed => {

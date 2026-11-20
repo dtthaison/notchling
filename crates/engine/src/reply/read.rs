@@ -61,7 +61,8 @@ pub fn read_dialog(pty: &mut dyn Pty) -> Result<Option<ScreenDialog>, Failure> {
 
 pub fn dialog_up(pty: &mut dyn Pty) -> bool {
     pty.wait_quiet(ms(ATTACH_QUIET_MS), ms(PROBE_TIMEOUT_MS));
-    screen_dialog::shown(&pty.screen()).is_some()
+    let lines = pty.screen();
+    super::keys::dialog_open(&lines) || screen_dialog::shown(&lines).is_some()
 }
 
 pub fn read_shell_output(pty: &mut dyn Pty, command: &str) -> Vec<String> {

@@ -189,6 +189,11 @@ fn a_dismiss_over_output_that_only_looks_like_a_dialog_sends_no_esc() {
             "    2. Sonnet",
             "  Pick one and press Enter.",
         ][..],
+        &[
+            "⏺ The menu you will see:",
+            "  Use the arrows to move.",
+            "  ↑/↓ to navigate · Esc to close",
+        ][..],
     ] {
         let mut pty = FakePrompt::new(screen);
         let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);

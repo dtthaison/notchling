@@ -1,7 +1,12 @@
 use crate::acting::ACTING_OFF;
-use crate::acting_ops_tests::{app, caller, code, sessions, setup, Setup, PROMPT};
-use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, Tier};
+use crate::acting_events::NOT_AT_A_PROMPT;
+use crate::acting_ops_tests::{
+    app, caller, code, sessions, setup, setup_in, Setup, PROMPT, SESSION,
+};
+use notchling_engine::sessions::Roots;
+use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 const SWITCH: &str = include_str!("../../engine/tests/fixtures/dialog-made-up/switch-model.txt");
 
@@ -152,38 +157,125 @@ const UNREADABLE: [&str; 3] = [
     " Enter to confirm · Esc to cancel",
 ];
 
+struct Live(PathBuf);
+
+impl Live {
+    fn at(tag: &str, status: Option<&str>) -> Live {
+        let dir = std::env::temp_dir().join(format!("nl-dismiss-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("claude/sessions")).unwrap();
+        if let Some(status) = status {
+            for (n, job) in [(1, "abcd1234"), (2, "idle0001")] {
+                let live = json!({"pid": std::process::id(), "sessionId": SESSION, "jobId": job,
+                    "status": status, "statusUpdatedAt": 1_794_697_000_000.0});
+                std::fs::write(
+                    dir.join(format!("claude/sessions/{n}.json")),
+                    live.to_string(),
+                )
+                .unwrap();
+            }
+        }
+        Live(dir)
+    }
+
+    fn setup(&self, screen: Option<&[&str]>) -> Setup {
+        let roots = Roots {
+            main_dir: self.0.join("claude"),
+            lanes_file: self.0.join("none/lanes.json"),
+        };
+        let s = setup_in(true, PROMPT, sessions(), roots, None);
+        let shown: Vec<String> = match screen {
+            Some(lines) => lines.iter().map(|l| l.to_string()).collect(),
+            None => dialog_screen(),
+        };
+        *s.dialog.lock().unwrap() = Some((shown, true));
+        s
+    }
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn dismiss(s: &Setup, id: &str) -> Result<Value, ApiError> {
+    s.ops
+        .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({ "id": id }))
+}
+
 #[test]
-fn dismissing_sends_esc_while_a_dialog_is_open_whatever_the_session_says() {
-    for id in ["job-a", "job-idle"] {
-        let s = setup(true, PROMPT, sessions());
-        showing(&s);
-        let done = s
-            .ops
-            .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({ "id": id }))
-            .unwrap();
-        assert_eq!(done, json!({"dismissed": true}), "{id}");
-        assert_eq!(s.writes.lock().unwrap().as_slice(), ["\x1b"], "{id}");
+fn dismissing_sends_esc_while_a_dialog_is_open_at_a_prompt() {
+    for status in ["waiting", "idle"] {
+        let live = Live::at(status, Some(status));
+        for id in ["job-a", "job-idle"] {
+            let s = live.setup(None);
+            assert_eq!(
+                dismiss(&s, id).unwrap(),
+                json!({"dismissed": true}),
+                "{status} {id}"
+            );
+            assert_eq!(
+                s.writes.lock().unwrap().as_slice(),
+                ["\x1b"],
+                "{status} {id}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dismissing_is_refused_while_the_session_works_even_with_a_dialog_open() {
+    for status in [Some("busy"), Some("working"), Some("shell"), None] {
+        let live = Live::at(&format!("{status:?}"), status);
+        let s = live.setup(None);
+        let (code, message) = code(dismiss(&s, "job-a"));
+        assert_eq!(code, ErrorCode::Failed, "{status:?}");
+        assert_eq!(message, NOT_AT_A_PROMPT, "{status:?}");
+        assert!(
+            s.writes.lock().unwrap().is_empty(),
+            "no Esc while {status:?}"
+        );
+        assert!(s.attached.lock().unwrap().is_empty(), "never attached");
     }
 }
 
 #[test]
 fn dismissing_also_closes_a_dialog_the_parser_cannot_read() {
-    let s = setup(true, PROMPT, sessions());
-    *s.dialog.lock().unwrap() = Some((UNREADABLE.iter().map(|l| l.to_string()).collect(), true));
-    s.ops
-        .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({"id": "job-a"}))
-        .unwrap();
+    let live = Live::at("unreadable", Some("waiting"));
+    let s = live.setup(Some(&UNREADABLE));
+    dismiss(&s, "job-a").unwrap();
     assert_eq!(s.writes.lock().unwrap().as_slice(), ["\x1b"]);
 }
 
 #[test]
+fn dismissing_over_a_bare_esc_hint_sends_no_esc() {
+    let live = Live::at("bare-hint", Some("idle"));
+    let s = live.setup(Some(&[
+        "⏺ The menu you will see:",
+        "  Use the arrows to move.",
+        "  ↑/↓ to navigate · Esc to close",
+    ]));
+    let (_, message) = code(dismiss(&s, "job-a"));
+    assert!(message.contains("isn't open"), "{message}");
+    assert!(s.writes.lock().unwrap().is_empty(), "no Esc typed");
+}
+
+#[test]
 fn dismissing_sends_no_esc_when_no_dialog_is_open() {
-    let s = setup(true, PROMPT, sessions());
+    let live = Live::at("none", Some("waiting"));
+    let s = setup_in(
+        true,
+        PROMPT,
+        sessions(),
+        Roots {
+            main_dir: live.0.join("claude"),
+            lanes_file: live.0.join("none/lanes.json"),
+        },
+        None,
+    );
     for id in ["job-a", "job-idle"] {
-        let result = s
-            .ops
-            .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({ "id": id }));
-        let (_, message) = code(result);
+        let (_, message) = code(dismiss(&s, id));
         assert!(message.contains("isn't open"), "{id}: {message}");
     }
     assert!(s.writes.lock().unwrap().is_empty(), "no Esc typed");

@@ -4,17 +4,25 @@ use super::permission_dialog::{self, clean, PermissionDialog};
 const MAX_HEADER_ROWS: usize = 14;
 const MAX_OPTION_ROWS: usize = 24;
 const MAX_TRAILING_ROWS: usize = 2;
-const HINTS: [&str; 10] = [
-    "Enter to confirm",
-    "Enter to select",
-    "Enter to view",
-    "Esc to cancel",
-    "Esc to close",
-    "Esc to go back",
-    "↑/↓ to navigate",
-    "Tab/Arrow keys to navigate",
-    "Space to toggle",
-    "Type to search",
+const MAX_FRAME_ROWS: usize = 40;
+const HINT_TAIL_ROWS: usize = 8;
+const MAX_VERB_WORDS: usize = 3;
+const KEYS: [&str; 15] = [
+    "Enter",
+    "Esc",
+    "Tab",
+    "Space",
+    "Type",
+    "↑/↓",
+    "↑↓",
+    "←/→",
+    "Tab/Arrow keys",
+    "Arrow keys",
+    "Shift+Tab",
+    "shift+tab",
+    "Ctrl+C",
+    "ctrl+c",
+    "Backspace",
 ];
 const SPINNERS: [char; 6] = ['✶', '✳', '✢', '✻', '✽', '✺'];
 
@@ -85,17 +93,111 @@ fn is_rule(row: &str) -> bool {
     rules >= 8 && rules * 2 >= row.chars().count()
 }
 
+fn is_counter(part: &str) -> bool {
+    let part = part.trim_start_matches('(').trim_end_matches(')');
+    let part = part.strip_prefix("Step ").unwrap_or(part);
+    let numbers = |a: &str, b: &str| {
+        [a, b]
+            .iter()
+            .all(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    };
+    part.split_once('/')
+        .or_else(|| part.split_once(" of "))
+        .is_some_and(|(a, b)| numbers(a, b))
+}
+
+fn without_counter(part: &str) -> &str {
+    match part.rsplit_once(' ') {
+        Some((head, last)) if is_counter(last) => head.trim_end(),
+        _ => part,
+    }
+}
+
+fn is_hint(part: &str) -> bool {
+    let part = part.trim();
+    if is_counter(part) {
+        return true;
+    }
+    let Some((key, verb)) = without_counter(part).split_once(" to ") else {
+        return false;
+    };
+    let words: Vec<&str> = verb.split(' ').collect();
+    KEYS.contains(&key)
+        && words.len() <= MAX_VERB_WORDS
+        && words
+            .iter()
+            .all(|w| !w.is_empty() && w.chars().all(|c| c.is_lowercase() || c == '-'))
+}
+
 fn is_footer(row: &str) -> bool {
-    row.split('·').all(|part| HINTS.contains(&part.trim()))
+    row.split('·').all(is_hint)
+}
+
+fn offers_esc(row: &str) -> bool {
+    is_footer(row) && row.split('·').any(|part| part.trim().starts_with("Esc to"))
+}
+
+fn last_text(rows: &[&str]) -> Option<usize> {
+    rows.iter()
+        .rposition(|row| !row.is_empty() && !is_rule(row))
 }
 
 fn esc_hint(rows: &[&str]) -> bool {
-    rows.iter()
+    last_text(rows).is_some_and(|at| offers_esc(rows[at]))
+}
+
+fn framed_esc_hint(rows: &[&str]) -> bool {
+    let Some(at) = last_text(rows).filter(|at| offers_esc(rows[*at])) else {
+        return false;
+    };
+    for row in rows[at.saturating_sub(MAX_FRAME_ROWS)..at].iter().rev() {
+        if is_rule(row) || row.starts_with(['❯', '›']) {
+            return true;
+        }
+        if row.starts_with(['⏺', '⎿']) || row.contains("? for shortcuts") || is_streaming(row) {
+            return false;
+        }
+    }
+    false
+}
+
+fn hint_tail(rows: &[&str]) -> Vec<String> {
+    let text: Vec<&str> = rows
+        .iter()
+        .copied()
+        .filter(|row| !row.is_empty() && !is_rule(row))
+        .collect();
+    text[text.len().saturating_sub(HINT_TAIL_ROWS)..]
+        .iter()
+        .map(|row| row.to_string())
+        .collect()
+}
+
+fn footer_below(below: &[&str]) -> Option<bool> {
+    let text: Vec<&str> = below
+        .iter()
+        .copied()
+        .filter(|row| !row.is_empty() && !is_rule(row))
+        .collect();
+    if text.is_empty() {
+        return Some(false);
+    }
+    (is_footer(&text.join(" ")) || text.iter().all(|row| is_footer(row))).then_some(true)
+}
+
+fn rule_above(rows: &[&str], first: usize) -> bool {
+    for row in rows[first.saturating_sub(MAX_HEADER_ROWS)..first]
+        .iter()
         .rev()
-        .find(|row| !row.is_empty() && !is_rule(row))
-        .is_some_and(|row| {
-            is_footer(row) && row.split('·').any(|part| part.trim().starts_with("Esc to"))
-        })
+    {
+        if is_rule(row) {
+            return true;
+        }
+        if is_past_dialog(row) {
+            return false;
+        }
+    }
+    false
 }
 
 fn is_chrome(row: &str) -> bool {
@@ -157,17 +259,15 @@ fn column(line: &str, row: &str) -> usize {
 }
 
 fn continuation_end(lines: &[String], rows: &[&str], tail: usize, drawn: usize) -> usize {
-    let prefix = option_row(0, rows[tail]).map_or(0, |o| {
-        rows[tail]
-            .chars()
-            .count()
-            .saturating_sub(o.label.chars().count())
-    });
-    let label_at = column(&lines[tail], rows[tail]) + prefix;
+    let prefix = rows[tail]
+        .chars()
+        .take_while(|c| !c.is_ascii_digit())
+        .count();
+    let number_at = column(&lines[tail], rows[tail]) + prefix;
     let mut end = tail + 1;
     while end < drawn && end - tail <= MAX_TRAILING_ROWS {
         let row = rows[end];
-        if is_chrome(row) || is_past_dialog(row) || column(&lines[end], row) < label_at {
+        if is_chrome(row) || is_past_dialog(row) || column(&lines[end], row) < number_at {
             break;
         }
         end += 1;
@@ -251,14 +351,21 @@ pub fn shown(lines: &[String]) -> Option<Shown> {
     if let Some(dialog) = read_rows(lines, &rows) {
         return Some(Shown::Screen(dialog));
     }
-    esc_hint(&rows).then(|| {
-        Shown::Hint(
-            rows.iter()
-                .filter(|row| !row.is_empty())
-                .map(|row| row.to_string())
-                .collect(),
-        )
-    })
+    esc_hint(&rows).then(|| Shown::Hint(hint_tail(&rows)))
+}
+
+pub fn closable(lines: &[String], marked: bool) -> Option<Shown> {
+    if let Some(page) = ask_dialog::page(lines) {
+        return Some(Shown::Question(page));
+    }
+    if let Some(dialog) = permission_dialog::read(lines) {
+        return Some(Shown::Permission(dialog));
+    }
+    let rows: Vec<&str> = lines.iter().map(|line| clean(line)).collect();
+    if let Some(dialog) = read_rows(lines, &rows) {
+        return Some(Shown::Screen(dialog));
+    }
+    (marked || framed_esc_hint(&rows)).then(|| Shown::Hint(hint_tail(&rows)))
 }
 
 fn read_rows(lines: &[String], rows: &[&str]) -> Option<ScreenDialog> {
@@ -268,11 +375,14 @@ fn read_rows(lines: &[String], rows: &[&str]) -> Option<ScreenDialog> {
         .rposition(|row| option_row(0, row).is_some())?;
     let end = continuation_end(lines, rows, tail, drawn);
     let below = &rows[end..drawn];
-    if !below.iter().all(|row| is_chrome(row)) || !below.iter().any(|row| is_footer(row)) {
-        return None;
-    }
+    let footed = footer_below(below)?;
     let found = numbered(rows, tail)?;
     if found.len() < 2 {
+        return None;
+    }
+    let marked = found.iter().any(|n| n.selected);
+    let ruled = below.iter().any(|row| is_rule(row)) && rule_above(rows, found[0].row);
+    if !footed && !(marked && ruled) {
         return None;
     }
     let options = options_of(rows, &found, end);

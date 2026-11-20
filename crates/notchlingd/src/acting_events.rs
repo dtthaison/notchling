@@ -17,6 +17,8 @@ use notchling_local_api::{ApiError, Caller, ErrorCode, Tier};
 use serde_json::Value;
 
 pub(crate) const LOG_DOWN: &str = "the audit log can't be written";
+pub(crate) const NOT_AT_A_PROMPT: &str =
+    "the session is working, and Esc would stop it: Dismiss waits until it waits or is idle";
 
 pub(crate) struct PlayError {
     pub(crate) err: ApiError,

@@ -184,3 +184,114 @@ fn output_that_only_looks_like_a_dialog_is_not_shown() {
         None
     );
 }
+
+const RULE: &str =
+    "────────────────────────────────────────────────────────────────────────────────";
+
+fn text_screen(rows: &[&str]) -> TerminalScreen {
+    screen_of(rows.join("\r\n").as_bytes())
+}
+
+fn card(rows: &[&str]) -> Option<screen_dialog::ScreenDialog> {
+    screen_dialog::read(&text_screen(rows).lines())
+}
+
+#[test]
+fn a_marked_list_between_rules_is_a_card_with_no_footer() {
+    let dialog = card(&[
+        RULE,
+        " Switch model?",
+        "",
+        " ❯ 1. Yes, switch",
+        "   2. No, go back",
+        "",
+        RULE,
+    ])
+    .expect("a dialog");
+    assert_eq!(dialog.title, "Switch model?");
+    assert_eq!(dialog.options.len(), 2);
+    let unmarked = card(&[RULE, " Pick", "   1. One", "   2. Two", RULE]);
+    assert_eq!(unmarked, None, "rules alone need a marked option");
+}
+
+#[test]
+fn a_footer_wrapped_over_two_rows_is_read() {
+    let dialog = card(&[
+        RULE,
+        " Switch model?",
+        " ❯ 1. Yes, switch",
+        "   2. No, go back",
+        "",
+        " Enter to select · Tab/Arrow keys to",
+        " navigate · Esc to cancel",
+    ])
+    .expect("a dialog");
+    assert_eq!(dialog.options[1].label, "No, go back");
+}
+
+#[test]
+fn common_hint_variants_are_footers() {
+    for footer in [
+        " ↑↓ to navigate · Esc to exit",
+        " Enter to confirm · Esc to cancel (1/2)",
+        " Step 1 of 2 · Enter to select",
+        " Enter to submit · Shift+Tab to go back",
+    ] {
+        let dialog = card(&[
+            " Switch model?",
+            " ❯ 1. Yes, switch",
+            "   2. No, go back",
+            "",
+            footer,
+        ]);
+        assert!(dialog.is_some(), "{footer}");
+    }
+}
+
+#[test]
+fn a_last_option_wrapped_to_its_number_column_is_one_label() {
+    let dialog = card(&[
+        " Switch model?",
+        " ❯ 1. Yes, switch",
+        "   2. No, go back and keep",
+        "   the model you had",
+        "",
+        " Enter to confirm · Esc to cancel",
+    ])
+    .expect("a dialog");
+    assert_eq!(
+        dialog.options[1].label,
+        "No, go back and keep the model you had"
+    );
+}
+
+#[test]
+fn a_bare_esc_hint_holds_a_row_but_is_never_enough_for_esc() {
+    let screen = text_screen(&[
+        "⏺ The menu you will see:",
+        "  Use the arrows to move.",
+        "  ↑/↓ to navigate · Esc to close",
+    ]);
+    assert!(screen_dialog::shown(&screen.lines()).is_some(), "held");
+    assert_eq!(screen_dialog::closable(&screen.lines(), false), None);
+}
+
+#[test]
+fn a_menu_framed_by_a_rule_can_be_closed_with_esc() {
+    let shown = screen_dialog::closable(&chrome("menu-on.txt").lines(), false);
+    assert!(matches!(shown, Some(Shown::Hint(_))), "{shown:?}");
+}
+
+#[test]
+fn output_that_only_looks_like_a_dialog_is_never_closed_with_esc() {
+    for name in [
+        "blockquote-list.txt",
+        "list-then-press-enter.txt",
+        "list-marked-then-prose.txt",
+        "list-streaming-no-box.txt",
+        "numbered-list-in-chat.txt",
+    ] {
+        let lines = made_up(name).lines();
+        assert_eq!(screen_dialog::closable(&lines, false), None, "{name}");
+    }
+}
