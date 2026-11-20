@@ -4,7 +4,7 @@ use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, NodeRef};
 use serde_json::{json, Value};
 
 use super::data::{Session, Tool};
-use super::reload::{
+use super::session_reload::{
     lead, mode, parse, Act, Applied, Card, Mode, Stage, State, Status, Task, NOTE_MS, POLL_MS,
 };
 use crate::acting::{ops, Request};
@@ -89,7 +89,10 @@ fn the_card_says_tokens_and_dollars_on_the_model_from_the_catalog_price() {
     assert!(text.contains("180k tokens"), "{text}");
     assert!(text.contains("about $0.72"), "{text}");
     assert!(text.contains("Opus"), "{text}");
-    assert!(text.starts_with("Reloads the session to pick up new tools."), "{text}");
+    assert!(
+        text.starts_with("Reloads the session to pick up new tools."),
+        "{text}"
+    );
 }
 
 #[test]

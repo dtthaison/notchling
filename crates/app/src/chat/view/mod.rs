@@ -28,7 +28,6 @@ mod message_actions;
 mod native_spin;
 mod opinions;
 mod outbox_edit;
-mod reload;
 mod outbox_rows;
 mod page_panel;
 mod paged_rows;
@@ -36,6 +35,7 @@ pub mod pane;
 mod panels;
 mod phone;
 mod prompts;
+mod reload;
 mod render_map;
 mod repo;
 mod repo_section;
@@ -199,7 +199,7 @@ pub struct ChatView {
     account_menu: bool,
     row_menu: Option<row_menu::RowMenu>,
     use_chrome: crate::chat::chrome::State,
-    reload: crate::chat::reload::State,
+    reload: crate::chat::session_reload::State,
     reload_view: Option<gpui::WeakEntity<crate::sheets::reload_view::ReloadView>>,
     copy_menu: Option<copy_menu::CopyMenu>,
     keys: copy::Keys,
@@ -443,7 +443,7 @@ impl ChatView {
             account_menu: false,
             row_menu: None,
             use_chrome: crate::chat::chrome::State::default(),
-            reload: crate::chat::reload::State::default(),
+            reload: crate::chat::session_reload::State::default(),
             reload_view: None,
             copy_menu: None,
             keys: copy::Keys::new(cx),

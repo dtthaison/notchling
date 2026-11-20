@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use super::ChatView;
 use crate::acting::Request;
-use crate::chat::reload::{self, Act, Applied, Card, Stage};
+use crate::chat::session_reload::{self, Act, Applied, Card, Stage};
 use crate::sheets::reload_view::{ReloadChoice, ReloadView};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -13,11 +13,11 @@ enum Sent {
 }
 
 impl ChatView {
-    pub(super) fn reload_mode(&self, id: &str) -> Option<reload::Mode> {
+    pub(super) fn reload_mode(&self, id: &str) -> Option<session_reload::Mode> {
         self.sessions
             .iter()
             .find(|s| s.agent.id == id)
-            .and_then(reload::mode)
+            .and_then(session_reload::mode)
     }
 
     pub(super) fn reload_offered(&self, id: &str) -> bool {
@@ -32,7 +32,7 @@ impl ChatView {
     fn reload_lead(&self, id: &str) -> String {
         let facts = &self.conversation.facts;
         let known = self.selected.as_deref() == Some(id);
-        reload::lead(
+        session_reload::lead(
             if known { facts.context_tokens } else { 0 },
             facts.model.as_deref().filter(|_| known),
             self.claude_catalog(),
@@ -120,12 +120,7 @@ impl ChatView {
         }
         self.reload.last_poll_ms = super::now_ms();
         self.reload_sync(cx);
-        self.reload_send(
-            Request::reload(id, true),
-            id.to_owned(),
-            Sent::Start,
-            cx,
-        );
+        self.reload_send(Request::reload(id, true), id.to_owned(), Sent::Start, cx);
         cx.notify();
     }
 
@@ -154,7 +149,7 @@ impl ChatView {
     ) {
         match result {
             Ok(reply) => {
-                if let Some(status) = reload::parse(&reply) {
+                if let Some(status) = session_reload::parse(&reply) {
                     match self.reload.apply(id, &status, super::now_ms()) {
                         Applied::Changed => self.reload_sync(cx),
                         Applied::Finished { .. } => {

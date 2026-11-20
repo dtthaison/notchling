@@ -693,8 +693,7 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<gpui::AnyView> {
         }
         Shown::ReloadCard | Shown::ReloadWaiting | Shown::ReloadTerminal => {
             let card = super::renders::reload_card(which)?;
-            cx.new(|_| super::reload_view::ReloadView::new(card))
-                .into()
+            cx.new(|_| super::reload_view::ReloadView::new(card)).into()
         }
         Shown::NewSession | Shown::NewSessionWorker | Shown::TrustFolder => cx
             .new(|cx| NewSessionView::new(new_session(which), acts, None, cx))

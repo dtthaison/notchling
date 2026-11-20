@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, Context, Div, Stateful};
+use gpui::{div, prelude::*, Context, Div, Stateful};
 use notchling_engine::sessions::Agent;
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{icon_button, menu_panel, MenuItem};
@@ -7,10 +7,14 @@ use notchling_locale as t;
 
 use super::cards::A;
 use super::view::NotchView;
-use crate::chat::reload::mode_of;
+use crate::chat::session_reload::mode_of;
 
 impl NotchView {
-    pub(super) fn reload_button(&self, agent: &Agent, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn reload_button(
+        &self,
+        agent: &Agent,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         mode_of(agent)?;
         let kind = if self.reload_menu {
             ButtonKind::Secondary
@@ -18,12 +22,12 @@ impl NotchView {
             ButtonKind::Ghost
         };
         Some(
-            icon_button("notch-more", Icon::More, kind, PartState::Rest, A).on_click(
-                cx.listener(|this, _, _, cx| {
+            icon_button("notch-more", Icon::More, kind, PartState::Rest, A).on_click(cx.listener(
+                |this, _, _, cx| {
                     this.reload_menu = !this.reload_menu;
                     cx.notify();
-                }),
-            ),
+                },
+            )),
         )
     }
 

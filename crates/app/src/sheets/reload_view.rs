@@ -7,7 +7,7 @@ use notchling_locale as t;
 
 use super::header::sheet_header;
 use super::view::Dismiss;
-use crate::chat::reload::{Act, Card};
+use crate::chat::session_reload::{Act, Card};
 
 pub struct ReloadChoice(pub Act);
 
@@ -30,13 +30,10 @@ pub fn body(card: &Card, a: Appearance) -> Div {
         .flex_col()
         .gap(px(12.0))
         .child(label(&card.intro(), TypeRole::Body, Ink::Text, a))
-        .children(status.map(|text| {
-            card_row(a).child(label(&text, TypeRole::Body, ink, a))
-        }))
+        .children(status.map(|text| card_row(a).child(label(&text, TypeRole::Body, ink, a))))
         .children(
-            (card.stage == crate::chat::reload::Stage::Terminal).then(|| {
-                card_row(a).child(label(&card.command, TypeRole::Mono, Ink::Text, a))
-            }),
+            (card.stage == crate::chat::session_reload::Stage::Terminal)
+                .then(|| card_row(a).child(label(&card.command, TypeRole::Mono, Ink::Text, a))),
         )
         .children(
             card.note()

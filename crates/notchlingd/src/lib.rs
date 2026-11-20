@@ -185,10 +185,10 @@ pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
-mod reply_attempts;
-mod reply_outbox;
 pub mod reload_cli;
 pub mod reload_ops;
+mod reply_attempts;
+mod reply_outbox;
 mod reply_screen;
 mod screen_keep;
 pub mod service;
@@ -274,10 +274,6 @@ mod catalog_ops_tests;
 mod catalog_roles_tests;
 #[cfg(test)]
 mod chrome_ops_tests;
-#[cfg(test)]
-mod reload_cli_tests;
-#[cfg(test)]
-mod reload_ops_tests;
 #[cfg(test)]
 mod cluster_fence_keeper_kit;
 #[cfg(test)]
@@ -436,6 +432,10 @@ mod providers_cli_tests;
 mod providers_ops_tests;
 #[cfg(test)]
 mod providers_sync_tests;
+#[cfg(test)]
+mod reload_cli_tests;
+#[cfg(test)]
+mod reload_ops_tests;
 #[cfg(test)]
 mod reply_clear_tests;
 #[cfg(test)]

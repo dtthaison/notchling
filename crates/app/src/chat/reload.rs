@@ -1,285 +1,123 @@
-use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
-use notchling_engine::catalog::ModelInfo;
-use notchling_engine::cluster::id::Tool as ClusterTool;
-use notchling_engine::cluster::main_sessions::tool_of_row;
-use notchling_engine::reload::{estimate, Need, Phase, Wait};
-use notchling_engine::sessions::{Agent, AgentTarget};
-use notchling_locale as t;
-use serde_json::Value;
+use notchling_platform::watch::WatchConfig;
 
-use crate::accounts::cost::dollars;
-use crate::chat::claude_picker::{find, model_label};
-use crate::chat::data::{Session, Tool};
-use crate::chat::format::tokens;
+pub const MIN_GAP_MS: i64 = 2_000;
+pub const FULL_EVERY_MS: i64 = 30_000;
 
-pub const POLL_MS: i64 = 1_000;
-pub const NOTE_MS: i64 = 6_000;
-pub const POLL_FAILS: u32 = 5;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Reload,
-    Terminal,
-}
-
-pub fn mode(session: &Session) -> Option<Mode> {
-    if session.tool != Tool::Claude {
-        return None;
-    }
-    mode_of(&session.agent)
-}
-
-pub fn mode_of(agent: &Agent) -> Option<Mode> {
-    if !matches!(tool_of_row(&agent.id), ClusterTool::Claude)
-        || agent.node.is_some()
-        || agent.headless
-        || agent.command.is_some()
-    {
-        return None;
-    }
-    match agent.target {
-        AgentTarget::Job(_) => Some(Mode::Reload),
-        AgentTarget::Process(_) => Some(Mode::Terminal),
-        AgentTarget::Resume { .. } => None,
+pub fn watch_config() -> WatchConfig {
+    WatchConfig {
+        poll: Duration::from_secs(1),
+        debounce: Duration::from_millis(500),
+        max_latency: Duration::from_secs(1),
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Task {
-    pub phase: Phase,
-    pub since_ms: i64,
-    pub session: Option<String>,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReloadGate {
+    last_ms: Option<i64>,
+    changed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Status {
-    pub offered: bool,
-    pub task: Option<Task>,
-}
-
-pub fn parse(value: &Value) -> Option<Status> {
-    let offered = value.get("offered").and_then(Value::as_bool)?;
-    let task = match value.get("task") {
-        None | Some(Value::Null) => None,
-        Some(task) => Some(Task {
-            phase: serde_json::from_value(task.clone()).ok()?,
-            since_ms: task.get("since_ms").and_then(Value::as_i64).unwrap_or(0),
-            session: task
-                .get("session")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-        }),
-    };
-    Some(Status { offered, task })
-}
-
-pub fn lead(tokens_read: u64, model: Option<&str>, catalog: &[ModelInfo]) -> String {
-    if tokens_read == 0 {
-        return t::chat::reload_lead().to_owned();
-    }
-    let price = model
-        .and_then(|id| find(catalog, id))
-        .and_then(|info| info.price);
-    let found = estimate(tokens_read, price.as_ref());
-    match (found.usd, model) {
-        (Some(usd), Some(id)) => t::chat::reload_cost(
-            &tokens(tokens_read),
-            &dollars(usd),
-            &model_label(Some(id), catalog),
-        ),
-        _ => t::chat::reload_tokens(&tokens(tokens_read)),
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Act {
-    Reload,
-    Cancel,
-    CancelReload,
-    Close,
-    TryAgain,
-    CopyCommand,
-}
-
-impl Act {
-    pub fn label(self) -> &'static str {
-        match self {
-            Act::Reload => t::chat::reload_reload(),
-            Act::Cancel => t::chat::reload_cancel(),
-            Act::CancelReload => t::chat::reload_cancel_reload(),
-            Act::Close => t::chat::reload_close(),
-            Act::TryAgain => t::chat::reload_try_again(),
-            Act::CopyCommand => t::chat::reload_copy(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Stage {
-    Ask,
-    Waiting(Wait),
-    Working,
-    Needs(Need),
-    Terminal,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Card {
-    pub session: String,
-    pub lead: String,
-    pub stage: Stage,
-    pub command: String,
-}
-
-impl Card {
-    pub fn open(agent: &Agent, lead: String) -> Option<Card> {
-        let stage = match mode_of(agent)? {
-            Mode::Reload => Stage::Ask,
-            Mode::Terminal => Stage::Terminal,
-        };
-        let id = agent.id.clone();
-        Some(Card {
-            command: t::chat::reload_terminal_command(&id),
-            session: id,
-            lead,
-            stage,
-        })
-    }
-
-    pub fn intro(&self) -> String {
-        match self.stage {
-            Stage::Terminal => t::chat::reload_terminal().to_owned(),
-            _ => self.lead.clone(),
-        }
-    }
-
-    pub fn status(&self) -> Option<String> {
-        Some(match &self.stage {
-            Stage::Ask | Stage::Terminal => return None,
-            Stage::Waiting(Wait::Turn) => t::chat::reload_wait_turn().to_owned(),
-            Stage::Waiting(Wait::Dialog) => t::chat::reload_wait_dialog().to_owned(),
-            Stage::Waiting(Wait::Tasks { count }) => t::chat::reload_wait_tasks(*count),
-            Stage::Working => t::chat::reload_working().to_owned(),
-            Stage::Needs(need) => match need {
-                Need::Busy { by: Wait::Turn } => t::chat::reload_busy_turn().to_owned(),
-                Need::Busy { by: Wait::Dialog } => t::chat::reload_busy_dialog().to_owned(),
-                Need::Busy {
-                    by: Wait::Tasks { .. },
-                } => t::chat::reload_busy_tasks().to_owned(),
-                Need::TasksUnknown => t::chat::reload_tasks_unknown().to_owned(),
-                Need::Failed { text } => t::chat::reload_failed(text),
-            },
-        })
-    }
-
-    pub fn note(&self) -> Option<String> {
-        match self.stage {
-            Stage::Waiting(_) => Some(t::chat::reload_wait_note().to_owned()),
-            _ => None,
-        }
-    }
-
-    pub fn problem(&self) -> bool {
-        matches!(self.stage, Stage::Needs(_))
-    }
-
-    pub fn acts(&self) -> Vec<Act> {
-        match &self.stage {
-            Stage::Ask => vec![Act::Reload, Act::Cancel],
-            Stage::Waiting(_) => vec![Act::CancelReload],
-            Stage::Working => Vec::new(),
-            Stage::Needs(_) => vec![Act::TryAgain, Act::Close],
-            Stage::Terminal => vec![Act::CopyCommand, Act::Close],
-        }
-    }
-
-    pub fn live(&self) -> bool {
-        matches!(self.stage, Stage::Waiting(_) | Stage::Working)
-    }
-}
-
-#[derive(Default)]
-pub struct State {
-    pub card: Option<Card>,
-    pub notes: HashMap<String, (String, i64)>,
-    pub watching: HashSet<String>,
-    pub asking: HashSet<String>,
-    pub poll_fails: u32,
-    pub last_poll_ms: i64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Applied {
-    Nothing,
-    Changed,
-    Finished { followed: Option<String> },
-}
-
-impl State {
-    pub fn poll_failed(&mut self) -> bool {
-        self.poll_fails += 1;
-        if self.poll_fails >= POLL_FAILS {
-            self.poll_fails = 0;
-            return true;
-        }
-        false
-    }
-
-    pub fn apply(&mut self, id: &str, status: &Status, now_ms: i64) -> Applied {
-        self.poll_fails = 0;
-        let Some(task) = &status.task else {
-            return Applied::Nothing;
-        };
-        let Some(card) = self.card.as_mut().filter(|c| c.session == id) else {
-            return match &task.phase {
-                Phase::Done { .. } => Applied::Finished {
-                    followed: task.session.clone(),
-                },
-                _ => Applied::Nothing,
-            };
-        };
-        let stage = match &task.phase {
-            Phase::Waiting { by } => Stage::Waiting(*by),
-            Phase::Working { .. } => Stage::Working,
-            Phase::NeedsYou { need } => Stage::Needs(need.clone()),
-            Phase::Cancelled => {
-                self.card = None;
-                return Applied::Finished { followed: None };
-            }
-            Phase::Done { .. } => {
-                self.card = None;
-                let text = match &task.session {
-                    Some(_) => t::chat::reload_done_new(),
-                    None => t::chat::reload_done(),
-                };
-                self.notes
-                    .insert(id.to_owned(), (text.to_owned(), now_ms + NOTE_MS));
-                return Applied::Finished {
-                    followed: task.session.clone(),
-                };
-            }
-        };
-        if card.stage == stage {
-            return Applied::Nothing;
-        }
-        card.stage = stage;
-        Applied::Changed
-    }
-
-    pub fn note(&self, id: &str, now_ms: i64) -> Option<String> {
-        if let Some(card) = self.card.as_ref().filter(|c| c.session == id) {
-            if card.live() {
-                return card.status();
-            }
-        }
-        self.notes
-            .get(id)
-            .filter(|(_, until)| *until > now_ms)
-            .map(|(text, _)| text.clone())
+impl ReloadGate {
+    pub fn changed(&mut self) {
+        self.changed = true;
     }
 
     pub fn due(&self, now_ms: i64) -> bool {
-        self.card.as_ref().is_some_and(Card::live) && now_ms - self.last_poll_ms >= POLL_MS
+        let Some(last) = self.last_ms else {
+            return true;
+        };
+        let since = now_ms - last;
+        (self.changed && since >= MIN_GAP_MS) || since >= FULL_EVERY_MS
+    }
+
+    pub fn reloaded(&mut self, now_ms: i64) {
+        self.last_ms = Some(now_ms);
+        self.changed = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notchling_platform::watch::Watcher;
+    use std::time::Instant;
+
+    #[test]
+    fn the_first_reload_is_at_once_and_a_quiet_one_waits_for_the_full_reload() {
+        let mut gate = ReloadGate::default();
+        assert!(gate.due(0));
+        gate.reloaded(0);
+        assert!(!gate.due(1));
+        assert!(!gate.due(FULL_EVERY_MS - 1));
+        assert!(gate.due(FULL_EVERY_MS));
+    }
+
+    #[test]
+    fn a_change_after_a_quiet_spell_reloads_at_once_and_one_just_after_a_reload_waits() {
+        let mut gate = ReloadGate::default();
+        gate.reloaded(0);
+        gate.changed();
+        assert!(!gate.due(MIN_GAP_MS - 1), "too soon after the last reload");
+        assert!(gate.due(MIN_GAP_MS), "but not lost");
+        gate.reloaded(MIN_GAP_MS);
+        gate.changed();
+        assert!(!gate.due(MIN_GAP_MS + 500));
+        let mut quiet = ReloadGate::default();
+        quiet.reloaded(0);
+        quiet.changed();
+        assert!(quiet.due(20_000));
+    }
+
+    #[test]
+    fn steady_changes_reload_every_gap_and_are_never_starved() {
+        let mut gate = ReloadGate::default();
+        let tick = 500;
+        let mut reloads = Vec::new();
+        for now in (0..60_000).step_by(tick as usize) {
+            gate.changed();
+            if gate.due(now) {
+                gate.reloaded(now);
+                reloads.push(now);
+            }
+        }
+        assert!(reloads.len() >= 28, "{} reloads in a minute", reloads.len());
+        for pair in reloads.windows(2) {
+            let gap = pair[1] - pair[0];
+            assert!(
+                (MIN_GAP_MS..=MIN_GAP_MS + tick).contains(&gap),
+                "reloads {} ms apart",
+                gap
+            );
+        }
+    }
+
+    #[test]
+    fn steady_writes_still_make_the_watcher_report() {
+        let scratch = crate::testutil::Scratch::new("steady-writes");
+        let file = scratch.write("transcript.jsonl", "x");
+        let config = watch_config();
+        assert!(
+            config.max_latency > config.debounce,
+            "or the debounce never waits"
+        );
+        let (_watcher, batches) =
+            Watcher::start(vec![scratch.path().to_path_buf()], config).expect("a watcher");
+        let started = Instant::now();
+        let mut reported = 0;
+        let mut size = 1;
+        while started.elapsed() < Duration::from_millis(3_500) {
+            size += 1;
+            std::fs::write(&file, vec![b'x'; size]).expect("append");
+            std::thread::sleep(Duration::from_millis(30));
+            while batches.try_recv().is_ok() {
+                reported += 1;
+            }
+        }
+        assert!(
+            reported >= 1,
+            "no batch in 3.5 s of steady writes: a debounce alone starves the reload"
+        );
     }
 }

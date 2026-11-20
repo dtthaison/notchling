@@ -11,8 +11,6 @@ mod capabilities_tests;
 pub mod capabilities_view;
 #[cfg(target_os = "macos")]
 pub mod chrome_view;
-#[cfg(target_os = "macos")]
-pub mod reload_view;
 pub mod client_check;
 pub mod client_model;
 #[cfg(test)]
@@ -36,6 +34,8 @@ pub mod new_session;
 mod new_session_chrome_tests;
 #[cfg(test)]
 mod new_session_run_on_tests;
+#[cfg(target_os = "macos")]
+pub mod reload_view;
 pub mod renders;
 pub mod run_on;
 #[cfg(target_os = "macos")]

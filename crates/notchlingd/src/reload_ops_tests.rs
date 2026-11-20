@@ -1,5 +1,6 @@
 use crate::acting_ops::ActingOps;
 use crate::acting_ops_tests::{app, caller, code, sessions, setup_in, Setup, PROMPT};
+use crate::op_group::OpGroup;
 use crate::outbox_ops::OutboxOps;
 use crate::reload_ops::{Hosts, LiveHosts, ReloadOps};
 use notchling_engine::chrome::status;
@@ -30,6 +31,7 @@ struct Log {
     restarts: u32,
     sleeps: Vec<u64>,
     hold: bool,
+    slow: bool,
     now: u64,
     moved_to: Option<String>,
 }
@@ -45,7 +47,13 @@ impl Host for FakeHost {
         log.hold || log.turns.pop_front().unwrap_or(false)
     }
     fn dialog_open(&mut self) -> bool {
-        (self.0).0.lock().unwrap().dialogs.pop_front().unwrap_or(false)
+        (self.0)
+            .0
+            .lock()
+            .unwrap()
+            .dialogs
+            .pop_front()
+            .unwrap_or(false)
     }
     fn tasks_in_flight(&mut self) -> Option<u32> {
         (self.0)
@@ -65,7 +73,7 @@ impl Host for FakeHost {
             let mut log = (self.0).0.lock().unwrap();
             log.sleeps.push(ms);
             log.now += ms;
-            log.hold
+            log.hold || log.slow
         };
         if hold {
             std::thread::sleep(std::time::Duration::from_millis(2));
@@ -185,8 +193,8 @@ fn without_after_turn_a_running_turn_is_refused_for_the_card() {
 #[test]
 fn background_helpers_hold_it_and_the_card_can_say_how_many() {
     let fake = Fake::default();
-    fake.0.lock().unwrap().tasks = VecDeque::from(vec![Some(3); 60]);
-    fake.0.lock().unwrap().hold = false;
+    fake.0.lock().unwrap().tasks = VecDeque::from(vec![Some(3); 600]);
+    fake.0.lock().unwrap().slow = true;
     let (_d, s) = faked("tasks", &fake, false);
     reload(&s, "job-a", true).unwrap();
     let mut seen = Value::Null;
@@ -292,11 +300,14 @@ fn a_reload_is_audited_when_it_ends() {
     let (_d, s) = faked("audit", &fake, true);
     let words: Arc<Mutex<Vec<(String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = words.clone();
-    s.ops.reload().unwrap().set_audit(Arc::new(move |_, word, result| {
-        seen.lock()
-            .unwrap()
-            .push((word.to_string(), result == DoneOrFailed::Done));
-    }));
+    s.ops
+        .reload()
+        .unwrap()
+        .set_audit(Arc::new(move |_, word, result| {
+            seen.lock()
+                .unwrap()
+                .push((word.to_string(), result == DoneOrFailed::Done));
+        }));
     reload(&s, "job-a", true).unwrap();
     assert_eq!(*words.lock().unwrap(), [("reload".to_string(), true)]);
 }
@@ -326,7 +337,11 @@ fn a_finished_task_is_cleared_when_read_with_ack() {
     assert!(phase_of(&s, "job-a").is_null());
 }
 
-fn live(tag: &str, launcher: Arc<FakeLauncher>, state_text: &str) -> (Dir, Arc<ActingOps>, PathBuf) {
+fn live(
+    tag: &str,
+    launcher: Arc<FakeLauncher>,
+    state_text: &str,
+) -> (Dir, Arc<ActingOps>, PathBuf) {
     let (dir, roots) = roots(tag);
     let state = roots.main_dir.join("jobs/abcd1234/state.json");
     std::fs::write(&state, state_text).unwrap();
@@ -356,7 +371,15 @@ fn the_live_host_respawns_the_same_job_with_its_own_flags_untouched() {
     let after: Value = serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
     assert_eq!(
         after["respawnFlags"],
-        json!(["--model", "opus", "--bg", "--resume", "old", "--permission-mode", "plan"])
+        json!([
+            "--model",
+            "opus",
+            "--bg",
+            "--resume",
+            "old",
+            "--permission-mode",
+            "plan"
+        ])
     );
 }
 
@@ -437,11 +460,19 @@ fn a_mode_changed_during_the_session_is_carried_and_restored_on_failure() {
     let mut host = hosts.host(&job_a(&ops));
     assert_eq!(host.restart(), Ok(true));
     let flags = status::read_flags(&state).unwrap();
-    assert_eq!(&flags[flags.len() - 2..], ["--permission-mode", "acceptEdits"]);
+    assert_eq!(
+        &flags[flags.len() - 2..],
+        ["--permission-mode", "acceptEdits"]
+    );
     assert!(status::read_pending(&state).is_none());
     launcher.push_output(Ok(LaunchOutput::failed(1, "no such job")));
-    std::fs::write(&state, std::fs::read_to_string(&state).unwrap().replace("acceptEdits", "plan"))
-        .unwrap();
+    std::fs::write(
+        &state,
+        std::fs::read_to_string(&state)
+            .unwrap()
+            .replace("acceptEdits", "plan"),
+    )
+    .unwrap();
     let before = status::read_flags(&state).unwrap();
     assert!(host.restart().is_err());
     assert_eq!(status::read_flags(&state).unwrap(), before);

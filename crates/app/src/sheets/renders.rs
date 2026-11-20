@@ -18,7 +18,7 @@ use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 19] = [
+pub const VIEWS: [ViewSpec; 22] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -227,8 +227,8 @@ pub fn chrome_sheet(shown: Shown) -> Option<crate::chat::chrome::Sheet> {
     })
 }
 
-pub fn reload_card(shown: Shown) -> Option<crate::chat::reload::Card> {
-    use crate::chat::reload::{lead, Card, Stage};
+pub fn reload_card(shown: Shown) -> Option<crate::chat::session_reload::Card> {
+    use crate::chat::session_reload::{lead, Card, Stage};
     use notchling_engine::catalog::{Catalog, Tool};
     use notchling_engine::reload::Wait;
     use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};

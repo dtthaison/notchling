@@ -16,11 +16,8 @@ pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
 pub mod chrome;
-pub mod reload;
 #[cfg(test)]
 mod chrome_tests;
-#[cfg(test)]
-mod reload_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;
@@ -123,6 +120,9 @@ pub mod run_command;
 mod run_command_tests;
 pub mod scroll_trace;
 pub mod selection;
+pub mod session_reload;
+#[cfg(test)]
+mod session_reload_tests;
 pub mod shell_list;
 pub mod shell_live;
 #[cfg(test)]

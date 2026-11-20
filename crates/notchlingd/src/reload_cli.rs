@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
 
-pub const USAGE: &str = "Usage: notchling session reload <id|self> [--after-turn] [--json] [--socket <path>]";
+pub const USAGE: &str =
+    "Usage: notchling session reload <id|self> [--after-turn] [--json] [--socket <path>]";
 
 pub const DONE: i32 = 0;
 pub const REFUSED: i32 = 1;
