@@ -9,8 +9,8 @@ use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitSty
 use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::approval::requested_by;
-use super::form::{Form, Typed};
-use super::form_view::{clipboard_key, form_body, form_footer, FormEvent};
+use super::form::{Enter, Form};
+use super::form_view::{form_body, form_footer, Editing, FormEditors, FormEvent};
 use super::presence::{Done, Presence};
 use super::store::Vault;
 use super::wire::PendingRequest;
@@ -27,6 +27,7 @@ pub struct VaultRequestView {
     vault: Arc<Vault>,
     id: String,
     form: Form,
+    editors: FormEditors,
     busy: bool,
     done: bool,
     presence: Presence,
@@ -58,11 +59,18 @@ impl VaultRequestView {
         presence: Presence,
         cx: &mut Context<Self>,
     ) -> Self {
+        let form = Form::request(&pending);
+        let editors = FormEditors::new(
+            &form,
+            cx,
+            Rc::new(|this: &mut Self, e, cx| this.event(e, cx)),
+        );
         VaultRequestView {
             feed,
             vault,
             id: pending.id.clone(),
-            form: Form::request(&pending),
+            form,
+            editors,
             busy: false,
             done: false,
             presence,
@@ -77,11 +85,18 @@ impl VaultRequestView {
     }
 
     pub fn fixed(pending: PendingRequest, today: i64, cx: &mut Context<Self>) -> Self {
+        let form = Form::request(&pending);
+        let editors = FormEditors::new(
+            &form,
+            cx,
+            Rc::new(|this: &mut Self, e, cx| this.event(e, cx)),
+        );
         VaultRequestView {
             feed: Arc::new(SwitchFeed::fixed(crate::switches::Switches::all_on())),
             vault: Arc::new(Vault::fixed(Vec::new())),
             id: pending.id.clone(),
-            form: Form::request(&pending),
+            form,
+            editors,
             busy: false,
             done: false,
             presence: Presence::Window,
@@ -212,6 +227,21 @@ impl VaultRequestView {
                 self.form.focus = field;
                 self.typing = true;
                 self.want_focus = true;
+                self.editors.want(field);
+            }
+            FormEvent::Edited(field) => {
+                if !self.editors.pull(&mut self.form, field, cx) {
+                    return;
+                }
+                self.form.focus = field;
+            }
+            FormEvent::Enter(field) => {
+                match self.form.enter(field) {
+                    Enter::Newline => self.editors.insert_newline(field, cx),
+                    Enter::Save => self.save(cx),
+                    Enter::Ignore => {}
+                }
+                return;
             }
             FormEvent::Kind(kind) => self.form.set_kind(kind),
             FormEvent::ToggleAsk => self.form.ask = !self.form.ask,
@@ -223,7 +253,7 @@ impl VaultRequestView {
         cx.notify();
     }
 
-    fn key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
         if !self.typing {
             return;
         }
@@ -233,19 +263,15 @@ impl VaultRequestView {
             cx.stop_propagation();
             return;
         }
-        if clipboard_key(&mut self.form, k, cx) {
+        if k.key == "tab" && !k.modifiers.platform && !k.modifiers.control {
+            if let Some(field) = self.editors.focused(window, cx) {
+                self.form.focus = field;
+            }
+            self.form.focus_next();
+            self.editors.want(self.form.focus);
             cx.stop_propagation();
             cx.notify();
-            return;
         }
-        let modified = k.modifiers.platform || k.modifiers.control;
-        match self.form.key(&k.key, k.key_char.as_deref(), modified) {
-            Typed::Submit => self.save(cx),
-            Typed::Changed => {}
-            Typed::Ignored => return,
-        }
-        cx.stop_propagation();
-        cx.notify();
     }
 }
 
@@ -260,19 +286,20 @@ impl Render for VaultRequestView {
         let a = window_appearance(window);
         if self.reset_focus {
             self.reset_focus = false;
-            if self.focus.is_focused(window) {
+            if self.focus.contains_focused(window, cx) {
                 window.blur();
             }
         }
         let asked = std::mem::take(&mut self.want_focus) && self.visible;
         if (asked || self.presence.takes_focus() && self.visible)
-            && !self.focus.is_focused(window)
+            && !self.focus.contains_focused(window, cx)
             && self.fixed_today.is_none()
         {
-            window.focus(&self.focus);
+            self.editors.want(self.form.focus);
         }
-        self.form.keyboard =
-            self.fixed_today.is_some() || (self.typing && self.focus.is_focused(window));
+        self.editors.apply_want(window, cx);
+        self.editors.push(&self.form, cx);
+        self.form.keyboard = self.fixed_today.is_some();
         if self.done {
             return match self.presence {
                 Presence::Window => div().size_full().fill(Ink::Window, a).into_any_element(),
@@ -287,14 +314,20 @@ impl Render for VaultRequestView {
             .track_focus(&self.focus)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, _| {
-                    if this.presence.takes_focus() {
+                cx.listener(|this, _, window, cx| {
+                    if this.presence.takes_focus() && !this.focus.contains_focused(window, cx) {
                         window.focus(&this.focus);
                     }
                 }),
             )
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)));
-        let body = form_body(&self.form, self.today(), a, cx, on);
+            .on_key_down(
+                cx.listener(|this, event: &KeyDownEvent, window, cx| this.key(event, window, cx)),
+            );
+        let editing = Editing {
+            editors: &self.editors,
+            window,
+        };
+        let body = form_body(&self.form, editing, self.today(), a, cx, on);
         match self.presence {
             Presence::Window => frame
                 .size_full()
