@@ -1,4 +1,6 @@
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
@@ -22,10 +24,11 @@ use super::add_sheet::{
 };
 use super::address_rows_view::{RowEditor, Rows};
 use super::addresses_form::{RowDraft, RowMeta};
+use super::edit_key::EditTest;
 use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
-use super::view::{field_box, ClusterSheetView};
+use super::view::ClusterSheetView;
 use crate::mac::gate;
 use crate::machines::view::mono_lines;
 use crate::notch::answer::{type_key, Typed};
@@ -46,6 +49,10 @@ pub(super) struct AddSheet {
     pub(super) name: Entity<TextEditor>,
     pub(super) rows: Vec<RowEditor>,
     pub(super) touched: bool,
+    pub(super) more: bool,
+    pub(super) test: EditTest,
+    pub(super) tested: String,
+    pub(super) stop: Arc<AtomicBool>,
     pub(super) machine: MachineAdd,
     pub(super) flow: Option<String>,
     pub(super) joining: bool,
@@ -59,6 +66,12 @@ pub(super) struct AddSheet {
     pub(super) error: Option<String>,
     _address_events: Subscription,
     _name_events: Subscription,
+}
+
+impl Drop for AddSheet {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
 }
 
 pub(super) struct NestedVault {
@@ -131,6 +144,10 @@ impl AddSheet {
             name,
             rows: vec![first],
             touched: false,
+            more: false,
+            test: EditTest::Idle,
+            tested: String::new(),
+            stop: Arc::new(AtomicBool::new(false)),
             machine: MachineAdd::new(),
             joining: flow.is_some(),
             flow,
@@ -266,7 +283,7 @@ impl ClusterSheetView {
         cx.notify();
     }
 
-    fn add_draft(&self, cx: &Context<Self>) -> Draft {
+    pub(super) fn add_draft(&self, cx: &Context<Self>) -> Draft {
         match &self.add.sheet {
             Some(sheet) => {
                 let rows = self.rows_drafts(Rows::Add, cx);
@@ -703,35 +720,11 @@ impl ClusterSheetView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
-        let Some(sheet) = self.add.sheet.as_ref() else {
+        if self.add.sheet.is_none() {
             return body;
-        };
+        }
         if shown.form {
-            let name_focused = sheet.name.read(cx).is_focused(window);
-            body = body
-                .child(label(
-                    t::cluster::add_intro(),
-                    TypeRole::Body,
-                    Ink::TextMuted,
-                    a,
-                ))
-                .child(self.rows_view(Rows::Add, window, a, cx))
-                .children(
-                    shown
-                        .target
-                        .as_deref()
-                        .map(|text| label(text, TypeRole::Meta, Ink::TextMuted, a)),
-                )
-                .child(label(
-                    t::cluster::add_name_label(),
-                    TypeRole::Label,
-                    Ink::TextFaint,
-                    a,
-                ))
-                .child(field_box(&sheet.name, name_focused, a));
-            if let Some(problem) = &shown.error {
-                body = body.child(label(problem, TypeRole::Meta, Ink::Needs, a));
-            }
+            body = self.add_form(body, shown, window, a, cx);
         }
         if let Some(text) = &shown.busy {
             body = body.child(

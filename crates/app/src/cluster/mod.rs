@@ -1,4 +1,6 @@
 pub mod add;
+#[cfg(target_os = "macos")]
+mod add_form_view;
 pub mod add_job;
 pub mod add_parts;
 pub mod add_plan;
@@ -71,6 +73,8 @@ pub const HEIGHT: f32 = 560.0;
 mod add_rig_tests;
 #[cfg(test)]
 mod add_sheet_tests;
+#[cfg(test)]
+mod add_ssh_paste_tests;
 #[cfg(test)]
 mod add_tests;
 #[cfg(test)]

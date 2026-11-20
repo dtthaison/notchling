@@ -171,6 +171,17 @@ impl ClusterSheetView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
+        self.rows_view_with(at, false, window, a, cx)
+    }
+
+    pub(super) fn rows_view_with(
+        &self,
+        at: Rows,
+        first_is_elsewhere: bool,
+        window: &Window,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let tag = match at {
             Rows::Add => "add",
             Rows::Edit => "edit",
@@ -271,7 +282,10 @@ impl ClusterSheetView {
                     .flex()
                     .flex_col()
                     .gap(px(SPACE[0]))
-                    .child(field_box(&row.editor, focused, a))
+                    .children(
+                        (!(first_is_elsewhere && i == 0))
+                            .then(|| field_box(&row.editor, focused, a)),
+                    )
                     .child(controls),
             );
         }

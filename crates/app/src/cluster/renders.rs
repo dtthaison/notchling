@@ -14,7 +14,7 @@ pub const STUDIO: &str = "5566778899aabbcc";
 pub const THIS_MAC: &str = "MacBook";
 pub const STANDBY_NAME: &str = "mac-mini";
 
-pub const VIEWS: [ViewSpec; 29] = [
+pub const VIEWS: [ViewSpec; 32] = [
     ViewSpec {
         name: "cluster",
         size: (WIDTH, HEIGHT),
@@ -29,6 +29,21 @@ pub const VIEWS: [ViewSpec; 29] = [
         name: "machines-sheet-add",
         size: (WIDTH, 760.0),
         about: "the Add Machine form over the Machines sheet: user@host typed, the name filled from the host (made-up hosts)",
+    },
+    ViewSpec {
+        name: "machines-sheet-add-empty",
+        size: (WIDTH, 760.0),
+        about: "the Add Machine form, empty: one field for an SSH address or command, Test, the name, More Options closed",
+    },
+    ViewSpec {
+        name: "machines-sheet-add-paste",
+        size: (WIDTH, 760.0),
+        about: "the Add Machine form after pasting an ssh command: what was understood on one line (made-up host)",
+    },
+    ViewSpec {
+        name: "machines-sheet-add-more",
+        size: (WIDTH, 760.0),
+        about: "the Add Machine form with More Options open: the kind of the address and Add Address (made-up host)",
     },
     ViewSpec {
         name: "machines-sheet-addresses",
@@ -186,6 +201,9 @@ pub enum Shown {
     Update,
     Machines,
     MachinesAdd,
+    MachinesAddEmpty,
+    MachinesAddPaste,
+    MachinesAddMore,
     MachinesAddresses,
     MachinesTailscale,
     MachinesTest,
@@ -200,6 +218,9 @@ pub fn shown(name: &str) -> Option<Shown> {
         "cluster" => Some(Shown::Full),
         "machines-sheet" => Some(Shown::Machines),
         "machines-sheet-add" => Some(Shown::MachinesAdd),
+        "machines-sheet-add-empty" => Some(Shown::MachinesAddEmpty),
+        "machines-sheet-add-paste" => Some(Shown::MachinesAddPaste),
+        "machines-sheet-add-more" => Some(Shown::MachinesAddMore),
         "machines-sheet-addresses" => Some(Shown::MachinesAddresses),
         "machines-sheet-tailscale" => Some(Shown::MachinesTailscale),
         "machines-sheet-tailscale-test" => Some(Shown::MachinesTest),
@@ -657,6 +678,9 @@ pub fn model_of(which: Shown) -> ClusterModel {
     match which {
         Shown::Machines
         | Shown::MachinesAdd
+        | Shown::MachinesAddEmpty
+        | Shown::MachinesAddPaste
+        | Shown::MachinesAddMore
         | Shown::MachinesAddresses
         | Shown::MachinesTailscale
         | Shown::MachinesTest

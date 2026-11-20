@@ -464,12 +464,28 @@ cluster-add-machine = Add Machine…
 cluster-add-title = Add Machine
 # Title of the sheet once a machine is chosen; $name is its name.
 cluster-add-title-named = Add { $name }
-cluster-add-intro = Type the machine's SSH address. Add looks at the machine over SSH and saves it to Machines if it answers. Nothing is installed on it and it doesn't join the cluster; Join Cluster… does that later.
-cluster-add-address-placeholder = user@host
+cluster-add-intro = Paste an ssh command or type user@host:port. Nothing is installed on the machine.
+# Label of the field that takes the machine's address or a pasted ssh command.
+cluster-add-address-label = SSH address or command
+cluster-add-address-placeholder = ssh -p 22 user@host
 # Label of the name field in the Add Machine form. Left empty, the name is the first part of the host.
 cluster-add-name-label = Name (Optional)
-# Line under the address field; $target is user@host as it will be used.
-cluster-add-connects-as = Connects as { $target }
+# Part of the line under the address field that says what was understood; $user is the user.
+cluster-add-seen-user = User { $user }
+# Part of the line that says what Add Machine understood; $host is the host.
+cluster-add-seen-host = Host { $host }
+# Same; $port is the port number as text.
+cluster-add-seen-port = Port { $port }
+# Same; $key is the path of the key file.
+cluster-add-seen-key = Key { $key }
+# Same; $name is the machine the connection goes through.
+cluster-add-seen-jump = Via jump { $name }
+# Two parts of that line side by side.
+cluster-add-seen-joined = { $first } · { $second }
+# Row that shows or hides the extra Add Machine fields.
+cluster-add-more = More Options
+# Error when an ssh command names a jump host that Machines doesn't list; $host is that name.
+cluster-add-jump-unknown = { $host } isn't a machine in Machines. Add it first, then use its name after -J.
 # Button of the Add Machine form: it checks the machine over SSH, then saves it.
 cluster-add-save = Add
 # Line when a machine was saved; $name is its name.

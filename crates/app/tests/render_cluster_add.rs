@@ -90,6 +90,24 @@ fn render_machines_add() {
 
 #[test]
 #[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_add_empty() {
+    render("machines-sheet-add-empty");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_add_paste() {
+    render("machines-sheet-add-paste");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
+fn render_machines_add_more() {
+    render("machines-sheet-add-more");
+}
+
+#[test]
+#[ignore = "opens a window and captures it; needs a window server"]
 fn render_machines_addresses() {
     render("machines-sheet-addresses");
 }
@@ -129,6 +147,9 @@ fn the_add_views_are_listed_and_named_for_the_map() {
         "cluster-update",
         "machines-sheet",
         "machines-sheet-add",
+        "machines-sheet-add-empty",
+        "machines-sheet-add-paste",
+        "machines-sheet-add-more",
         "machines-sheet-addresses",
         "machines-sheet-tailscale",
         "machines-sheet-organization",
@@ -138,6 +159,7 @@ fn the_add_views_are_listed_and_named_for_the_map() {
     }
     let sources = [
         include_str!("../src/cluster/add_view.rs"),
+        include_str!("../src/cluster/add_form_view.rs"),
         include_str!("../src/cluster/add_plan_view.rs"),
         include_str!("../src/cluster/not_joined_view.rs"),
         include_str!("../src/cluster/updates_view.rs"),
