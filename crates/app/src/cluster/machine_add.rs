@@ -213,7 +213,9 @@ fn save(parts: &AddParts, target: &Target, check: &DraftCheck) -> Result<(), Str
             machine.set_admin(AdminAccess::RootSsh);
         }
         machine.organization = target.organization.clone();
-        machine.set_ssh_key(target.key.as_deref());
+        if target.key.is_some() {
+            machine.set_ssh_key(target.key.as_deref());
+        }
         if !target.addresses.is_empty() {
             machine.set_addresses(target.addresses.clone());
         }

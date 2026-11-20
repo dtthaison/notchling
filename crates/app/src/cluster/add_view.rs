@@ -1,6 +1,4 @@
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
@@ -22,9 +20,9 @@ use super::add_sheet::{
     derived_name, install, machine_view, may_open, refused_view, sign_in_target, view, Action,
     AddPassword, AddView, Button, Draft,
 };
+use super::add_test_run::TestRun;
 use super::address_rows_view::{RowEditor, Rows};
 use super::addresses_form::{RowDraft, RowMeta};
-use super::edit_key::EditTest;
 use super::machine_add::{MachineAdd, Probe};
 use super::model::ClusterModel;
 use super::not_joined::NotJoined;
@@ -50,9 +48,7 @@ pub(super) struct AddSheet {
     pub(super) rows: Vec<RowEditor>,
     pub(super) touched: bool,
     pub(super) more: bool,
-    pub(super) test: EditTest,
-    pub(super) tested: String,
-    pub(super) stop: Arc<AtomicBool>,
+    pub(super) run: TestRun,
     pub(super) machine: MachineAdd,
     pub(super) flow: Option<String>,
     pub(super) joining: bool,
@@ -66,12 +62,6 @@ pub(super) struct AddSheet {
     pub(super) error: Option<String>,
     _address_events: Subscription,
     _name_events: Subscription,
-}
-
-impl Drop for AddSheet {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-    }
 }
 
 pub(super) struct NestedVault {
@@ -145,9 +135,7 @@ impl AddSheet {
             rows: vec![first],
             touched: false,
             more: false,
-            test: EditTest::Idle,
-            tested: String::new(),
-            stop: Arc::new(AtomicBool::new(false)),
+            run: TestRun::default(),
             machine: MachineAdd::new(),
             joining: flow.is_some(),
             flow,
@@ -258,6 +246,7 @@ impl ClusterSheetView {
     }
 
     fn add_address_changed(&mut self, cx: &mut Context<Self>) {
+        self.add_test_reset();
         let Some(sheet) = self.add.sheet.as_mut() else {
             return;
         };

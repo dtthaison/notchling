@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use gpui::{div, prelude::*, px, Context, Div, Window};
 use notchling_engine::machines::registry::Machine;
+use notchling_engine::machines::ssh_command::parse_ssh_command;
 use notchling_engine::machines::ssh_test::{run_target_stoppable, Target, TEST_PARALLEL};
 use notchling_kit::metric::SPACE;
 use notchling_kit::part::{ButtonKind, PartState};
@@ -11,10 +11,11 @@ use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use notchling_locale as t;
 
 use super::add_sheet::{parse_draft, AddView, Parsed};
+use super::add_test_run::{may_test, test_signature};
 use super::add_view::AddSheet;
 use super::address_rows_view::Rows;
 use super::addresses_form::text_of;
-use super::edit_key::{EditResult, EditTest};
+use super::edit_key::EditResult;
 use super::rounds;
 use super::ssh_text::{address_test_text, test_ink};
 use super::view::{field_box, ClusterSheetView};
@@ -46,8 +47,13 @@ impl ClusterSheetView {
         };
         let address_focused = sheet.address.read(cx).is_focused(window);
         let name_focused = sheet.name.read(cx).is_focused(window);
-        let running = matches!(sheet.test, EditTest::Running(_));
-        let can_test = shown.target.is_some() && !running;
+        let running = sheet.run.is_running();
+        let can_test = may_test(
+            shown.target.is_some(),
+            running,
+            self.test_lanes,
+            TEST_PARALLEL,
+        );
         let test = button(
             "add-test",
             if running {
@@ -108,7 +114,10 @@ impl ClusterSheetView {
             .child(field_box(&sheet.name, name_focused, a))
             .child(self.add_more_row(sheet.more, a, cx));
         if sheet.more {
-            body = body.child(self.rows_view_with(Rows::Add, true, window, a, cx));
+            let jump = parse_ssh_command(sheet.address.read(cx).text())
+                .ok()
+                .and_then(|t| t.jump);
+            body = body.child(self.rows_view_with(Rows::Add, true, jump.as_deref(), window, a, cx));
         }
         body
     }
@@ -142,19 +151,28 @@ impl ClusterSheetView {
         cx.notify();
     }
 
+    pub(super) fn add_test_reset(&mut self) {
+        if let Some(sheet) = self.add.sheet.as_mut() {
+            sheet.run.reset();
+        }
+    }
+
     fn add_signature(&self, cx: &Context<Self>) -> String {
-        format!("{:?}", self.add_draft(cx))
+        let draft = self.add_draft(cx);
+        let jump = parse_ssh_command(&draft.address).ok().and_then(|t| t.jump);
+        let machines = self
+            .add
+            .sheet
+            .as_ref()
+            .and_then(|s| s.parts.as_ref())
+            .map(|p| p.registry.all())
+            .unwrap_or_default();
+        test_signature(&draft, &machines, jump.as_deref())
     }
 
     fn add_test_lines(&self, sheet: &AddSheet, a: Appearance, cx: &mut Context<Self>) -> Div {
         let mut lines = div().flex().flex_none().flex_col().gap(px(2.0));
-        let EditTest::Done(_, results) = &sheet.test else {
-            return lines;
-        };
-        if self.add_signature(cx) != sheet.tested {
-            return lines;
-        }
-        for row in results {
+        for row in sheet.run.shown(&self.add_signature(cx)) {
             lines = lines.child(label(
                 &t::cluster::ssh_test_address(&row.address, &address_test_text(&row.result)),
                 TypeRole::Meta,
@@ -172,7 +190,7 @@ impl ClusterSheetView {
         let Some(sheet) = self.add.sheet.as_mut() else {
             return;
         };
-        if matches!(sheet.test, EditTest::Running(_)) || full {
+        if sheet.run.is_running() || full {
             return;
         }
         let Some(parts) = sheet.parts.clone() else {
@@ -189,12 +207,8 @@ impl ClusterSheetView {
         let machine = test_machine(&parsed);
         let home = std::path::PathBuf::from(&parts.this.home);
         sheet.error = None;
-        sheet.stop.store(true, Ordering::SeqCst);
-        sheet.stop = Arc::new(AtomicBool::new(false));
-        sheet.tested = signature;
         let round = rounds::next();
-        sheet.test = EditTest::Running(round);
-        let stop = sheet.stop.clone();
+        let stop = sheet.run.start(signature, round);
         self.test_lanes += 1;
         cx.spawn(async move |this, cx| {
             let user = machine.user.clone();
@@ -226,13 +240,7 @@ impl ClusterSheetView {
                 view.test_lanes = view.test_lanes.saturating_sub(1);
                 let now = view.add_signature(cx);
                 if let Some(sheet) = view.add.sheet.as_mut() {
-                    if sheet.test == EditTest::Running(round) {
-                        sheet.test = if now == sheet.tested {
-                            EditTest::Done(round, results)
-                        } else {
-                            EditTest::Idle
-                        };
-                    }
+                    sheet.run.finish(round, &now, results);
                 }
                 cx.notify();
             })

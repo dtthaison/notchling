@@ -30,18 +30,21 @@ impl SshTarget {
 
 const EMPTY: &str = "Paste an ssh command or type user@host:port";
 const SHAPE: &str = "Start with ssh, or type user@host:port";
-const SHELL: &str = "Use plain words: no quotes, variables, pipes or redirects";
+const SHELL: &str = "Use plain words: no quotes, variables, pipes, redirects or %";
+const JUMP: &str = "-J must name a machine already in Machines, without a user or port";
+const BUNDLE: &str = "Write ssh options one at a time";
 const NO_HOST: &str = "The command names no machine: add user@host";
 const HOST: &str = "The host is a name or an IP address";
 const USER: &str = "The user is lowercase letters, digits, hyphens and underscores";
 const PORT: &str = "The port is a number from 1 to 65535";
+const BRACKET_V6: &str = "Brackets are only for an IPv6 address";
 const BRACKET: &str = "Close the IPv6 address's bracket";
 const KEY: &str = "The key is the full path of a file, or one starting with ~/";
 const ONE_JUMP: &str = "Only one jump host is supported";
 const ONE_KEY: &str = "Only one key is supported";
 const PATH: &str = "The address can't hold a path";
 
-const PLAIN_FLAGS: [&str; 7] = ["-4", "-6", "-C", "-q", "-v", "-vv", "-vvv"];
+const PLAIN_FLAG_LETTERS: &str = "Cqv";
 
 #[derive(Default)]
 struct Found {
@@ -61,7 +64,7 @@ pub fn parse_ssh_command(text: &str) -> Result<SshTarget, String> {
     if text.chars().any(char::is_control) {
         return Err("The address can't hold control characters".into());
     }
-    if text.chars().any(|c| "\"'`$;|&<>(){}*?!\\#".contains(c)) {
+    if text.chars().any(|c| "\"'`$;|&<>(){}*?!\\#%".contains(c)) {
         return Err(SHELL.into());
     }
     let tokens: Vec<&str> = text.split_whitespace().collect();
@@ -135,8 +138,15 @@ fn merged<T: PartialEq>(a: Option<T>, b: Option<T>, what: &str) -> Result<Option
 }
 
 fn option(arg: &str, args: &[&str], at: &mut usize, found: &mut Found) -> Result<(), String> {
-    if PLAIN_FLAGS.contains(&arg) {
-        return Ok(());
+    let letters = &arg[1..];
+    if !arg.starts_with("--") && !letters.is_empty() {
+        if letters.chars().all(|c| PLAIN_FLAG_LETTERS.contains(c)) {
+            return Ok(());
+        }
+        let first = letters.chars().next().unwrap_or(' ');
+        if PLAIN_FLAG_LETTERS.contains(first) && letters.len() > 1 {
+            return Err(format!("{BUNDLE}: {arg}"));
+        }
     }
     let flag: String = if arg.starts_with("--") {
         arg.to_owned()
@@ -190,7 +200,7 @@ fn set_user(found: &mut Found, value: &str) -> Result<(), String> {
     if found.user.is_some() {
         return Err("The user is given twice".into());
     }
-    if !is_user(value) {
+    if !is_user(value) || value.starts_with('-') {
         return Err(USER.into());
     }
     found.user = Some(value.to_owned());
@@ -212,11 +222,17 @@ fn set_jump(found: &mut Found, value: &str) -> Result<(), String> {
     if found.jump.is_some() || value.contains(',') {
         return Err(ONE_JUMP.into());
     }
-    found.jump = Some(destination(value)?.host);
+    if value.is_empty() || value.contains(['@', ':', '/', '[', ']']) || value.starts_with('-') {
+        return Err(JUMP.into());
+    }
+    found.jump = Some(value.to_owned());
     Ok(())
 }
 
 fn port_of(text: &str) -> Result<u16, String> {
+    if !text.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(PORT.into());
+    }
     text.parse::<u16>()
         .ok()
         .filter(|p| *p > 0)
@@ -238,7 +254,7 @@ fn destination(text: &str) -> Result<Dest, String> {
             if rest.contains('@') {
                 return Err(HOST.into());
             }
-            if !is_user(user) {
+            if !is_user(user) || user.starts_with('-') {
                 return Err(USER.into());
             }
             (Some(user.to_owned()), rest)
@@ -249,7 +265,7 @@ fn destination(text: &str) -> Result<Dest, String> {
         return Err(PATH.into());
     }
     let (host, port) = host_and_port(rest)?;
-    if !is_host(&host) {
+    if !is_host(&host) || host.starts_with('-') {
         return Err(HOST.into());
     }
     Ok(Dest { user, host, port })
@@ -260,6 +276,9 @@ fn host_and_port(rest: &str) -> Result<(String, Option<u16>), String> {
         let Some((host, after)) = inner.split_once(']') else {
             return Err(BRACKET.into());
         };
+        if !host.contains(':') {
+            return Err(BRACKET_V6.into());
+        }
         return match after {
             "" => Ok((host.to_owned(), None)),
             _ => match after.strip_prefix(':') {

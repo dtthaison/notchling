@@ -65,9 +65,26 @@ fn jump_host() {
 }
 
 #[test]
-fn jump_host_with_its_own_user_and_port() {
-    let got = parsed("ssh -J me@bastion:2200 user@inner.example.test");
-    assert_eq!(got.jump.as_deref(), Some("bastion"));
+fn a_jump_with_a_user_or_port_is_refused() {
+    for text in [
+        "ssh -J me@bastion user@inner.example.test",
+        "ssh -J bastion:2200 user@inner.example.test",
+        "ssh -J [2001:db8::1] user@inner.example.test",
+        "ssh -o ProxyJump=me@bastion user@inner.example.test",
+    ] {
+        let why = parse_ssh_command(text).unwrap_err();
+        assert!(why.contains("already in Machines"), "{text}: {why}");
+    }
+}
+
+#[test]
+fn a_jump_may_be_any_machine_name() {
+    assert_eq!(
+        parsed("ssh -J build_box.2 user@inner.example.test")
+            .jump
+            .as_deref(),
+        Some("build_box.2")
+    );
 }
 
 #[test]
@@ -138,7 +155,7 @@ fn ssh_uri() {
 #[test]
 fn harmless_flags_are_ignored() {
     assert_eq!(
-        parsed("ssh -4 -C -v user@host.example.test"),
+        parsed("ssh -C -v user@host.example.test"),
         target(Some("user"), "host.example.test", None)
     );
 }
@@ -293,4 +310,57 @@ fn canonical_text_round_trips() {
         parsed("ssh -p 234 stackops@203.0.113.7").canonical(),
         "stackops@203.0.113.7:234"
     );
+}
+
+#[test]
+fn address_family_flags_are_refused_by_name() {
+    for flag in ["-4", "-6"] {
+        let why = parse_ssh_command(&format!("ssh {flag} user@h.example.test")).unwrap_err();
+        assert!(why.contains(flag), "{why}");
+    }
+}
+
+#[test]
+fn plain_flags_are_treated_alike() {
+    for text in [
+        "ssh -C user@h.example.test",
+        "ssh -q user@h.example.test",
+        "ssh -v user@h.example.test",
+        "ssh -vvvv user@h.example.test",
+        "ssh -Cqv user@h.example.test",
+    ] {
+        assert_eq!(parsed(text).host, "h.example.test", "{text}");
+    }
+    let why = parse_ssh_command("ssh -vp 234 user@h.example.test").unwrap_err();
+    assert!(why.contains("-vp"), "{why}");
+    let why = parse_ssh_command("ssh -4C user@h.example.test").unwrap_err();
+    assert!(why.contains("-4"), "{why}");
+}
+
+#[test]
+fn percent_tokens_and_leading_dashes_are_refused() {
+    for text in [
+        "ssh -i ~/.ssh/%h_key user@h.example.test",
+        "ssh user@%h",
+        "ssh %u@h.example.test",
+        "ssh -l -evil h.example.test",
+        "ssh -- -evil",
+        "ssh -- -evil@h.example.test",
+        "-oProxyCommand=x",
+        "ssh -oProxyCommand=x h.example.test",
+    ] {
+        assert!(parse_ssh_command(text).is_err(), "{text}");
+    }
+}
+
+#[test]
+fn ports_are_digits_only() {
+    assert!(parse_ssh_command("ssh -p +22 user@h.example.test").is_err());
+    assert!(parse_ssh_command("user@h.example.test:+22").is_err());
+}
+
+#[test]
+fn brackets_are_for_ipv6_only() {
+    assert!(parse_ssh_command("[h.example.test]:22").is_err());
+    assert!(parse_ssh_command("[203.0.113.7]:22").is_err());
 }

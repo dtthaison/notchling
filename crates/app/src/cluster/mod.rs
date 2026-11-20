@@ -10,6 +10,7 @@ mod add_register;
 pub mod add_runs;
 pub mod add_sheet;
 pub mod add_source;
+pub mod add_test_run;
 #[cfg(target_os = "macos")]
 mod add_view;
 #[cfg(target_os = "macos")]
@@ -75,6 +76,8 @@ mod add_rig_tests;
 mod add_sheet_tests;
 #[cfg(test)]
 mod add_ssh_paste_tests;
+#[cfg(test)]
+mod add_ssh_review_tests;
 #[cfg(test)]
 mod add_tests;
 #[cfg(test)]

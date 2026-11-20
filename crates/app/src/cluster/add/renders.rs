@@ -505,9 +505,14 @@ impl ClusterSheetView {
                 .update(cx, |editor, cx| editor.set_text("app-3", cx));
         }
         if matches!(which, Shown::MachinesAddPaste | Shown::MachinesAddMore) {
-            sheet.address.update(cx, |editor, cx| {
-                editor.set_text("ssh -i ~/.ssh/id_x -p 234 stackops@203.0.113.7", cx)
-            });
+            let typed = if which == Shown::MachinesAddMore {
+                "ssh -i ~/.ssh/id_x -J app-1 -p 234 stackops@203.0.113.7"
+            } else {
+                "ssh -i ~/.ssh/id_x -p 234 stackops@203.0.113.7"
+            };
+            sheet
+                .address
+                .update(cx, |editor, cx| editor.set_text(typed, cx));
             sheet
                 .name
                 .update(cx, |editor, cx| editor.set_text("machine-7", cx));

@@ -74,6 +74,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_changed(&mut self, at: Rows, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         match at {
             Rows::Add => {
                 if let Some(sheet) = self.add.sheet.as_mut() {
@@ -90,6 +93,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_add(&mut self, at: Rows, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         let row = self.row_new(at, "", RowMeta::default(), cx);
         if let Some(rows) = self.rows_of(at) {
             rows.push(row);
@@ -98,6 +104,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_remove(&mut self, at: Rows, i: usize, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         if let Some(rows) = self.rows_of(at) {
             if (i > 0 || at == Rows::Edit) && i < rows.len() {
                 rows.remove(i);
@@ -107,6 +116,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_swap(&mut self, at: Rows, i: usize, j: usize, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         let mut drafts = self.rows_drafts(at, cx);
         if !swap_rows(&mut drafts, i, j) {
             return;
@@ -123,6 +135,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_cycle_kind(&mut self, at: Rows, i: usize, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         let drafts = self.rows_drafts(at, cx);
         let Some(draft) = drafts.get(i) else {
             return;
@@ -141,6 +156,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_cycle_network(&mut self, at: Rows, i: usize, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         let mut options: Vec<Option<String>> = vec![None];
         options.extend(self.tailnets.iter().cloned().map(Some));
         if let Some(row) = self.rows_of(at).and_then(|rows| rows.get_mut(i)) {
@@ -156,6 +174,9 @@ impl ClusterSheetView {
     }
 
     pub(super) fn rows_cycle_via(&mut self, at: Rows, i: usize, cx: &mut Context<Self>) {
+        if at == Rows::Add {
+            self.add_test_reset();
+        }
         let options: Vec<Option<String>> = self.via_names.iter().cloned().map(Some).collect();
         if let Some(row) = self.rows_of(at).and_then(|rows| rows.get_mut(i)) {
             let current = row.meta.via.clone();
@@ -171,13 +192,14 @@ impl ClusterSheetView {
         a: Appearance,
         cx: &mut Context<Self>,
     ) -> Div {
-        self.rows_view_with(at, false, window, a, cx)
+        self.rows_view_with(at, false, None, window, a, cx)
     }
 
     pub(super) fn rows_view_with(
         &self,
         at: Rows,
         first_is_elsewhere: bool,
+        decided_by_command: Option<&str>,
         window: &Window,
         a: Appearance,
         cx: &mut Context<Self>,
@@ -196,49 +218,63 @@ impl ClusterSheetView {
             let kind = row.meta.kind_for(&text);
             let focused = row.editor.read(cx).is_focused(window);
             let mut controls = div().flex().items_center().gap(px(SPACE[0]));
-            controls = controls.child(
-                button(
-                    SharedString::from(format!("{tag}-row-kind-{i}")),
-                    kind_title(kind),
-                    ButtonKind::Secondary,
-                    PartState::Rest,
+            let locked = (first_is_elsewhere && i == 0)
+                .then_some(decided_by_command)
+                .flatten();
+            if let Some(machine) = locked {
+                controls = controls.child(label(
+                    &t::cluster::add_jump_decides(machine),
+                    TypeRole::Meta,
+                    Ink::TextMuted,
                     a,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.rows_cycle_kind(at, i, cx))),
-            );
-            if kind.is_tailscale() {
-                let title = match row.meta.tailnet.as_deref() {
-                    Some(name) => t::cluster::address_network(name),
-                    None => t::cluster::address_network_any().to_owned(),
-                };
+                ));
+            } else {
                 controls = controls.child(
                     button(
-                        SharedString::from(format!("{tag}-row-network-{i}")),
-                        &title,
+                        SharedString::from(format!("{tag}-row-kind-{i}")),
+                        kind_title(kind),
                         ButtonKind::Secondary,
                         PartState::Rest,
                         a,
                     )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.rows_cycle_network(at, i, cx)),
-                    ),
+                    .on_click(cx.listener(move |this, _, _, cx| this.rows_cycle_kind(at, i, cx))),
                 );
-            }
-            if kind == AddressKind::Jump {
-                let title = match row.meta.via.as_deref() {
-                    Some(name) => t::cluster::address_via(name),
-                    None => t::cluster::address_via_none().to_owned(),
-                };
-                controls = controls.child(
-                    button(
-                        SharedString::from(format!("{tag}-row-via-{i}")),
-                        &title,
-                        ButtonKind::Secondary,
-                        PartState::Rest,
-                        a,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.rows_cycle_via(at, i, cx))),
-                );
+                if kind.is_tailscale() {
+                    let title = match row.meta.tailnet.as_deref() {
+                        Some(name) => t::cluster::address_network(name),
+                        None => t::cluster::address_network_any().to_owned(),
+                    };
+                    controls = controls.child(
+                        button(
+                            SharedString::from(format!("{tag}-row-network-{i}")),
+                            &title,
+                            ButtonKind::Secondary,
+                            PartState::Rest,
+                            a,
+                        )
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.rows_cycle_network(at, i, cx)),
+                        ),
+                    );
+                }
+                if kind == AddressKind::Jump {
+                    let title = match row.meta.via.as_deref() {
+                        Some(name) => t::cluster::address_via(name),
+                        None => t::cluster::address_via_none().to_owned(),
+                    };
+                    controls = controls.child(
+                        button(
+                            SharedString::from(format!("{tag}-row-via-{i}")),
+                            &title,
+                            ButtonKind::Secondary,
+                            PartState::Rest,
+                            a,
+                        )
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.rows_cycle_via(at, i, cx)),
+                        ),
+                    );
+                }
             }
             controls = controls.child(div().flex_1());
             if i > 0 {

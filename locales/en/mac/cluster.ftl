@@ -484,6 +484,8 @@ cluster-add-seen-jump = Via jump { $name }
 cluster-add-seen-joined = { $first } · { $second }
 # Row that shows or hides the extra Add Machine fields.
 cluster-add-more = More Options
+# Note in More Options where the kind buttons would be, when the pasted command has -J; $machine is the jump machine.
+cluster-add-jump-decides = The command decides this address: through { $machine }
 # Error when an ssh command names a jump host that Machines doesn't list; $host is that name.
 cluster-add-jump-unknown = { $host } isn't a machine in Machines. Add it first, then use its name after -J.
 # Button of the Add Machine form: it checks the machine over SSH, then saves it.
