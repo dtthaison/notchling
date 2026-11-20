@@ -9,6 +9,7 @@ use notchling_locale as t;
 use serde_json::{json, Value};
 
 use crate::acting::Request;
+use crate::chat::busy::Busy;
 use crate::chat::outbox::{Bubble, Button, OutboxRow, Status};
 use crate::tools::requests::Pick;
 
@@ -25,10 +26,12 @@ pub fn status_icon(status: &Status, a: Appearance) -> Div {
         Status::Editing => (Icon::Edit, Ink::TextFaint),
         Status::MayBeIn
         | Status::MayBeInHolding(_)
+        | Status::AnswerUnseen
         | Status::BoxHasText(_)
         | Status::BoxHoldsThis => (Icon::Warning, Ink::Needs),
         Status::Stopped => (Icon::Stop, Ink::TextFaint),
         Status::NotFound => (Icon::Fail, Ink::Needs),
+        Status::NeedsAnswer => (Icon::Question, Ink::Needs),
         _ => (Icon::Clock, Ink::TextFaint),
     };
     icon(glyph, 13.0, ink, a).flex_shrink_0()
@@ -61,6 +64,17 @@ pub fn status_line_at(status: &Status, now_ms: Option<i64>) -> String {
         Status::Queued => t::chat::outbox_queued().to_owned(),
         Status::QueuedRetry => t::chat::outbox_retry().to_owned(),
         Status::WaitingDialog => t::chat::outbox_dialog().to_owned(),
+        Status::NeedsAnswer => t::chat::outbox_answer().to_owned(),
+        Status::Busy(Busy::Tasks {
+            count,
+            commands: true,
+        }) => t::chat::outbox_busy_commands(*count),
+        Status::Busy(Busy::Tasks {
+            count,
+            commands: false,
+        }) => t::chat::outbox_busy_tasks(*count),
+        Status::Busy(Busy::Replying) => t::chat::outbox_busy_replying().to_owned(),
+        Status::Busy(Busy::Unconfirmed) => t::chat::outbox_busy_unconfirmed().to_owned(),
         Status::WaitsForTurn => t::chat::outbox_turn().to_owned(),
         Status::WaitsForQueue(tool) => t::chat::outbox_wait_queue(tool_name(*tool)),
         Status::WaitsForPrevious => t::chat::outbox_wait_unsure().to_owned(),
@@ -69,6 +83,7 @@ pub fn status_line_at(status: &Status, now_ms: Option<i64>) -> String {
         Status::QueuedInSession(tool) => t::chat::outbox_in_queue(tool_name(*tool)),
         Status::Sent => t::chat::outbox_sent().to_owned(),
         Status::MayBeIn => t::chat::outbox_maybe().to_owned(),
+        Status::AnswerUnseen => t::chat::outbox_answer_unseen().to_owned(),
         Status::MayBeInHolding(until) => match now_ms {
             Some(now) => format!(
                 "{} · {}",
@@ -101,6 +116,8 @@ pub fn button_label(button: Button) -> &'static str {
         Button::MarkAsSent => t::chat::outbox_mark_sent(),
         Button::ClearBoxAndSend => t::chat::outbox_clear_send(),
         Button::ResumeAndSend => t::chat::outbox_resume_send(),
+        Button::ShowTerminal => t::chat::outbox_show_terminal(),
+        Button::Dismiss => t::chat::dialog_dismiss(),
     }
 }
 
@@ -112,6 +129,8 @@ pub fn button_id(button: Button) -> &'static str {
         Button::MarkAsSent => "outbox-mark-sent",
         Button::ClearBoxAndSend => "outbox-clear-send",
         Button::ResumeAndSend => "outbox-resume-send",
+        Button::ShowTerminal => "outbox-show-terminal",
+        Button::Dismiss => "outbox-dismiss",
     }
 }
 
@@ -266,6 +285,10 @@ pub fn attachments_for(editing: Option<&Editing>, row: &str, files: Vec<PathBuf>
         _ => files,
     }
 }
+
+#[cfg(test)]
+#[path = "outbox_asked_words_tests.rs"]
+mod asked_words_tests;
 
 #[cfg(test)]
 #[path = "outbox_rows_tests.rs"]

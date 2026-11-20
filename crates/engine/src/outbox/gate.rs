@@ -1,5 +1,6 @@
 use super::{
-    Kind, Row, State, Why, DIALOG_RECHECK_MS, GONE_AFTER_MS, QUEUE_STALE_MS, TURN_SETTLE_MS,
+    Kind, Row, State, Why, ANSWER_GRACE_MS, ANSWER_HOLD_MS, DIALOG_RECHECK_MS, GONE_AFTER_MS,
+    QUEUE_STALE_MS, TURN_SETTLE_MS,
 };
 
 const RECHECK_MS: i64 = 1_000;
@@ -26,6 +27,8 @@ pub enum Gate {
     Go { guarded: bool },
     Wait { why: Why, until_ms: i64 },
     NeedsUser(State),
+    Unsure(Why),
+    Delivered,
 }
 
 pub fn gate(row: &Row, facts: &Facts) -> Gate {
@@ -43,6 +46,9 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         Job::Stopped => return Gate::NeedsUser(State::Stopped),
         Job::Live { status } => status.as_deref(),
     };
+    if row.why == Some(Why::Answer) {
+        return answer_gate(row, status, facts);
+    }
     if status == Some("waiting") || facts.dialog_on_screen {
         return Gate::Wait {
             why: Why::Dialog,
@@ -75,6 +81,21 @@ pub fn idle_at_prompt(facts: &Facts) -> bool {
         && !facts.dialog_on_screen
         && !facts.safe
         && facts.queue_waiting == 0
+}
+
+fn answer_gate(row: &Row, status: Option<&str>, facts: &Facts) -> Gate {
+    let held = facts.now_ms - row.updated_ms;
+    let asked = status == Some("waiting") || facts.dialog_on_screen || held < ANSWER_GRACE_MS;
+    if !asked {
+        return Gate::Delivered;
+    }
+    if held >= ANSWER_HOLD_MS {
+        return Gate::Unsure(Why::Answer);
+    }
+    Gate::Wait {
+        why: Why::Answer,
+        until_ms: facts.now_ms + RECHECK_MS,
+    }
 }
 
 fn queue_is_stale(status: Option<&str>, facts: &Facts) -> bool {

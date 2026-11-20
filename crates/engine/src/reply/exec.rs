@@ -1,8 +1,9 @@
 use super::keys::{self, timing::*, ENTER, LEFT, SUBMIT};
-use super::plan::{Plan, Step, Until};
+use super::plan::{DialogPick, Plan, Step, Until};
 use super::popall;
 use crate::terminal::input_box::{self, Fill, Input};
 use crate::terminal::permission_dialog::{self, Decision, PermissionDialog};
+use crate::terminal::screen_dialog::{self, ScreenDialog};
 use crate::terminal::Shade;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -88,6 +89,9 @@ pub trait ScreenCheck {
     }
     fn shows(&self, question: &str, lines: &[String]) -> bool;
     fn is_review(&self, lines: &[String]) -> bool;
+    fn at_prompt(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -155,6 +159,7 @@ pub enum Failure {
     PermissionMismatch,
     NoAlways,
     PermissionStillOpen,
+    Working,
 }
 
 impl Failure {
@@ -216,6 +221,10 @@ impl std::fmt::Display for Failure {
                 f,
                 "The answer was typed, but the permission is still open in the terminal. Check it there."
             ),
+            Failure::Working => write!(
+                f,
+                "The session started working, so Esc wasn't sent."
+            ),
         }
     }
 }
@@ -275,6 +284,8 @@ pub fn execute_clearing(
         clearing,
         taken: false,
         pressed: None,
+        pressed_dialog: None,
+        closing: None,
         pasted: String::new(),
         intended: plan.steps.iter().find_map(|step| match step {
             Step::Paste(text) => Some(keys::paste_safe(text)),
@@ -365,6 +376,8 @@ struct Run<'a> {
     clearing: &'a Clearing,
     taken: bool,
     pressed: Option<PermissionDialog>,
+    pressed_dialog: Option<ScreenDialog>,
+    closing: Option<screen_dialog::Shown>,
     pasted: String,
     intended: Option<String>,
     doing: &'static str,
@@ -497,6 +510,40 @@ impl Run<'_> {
             },
             _ => Ok(()),
         }
+    }
+
+    fn closable(&self, lines: &[String]) -> Option<screen_dialog::Shown> {
+        screen_dialog::closable(lines, self.check.dialog_open(lines))
+    }
+
+    fn closing_still_shown(&self, lines: &[String]) -> bool {
+        match (&self.closing, self.closable(lines)) {
+            (Some(before), Some(now)) => before.same_as(&now),
+            _ => false,
+        }
+    }
+
+    fn dialog_still_open(&self, lines: &[String]) -> bool {
+        match (&self.pressed_dialog, screen_dialog::read(lines)) {
+            (Some(pressed), Some(now)) => pressed.same_as(&now),
+            _ => false,
+        }
+    }
+
+    fn press_dialog(&mut self, pick: &DialogPick) -> Result<(), Failure> {
+        let mut lines = self.pty.screen();
+        if screen_dialog::read(&lines).is_none() {
+            self.wait_until(PERMISSION_DRAW_WAIT_MS, |_, lines| {
+                screen_dialog::read(lines).is_some()
+            });
+            lines = self.pty.screen();
+        }
+        let dialog = screen_dialog::read(&lines).ok_or(Failure::QuestionGone)?;
+        if !dialog.offers(pick) || !(1..=9).contains(&pick.number) {
+            return Err(Failure::QuestionMismatch);
+        }
+        self.pressed_dialog = Some(dialog);
+        self.write(&pick.number.to_string())
     }
 
     fn highlight_in_box(&mut self) -> bool {
@@ -656,6 +703,15 @@ impl Run<'_> {
                     return Err(Failure::QuestionGone);
                 }
             }
+            Step::RequireAnyDialog => {
+                let lines = self.pty.screen();
+                self.closing = Some(self.closable(&lines).ok_or(Failure::QuestionGone)?);
+            }
+            Step::RequireAtPrompt => {
+                if !self.check.at_prompt() {
+                    return Err(Failure::Working);
+                }
+            }
             Step::AwaitInput { timeout_ms } => {
                 self.await_prompt(*timeout_ms)?;
                 self.require_free()?;
@@ -698,10 +754,14 @@ impl Run<'_> {
                         run.check.is_review(lines) || !run.check.dialog_open(lines)
                     }
                     Until::PermissionGone => permission_dialog::read(lines) != run.pressed,
+                    Until::DialogGone => !run.dialog_still_open(lines),
+                    Until::DialogClosed => !run.closing_still_shown(lines),
                 });
                 if !moved {
                     return Err(match until {
-                        Until::PermissionGone => Failure::PermissionStillOpen,
+                        Until::PermissionGone | Until::DialogGone | Until::DialogClosed => {
+                            Failure::PermissionStillOpen
+                        }
                         _ => Failure::QuestionMismatch,
                     });
                 }
@@ -729,6 +789,7 @@ impl Run<'_> {
                 self.pressed = Some(dialog);
                 self.write(&digit)?;
             }
+            Step::PressDialog { pick } => self.press_dialog(pick)?,
             Step::SubmitIfReview { timeout_ms } => {
                 let lines = self.pty.screen();
                 if self.check.is_review(&lines) {

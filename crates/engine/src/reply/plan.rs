@@ -2,6 +2,7 @@ use super::keys::{self, timing::*, ENTER, ESC, SUBMIT, UP};
 use super::question::{page_keys, Choice, PendingQuestion};
 use super::shell;
 pub use crate::terminal::permission_dialog::{self, Decision, Expected};
+pub use crate::terminal::screen_dialog::DialogPick;
 use crate::transcript::stored::precleaned;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,6 +14,8 @@ pub enum Step {
     },
     RefuseDialog,
     RequireDialog,
+    RequireAnyDialog,
+    RequireAtPrompt,
     AwaitInput {
         timeout_ms: u64,
     },
@@ -50,6 +53,9 @@ pub enum Step {
         decision: Decision,
         expect: Expected,
     },
+    PressDialog {
+        pick: DialogPick,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +63,8 @@ pub enum Until {
     Shows(String),
     ReviewOrGone,
     PermissionGone,
+    DialogGone,
+    DialogClosed,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -71,6 +79,8 @@ impl Step {
             Step::WaitQuiet { .. } => "wait quiet",
             Step::RefuseDialog => "refuse dialog",
             Step::RequireDialog => "require dialog",
+            Step::RequireAnyDialog => "require any dialog",
+            Step::RequireAtPrompt => "require at prompt",
             Step::AwaitInput { .. } => "await input",
             Step::AwaitEmpty { .. } => "await empty",
             Step::Keys(_) => "keys",
@@ -86,6 +96,7 @@ impl Step {
             Step::AwaitPopAll { .. } => "await pop all",
             Step::EndUnlessTaken => "end unless taken",
             Step::PressPermission { .. } => "press permission",
+            Step::PressDialog { .. } => "press dialog",
         }
     }
 }
@@ -199,6 +210,23 @@ pub fn interrupt(working: bool) -> Result<Plan, PlanError> {
     })
 }
 
+pub fn dismiss() -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::RequireAnyDialog,
+            Step::RequireAtPrompt,
+            Step::Keys(ESC.into()),
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::DialogClosed,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}
+
 pub fn take_back(latest: &str, keep: &[String]) -> Plan {
     let mut steps = vec![
         attach(Some(SETTLE_MS)),
@@ -277,6 +305,21 @@ pub fn permission(decision: Decision, expect: &Expected) -> Plan {
             Step::Pause(KEY_PAUSE_MS),
             Step::WaitFor {
                 until: Until::PermissionGone,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}
+
+pub fn dialog(pick: &DialogPick) -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::PressDialog { pick: pick.clone() },
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::DialogGone,
                 timeout_ms: PERMISSION_WAIT_MS,
             },
         ],

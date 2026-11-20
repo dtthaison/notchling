@@ -100,6 +100,8 @@ impl Pty for FakePty {
     }
 }
 
+pub(crate) type DialogSlot = Arc<Mutex<Option<(Vec<String>, bool)>>>;
+
 pub(crate) type Attaches = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
 #[derive(Default)]
@@ -111,10 +113,20 @@ struct FakeAttacher {
     starting: Arc<AtomicU64>,
     human: Arc<Mutex<Vec<(u64, String)>>>,
     closed: Arc<Mutex<Option<CloseHook>>>,
+    dialog: DialogSlot,
+    refuse: Arc<AtomicBool>,
+    attaching: Arc<Mutex<Option<CloseHook>>>,
 }
 
 impl Attacher for FakeAttacher {
     fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
+        if self.refuse.load(Ordering::SeqCst) {
+            return Err(ApiError::new(ErrorCode::Failed, "no terminal"));
+        }
+        let hook = self.attaching.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
         self.attached
             .lock()
             .unwrap()
@@ -131,6 +143,13 @@ impl Attacher for FakeAttacher {
         }
         for (at, text) in self.human.lock().unwrap().iter() {
             prompt = prompt.typing(*at, text);
+        }
+        if let Some((dialog, up)) = self.dialog.lock().unwrap().as_ref() {
+            let lines: Vec<&str> = dialog.iter().map(String::as_str).collect();
+            prompt = match up {
+                true => prompt.with_dialog(&lines),
+                false => prompt.opening_dialog_on_command(&lines),
+            };
         }
         Ok(Box::new(FakePty {
             prompt,
@@ -178,6 +197,9 @@ pub(crate) struct Setup {
     pub human: Arc<Mutex<Vec<(u64, String)>>>,
     pub screen: Arc<Mutex<Vec<String>>>,
     pub closed: Arc<Mutex<Option<CloseHook>>>,
+    pub dialog: DialogSlot,
+    pub refuse: Arc<AtomicBool>,
+    pub attaching: Arc<Mutex<Option<CloseHook>>>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -206,6 +228,9 @@ pub(crate) fn setup_in(
     let (deaf, starting) = (attacher.deaf.clone(), attacher.starting.clone());
     let human = attacher.human.clone();
     let closed = attacher.closed.clone();
+    let dialog = attacher.dialog.clone();
+    let refuse = attacher.refuse.clone();
+    let attaching = attacher.attaching.clone();
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -231,6 +256,9 @@ pub(crate) fn setup_in(
         human,
         screen: shown,
         closed,
+        dialog,
+        refuse,
+        attaching,
     }
 }
 

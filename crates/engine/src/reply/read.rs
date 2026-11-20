@@ -1,6 +1,7 @@
 use super::exec::{Failure, Pty};
 use super::keys::{timing::*, LEFT, RIGHT};
 use crate::terminal::ask_dialog::{self, Page};
+use crate::terminal::screen_dialog::{self, ScreenDialog};
 use crate::terminal::{input_box, shell_output};
 use crate::transcript::snapshot::{PendingQuestion, QuestionItem};
 use std::time::Duration;
@@ -49,6 +50,19 @@ pub fn read_question(pty: &mut dyn Pty, job: &str) -> Result<Option<PendingQuest
         return Ok(None);
     }
     Ok(Some(question_from(job, &pages)))
+}
+
+pub fn read_dialog(pty: &mut dyn Pty) -> Result<Option<ScreenDialog>, Failure> {
+    if !pty.wait_quiet(ms(ATTACH_QUIET_MS), ms(ATTACH_TIMEOUT_MS)) {
+        return Err(Failure::Timeout);
+    }
+    Ok(screen_dialog::read(&pty.screen()))
+}
+
+pub fn dialog_up(pty: &mut dyn Pty) -> bool {
+    pty.wait_quiet(ms(ATTACH_QUIET_MS), ms(PROBE_TIMEOUT_MS));
+    let lines = pty.screen();
+    super::keys::dialog_open(&lines) || screen_dialog::shown(&lines).is_some()
 }
 
 pub fn read_shell_output(pty: &mut dyn Pty, command: &str) -> Vec<String> {

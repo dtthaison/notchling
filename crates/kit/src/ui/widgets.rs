@@ -443,6 +443,29 @@ pub fn option_row(
     state: PartState,
     appearance: Appearance,
 ) -> Stateful<Div> {
+    option_row_of(id, number, title, Some(detail), selected, state, appearance)
+}
+
+pub fn option_row_plain(
+    id: impl Into<ElementId>,
+    number: usize,
+    title: &str,
+    selected: bool,
+    state: PartState,
+    appearance: Appearance,
+) -> Stateful<Div> {
+    option_row_of(id, number, title, None, selected, state, appearance)
+}
+
+fn option_row_of(
+    id: impl Into<ElementId>,
+    number: usize,
+    title: &str,
+    detail: Option<&str>,
+    selected: bool,
+    state: PartState,
+    appearance: Appearance,
+) -> Stateful<Div> {
     let look = option_look(state, selected, appearance);
     let badge_text = if selected {
         icon_in(Icon::Check, 10.0, look.badge_text).into_any_element()
@@ -477,7 +500,9 @@ pub fn option_row(
                 .flex_1()
                 .gap(px(2.0))
                 .child(label(title, TypeRole::Heading, Ink::Text, appearance))
-                .child(label(detail, TypeRole::Meta, Ink::TextMuted, appearance)),
+                .children(
+                    detail.map(|detail| label(detail, TypeRole::Meta, Ink::TextMuted, appearance)),
+                ),
         );
     interactive(
         element,

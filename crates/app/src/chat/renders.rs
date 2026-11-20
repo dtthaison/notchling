@@ -1,3 +1,4 @@
+use crate::chat::busy::Busy;
 use crate::chat::outbox::{bubble, Bubble, OutboxFeed, OutboxRow};
 use crate::views::ViewSpec;
 
@@ -14,10 +15,15 @@ pub const VIEWS: [ViewSpec; 2] = [
     },
 ];
 
-pub const OUTBOX_STATES: [&str; 20] = [
+pub const OUTBOX_STATES: [&str; 25] = [
     "queued",
     "retry",
     "dialog",
+    "answer",
+    "busy_tasks",
+    "busy_commands",
+    "busy_replying",
+    "busy_unconfirmed",
     "turn",
     "sending",
     "in_queue",
@@ -76,6 +82,19 @@ fn preview_row(state: &str, why: Option<&str>, text: &str) -> Option<Bubble> {
     OutboxRow::from_wire(&wire).map(|row| bubble(&row))
 }
 
+fn busy_row(why: Busy, text: &str) -> Vec<Bubble> {
+    vec![Bubble {
+        id: "preview-busy".into(),
+        text: text.into(),
+        status: crate::chat::outbox::Status::Busy(why),
+        buttons: vec![
+            crate::chat::outbox::Button::Edit,
+            crate::chat::outbox::Button::Remove,
+        ],
+        joined: 1,
+    }]
+}
+
 pub fn outbox_preview(how: &str) -> Option<Vec<Bubble>> {
     let text = "Please run the whole suite again\n\nand then push";
     let one = |state: &str, why: Option<&str>| preview_row(state, why, text).into_iter().collect();
@@ -83,6 +102,29 @@ pub fn outbox_preview(how: &str) -> Option<Vec<Bubble>> {
         "queued" => one("queued", None),
         "retry" => one("waiting", Some("retry")),
         "dialog" => one("waiting", Some("dialog")),
+        "answer" => one("waiting", Some("answer")),
+        "busy_tasks" => busy_row(
+            Busy::Tasks {
+                count: 9,
+                commands: false,
+            },
+            text,
+        ),
+        "busy_commands" => busy_row(
+            Busy::Tasks {
+                count: 3,
+                commands: true,
+            },
+            text,
+        ),
+        "busy_replying" => busy_row(Busy::Replying, text),
+        "busy_unconfirmed" => {
+            let mut shown: Vec<Bubble> = preview_row("unsure", Some("restart"), text)
+                .into_iter()
+                .collect();
+            shown.extend(busy_row(Busy::Unconfirmed, "and then push"));
+            shown
+        }
         "turn" => one("waiting", Some("turn")),
         "sending" => one("sending", None),
         "in_queue" => one("in_queue", None),

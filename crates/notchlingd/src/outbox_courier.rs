@@ -4,7 +4,8 @@ use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
-    Facts, Job, Kind, Row, Tried, TryEnd, DIALOG_RECHECK_MS, GONE_AFTER_MS,
+    AnswerWatch, Facts, Job, Kind, Row, Seen, Tried, TryEnd, Why, ANSWER_GRACE_MS,
+    DIALOG_RECHECK_MS, GONE_AFTER_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
@@ -12,6 +13,7 @@ use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
 use notchling_engine::terminal::input_box;
+use notchling_engine::terminal::screen_dialog;
 use notchling_engine::transcript::locate::{find_in_folders, find_transcript, project_folders};
 use notchling_engine::transcript::queue_state::{queue_state, QueueState};
 use notchling_engine::transcript::restart;
@@ -22,8 +24,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 const CALM_GAP_MS: i64 = 3_000;
+const ASKED_QUIET_MS: u64 = 400;
+const ASKED_WAIT_MS: u64 = 1_500;
+const MODEL_QUIET_MS: u64 = 1_500;
+const MODEL_WAIT_MS: u64 = 5_000;
 
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
@@ -223,6 +230,7 @@ struct Memo {
     dialog_at: Option<i64>,
     calm_since: Option<i64>,
     last_seen: Option<i64>,
+    answer: Option<AnswerWatch>,
 }
 
 pub struct ClaudeCourier {
@@ -236,6 +244,21 @@ pub struct ClaudeCourier {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn asked_window(text: &str) -> (u64, u64) {
+    match text.trim_start().strip_prefix("/model") {
+        Some(rest) if rest.is_empty() || rest.starts_with(char::is_whitespace) => {
+            (MODEL_QUIET_MS, MODEL_WAIT_MS)
+        }
+        _ => (ASKED_QUIET_MS, ASKED_WAIT_MS),
+    }
+}
+
+fn asks_something(pty: &mut dyn Pty, text: &str) -> bool {
+    let (quiet, wait) = asked_window(text);
+    pty.wait_quiet(Duration::from_millis(quiet), Duration::from_millis(wait));
+    screen_dialog::read(&pty.screen()).is_some()
 }
 
 fn calm(files: &dyn JobFiles, fresh: &Agent, now_ms: i64) -> bool {
@@ -279,6 +302,34 @@ impl ClaudeCourier {
     #[cfg(test)]
     pub(crate) fn open(&self) -> usize {
         lock(&self.attaches).len()
+    }
+
+    fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
+        let Job::Live { status } = job else {
+            return true;
+        };
+        if now_ms - row.updated_ms < ANSWER_GRACE_MS {
+            return true;
+        }
+        let taken = lock(&self.memos)
+            .entry(row.session.clone())
+            .or_default()
+            .answer
+            .take();
+        let mut watch = taken.unwrap_or_default();
+        let key = (row.id.as_str(), row.updated_ms);
+        let open = watch.open(key, status.as_deref(), now_ms, || {
+            let seen = match fresh {
+                Some(agent) => self.acting.dialog_seen(agent),
+                None => Seen::Unknown,
+            };
+            (seen, (self.clock)())
+        });
+        lock(&self.memos)
+            .entry(row.session.clone())
+            .or_default()
+            .answer = open.then_some(watch);
+        open
     }
 
     fn calm_now(&self, session: &str) -> bool {
@@ -366,6 +417,11 @@ impl ClaudeCourier {
             return (TryEnd::NotIdle, tried, None);
         }
         match played {
+            Ok(_) if row.kind == Kind::Command && asks_something(pty.as_mut(), &row.text) => {
+                self.acting.attempts.forget(&agent.id);
+                self.note(row, agent, None);
+                (TryEnd::Asked, tried, None)
+            }
             Ok(_) => {
                 self.acting.attempts.forget(&agent.id);
                 lock(&self.attaches).insert(row.session.clone(), pty);
@@ -469,12 +525,18 @@ impl Courier for ClaudeCourier {
                 None
             }
         };
+        let remembered = memo
+            .dialog_at
+            .is_some_and(|at| now_ms - at < DIALOG_RECHECK_MS);
+        drop(memos);
+        let dialog_on_screen = match row.why {
+            Some(Why::Answer) => self.answer_open(row, &job, fresh.as_ref(), now_ms),
+            _ => remembered,
+        };
         Facts {
             now_ms,
             job,
-            dialog_on_screen: memo
-                .dialog_at
-                .is_some_and(|at| now_ms - at < DIALOG_RECHECK_MS),
+            dialog_on_screen,
             queue_waiting: queue.waiting.len(),
             safe,
             turn_over_since_ms,

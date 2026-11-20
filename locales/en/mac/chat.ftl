@@ -285,7 +285,23 @@ chat-messages-wait = { $count ->
 chat-outbox-queued = Queued
 chat-outbox-retry = Couldn't reach the session, trying again
 chat-outbox-dialog = Waiting for a dialog
+# The message was typed and the session asked you something because of it, such as /model asking before it switches.
+chat-outbox-answer = Needs your answer
+# The session asked something because of the message, and after a long wait Notchling still could not see it answered or closed.
+chat-outbox-answer-unseen = No answer seen in time
 chat-outbox-turn = Waiting for the turn to end
+# $count is how many background tasks the session has running; the message goes in when they end.
+chat-outbox-busy-tasks = { $count ->
+    [one] Waiting: { $count } background task running
+   *[other] Waiting: { $count } background tasks running
+}
+# $count is how many background shell commands the session has running.
+chat-outbox-busy-commands = { $count ->
+    [one] Waiting: { $count } background command running
+   *[other] Waiting: { $count } background commands running
+}
+chat-outbox-busy-replying = Waiting: { -brand-claude } is replying
+chat-outbox-busy-unconfirmed = Waiting: an earlier message is unconfirmed
 # $tool is the tool's name (Claude Code, Codex or Antigravity).
 chat-outbox-wait-queue = Waiting for { $tool } to read the message before
 # A message behind one that is unsure, in the box, held by Edit, or in the tool's queue.
@@ -321,6 +337,8 @@ chat-outbox-mark-sent = Mark as Sent
 # The button that deletes the text in the session's terminal box, then sends the message.
 chat-outbox-clear-send = Clear Box and Send
 chat-outbox-resume-send = Resume and Send
+# Opens the session's own terminal, where its dialog is drawn.
+chat-outbox-show-terminal = Show Terminal
 # The line above the reply box while a queued message is being edited.
 chat-outbox-editing = Editing a queued message
 # The note when a queued message was taken before its edit went in.
@@ -413,6 +431,12 @@ chat-not-answered = Not answered
 chat-step-of = { NUMBER($step) } of { NUMBER($total) }
 chat-pick-any = Pick any that apply
 chat-claude-asks = { -brand-claude } asks
+# $label is the option of the session's dialog that was picked.
+chat-dialog-chose = Answered: { $label }
+# $label is the option that was picked in a dialog the session no longer shows.
+chat-dialog-chose-gone = Already answered in the terminal
+chat-dialog-dismiss = Dismiss
+chat-dialog-dismissed = Dismissed in the terminal
 chat-type-something-else = Type something else…
 chat-next = Next
 chat-submit = Submit

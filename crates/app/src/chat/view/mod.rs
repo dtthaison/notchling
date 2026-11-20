@@ -3,6 +3,7 @@ mod ask_cards;
 mod branches;
 mod branches_panel;
 mod bring_back;
+mod busy_note;
 mod changes;
 mod changes_panel;
 mod chrome;
@@ -13,6 +14,7 @@ mod conversation_list;
 mod conversation_view;
 mod copy;
 mod copy_menu;
+mod dialog_card;
 mod diff_panel;
 mod drop;
 mod header;
@@ -162,6 +164,7 @@ pub struct ChatView {
     tasks_open_preview: bool,
     drop_preview: bool,
     outbox_preview: Option<Vec<crate::chat::outbox::Bubble>>,
+    busy: crate::chat::busy::Reading,
     outbox_second: Option<i64>,
     overlay_open: bool,
     page_covered: bool,
@@ -478,6 +481,7 @@ impl ChatView {
             tasks_open_preview: false,
             drop_preview: false,
             outbox_preview: None,
+            busy: crate::chat::busy::Reading::default(),
             outbox_second: None,
             sidebar_hidden: false,
             details_hidden: false,

@@ -729,6 +729,17 @@ impl Postman {
                 }
                 None
             }
+            Gate::Delivered => match self.sent(row) {
+                true => None,
+                false => Some(now + TICK_MS),
+            },
+            Gate::Unsure(why) => {
+                let then = Some(OutboxThen::Unsure);
+                match self.moved(row, row.state, State::Unsure, Some(why), None, then) {
+                    true => None,
+                    false => Some(now + TICK_MS),
+                }
+            }
             Gate::Go { guarded } => self.try_row(row, guarded, now),
         }
     }
@@ -932,6 +943,9 @@ impl Postman {
 #[cfg(test)]
 #[path = "outbox_aside_tests.rs"]
 mod aside_tests;
+#[cfg(test)]
+#[path = "outbox_asked_tests.rs"]
+mod asked_tests;
 #[cfg(test)]
 #[path = "outbox_join_tests.rs"]
 mod join_tests;

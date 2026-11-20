@@ -1,0 +1,9 @@
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/work/api
+
+⏺ Here is what I found in the parser:
+
+  There are two ways to fix it:
+  1. Rewrite the parser
+  2. Patch the parser

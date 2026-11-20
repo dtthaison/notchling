@@ -12,6 +12,7 @@ pub mod branch_rows;
 pub mod branches_preview;
 pub mod branches_state;
 pub mod browser_rows;
+pub mod busy;
 pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
@@ -32,6 +33,7 @@ pub mod delegated;
 mod delegated_cap_tests;
 #[cfg(test)]
 mod details_words_tests;
+pub mod dialog_card;
 pub mod drafts;
 pub mod drops;
 pub mod escape;
@@ -66,6 +68,8 @@ pub mod markdown_cache;
 pub mod markers;
 pub mod message_meta;
 pub mod outbox;
+#[cfg(test)]
+mod outbox_asked_tests;
 #[cfg(test)]
 mod outbox_box_same_tests;
 #[cfg(test)]
