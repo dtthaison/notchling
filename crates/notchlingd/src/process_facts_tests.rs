@@ -73,3 +73,23 @@ fn procargs_split_into_argv_after_the_exec_path() {
     assert_eq!(argv, ["sh", "-c", "echo hi"]);
     assert_eq!(crate::process_facts::parse_procargs2(&raw[..6]), None);
 }
+
+#[cfg(unix)]
+#[test]
+fn this_process_is_ours_and_a_pid_no_process_can_have_is_gone() {
+    use notchling_engine::sessions::fresh::Process;
+    let me = crate::process_facts::process(std::process::id());
+    let Process::Ours { started_ms, ticks } = me else {
+        panic!("{me:?}");
+    };
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
+        assert!(started_ms.is_some_and(|at| at > 1_600_000_000_000));
+    }
+    assert_eq!(ticks.is_some(), cfg!(target_os = "linux"));
+    assert_eq!(crate::process_facts::process(0), Process::Gone);
+    assert_eq!(crate::process_facts::process(u32::MAX - 1), Process::Gone);
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    assert_eq!(crate::process_facts::process(pid), Process::Gone);
+}

@@ -154,3 +154,53 @@ fn a_new_row_after_a_long_unreadable_one_starts_at_checking() {
     p.pass(r.at(T0 + UNREADABLE_AFTER_MS + 10_000));
     assert_eq!(shown(&r, &second.id), Some("checking".into()));
 }
+
+#[test]
+fn a_row_sent_again_while_its_status_was_read_is_not_stopped_by_the_old_read() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    done_with_no_process(&r);
+    let mut p = r.postmen.postman(IDLE);
+    let mut at = T0;
+    for _ in 0..DONE_STOPS_AFTER_TRIES {
+        p.pass(r.at(at));
+        at = due(&r, &row.id);
+    }
+    let waiting = r.row(&row.id).unwrap();
+    assert_eq!(
+        (waiting.state, waiting.tries, waiting.done_from),
+        (State::Waiting, DONE_STOPS_AFTER_TRIES, Some(0))
+    );
+    let (ops, id) = (r.ops.clone(), row.id.clone());
+    *r.files.during.lock().unwrap() = Some(Box::new(move || {
+        ops.call(&app(), "outbox.resend", &json!({"id": id}))
+            .unwrap();
+    }));
+    p.pass(r.at(at));
+    let tried = r.row(&row.id).unwrap();
+    assert_eq!(
+        (tried.state, tried.tries, tried.done_from),
+        (State::Waiting, 4, Some(3)),
+        "the read was of the row before the person sent it again, so it is looked at afresh"
+    );
+}
+
+#[test]
+fn a_row_an_older_daemon_put_back_in_line_gets_its_tries_again() {
+    let r = rig();
+    let row = r.send("job-idle", "hi");
+    done_with_no_process(&r);
+    r.ops.store().run_sql_for_tests(&format!(
+        "UPDATE outbox SET state = 'queued', why = NULL, next_ms = NULL, tries = 3,
+             done_from = 0, updated_ms = {T0}
+         WHERE id = '{}'",
+        row.id
+    ));
+    let mut p = r.postmen.postman(IDLE);
+    p.pass(r.at(T0 + 1_000));
+    let tried = r.row(&row.id).unwrap();
+    assert_eq!(
+        (tried.state, tried.tries, tried.done_from),
+        (State::Waiting, 4, Some(3))
+    );
+}

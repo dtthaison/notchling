@@ -306,11 +306,36 @@ impl OutboxStore {
         next_ms: Option<i64>,
         now_ms: i64,
     ) -> Result<bool, String> {
+        self.move_state((id, None), from, to, why, next_ms, now_ms)
+    }
+
+    pub fn set_state_of(
+        &self,
+        seen: &Row,
+        from: &[State],
+        to: State,
+        why: Option<Why>,
+        next_ms: Option<i64>,
+        now_ms: i64,
+    ) -> Result<bool, String> {
+        let unmoved = (seen.id.as_str(), Some(seen.updated_ms));
+        self.move_state(unmoved, from, to, why, next_ms, now_ms)
+    }
+
+    fn move_state(
+        &self,
+        (id, seen_ms): (&str, Option<i64>),
+        from: &[State],
+        to: State,
+        why: Option<Why>,
+        next_ms: Option<i64>,
+        now_ms: i64,
+    ) -> Result<bool, String> {
         let db = self.lock();
         let Some(row) = fetch(&db, id)? else {
             return Ok(false);
         };
-        if !from.contains(&row.state) {
+        if !from.contains(&row.state) || seen_ms.is_some_and(|seen| seen != row.updated_ms) {
             return Ok(false);
         }
         let struck: i64 = db
@@ -325,7 +350,7 @@ impl OutboxStore {
             "UPDATE outbox SET state = ?2, why = ?3, next_ms = ?4, updated_ms = ?5,
                  aside_at_ms = ?6, aside_ms = NULL,
                  strike = CASE WHEN ?2 = 'unsure' THEN 1 ELSE strike END
-             WHERE id = ?1 AND state IN ({})",
+             WHERE id = ?1 AND state IN ({}) AND (?7 IS NULL OR updated_ms = ?7)",
             states(from)
         );
         let changed = db
@@ -337,7 +362,8 @@ impl OutboxStore {
                     why.and_then(Why::stored).map(Why::as_str),
                     next_ms,
                     now_ms,
-                    aside_at
+                    aside_at,
+                    seen_ms
                 ],
             )
             .map_err(db_err)?;
@@ -599,7 +625,9 @@ impl OutboxStore {
         let db = self.lock();
         let sql = if counting {
             "UPDATE outbox SET done_from = tries
-             WHERE id = ?1 AND (done_from IS NULL OR done_from > tries)"
+             WHERE id = ?1
+               AND (done_from IS NULL OR done_from > tries
+                    OR (state = 'queued' AND done_from != tries))"
         } else {
             "UPDATE outbox SET done_from = NULL WHERE id = ?1 AND done_from IS NOT NULL"
         };

@@ -1,3 +1,4 @@
+use notchling_engine::sessions::fresh::Process;
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
@@ -52,6 +53,32 @@ pub fn started_ms(pid: u32) -> Option<i64> {
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     let hz = u64::try_from(hz).ok().filter(|hz| *hz > 0)?;
     i64::try_from(boot.checked_mul(1_000)? + ticks.checked_mul(1_000)? / hz).ok()
+}
+
+#[cfg(unix)]
+pub fn process(pid: u32) -> Process {
+    let Some(target) = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0) else {
+        return Process::Gone;
+    };
+    // SAFETY: signal 0 delivers nothing; `kill` only checks that the process exists.
+    if unsafe { libc::kill(target, 0) } != 0 {
+        return match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::EPERM) => Process::Other,
+            _ => Process::Gone,
+        };
+    }
+    Process::Ours {
+        started_ms: started_ms(pid),
+        ticks: cfg!(target_os = "linux").then(|| start_time(pid)).flatten(),
+    }
+}
+
+#[cfg(not(unix))]
+pub fn process(_pid: u32) -> Process {
+    Process::Ours {
+        started_ms: None,
+        ticks: None,
+    }
 }
 
 #[cfg(target_os = "macos")]

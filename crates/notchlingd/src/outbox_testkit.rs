@@ -58,6 +58,7 @@ pub(crate) struct FakeFiles {
     pub shared_name: AtomicBool,
     pub ended: Mutex<HashMap<String, Ended>>,
     pub slow: Mutex<Option<(Arc<AtomicI64>, i64)>>,
+    pub during: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl JobFiles for FakeFiles {
@@ -69,9 +70,13 @@ impl JobFiles for FakeFiles {
         let state = self.states.lock().unwrap().get(job).cloned();
         state.or_else(|| known.then(String::new))
     }
-    fn ended(&self, job: &str, _now_ms: i64) -> Ended {
+    fn ended(&self, job: &str) -> Ended {
         if let Some((clock, cost)) = self.slow.lock().unwrap().as_ref() {
             clock.fetch_add(*cost, Ordering::SeqCst);
+        }
+        let during = self.during.lock().unwrap().take();
+        if let Some(during) = during {
+            during();
         }
         if let Some(said) = self.ended.lock().unwrap().get(job) {
             return *said;

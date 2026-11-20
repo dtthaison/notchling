@@ -133,3 +133,41 @@ fn a_database_from_before_the_count_gets_the_column_and_keeps_its_rows() {
         .unwrap();
     assert_eq!(version, 9);
 }
+
+#[test]
+fn a_queued_row_takes_its_done_count_from_its_tries_again_whoever_put_it_back() {
+    let store = OutboxStore::in_memory_for_tests();
+    let id = store.insert(&new("hi"), 1).unwrap().id;
+    store.run_sql_for_tests(&format!(
+        "UPDATE outbox SET tries = 3, done_from = 0 WHERE id = '{id}'"
+    ));
+    assert_eq!(
+        store.count_done(&id, true).unwrap(),
+        Some(3),
+        "an older daemon put it back in line and left the count"
+    );
+    store.run_sql_for_tests(&format!(
+        "UPDATE outbox SET state = 'waiting', tries = 5 WHERE id = '{id}'"
+    ));
+    assert_eq!(store.count_done(&id, true).unwrap(), Some(3));
+}
+
+#[test]
+fn a_row_that_moved_since_it_was_read_is_not_written_over() {
+    let store = OutboxStore::in_memory_for_tests();
+    let id = store.insert(&new("hi"), 1).unwrap().id;
+    let seen = store.get(&id).unwrap().unwrap();
+    store.requeue(&id, &[State::Queued], false, 9).unwrap();
+    let from = [State::Queued, State::Waiting];
+    assert_eq!(
+        store.set_state_of(&seen, &from, State::Stopped, None, None, 10),
+        Ok(false)
+    );
+    let now = store.get(&id).unwrap().unwrap();
+    assert_eq!((now.state, now.updated_ms), (State::Queued, 9));
+    assert_eq!(
+        store.set_state_of(&now, &from, State::Stopped, None, None, 11),
+        Ok(true)
+    );
+    assert_eq!(store.get(&id).unwrap().unwrap().state, State::Stopped);
+}

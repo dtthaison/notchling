@@ -219,6 +219,7 @@ fn a_done_job_is_stopped_only_after_the_tries_counted_on_the_row_fail() {
     };
     let go = Gate::Go { guarded: false };
     let mut r = row(Kind::Prompt);
+    r.state = State::Waiting;
     r.tries = 9;
     assert_eq!(
         gate(&r, &f),
@@ -237,6 +238,52 @@ fn a_done_job_is_stopped_only_after_the_tries_counted_on_the_row_fail() {
         go,
         "a count above the tries never stops a row"
     );
+}
+
+#[test]
+fn a_row_put_back_in_line_starts_its_done_count_again_whoever_put_it_back() {
+    let f = Facts {
+        job: Job::Done,
+        ..facts(1_000)
+    };
+    let mut r = row(Kind::Prompt);
+    r.tries = DONE_STOPS_AFTER_TRIES;
+    r.done_from = Some(0);
+    assert_eq!(r.state, State::Queued);
+    assert_eq!(
+        recount(&r, &Job::Done),
+        Some(true),
+        "a count an older daemon left on a row it put back is taken again"
+    );
+    assert_eq!(
+        gate(&r, &f),
+        Gate::Go { guarded: false },
+        "and never stops the row untried"
+    );
+    r.state = State::Waiting;
+    assert_eq!(recount(&r, &Job::Done), None, "a waiting row keeps it");
+    assert_eq!(gate(&r, &f), Gate::NeedsUser(State::Stopped));
+}
+
+#[test]
+fn a_row_has_moved_when_its_state_time_tries_or_words_changed() {
+    let before = row(Kind::Prompt);
+    assert!(before.clone().unmoved_since(&before));
+    let mut counted = before.clone();
+    counted.done_from = Some(2);
+    assert!(counted.unmoved_since(&before), "the done count is no move");
+    let changes: [fn(&mut Row); 5] = [
+        |r| r.state = State::Waiting,
+        |r| r.why = Some(Why::Retry),
+        |r| r.updated_ms += 1,
+        |r| r.tries += 1,
+        |r| r.text.push('!'),
+    ];
+    for (n, change) in changes.iter().enumerate() {
+        let mut after = before.clone();
+        change(&mut after);
+        assert!(!after.unmoved_since(&before), "{n}");
+    }
 }
 
 #[test]

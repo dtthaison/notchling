@@ -130,6 +130,17 @@ pub struct Row {
     pub done_from: Option<u32>,
 }
 
+impl Row {
+    pub fn unmoved_since(&self, before: &Row) -> bool {
+        self.state == before.state
+            && self.why == before.why
+            && self.updated_ms == before.updated_ms
+            && self.tries == before.tries
+            && self.kind == before.kind
+            && self.text == before.text
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct New {
     pub session: String,

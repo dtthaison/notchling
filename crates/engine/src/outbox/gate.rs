@@ -104,6 +104,9 @@ fn unknown_since(row: &Row, now_ms: i64) -> i64 {
 }
 
 fn done_tries(row: &Row) -> u32 {
+    if row.state == State::Queued {
+        return 0;
+    }
     row.done_from
         .map_or(0, |from| row.tries.saturating_sub(from))
 }
@@ -114,9 +117,11 @@ pub fn recount(row: &Row, job: &Job) -> Option<bool> {
         Job::Done => true,
         _ => false,
     };
-    let settled = match counting {
-        true => row.done_from.is_some_and(|from| from <= row.tries),
-        false => row.done_from.is_none(),
+    let afresh = row.state == State::Queued;
+    let settled = match (counting, row.done_from) {
+        (true, Some(from)) => from == row.tries || (from < row.tries && !afresh),
+        (true, None) => false,
+        (false, from) => from.is_none(),
     };
     (!settled).then_some(counting)
 }

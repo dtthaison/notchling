@@ -9,7 +9,7 @@ use notchling_engine::outbox::{
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
-use notchling_engine::sessions::fresh::{Ended, Look};
+use notchling_engine::sessions::fresh::{Ended, Look, Mark, Watch};
 use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CALM_GAP_MS: i64 = 3_000;
 const ASKED_QUIET_MS: u64 = 400;
@@ -37,6 +37,11 @@ pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub fn real_clock() -> Clock {
     Arc::new(crate::acting_ops::now_ms)
+}
+
+pub fn running_clock() -> Clock {
+    let began = Instant::now();
+    Arc::new(move || i64::try_from(began.elapsed().as_millis()).unwrap_or(i64::MAX))
 }
 
 pub trait Courier: Send + Sync {
@@ -79,7 +84,7 @@ impl Courier for Refuse {
 pub(crate) trait JobFiles: Send + Sync {
     fn row(&self, job: &str) -> Option<Agent>;
     fn state(&self, job: &str) -> Option<String>;
-    fn ended(&self, job: &str, now_ms: i64) -> Ended;
+    fn ended(&self, job: &str) -> Ended;
     fn status(&self, job: &str) -> Option<String>;
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
     fn queue(&self, transcript: &str) -> Option<QueueState>;
@@ -112,6 +117,8 @@ pub(crate) fn made_ms(path: &str) -> Option<i64> {
 
 pub(crate) struct LiveFiles {
     roots: Roots,
+    watch: Mutex<Watch>,
+    running: Clock,
 }
 
 impl JobFiles for LiveFiles {
@@ -123,11 +130,11 @@ impl JobFiles for LiveFiles {
         fresh::job_state(&self.roots, job)
     }
 
-    fn ended(&self, job: &str, now_ms: i64) -> Ended {
+    fn ended(&self, job: &str) -> Ended {
+        let settled = |mark: &Mark| lock(&self.watch).settled(mark, (self.running)());
         let look = Look {
-            alive: Probes::from_proc().is_alive,
-            started_ms: &crate::process_facts::started_ms,
-            now_ms,
+            process: &crate::process_facts::process,
+            settled: &settled,
         };
         fresh::job_ended(&self.roots, &look, job)
     }
@@ -232,7 +239,11 @@ fn owns(projects: &Path, path: &Path) -> bool {
 }
 
 pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
-    Arc::new(LiveFiles { roots })
+    Arc::new(LiveFiles {
+        roots,
+        watch: Mutex::default(),
+        running: running_clock(),
+    })
 }
 
 #[derive(Default)]
@@ -248,6 +259,7 @@ pub struct ClaudeCourier {
     acting: Arc<ActingOps>,
     files: Arc<dyn JobFiles>,
     clock: Clock,
+    stopwatch: Clock,
     attaches: Mutex<HashMap<String, Box<dyn Pty + Send>>>,
     memos: Mutex<HashMap<String, Memo>>,
     safe: Arc<SafeModes>,
@@ -284,7 +296,10 @@ impl ClaudeCourier {
         clock: Clock,
         safe: Arc<SafeModes>,
     ) -> ClaudeCourier {
-        ClaudeCourier::with_files(acting, live_files(roots), clock, safe)
+        ClaudeCourier {
+            stopwatch: running_clock(),
+            ..ClaudeCourier::with_files(acting, live_files(roots), clock, safe)
+        }
     }
 
     pub(crate) fn with_files(
@@ -296,6 +311,7 @@ impl ClaudeCourier {
         ClaudeCourier {
             acting,
             files,
+            stopwatch: clock.clone(),
             clock,
             attaches: Mutex::new(HashMap::new()),
             memos: Mutex::new(HashMap::new()),
@@ -354,9 +370,9 @@ impl ClaudeCourier {
 
     fn job_of(&self, row: &Row, fresh: Option<&Agent>, now_ms: i64) -> (Job, bool) {
         let state = self.files.state(&row.session);
-        let asked = (self.clock)();
-        let ended = self.files.ended(&row.session, asked);
-        let late = (self.clock)() - asked >= SLOW_READ_MS;
+        let asked = (self.stopwatch)();
+        let ended = self.files.ended(&row.session);
+        let late = (self.stopwatch)() - asked >= SLOW_READ_MS;
         match (fresh, state.as_deref(), ended) {
             (_, _, Ended::Unknown) => (Job::Unknown, false),
             (_, _, Ended::Stopped | Ended::Done) if late => (Job::Unknown, false),

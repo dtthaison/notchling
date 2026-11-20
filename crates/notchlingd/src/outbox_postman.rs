@@ -697,6 +697,12 @@ impl Postman {
 
     fn gate(&mut self, row: &Row, now: i64) -> Option<i64> {
         let facts = self.courier().facts(row, now);
+        let read_again = match self.inner.ops.store().get(&row.id) {
+            Ok(Some(after)) if after.unmoved_since(row) => after,
+            Ok(_) => return None,
+            Err(_) => return Some(now + TICK_MS),
+        };
+        let row = &read_again;
         let counted = recount(row, &facts.job)
             .and_then(|counting| self.inner.ops.store().count_done(&row.id, counting).ok())
             .map(|done_from| Row {
@@ -722,7 +728,7 @@ impl Postman {
                     let store = ops.store();
                     let from = [State::Queued, State::Waiting];
                     if let Ok(true) =
-                        store.set_state(&row.id, &from, State::Waiting, Some(why), row.next_ms, now)
+                        store.set_state_of(row, &from, State::Waiting, Some(why), row.next_ms, now)
                     {
                         ops.set_shown(&row.id, shown);
                         self.publish(&row.id);
@@ -744,7 +750,7 @@ impl Postman {
                 }
                 let store = self.inner.ops.store();
                 let from = [State::Queued, State::Waiting];
-                if let Ok(true) = store.set_state(&row.id, &from, state, None, None, now) {
+                if let Ok(true) = store.set_state_of(row, &from, state, None, None, now) {
                     self.publish(&row.id);
                     if let Some(then) = then {
                         self.inner.ops.emit_then(row, then);
