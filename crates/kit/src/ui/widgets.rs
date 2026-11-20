@@ -497,7 +497,8 @@ fn option_row_of(
             div()
                 .flex()
                 .flex_col()
-                .flex_1()
+                .flex_grow()
+                .w(px(0.0))
                 .gap(px(2.0))
                 .child(label(title, TypeRole::Heading, Ink::Text, appearance))
                 .children(
