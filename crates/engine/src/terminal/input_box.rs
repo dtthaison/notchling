@@ -435,9 +435,12 @@ pub fn span(lines: &[String]) -> Option<(usize, usize)> {
 }
 
 fn bare(held: &[String]) -> bool {
-    match held {
-        [only] => only.chars().skip(1).all(char::is_whitespace),
-        _ => false,
+    match held.split_first() {
+        Some((first, rest)) => {
+            first.chars().skip(1).all(char::is_whitespace)
+                && rest.iter().all(|row| row.chars().all(char::is_whitespace))
+        }
+        None => false,
     }
 }
 

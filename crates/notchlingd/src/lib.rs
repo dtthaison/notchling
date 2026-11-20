@@ -434,6 +434,8 @@ mod reply_clear_tests;
 #[cfg(test)]
 mod reply_screen_tests;
 #[cfg(test)]
+mod reply_screens_kept_tests;
+#[cfg(test)]
 mod session_of_tests;
 #[cfg(all(test, unix))]
 mod snap_copy_tests;
