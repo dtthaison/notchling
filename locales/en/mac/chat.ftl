@@ -433,6 +433,8 @@ chat-claude-asks = { -brand-claude } asks
 chat-dialog-chose = Answered: { $label }
 # $label is the option that was picked in a dialog the session no longer shows.
 chat-dialog-chose-gone = Already answered in the terminal
+chat-dialog-dismiss = Dismiss
+chat-dialog-dismissed = Dismissed in the terminal
 chat-type-something-else = Type something else…
 chat-next = Next
 chat-submit = Submit

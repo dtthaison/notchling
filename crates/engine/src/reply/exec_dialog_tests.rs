@@ -93,3 +93,14 @@ fn the_plan_waits_for_the_dialog_to_close_and_detaches_quietly() {
     )));
     assert!(!plan.detach.is_empty());
 }
+
+#[test]
+fn a_dismiss_is_one_esc_and_only_while_the_session_waits() {
+    assert_eq!(plan::dismiss(false), None);
+    let mut pty = FakePrompt::new(&[]).with_dialog(SWITCH);
+    let plan = plan::dismiss(true).expect("a plan");
+    let done = execute(&plan, &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(done, Ok(Outcome { taken: false }));
+    assert_eq!(pty.writes, ["\x1b"]);
+    assert!(pty.picked.is_empty(), "no option number typed");
+}

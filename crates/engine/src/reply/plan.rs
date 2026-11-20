@@ -205,6 +205,20 @@ pub fn interrupt(working: bool) -> Result<Plan, PlanError> {
     })
 }
 
+pub fn dismiss(waiting: bool) -> Option<Plan> {
+    if !waiting {
+        return None;
+    }
+    Some(Plan {
+        steps: vec![
+            attach(None),
+            Step::Keys(ESC.into()),
+            Step::Pause(KEY_PAUSE_MS),
+        ],
+        detach: detach(),
+    })
+}
+
 pub fn take_back(latest: &str, keep: &[String]) -> Plan {
     let mut steps = vec![
         attach(Some(SETTLE_MS)),

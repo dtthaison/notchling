@@ -145,3 +145,65 @@ fn picking_is_refused_while_the_switch_is_off_and_for_other_callers() {
     assert_eq!(code(result).0, ErrorCode::Forbidden);
     assert!(on.writes.lock().unwrap().is_empty());
 }
+
+fn waiting() -> Value {
+    let mut rows = sessions();
+    rows.as_array_mut()
+        .unwrap()
+        .push(crate::acting_ops_tests::row(
+            "job-wait",
+            json!({"job": "wait0001"}),
+            "needsInput",
+            None,
+        ));
+    rows
+}
+
+#[test]
+fn dismissing_sends_esc_to_a_session_that_waits() {
+    let s = setup(true, PROMPT, waiting());
+    showing(&s);
+    let done = s
+        .ops
+        .call(
+            &app(),
+            ops::SESSION_DIALOG_DISMISS,
+            &json!({"id": "job-wait"}),
+        )
+        .unwrap();
+    assert_eq!(done, json!({"dismissed": true}));
+    assert_eq!(s.writes.lock().unwrap().as_slice(), ["\x1b"]);
+}
+
+#[test]
+fn dismissing_is_refused_for_a_session_that_is_not_waiting() {
+    let s = setup(true, PROMPT, waiting());
+    for id in ["job-a", "job-idle"] {
+        let result = s
+            .ops
+            .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({ "id": id }));
+        assert_eq!(code(result).0, ErrorCode::BadRequest, "{id}");
+    }
+    assert!(s.attached.lock().unwrap().is_empty());
+    assert!(s.writes.lock().unwrap().is_empty(), "nothing typed");
+}
+
+#[test]
+fn dismissing_waits_for_the_switch_and_the_app() {
+    let off = setup(false, PROMPT, waiting());
+    let result = off.ops.call(
+        &app(),
+        ops::SESSION_DIALOG_DISMISS,
+        &json!({"id": "job-wait"}),
+    );
+    assert_eq!(code(result), (ErrorCode::Forbidden, ACTING_OFF.to_string()));
+    let on = setup(true, PROMPT, waiting());
+    let result = on.ops.call(
+        &other_caller(),
+        ops::SESSION_DIALOG_DISMISS,
+        &json!({"id": "job-wait"}),
+    );
+    assert_eq!(code(result).0, ErrorCode::Forbidden);
+    assert!(on.writes.lock().unwrap().is_empty());
+    assert!(off.writes.lock().unwrap().is_empty());
+}

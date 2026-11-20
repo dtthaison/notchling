@@ -29,8 +29,8 @@ pub use text_editor::{TextEditor, TextEditorEvent};
 pub use tool_images::{first_installed, set_tool_image};
 pub use widgets::{
     account_line, avatar, brand_image, brand_mark, button, button_with, card, field, icon_button,
-    icon_button_small, label, node_line, option_row, phone_mark, session_row, session_row_marked,
-    status_pill, tool_icon, ToolMark,
+    icon_button_small, label, node_line, option_row, option_row_plain, phone_mark, session_row,
+    session_row_marked, status_pill, tool_icon, ToolMark,
 };
 
 use gpui::{px, FontWeight, Hsla, Rgba, Styled, Window, WindowAppearance};

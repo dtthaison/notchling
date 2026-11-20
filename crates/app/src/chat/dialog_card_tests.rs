@@ -83,6 +83,14 @@ fn picking_an_option_asks_the_daemon_to_press_that_number_for_that_dialog() {
 }
 
 #[test]
+fn every_card_offers_a_dismiss_that_sends_only_the_session_id() {
+    let card = DialogCard::from_reply("k", &reply()).unwrap();
+    let request = card.dismiss("sess-1");
+    assert_eq!(request.op, crate::acting::ops::SESSION_DIALOG_DISMISS);
+    assert_eq!(request.args, json!({"id": "sess-1"}));
+}
+
+#[test]
 fn a_waiting_claude_job_is_read_once_per_waiting_spell() {
     let waiting = job(AgentGroup::NeedsInput, None);
     assert_eq!(

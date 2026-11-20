@@ -49,7 +49,7 @@ const OWN_QUIET: [&str; 12] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 133] = [
+const NEVER_QUIET: [&str; 134] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -75,6 +75,7 @@ const NEVER_QUIET: [&str; 133] = [
     ops::SESSION_COMMAND,
     ops::SESSION_HELD_DISCARD,
     ops::SESSION_DIALOG_PICK,
+    ops::SESSION_DIALOG_DISMISS,
     ops::AGY_SIDECAR_TAKE,
     ops::AGY_SIDECAR_REPORT,
     ops::AGY_SIDECAR_SETUP,

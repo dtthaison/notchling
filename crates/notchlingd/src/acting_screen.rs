@@ -126,4 +126,21 @@ impl ActingOps {
         );
         Ok(json!({"answered": "terminal", "number": number}))
     }
+
+    pub(super) fn dialog_dismiss(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        if caller.tier != Tier::App {
+            return Err(forbidden(
+                "dismissing a session's dialog is for the app only",
+            ));
+        }
+        let first = self.agent(args)?;
+        self.locked(&first, |agent| {
+            let waiting = agent.group == AgentGroup::NeedsInput;
+            let plan = plan::dismiss(waiting).ok_or_else(|| {
+                bad("the session isn't waiting for an answer, so there's nothing to dismiss (Esc on an idle session opens rewind)")
+            })?;
+            self.play_locked(agent, &plan, &mut NoLog, None)
+        })?;
+        Ok(json!({"dismissed": true}))
+    }
 }

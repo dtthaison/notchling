@@ -103,12 +103,13 @@ pub enum Button {
     ClearBoxAndSend,
     ResumeAndSend,
     ShowTerminal,
+    Dismiss,
 }
 
 impl Button {
     pub fn request(self, id: &str, session: &str) -> Option<Request> {
         match self {
-            Button::Edit | Button::ShowTerminal => None,
+            Button::Edit | Button::ShowTerminal | Button::Dismiss => None,
             Button::Remove => Some(Request::outbox_remove(id, session)),
             Button::MarkAsSent => Some(Request::outbox_mark_sent(id, session)),
             Button::Retry => Some(Request::outbox_resend(id, session, false, false)),
@@ -202,7 +203,9 @@ pub fn offer_terminal(bubbles: &mut [Bubble]) {
     for bubble in bubbles {
         let asks = matches!(bubble.status, Status::WaitingDialog | Status::NeedsAnswer);
         if asks && !bubble.buttons.contains(&Button::ShowTerminal) {
-            bubble.buttons.insert(0, Button::ShowTerminal);
+            bubble
+                .buttons
+                .splice(0..0, [Button::ShowTerminal, Button::Dismiss]);
         }
     }
 }

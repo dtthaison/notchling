@@ -115,6 +115,7 @@ pub fn button_label(button: Button) -> &'static str {
         Button::ClearBoxAndSend => t::chat::outbox_clear_send(),
         Button::ResumeAndSend => t::chat::outbox_resume_send(),
         Button::ShowTerminal => t::chat::outbox_show_terminal(),
+        Button::Dismiss => t::chat::dialog_dismiss(),
     }
 }
 
@@ -127,6 +128,7 @@ pub fn button_id(button: Button) -> &'static str {
         Button::ClearBoxAndSend => "outbox-clear-send",
         Button::ResumeAndSend => "outbox-resume-send",
         Button::ShowTerminal => "outbox-show-terminal",
+        Button::Dismiss => "outbox-dismiss",
     }
 }
 

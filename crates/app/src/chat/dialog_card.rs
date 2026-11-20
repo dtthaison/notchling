@@ -72,6 +72,10 @@ impl DialogCard {
     pub fn pick(&self, session: &str, option: &DialogOption) -> Request {
         Request::dialog_pick(session, &self.title, option.number, &option.label)
     }
+
+    pub fn dismiss(&self, session: &str) -> Request {
+        Request::dialog_dismiss(session)
+    }
 }
 
 pub fn asked_by_outbox(rows: &[OutboxRow]) -> bool {

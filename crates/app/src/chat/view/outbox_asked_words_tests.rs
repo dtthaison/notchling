@@ -30,6 +30,13 @@ fn the_terminal_button_has_its_words_and_is_not_a_main_button() {
 }
 
 #[test]
+fn the_dismiss_button_has_its_words_and_is_not_a_main_button() {
+    assert_eq!(button_label(Button::Dismiss), "Dismiss");
+    assert_eq!(button_id(Button::Dismiss), "outbox-dismiss");
+    assert!(!is_main(Button::Dismiss));
+}
+
+#[test]
 fn a_busy_session_says_what_the_message_waits_for() {
     let said = |why| status_line(&Status::Busy(why));
     assert_eq!(

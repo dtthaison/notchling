@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use notchling_kit::metric::MENU_GAP;
-use notchling_kit::ui::{label, option_row};
+use notchling_kit::part::ButtonKind;
+use notchling_kit::ui::{button, label, option_row_plain};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
@@ -30,6 +31,21 @@ impl ChatView {
 
     pub(super) fn dialog_card_shown(&self) -> bool {
         matches!(self.prompt.shown, Some(Prompt::Dialog(_)))
+    }
+
+    pub(super) fn dismiss_session_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected_session().map(|s| s.agent.id.clone()) else {
+            return;
+        };
+        self.spawn_send(
+            Request::dialog_dismiss(&id),
+            |view, result, _| {
+                if let Err(message) = result {
+                    view.tools.error = Some(message);
+                }
+            },
+            cx,
+        );
     }
 
     pub(super) fn read_screen_dialog(&mut self, cx: &mut Context<Self>) {
@@ -84,11 +100,10 @@ pub(super) fn content(
         .iter()
         .map(|option| {
             let picked = sending && view.prompt.dialog.picked == Some(option.number);
-            let item = option_row(
+            let item = option_row_plain(
                 SharedString::from(format!("prompt-dialog-{}", option.number)),
                 usize::try_from(option.number).unwrap_or(0),
                 &option.label,
-                "",
                 picked,
                 gate::state(gate),
                 a,
@@ -113,6 +128,38 @@ pub(super) fn content(
             })
         })
         .collect::<Vec<_>>();
+    let open = Control {
+        enabled: gate.enabled && !sending,
+        tooltip: gate.tooltip,
+    };
+    let (key, request) = (card.key.clone(), card.dismiss(row));
+    let dismiss = gate::tip(
+        button(
+            "prompt-dialog-dismiss",
+            t::chat::dialog_dismiss(),
+            ButtonKind::Ghost,
+            gate::state(open),
+            a,
+        ),
+        open,
+        a,
+    )
+    .when(open.enabled, |el| {
+        el.on_click(cx.listener(move |this, _, _, cx| {
+            let said = t::chat::dialog_dismissed().to_owned();
+            let told = Told {
+                went_through: said.clone(),
+                already_answered: said,
+            };
+            this.answer_prompt(
+                key.clone(),
+                request.clone(),
+                Sending::Answer,
+                Some(told),
+                cx,
+            );
+        }))
+    });
     div()
         .flex()
         .flex_col()
@@ -132,5 +179,6 @@ pub(super) fn content(
         )
         .children(failed(view, a, cx))
         .child(div().flex().flex_col().children(options))
+        .child(div().flex().justify_end().child(dismiss))
         .children(status(view, gate, a))
 }

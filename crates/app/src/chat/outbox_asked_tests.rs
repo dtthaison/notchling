@@ -35,16 +35,20 @@ fn a_waiting_dialog_offers_the_terminal_first() {
     let mut shown = vec![bubble(&row("waiting", Some("dialog")))];
     offer_terminal(&mut shown);
     assert_eq!(shown[0].buttons[0], Button::ShowTerminal);
-    assert_eq!(shown[0].buttons.len(), 3);
+    assert_eq!(shown[0].buttons[1], Button::Dismiss);
+    assert_eq!(shown[0].buttons.len(), 4);
     offer_terminal(&mut shown);
-    assert_eq!(shown[0].buttons.len(), 3, "offered once");
+    assert_eq!(shown[0].buttons.len(), 4, "offered once");
 }
 
 #[test]
 fn an_answer_that_waits_offers_the_terminal_too() {
     let mut shown = vec![bubble(&row("waiting", Some("answer")))];
     offer_terminal(&mut shown);
-    assert_eq!(shown[0].buttons, vec![Button::ShowTerminal, Button::Remove]);
+    assert_eq!(
+        shown[0].buttons,
+        vec![Button::ShowTerminal, Button::Dismiss, Button::Remove]
+    );
 }
 
 #[test]
@@ -60,12 +64,14 @@ fn other_rows_get_no_terminal_button() {
         let before = shown[0].buttons.clone();
         offer_terminal(&mut shown);
         assert_eq!(shown[0].buttons, before, "{state} {why:?}");
+        assert!(!shown[0].buttons.contains(&Button::Dismiss));
     }
 }
 
 #[test]
-fn the_terminal_button_has_no_request_of_its_own() {
+fn the_terminal_and_dismiss_buttons_have_no_outbox_request() {
     assert_eq!(Button::ShowTerminal.request("o1", "ab12cd34"), None);
+    assert_eq!(Button::Dismiss.request("o1", "ab12cd34"), None);
 }
 
 #[test]

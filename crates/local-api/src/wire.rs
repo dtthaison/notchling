@@ -29,6 +29,7 @@ pub mod ops {
     pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
     pub const SESSION_DIALOG: &str = "session.dialog";
     pub const SESSION_DIALOG_PICK: &str = "session.dialog_pick";
+    pub const SESSION_DIALOG_DISMISS: &str = "session.dialog_dismiss";
     pub const SESSION_CHROME: &str = "session.chrome";
     pub const HOOK_REQUEST: &str = "hook.request";
 

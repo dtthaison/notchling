@@ -34,7 +34,7 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(290);
 
 pub const STOPPING_FOR: Duration = Duration::from_secs(20);
 
-pub const ACTING_OPS: [&str; 13] = [
+pub const ACTING_OPS: [&str; 14] = [
     ops::SESSION_REPLY,
     ops::SESSION_ANSWER,
     ops::SESSION_PERMISSION,
@@ -48,6 +48,7 @@ pub const ACTING_OPS: [&str; 13] = [
     ops::SESSION_COMMAND,
     ops::SESSION_HELD_DISCARD,
     ops::SESSION_DIALOG_PICK,
+    ops::SESSION_DIALOG_DISMISS,
 ];
 
 pub const CONTROL_OPS: [&str; 6] = [
@@ -315,6 +316,7 @@ impl ActingOps {
             ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
             ops::SESSION_DIALOG => self.dialog(caller, args),
             ops::SESSION_DIALOG_PICK => self.dialog_pick(caller, args),
+            ops::SESSION_DIALOG_DISMISS => self.dialog_dismiss(caller, args),
             ops::SESSION_CHROME => {
                 app_only(caller)?;
                 self.chrome_state(args)
