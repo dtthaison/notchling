@@ -1,4 +1,5 @@
 use super::*;
+use notchling_engine::outbox::Seen;
 use notchling_engine::reply::read::{dialog_up, read_dialog};
 use notchling_engine::terminal::screen_dialog::{DialogPick, ScreenDialog};
 
@@ -96,9 +97,9 @@ impl ActingOps {
         }
     }
 
-    pub(crate) fn dialog_up(&self, agent: &Agent) -> bool {
+    pub(crate) fn dialog_seen(&self, agent: &Agent) -> Seen {
         if !self.acting.is_on() {
-            return false;
+            return Seen::Unknown;
         }
         let probe = self.try_locked(agent, |agent| -> Result<_, ApiError> {
             let AgentTarget::Job(job) = &agent.target else {
@@ -111,12 +112,14 @@ impl ActingOps {
             Ok(Some((up, pty)))
         });
         match probe {
-            None => true,
             Some(Ok(Some((up, pty)))) => {
                 drop(pty);
-                up
+                match up {
+                    true => Seen::Open,
+                    false => Seen::Closed,
+                }
             }
-            Some(_) => false,
+            _ => Seen::Unknown,
         }
     }
 

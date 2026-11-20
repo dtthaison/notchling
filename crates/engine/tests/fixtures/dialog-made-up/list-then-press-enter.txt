@@ -1,0 +1,7 @@
+⏺ Setup is ready.
+
+  Before you go on
+  1. Install the tools
+  2. Run the tests
+
+  Press Enter to continue

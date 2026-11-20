@@ -4,7 +4,8 @@ use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
-    Facts, Job, Kind, Row, Tried, TryEnd, Why, ANSWER_GRACE_MS, DIALOG_RECHECK_MS, GONE_AFTER_MS,
+    AnswerWatch, Facts, Job, Kind, Row, Seen, Tried, TryEnd, Why, ANSWER_GRACE_MS,
+    DIALOG_RECHECK_MS, GONE_AFTER_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
@@ -229,6 +230,7 @@ struct Memo {
     dialog_at: Option<i64>,
     calm_since: Option<i64>,
     last_seen: Option<i64>,
+    answer: Option<AnswerWatch>,
 }
 
 pub struct ClaudeCourier {
@@ -303,11 +305,27 @@ impl ClaudeCourier {
     }
 
     fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
-        let waiting = matches!(job, Job::Live { status: Some(s) } if s == "waiting");
-        if row.why != Some(Why::Answer) || waiting || now_ms - row.updated_ms < ANSWER_GRACE_MS {
-            return false;
+        let Job::Live { status } = job else {
+            return true;
+        };
+        if now_ms - row.updated_ms < ANSWER_GRACE_MS {
+            return true;
         }
-        fresh.is_some_and(|agent| self.acting.dialog_up(agent))
+        let taken = lock(&self.memos)
+            .entry(row.session.clone())
+            .or_default()
+            .answer
+            .take();
+        let mut watch = taken.unwrap_or_default();
+        let open = watch.open(&row.id, status.as_deref(), now_ms, || match fresh {
+            Some(agent) => self.acting.dialog_seen(agent),
+            None => Seen::Unknown,
+        });
+        lock(&self.memos)
+            .entry(row.session.clone())
+            .or_default()
+            .answer = Some(watch);
+        open
     }
 
     fn calm_now(&self, session: &str) -> bool {
@@ -506,11 +524,14 @@ impl Courier for ClaudeCourier {
             .dialog_at
             .is_some_and(|at| now_ms - at < DIALOG_RECHECK_MS);
         drop(memos);
-        let answer_open = self.answer_open(row, &job, fresh.as_ref(), now_ms);
+        let dialog_on_screen = match row.why {
+            Some(Why::Answer) => self.answer_open(row, &job, fresh.as_ref(), now_ms),
+            _ => remembered,
+        };
         Facts {
             now_ms,
             job,
-            dialog_on_screen: remembered || answer_open,
+            dialog_on_screen,
             queue_waiting: queue.waiting.len(),
             safe,
             turn_over_since_ms,

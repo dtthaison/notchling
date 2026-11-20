@@ -1,7 +1,7 @@
 mod common;
 
 use common::notchling_fixture;
-use notchling_engine::terminal::screen_dialog::{self, DialogPick};
+use notchling_engine::terminal::screen_dialog::{self, DialogPick, Shown};
 use notchling_engine::terminal::{dialog_open, TerminalScreen};
 use std::path::Path;
 
@@ -68,7 +68,7 @@ fn the_marker_follows_the_selected_option() {
 }
 
 #[test]
-fn a_dialog_with_no_rule_and_no_footer_is_still_read() {
+fn a_dialog_with_no_rule_is_still_read() {
     let screen = made_up("switch-model-borderless.txt");
     let dialog = screen_dialog::read(&screen.lines()).expect("a dialog");
     assert_eq!(dialog.title, "Switch model?");
@@ -135,4 +135,52 @@ fn a_pick_matches_only_the_dialog_it_was_made_from() {
         ..pick
     };
     assert!(!first.offers(&renamed));
+}
+
+fn chrome(name: &str) -> TerminalScreen {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/chrome")
+        .join(name);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    screen_of(text.replace('\n', "\r\n").as_bytes())
+}
+
+#[test]
+fn every_switch_model_screen_is_shown_for_dismiss() {
+    for name in [
+        "switch-model.txt",
+        "switch-model-second.txt",
+        "switch-model-wrapped.txt",
+        "switch-model-borderless.txt",
+    ] {
+        let shown = screen_dialog::shown(&made_up(name).lines());
+        assert!(matches!(shown, Some(Shown::Screen(_))), "{name}: {shown:?}");
+    }
+    let permission = screen_dialog::shown(&made_up("permission-prompt.txt").lines());
+    assert!(matches!(permission, Some(Shown::Permission(_))));
+}
+
+#[test]
+fn a_menu_whose_last_hint_offers_esc_is_shown() {
+    let shown = screen_dialog::shown(&chrome("menu-on.txt").lines());
+    assert!(matches!(shown, Some(Shown::Hint(_))), "{shown:?}");
+}
+
+#[test]
+fn output_that_only_looks_like_a_dialog_is_not_shown() {
+    for name in [
+        "blockquote-list.txt",
+        "list-then-press-enter.txt",
+        "list-marked-then-prose.txt",
+        "list-streaming-no-box.txt",
+        "list-in-output.txt",
+        "list-streaming.txt",
+        "numbered-list-in-chat.txt",
+    ] {
+        assert_eq!(screen_dialog::shown(&made_up(name).lines()), None, "{name}");
+    }
+    assert_eq!(
+        screen_dialog::shown(&recorded("attach-idle.bin").lines()),
+        None
+    );
 }

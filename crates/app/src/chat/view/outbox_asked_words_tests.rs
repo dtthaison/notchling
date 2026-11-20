@@ -1,5 +1,6 @@
 use super::*;
 use crate::chat::outbox::{bubble, OutboxRow};
+use notchling_engine::outbox::State;
 
 fn row(why: &str) -> OutboxRow {
     OutboxRow::from_wire(&json!({
@@ -72,4 +73,16 @@ fn a_busy_session_says_what_the_message_waits_for() {
         said(Busy::Unconfirmed),
         "Waiting: an earlier message is unconfirmed"
     );
+}
+
+#[test]
+fn an_answer_never_seen_says_so_and_offers_the_terminal() {
+    let mut unsure = row("answer");
+    unsure.state = State::Unsure;
+    let mut shown = vec![bubble(&unsure)];
+    crate::chat::outbox::offer_terminal(&mut shown);
+    assert_eq!(status_line(&shown[0].status), "No answer seen in time");
+    assert!(shown[0].buttons.contains(&Button::MarkAsSent));
+    assert!(shown[0].buttons.contains(&Button::ShowTerminal));
+    assert!(shown[0].buttons.contains(&Button::Dismiss));
 }

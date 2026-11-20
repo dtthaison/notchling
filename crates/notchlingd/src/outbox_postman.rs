@@ -644,6 +644,13 @@ impl Postman {
                 true => None,
                 false => Some(now + TICK_MS),
             },
+            Gate::Unsure(why) => {
+                let then = Some(OutboxThen::Unsure);
+                match self.moved(row, row.state, State::Unsure, Some(why), None, then) {
+                    true => None,
+                    false => Some(now + TICK_MS),
+                }
+            }
             Gate::Go { guarded } => self.try_row(row, guarded, now),
         }
     }

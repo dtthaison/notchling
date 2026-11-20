@@ -26,6 +26,7 @@ pub fn status_icon(status: &Status, a: Appearance) -> Div {
         Status::Editing => (Icon::Edit, Ink::TextFaint),
         Status::MayBeIn
         | Status::MayBeInHolding(_)
+        | Status::AnswerUnseen
         | Status::BoxHasText(_)
         | Status::BoxHoldsThis => (Icon::Warning, Ink::Needs),
         Status::Stopped => (Icon::Stop, Ink::TextFaint),
@@ -82,6 +83,7 @@ pub fn status_line_at(status: &Status, now_ms: Option<i64>) -> String {
         Status::QueuedInSession(tool) => t::chat::outbox_in_queue(tool_name(*tool)),
         Status::Sent => t::chat::outbox_sent().to_owned(),
         Status::MayBeIn => t::chat::outbox_maybe().to_owned(),
+        Status::AnswerUnseen => t::chat::outbox_answer_unseen().to_owned(),
         Status::MayBeInHolding(until) => match now_ms {
             Some(now) => format!(
                 "{} · {}",

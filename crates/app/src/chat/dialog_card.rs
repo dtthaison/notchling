@@ -10,6 +10,8 @@ use crate::chat::data::Tool;
 
 pub const READ_TRIES: u8 = 3;
 pub const READ_RETRY_MS: i64 = 3_000;
+pub const BUSY_TRIES: u8 = 8;
+pub const BUSY_RETRY_MAX_MS: i64 = 30_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DialogOption {
@@ -116,6 +118,7 @@ pub struct Reading {
     pub tries: u8,
     pub retry_ms: i64,
     pub picked: Option<u64>,
+    pub busy_tries: u8,
     round: u32,
 }
 
@@ -123,7 +126,10 @@ impl Reading {
     pub fn due(&self, key: &str, now_ms: i64) -> bool {
         match self.asked.as_deref() {
             Some(asked) if asked == key => {
-                self.card.is_none() && self.tries < READ_TRIES && now_ms >= self.retry_ms
+                self.card.is_none()
+                    && self.tries < READ_TRIES
+                    && self.busy_tries < BUSY_TRIES
+                    && now_ms >= self.retry_ms
             }
             _ => true,
         }
@@ -133,6 +139,7 @@ impl Reading {
         if self.asked.as_deref() != Some(key) {
             self.card = None;
             self.tries = 0;
+            self.busy_tries = 0;
         }
         self.asked = Some(key.to_owned());
         self.tries += 1;
@@ -154,7 +161,9 @@ impl Reading {
             return;
         }
         self.tries = self.tries.saturating_sub(1);
-        self.retry_ms = now_ms + READ_RETRY_MS;
+        self.busy_tries = self.busy_tries.saturating_add(1);
+        let doubled = READ_RETRY_MS << u32::from(self.busy_tries.saturating_sub(1)).min(4);
+        self.retry_ms = now_ms + doubled.min(BUSY_RETRY_MAX_MS);
     }
 
     pub fn round(&self) -> u32 {
@@ -166,6 +175,7 @@ impl Reading {
         self.card = None;
         self.asked = None;
         self.tries = 0;
+        self.busy_tries = 0;
         self.retry_ms = 0;
         self.picked = None;
     }

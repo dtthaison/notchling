@@ -277,6 +277,7 @@ pub fn execute_clearing(
         taken: false,
         pressed: None,
         pressed_dialog: None,
+        closing: None,
         pasted: String::new(),
         intended: plan.steps.iter().find_map(|step| match step {
             Step::Paste(text) => Some(keys::paste_safe(text)),
@@ -368,6 +369,7 @@ struct Run<'a> {
     taken: bool,
     pressed: Option<PermissionDialog>,
     pressed_dialog: Option<ScreenDialog>,
+    closing: Option<screen_dialog::Shown>,
     pasted: String,
     intended: Option<String>,
     doing: &'static str,
@@ -502,8 +504,11 @@ impl Run<'_> {
         }
     }
 
-    fn any_dialog_open(&self, lines: &[String]) -> bool {
-        self.check.dialog_open(lines) || screen_dialog::read(lines).is_some()
+    fn closing_still_shown(&self, lines: &[String]) -> bool {
+        match (&self.closing, screen_dialog::shown(lines)) {
+            (Some(before), Some(now)) => before.same_as(&now),
+            _ => false,
+        }
     }
 
     fn dialog_still_open(&self, lines: &[String]) -> bool {
@@ -687,16 +692,8 @@ impl Run<'_> {
                 }
             }
             Step::RequireAnyDialog => {
-                let mut lines = self.pty.screen();
-                if !self.any_dialog_open(&lines) {
-                    self.wait_until(PERMISSION_DRAW_WAIT_MS, |run, lines| {
-                        run.any_dialog_open(lines)
-                    });
-                    lines = self.pty.screen();
-                }
-                if !self.any_dialog_open(&lines) {
-                    return Err(Failure::QuestionGone);
-                }
+                let lines = self.pty.screen();
+                self.closing = Some(screen_dialog::shown(&lines).ok_or(Failure::QuestionGone)?);
             }
             Step::AwaitInput { timeout_ms } => {
                 self.await_prompt(*timeout_ms)?;
@@ -741,7 +738,7 @@ impl Run<'_> {
                     }
                     Until::PermissionGone => permission_dialog::read(lines) != run.pressed,
                     Until::DialogGone => !run.dialog_still_open(lines),
-                    Until::DialogClosed => !run.any_dialog_open(lines),
+                    Until::DialogClosed => !run.closing_still_shown(lines),
                 });
                 if !moved {
                     return Err(match until {

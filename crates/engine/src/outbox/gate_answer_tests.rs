@@ -132,3 +132,22 @@ fn it_is_kept_while_a_dialog_is_still_on_screen_whatever_the_job_says() {
         }
     }
 }
+
+#[test]
+fn a_dialog_held_open_too_long_turns_unsure_with_its_reason() {
+    let asked = row(Some(Why::Answer), 1_000);
+    let mut f = facts(1_000 + ANSWER_HOLD_MS, "idle");
+    f.dialog_on_screen = true;
+    assert_eq!(gate(&asked, &f), Gate::Unsure(Why::Answer));
+    let waiting = facts(1_000 + ANSWER_HOLD_MS, "waiting");
+    assert_eq!(gate(&asked, &waiting), Gate::Unsure(Why::Answer));
+    f.now_ms -= 1;
+    assert!(matches!(gate(&asked, &f), Gate::Wait { .. }));
+}
+
+#[test]
+fn a_dialog_seen_closed_after_the_cap_is_still_delivered() {
+    let asked = row(Some(Why::Answer), 1_000);
+    let f = facts(1_000 + ANSWER_HOLD_MS * 2, "idle");
+    assert_eq!(gate(&asked, &f), Gate::Delivered);
+}

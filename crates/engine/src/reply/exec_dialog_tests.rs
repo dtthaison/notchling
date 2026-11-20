@@ -1,6 +1,8 @@
-use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome};
+use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty};
 use super::fake::FakePrompt;
+use super::keys::timing::PERMISSION_DRAW_WAIT_MS;
 use super::plan::{self, DialogPick};
+use std::time::Duration;
 
 const SWITCH: &[&str] = &[
     "────────────────────────────────────────",
@@ -138,5 +140,127 @@ fn a_dismiss_also_closes_a_dialog_this_parser_cannot_read() {
     ]);
     let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
     assert_eq!(done, Ok(Outcome { taken: false }));
+    assert_eq!(pty.writes, ["\x1b"]);
+}
+
+const IDLE: &[&str] = &[
+    "⏺ Done.",
+    "────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────",
+    "  ? for shortcuts",
+];
+
+#[test]
+fn a_dismiss_with_no_dialog_fails_at_once_without_waiting_for_one() {
+    let mut pty = FakePrompt::new(IDLE);
+    let before = pty.now_ms();
+    let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(done, Err(Failure::QuestionGone));
+    assert!(pty.writes.is_empty());
+    assert!(
+        pty.now_ms() - before < PERMISSION_DRAW_WAIT_MS,
+        "no wait for a dialog to draw: {} ms",
+        pty.now_ms() - before
+    );
+}
+
+#[test]
+fn a_dismiss_over_output_that_only_looks_like_a_dialog_sends_no_esc() {
+    for screen in [
+        &[
+            "⏺ The docs say to pick a model like this:",
+            "",
+            "  Choose a model",
+            "  > 1. Opus for hard work",
+            "  2. Sonnet for the rest",
+        ][..],
+        &[
+            "⏺ Setup is ready.",
+            "  Before you go on",
+            "  1. Install the tools",
+            "  2. Run the tests",
+            "  Press Enter to continue",
+        ][..],
+        &[
+            "⏺ The menu looks like this:",
+            "  Pick a model",
+            "  ❯ 1. Opus",
+            "    2. Sonnet",
+            "  Pick one and press Enter.",
+        ][..],
+    ] {
+        let mut pty = FakePrompt::new(screen);
+        let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
+        assert_eq!(done, Err(Failure::QuestionGone), "{screen:?}");
+        assert!(pty.writes.is_empty(), "no Esc into {screen:?}");
+    }
+}
+
+struct Stepping {
+    screens: Vec<Vec<String>>,
+    at: usize,
+    clock: u64,
+    writes: Vec<String>,
+}
+
+impl Pty for Stepping {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let typed = String::from_utf8_lossy(bytes).into_owned();
+        if typed == "\x1b" {
+            self.at = (self.at + 1).min(self.screens.len() - 1);
+        }
+        self.writes.push(typed);
+        Ok(())
+    }
+    fn wait_quiet(&mut self, quiet: Duration, _timeout: Duration) -> bool {
+        self.clock += quiet.as_millis() as u64;
+        true
+    }
+    fn screen(&mut self) -> Vec<String> {
+        self.screens[self.at].clone()
+    }
+    fn sleep(&mut self, duration: Duration) {
+        self.clock += duration.as_millis() as u64;
+    }
+    fn now_ms(&self) -> u64 {
+        self.clock
+    }
+}
+
+#[test]
+fn an_esc_that_steps_back_to_another_dialog_has_moved_it() {
+    let parent: Vec<String> = [
+        "────────────────────────────────────────",
+        " Select model",
+        " ❯ 1. Opus 5.5",
+        "   2. Sonnet 5.5",
+        "   3. Haiku 5.5",
+        " Enter to confirm · Esc to cancel",
+    ]
+    .iter()
+    .map(|l| l.to_string())
+    .collect();
+    let mut pty = Stepping {
+        screens: vec![SWITCH.iter().map(|l| l.to_string()).collect(), parent],
+        at: 0,
+        clock: 0,
+        writes: Vec::new(),
+    };
+    let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(done, Ok(Outcome { taken: false }));
+    assert_eq!(pty.writes, ["\x1b"], "one Esc, never a second");
+}
+
+#[test]
+fn an_esc_that_leaves_the_same_dialog_up_is_still_open() {
+    let mut pty = Stepping {
+        screens: vec![SWITCH.iter().map(|l| l.to_string()).collect()],
+        at: 0,
+        clock: 0,
+        writes: Vec::new(),
+    };
+    let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(done, Err(Failure::PermissionStillOpen));
     assert_eq!(pty.writes, ["\x1b"]);
 }

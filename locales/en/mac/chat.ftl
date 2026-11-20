@@ -287,6 +287,8 @@ chat-outbox-retry = Couldn't reach the session, trying again
 chat-outbox-dialog = Waiting for a dialog
 # The message was typed and the session asked you something because of it, such as /model asking before it switches.
 chat-outbox-answer = Needs your answer
+# The session asked something because of the message, and after a long wait Notchling still could not see it answered or closed.
+chat-outbox-answer-unseen = No answer seen in time
 chat-outbox-turn = Waiting for the turn to end
 # $count is how many background tasks the session has running; the message goes in when they end.
 chat-outbox-busy-tasks = { $count ->

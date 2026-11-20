@@ -179,15 +179,38 @@ fn a_busy_reply_is_told_from_a_read_and_costs_no_try() {
     assert!(!is_busy(&json!({"dialog": null})));
     assert!(!is_busy(&reply()));
     let mut reading = Reading::default();
+    let now = 10_000_000;
+    assert!(reading.due("k", now));
+    reading.begin("k");
+    reading.busy("k", now);
+    assert_eq!(reading.tries, 0);
+    assert!(!reading.due("k", now + READ_RETRY_MS - 1));
+    assert!(reading.due("k", now + READ_RETRY_MS));
+}
+
+#[test]
+fn busy_replies_back_off_and_stop_after_their_own_cap() {
+    let mut reading = Reading::default();
     let mut now = 10_000_000;
-    for _ in 0..5 {
+    let mut gaps = Vec::new();
+    for _ in 0..BUSY_TRIES {
         assert!(reading.due("k", now));
         reading.begin("k");
         reading.busy("k", now);
-        assert_eq!(reading.tries, 0);
-        assert!(!reading.due("k", now + READ_RETRY_MS - 1));
-        now += READ_RETRY_MS;
+        assert_eq!(reading.tries, 0, "a busy reply costs no read try");
+        gaps.push(reading.retry_ms - now);
+        now = reading.retry_ms;
     }
+    assert!(
+        !reading.due("k", now),
+        "no more reads after {BUSY_TRIES} busy replies"
+    );
+    assert!(!reading.due("k", now + 3_600_000));
+    assert!(gaps.windows(2).all(|w| w[0] <= w[1]), "{gaps:?}");
+    assert!(gaps[1] > gaps[0], "{gaps:?}");
+    assert_eq!(gaps.last(), Some(&BUSY_RETRY_MAX_MS));
+    reading.next_round();
+    assert!(reading.due("k", now), "a new round reads again");
 }
 
 #[test]

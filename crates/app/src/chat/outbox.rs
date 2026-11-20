@@ -88,6 +88,7 @@ pub enum Status {
     Sent,
     MayBeIn,
     MayBeInHolding(i64),
+    AnswerUnseen,
     BoxHasText(String),
     BoxHoldsThis,
     Stopped,
@@ -153,6 +154,10 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         }
         State::Sending => (Status::Sending, Vec::new()),
         State::InQueue => (Status::QueuedInSession(row.tool), Vec::new()),
+        State::Unsure if row.why == Some(Why::Answer) => (
+            Status::AnswerUnseen,
+            vec![Button::Retry, Button::MarkAsSent],
+        ),
         State::Unsure => {
             let status = match (row.aside_ms, row.aside_at_ms) {
                 (None, Some(at)) => Status::MayBeInHolding(at),
@@ -201,7 +206,10 @@ fn blocks_next(row: &OutboxRow) -> bool {
 
 pub fn offer_terminal(bubbles: &mut [Bubble]) {
     for bubble in bubbles {
-        let asks = matches!(bubble.status, Status::WaitingDialog | Status::NeedsAnswer);
+        let asks = matches!(
+            bubble.status,
+            Status::WaitingDialog | Status::NeedsAnswer | Status::AnswerUnseen
+        );
         if asks && !bubble.buttons.contains(&Button::ShowTerminal) {
             bubble
                 .buttons

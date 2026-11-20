@@ -67,3 +67,52 @@ fn a_prompt_box_below_the_options_means_the_dialog_is_over() {
     );
     assert_eq!(screen_dialog::read(&screen.lines()), None);
 }
+
+#[test]
+fn a_blockquote_list_is_no_dialog() {
+    assert_eq!(read("blockquote-list.txt"), None);
+}
+
+#[test]
+fn a_list_then_press_enter_to_continue_is_no_dialog() {
+    assert_eq!(read("list-then-press-enter.txt"), None);
+}
+
+#[test]
+fn a_marked_list_then_prose_is_no_dialog() {
+    assert_eq!(read("list-marked-then-prose.txt"), None);
+}
+
+#[test]
+fn prose_after_the_last_option_is_no_dialog_even_above_a_footer() {
+    let screen = screen_of(
+        " Pick a model\n ❯ 1. Opus\n   2. Sonnet\n Pick one and press Enter.\n Then wait.\n\n Enter to confirm · Esc to cancel\n",
+    );
+    assert_eq!(screen_dialog::read(&screen.lines()), None);
+}
+
+#[test]
+fn a_streaming_list_with_no_prompt_box_yet_is_no_dialog() {
+    assert_eq!(read("list-streaming-no-box.txt"), None);
+}
+
+#[test]
+fn a_selection_marker_without_a_footer_is_not_enough() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/dialog-made-up/switch-model-borderless.txt");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let cut: Vec<&str> = text
+        .lines()
+        .take_while(|line| !line.contains("Esc to cancel"))
+        .collect();
+    let screen = screen_of(&cut.join("\n"));
+    assert_eq!(screen_dialog::read(&screen.lines()), None);
+}
+
+#[test]
+fn a_tip_that_names_a_key_is_no_footer() {
+    let screen = screen_of(
+        " Pick a model\n ❯ 1. Opus\n   2. Sonnet\n\n Tip: Press Shift+Enter to send a multi-line message\n",
+    );
+    assert_eq!(screen_dialog::read(&screen.lines()), None);
+}

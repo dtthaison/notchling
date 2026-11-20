@@ -194,6 +194,7 @@ pub(crate) struct Rig {
     pub safe: Arc<SafeModes>,
     pub sink: Arc<MemorySink>,
     pub dialog: crate::acting_ops_tests::DialogSlot,
+    pub refuse: Arc<AtomicBool>,
 }
 
 pub(crate) struct Options {
@@ -250,6 +251,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         screen,
         human,
         dialog,
+        refuse,
         ..
     } = setup_in(
         true,
@@ -326,6 +328,7 @@ pub(crate) fn rig_with(options: Options) -> Rig {
         safe,
         sink,
         dialog,
+        refuse,
     }
 }
 

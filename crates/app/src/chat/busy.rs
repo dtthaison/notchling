@@ -64,7 +64,7 @@ pub fn why_busy(facts: &BusyFacts) -> Option<Busy> {
 
 fn holds_the_line(status: &Status) -> Option<bool> {
     match status {
-        Status::MayBeIn | Status::MayBeInHolding(_) => Some(true),
+        Status::MayBeIn | Status::MayBeInHolding(_) | Status::AnswerUnseen => Some(true),
         Status::BoxHasText(_)
         | Status::BoxHoldsThis
         | Status::Stopped
