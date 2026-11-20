@@ -402,16 +402,11 @@ impl Request {
         Request::new(ops::SESSION_RELOAD, json!({ "id": id, "cancel": true }))
     }
 
-    pub fn reload_state(id: &str, ack: bool) -> Request {
-        let mut args = json!({ "id": id });
-        if ack {
-            args["ack"] = json!(true);
-        }
-        Request::new(ops::SESSION_RELOAD_STATE, args)
-    }
-
-    pub fn reload_active() -> Request {
-        Request::new(ops::SESSION_RELOAD_STATE, json!({ "active": true }))
+    pub fn reload_ack(id: &str, rev: u64) -> Request {
+        Request::new(
+            ops::SESSION_RELOAD_STATE,
+            json!({ "id": id, "ack": true, "rev": rev }),
+        )
     }
 
     pub fn command(id: &str, command: &str) -> Request {

@@ -566,6 +566,10 @@ impl Wired {
                 acting.note_chrome(agent, word, result);
             }
         }));
+        let pushes = acting.room.clone();
+        reload.set_publish(Arc::new(move |data| {
+            pushes.publish(topics::PROMPTS, topics::RELOAD_CHANGED, data)
+        }));
         acting.attach_reload(reload);
         crate::chrome_ops::reconcile_when_acting_turns_on(&acting);
         let node_slot = crate::ask_wiring::Slot::default();

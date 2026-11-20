@@ -45,7 +45,10 @@ impl Host for Fake {
 
 fn go(host: &mut Fake, after_turn: bool) -> (Phase, Vec<Phase>) {
     let mut said = Vec::new();
-    let end = run(host, Options { after_turn }, &mut |p| said.push(p));
+    let end = run(host, Options { after_turn }, &mut |p| {
+        said.push(p);
+        true
+    });
     (end, said)
 }
 
@@ -250,4 +253,39 @@ fn a_restart_that_goes_through_after_a_few_tries_is_done() {
     let (end, _) = go(&mut host, true);
     assert_eq!(end, reloaded());
     assert_eq!(host.restarted, 3);
+}
+
+#[test]
+fn a_refused_step_stops_before_the_restart() {
+    let mut host = Fake {
+        turns: VecDeque::from([true, true]),
+        ..Fake::default()
+    };
+    let mut said = Vec::new();
+    let end = run(&mut host, Options { after_turn: true }, &mut |p| {
+        let working = matches!(p, Phase::Working { .. });
+        said.push(p);
+        !working
+    });
+    assert_eq!(end, Phase::Cancelled);
+    assert_eq!(host.restarted, 0);
+    assert_eq!(
+        said.last(),
+        Some(&Phase::Working {
+            step: Step::Restarting
+        })
+    );
+}
+
+#[test]
+fn a_restart_that_finds_the_session_busy_waits_again_and_never_says_the_end() {
+    let mut host = Fake {
+        restarts: VecDeque::from([Ok(false), Ok(true)]),
+        turns: VecDeque::from([false, true]),
+        ..Fake::default()
+    };
+    let (end, said) = go(&mut host, true);
+    assert_eq!(end, reloaded());
+    assert!(said.contains(&Phase::Waiting { by: Wait::Turn }));
+    assert!(said.iter().all(|p| !p.is_over()));
 }

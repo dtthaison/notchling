@@ -86,13 +86,7 @@ fn blocker(host: &mut dyn Host) -> Result<Option<Wait>, Need> {
     }
 }
 
-pub fn run(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> Phase {
-    let end = steps(host, options, say);
-    say(end.clone());
-    end
-}
-
-fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> Phase {
+pub fn run(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase) -> bool) -> Phase {
     let started = host.now_ms();
     let mut tries = 0;
     loop {
@@ -110,15 +104,19 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                     };
                 }
                 tries = 0;
-                say(Phase::Waiting { by });
+                if !say(Phase::Waiting { by }) {
+                    return Phase::Cancelled;
+                }
                 host.sleep(POLL_MS);
                 continue;
             }
             Ok(None) => {}
         }
-        say(Phase::Working {
+        if !say(Phase::Working {
             step: Step::Restarting,
-        });
+        }) {
+            return Phase::Cancelled;
+        }
         match host.restart() {
             Ok(true) => {
                 return Phase::Done {
@@ -133,6 +131,10 @@ fn steps(host: &mut dyn Host, options: Options, say: &mut dyn FnMut(Phase)) -> P
                             text: STUCK.to_string(),
                         },
                     };
+                }
+                let by = blocker(host).ok().flatten().unwrap_or(Wait::Turn);
+                if !say(Phase::Waiting { by }) {
+                    return Phase::Cancelled;
                 }
                 host.sleep(POLL_MS)
             }

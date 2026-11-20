@@ -3,20 +3,22 @@ use crate::acting_ops::{bad, forbidden, now_ms, text_arg, ActingOps};
 use crate::outbox_courier::live_files;
 use notchling_engine::chrome::status;
 use notchling_engine::control::{job_state_path, plan_respawn};
-use notchling_engine::reload::flow::{self, Host, Options, Phase};
+use notchling_engine::reload::flow::{self, Host, Need, Options, Phase};
 use notchling_engine::reload::{bypasses, mode_of};
 use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_events::kinds::choices::DoneOrFailed;
 use notchling_local_api::{ApiError, Caller, ClientKind, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 const TIMED_OUT: &str = "didn't finish in";
 const SLOW: &str =
     "Claude Code is slow to restart the session. It may finish by itself; try again in a minute.";
+pub const RESTARTING: &str =
+    "Already restarting. The reload can't be cancelled now; it finishes by itself.";
+pub const STOPPED: &str = "The reload stopped before it finished. Try again.";
 
 pub const AUDIT_WORD: &str = "reload";
 
@@ -25,104 +27,70 @@ pub trait Hosts: Send + Sync {
     fn current(&self, agent: &Agent) -> Option<String>;
 }
 
+pub type Audit = Arc<dyn Fn(&Agent, &str, DoneOrFailed) + Send + Sync>;
+pub type Publish = Arc<dyn Fn(&Value) + Send + Sync>;
+
 #[derive(Clone, Debug)]
-struct Task {
+struct Entry {
     phase: Phase,
+    cancel: bool,
     after_turn: bool,
     since_ms: i64,
-    serial: u64,
-    worker: Arc<Worker>,
+    rev: u64,
     session: Option<String>,
 }
 
-#[derive(Debug)]
-struct WorkerState {
-    cancel: bool,
-    alive: bool,
+impl Entry {
+    fn json(&self) -> Value {
+        let mut value = serde_json::to_value(&self.phase).unwrap_or(Value::Null);
+        value["after_turn"] = json!(self.after_turn);
+        value["since_ms"] = json!(self.since_ms);
+        if self.cancel {
+            value["cancelling"] = json!(true);
+        }
+        if let Some(session) = &self.session {
+            value["session"] = json!(session);
+        }
+        value
+    }
 }
 
-#[derive(Debug)]
-struct Worker {
-    state: Mutex<WorkerState>,
-    wake: Condvar,
+struct Book {
+    entries: HashMap<String, Entry>,
+    rev: u64,
 }
 
-impl Worker {
-    fn new() -> Arc<Worker> {
-        Arc::new(Worker {
-            state: Mutex::new(WorkerState {
-                cancel: false,
-                alive: true,
-            }),
-            wake: Condvar::new(),
+impl Book {
+    fn next(&mut self) -> u64 {
+        self.rev += 1;
+        self.rev
+    }
+
+    fn report(&self, id: &str) -> Value {
+        let entry = self.entries.get(id);
+        json!({
+            "id": id,
+            "rev": entry.map_or(self.rev, |e| e.rev),
+            "task": entry.map(Entry::json),
         })
     }
 
-    fn cancel(&self) {
-        lock(&self.state).cancel = true;
-        self.wake.notify_all();
-    }
-
-    fn cancelled(&self) -> bool {
-        lock(&self.state).cancel
-    }
-
-    fn alive(&self) -> bool {
-        lock(&self.state).alive
-    }
-
-    fn finish(&self) {
-        lock(&self.state).alive = false;
-        self.wake.notify_all();
-    }
-
-    fn nap(&self, ms: u64) {
-        let end = Instant::now() + Duration::from_millis(ms);
-        let mut state = lock(&self.state);
-        while !state.cancel {
-            let Some(left) = end.checked_duration_since(Instant::now()) else {
-                break;
-            };
-            state = self
-                .wake
-                .wait_timeout(state, left)
-                .unwrap_or_else(|e| e.into_inner())
-                .0;
-        }
-    }
-
-    fn wait_gone(&self, limit: Duration) -> bool {
-        let end = Instant::now() + limit;
-        let mut state = lock(&self.state);
-        while state.alive {
-            let Some(left) = end.checked_duration_since(Instant::now()) else {
-                return false;
-            };
-            state = self
-                .wake
-                .wait_timeout(state, left)
-                .unwrap_or_else(|e| e.into_inner())
-                .0;
-        }
-        true
+    fn change(&mut self, id: &str, apply: impl FnOnce(&mut Entry)) -> Option<Value> {
+        let rev = self.next();
+        let entry = self.entries.get_mut(id)?;
+        apply(entry);
+        entry.rev = rev;
+        entry.since_ms = now_ms();
+        Some(self.report(id))
     }
 }
-
-struct Finish(Arc<Worker>);
-
-impl Drop for Finish {
-    fn drop(&mut self) {
-        self.0.finish();
-    }
-}
-
-pub type Audit = Arc<dyn Fn(&Agent, &str, DoneOrFailed) + Send + Sync>;
 
 pub struct ReloadOps {
     audit: OnceLock<Audit>,
+    publish: OnceLock<Publish>,
     hosts: Arc<dyn Hosts>,
-    tasks: Mutex<HashMap<String, Task>>,
-    serial: AtomicU64,
+    book: Mutex<Book>,
+    wake: Condvar,
     inline: bool,
 }
 
@@ -160,12 +128,13 @@ pub fn kind_of(agent: &Agent) -> Kind {
     }
 }
 
-struct Cancelable {
+struct Gated {
     inner: Box<dyn Host + Send>,
-    worker: Arc<Worker>,
+    ops: Arc<ReloadOps>,
+    id: String,
 }
 
-impl Host for Cancelable {
+impl Host for Gated {
     fn turn_running(&mut self) -> bool {
         self.inner.turn_running()
     }
@@ -176,14 +145,11 @@ impl Host for Cancelable {
         self.inner.tasks_in_flight()
     }
     fn restart(&mut self) -> Result<bool, String> {
-        if self.cancelled() {
-            return Err("Cancelled.".to_string());
-        }
         self.inner.restart()
     }
     fn sleep(&mut self, ms: u64) {
         if self.inner.real_time() {
-            self.worker.nap(ms)
+            self.ops.nap(&self.id, ms)
         } else {
             self.inner.sleep(ms)
         }
@@ -192,10 +158,74 @@ impl Host for Cancelable {
         self.inner.now_ms()
     }
     fn cancelled(&mut self) -> bool {
-        self.worker.cancelled() || self.inner.cancelled()
+        self.ops.cancel_asked(&self.id) || self.inner.cancelled()
     }
     fn real_time(&self) -> bool {
         self.inner.real_time()
+    }
+}
+
+struct Worker {
+    ops: Arc<ReloadOps>,
+    agent: Agent,
+    after_turn: bool,
+    ended: bool,
+}
+
+impl Worker {
+    fn run(mut self) {
+        let ops = self.ops.clone();
+        let id = self.agent.id.clone();
+        let mut host = Gated {
+            inner: ops.hosts.host(&self.agent),
+            ops: ops.clone(),
+            id: id.clone(),
+        };
+        let options = Options {
+            after_turn: self.after_turn,
+        };
+        let end = flow::run(&mut host, options, &mut |phase| ops.step(&id, phase));
+        drop(host);
+        let done = matches!(end, Phase::Done { .. });
+        let session = if done {
+            ops.hosts.current(&self.agent).filter(|now| *now != id)
+        } else {
+            None
+        };
+        let cancelled = matches!(end, Phase::Cancelled);
+        self.end(end, session);
+        if cancelled {
+            return;
+        }
+        if let Some(audit) = ops.audit.get() {
+            let result = if done {
+                DoneOrFailed::Done
+            } else {
+                DoneOrFailed::Failed
+            };
+            audit(&self.agent, AUDIT_WORD, result);
+        }
+    }
+
+    fn end(&mut self, phase: Phase, session: Option<String>) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        self.ops.finish(&self.agent.id, phase, session);
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.end(
+            Phase::NeedsYou {
+                need: Need::Failed {
+                    text: STOPPED.to_string(),
+                },
+            },
+            None,
+        );
     }
 }
 
@@ -210,11 +240,16 @@ impl ReloadOps {
     }
 
     fn build(hosts: Arc<dyn Hosts>, inline: bool) -> Arc<ReloadOps> {
+        let first = u64::try_from(now_ms()).unwrap_or(0);
         Arc::new(ReloadOps {
             audit: OnceLock::new(),
+            publish: OnceLock::new(),
             hosts,
-            tasks: Mutex::new(HashMap::new()),
-            serial: AtomicU64::new(1),
+            book: Mutex::new(Book {
+                entries: HashMap::new(),
+                rev: first,
+            }),
+            wake: Condvar::new(),
             inline,
         })
     }
@@ -223,161 +258,196 @@ impl ReloadOps {
         let _ = self.audit.set(audit);
     }
 
-    pub fn start(self: &Arc<Self>, agent: &Agent, after_turn: bool) -> Value {
-        let old = lock(&self.tasks)
-            .get(&agent.id)
-            .filter(|t| t.phase.is_over())
-            .map(|t| t.worker.clone());
-        if let Some(old) = old {
-            if !old.wait_gone(Duration::from_secs(2)) {
-                return self.state(agent, false);
-            }
+    pub fn set_publish(&self, publish: Publish) {
+        let _ = self.publish.set(publish);
+    }
+
+    fn tell(&self, report: &Value) {
+        if let Some(publish) = self.publish.get() {
+            publish(report);
         }
-        let worker = Worker::new();
-        let serial = {
-            let mut tasks = lock(&self.tasks);
-            if tasks
+    }
+
+    pub fn start(self: &Arc<Self>, agent: &Agent, after_turn: bool) -> Value {
+        let report = {
+            let mut book = lock(&self.book);
+            if book
+                .entries
                 .get(&agent.id)
-                .is_some_and(|t| !t.phase.is_over() || t.worker.alive())
+                .is_some_and(|e| !e.phase.is_over())
             {
-                drop(tasks);
-                return self.state(agent, false);
+                let report = book.report(&agent.id);
+                drop(book);
+                return reply(agent, report);
             }
-            let serial = self.serial.fetch_add(1, Ordering::SeqCst);
-            tasks.insert(
+            let rev = book.next();
+            book.entries.insert(
                 agent.id.clone(),
-                Task {
+                Entry {
                     phase: Phase::Waiting {
                         by: flow::Wait::Turn,
                     },
+                    cancel: false,
                     after_turn,
                     since_ms: now_ms(),
-                    serial,
-                    worker: worker.clone(),
+                    rev,
                     session: None,
                 },
             );
-            serial
+            book.report(&agent.id)
         };
-        let (me, agent_now) = (self.clone(), agent.clone());
-        let finisher = worker.clone();
-        let work = move || {
-            let _finish = Finish(worker.clone());
-            let mut host = Cancelable {
-                inner: me.hosts.host(&agent_now),
-                worker: worker.clone(),
-            };
-            let id = agent_now.id.clone();
-            let sink = me.clone();
-            let end = flow::run(&mut host, Options { after_turn }, &mut |phase| {
-                sink.set(&id, serial, phase)
-            });
-            if matches!(end, Phase::Cancelled) {
-                return;
-            }
-            let done = matches!(end, Phase::Done { .. });
-            if done {
-                me.followed(&agent_now, serial);
-            }
-            if let Some(audit) = me.audit.get() {
-                let result = if done {
-                    DoneOrFailed::Done
-                } else {
-                    DoneOrFailed::Failed
-                };
-                audit(&agent_now, AUDIT_WORD, result);
-            }
+        self.tell(&report);
+        let worker = Worker {
+            ops: self.clone(),
+            agent: agent.clone(),
+            after_turn,
+            ended: false,
         };
         if self.inline {
-            work();
-        } else if std::thread::Builder::new()
-            .name("reload".to_string())
-            .spawn(work)
-            .is_err()
-        {
-            finisher.finish();
-            self.set(
-                &agent.id,
-                serial,
-                Phase::NeedsYou {
-                    need: flow::Need::Failed {
-                        text: "Couldn't start the reload.".to_string(),
-                    },
-                },
-            );
+            worker.run();
+        } else {
+            let _ = std::thread::Builder::new()
+                .name("reload".to_string())
+                .spawn(move || worker.run());
         }
-        self.state(agent, false)
+        self.state(agent, None)
     }
 
-    fn followed(&self, agent: &Agent, serial: u64) {
-        let now = self.hosts.current(agent).filter(|id| *id != agent.id);
-        let mut tasks = lock(&self.tasks);
-        if let Some(task) = tasks.get_mut(&agent.id).filter(|t| t.serial == serial) {
-            task.session = now;
+    fn step(&self, id: &str, phase: Phase) -> bool {
+        let report = {
+            let mut book = lock(&self.book);
+            match book.entries.get(id) {
+                Some(entry) if !entry.phase.is_over() && !entry.cancel => {}
+                _ => return false,
+            }
+            if book.entries.get(id).is_some_and(|e| e.phase == phase) {
+                return true;
+            }
+            book.change(id, |entry| entry.phase = phase)
+        };
+        if let Some(report) = report {
+            self.tell(&report);
+        }
+        true
+    }
+
+    fn finish(&self, id: &str, phase: Phase, session: Option<String>) {
+        let report = {
+            let mut book = lock(&self.book);
+            if book.entries.get(id).is_none_or(|e| e.phase.is_over()) {
+                return;
+            }
+            book.change(id, |entry| {
+                entry.phase = phase;
+                entry.cancel = false;
+                entry.session = session;
+            })
+        };
+        self.wake.notify_all();
+        if let Some(report) = report {
+            self.tell(&report);
+        }
+    }
+
+    fn cancel_asked(&self, id: &str) -> bool {
+        lock(&self.book).entries.get(id).is_some_and(|e| e.cancel)
+    }
+
+    fn nap(&self, id: &str, ms: u64) {
+        let end = Instant::now() + Duration::from_millis(ms);
+        let mut book = lock(&self.book);
+        while book.entries.get(id).is_some_and(|e| !e.cancel) {
+            let Some(left) = end.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            book = self
+                .wake
+                .wait_timeout(book, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
         }
     }
 
     pub fn cancel(&self, agent: &Agent) -> Result<Value, ApiError> {
-        {
-            let mut tasks = lock(&self.tasks);
-            if let Some(task) = tasks.get_mut(&agent.id).filter(|t| !t.phase.is_over()) {
-                if matches!(task.phase, Phase::Working { .. }) {
-                    return Err(bad(
-                        "The session is restarting now, so the reload can't be cancelled. It finishes by itself.",
-                    ));
-                }
-                task.worker.cancel();
-                task.serial = self.serial.fetch_add(1, Ordering::SeqCst);
-                task.phase = Phase::Cancelled;
-                task.since_ms = now_ms();
+        let (asked, report) = {
+            let mut book = lock(&self.book);
+            let asked = match book.entries.get(&agent.id) {
+                Some(Entry {
+                    phase: Phase::Working { .. },
+                    ..
+                }) => return Err(bad(RESTARTING)),
+                Some(Entry {
+                    phase: Phase::Waiting { .. },
+                    cancel: false,
+                    ..
+                }) => true,
+                _ => false,
+            };
+            if asked {
+                book.change(&agent.id, |entry| entry.cancel = true);
             }
-        }
-        Ok(self.state(agent, false))
-    }
-
-    pub fn active(&self) -> Vec<String> {
-        let mut ids: Vec<String> = lock(&self.tasks)
-            .iter()
-            .filter(|(_, t)| !t.phase.is_over())
-            .map(|(id, _)| id.clone())
-            .collect();
-        ids.sort();
-        ids
-    }
-
-    fn set(&self, id: &str, serial: u64, phase: Phase) {
-        let mut tasks = lock(&self.tasks);
-        if let Some(task) = tasks.get_mut(id).filter(|t| t.serial == serial) {
-            if task.phase != phase {
-                task.since_ms = now_ms();
-            }
-            task.phase = phase;
-        }
-    }
-
-    pub fn state(&self, agent: &Agent, ack: bool) -> Value {
-        let task = {
-            let mut tasks = lock(&self.tasks);
-            if ack && tasks.get(&agent.id).is_some_and(|t| t.phase.is_over()) {
-                tasks.remove(&agent.id);
-            }
-            tasks.get(&agent.id).cloned()
+            (asked, book.report(&agent.id))
         };
-        let kind = kind_of(agent);
-        json!({
-            "offered": kind == Kind::Job,
-            "kind": kind.word(),
-            "task": task.map(|t| {
-                let mut value = serde_json::to_value(&t.phase).unwrap_or(Value::Null);
-                value["after_turn"] = json!(t.after_turn);
-                value["since_ms"] = json!(t.since_ms);
-                if let Some(session) = t.session {
-                    value["session"] = json!(session);
-                }
-                value
-            }),
-        })
+        if asked {
+            self.wake.notify_all();
+            self.tell(&report);
+        }
+        Ok(reply(agent, report))
     }
+
+    pub fn all(&self) -> Value {
+        let book = lock(&self.book);
+        let mut ids: Vec<&String> = book.entries.keys().collect();
+        ids.sort();
+        let tasks: Vec<Value> = ids.into_iter().map(|id| book.report(id)).collect();
+        json!({ "rev": book.rev, "tasks": tasks })
+    }
+
+    pub fn state(&self, agent: &Agent, ack: Option<u64>) -> Value {
+        let (report, removed) = {
+            let mut book = lock(&self.book);
+            let over = book
+                .entries
+                .get(&agent.id)
+                .is_some_and(|e| e.phase.is_over() && ack.is_some_and(|rev| rev == e.rev));
+            if over {
+                book.entries.remove(&agent.id);
+                book.next();
+            }
+            (book.report(&agent.id), over)
+        };
+        if removed {
+            self.tell(&report);
+        }
+        reply(agent, report)
+    }
+
+    #[cfg(test)]
+    pub fn wait_over(&self, id: &str, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        let mut book = lock(&self.book);
+        while book.entries.get(id).is_some_and(|e| !e.phase.is_over()) {
+            let Some(left) = end.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            book = self
+                .wake
+                .wait_timeout(book, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        true
+    }
+}
+
+fn reply(agent: &Agent, report: Value) -> Value {
+    let kind = kind_of(agent);
+    json!({
+        "offered": kind == Kind::Job,
+        "kind": kind.word(),
+        "rev": report["rev"],
+        "task": report["task"],
+    })
 }
 
 pub struct LiveHosts {
@@ -608,11 +678,13 @@ impl ActingOps {
         let reload = self
             .reload()
             .ok_or_else(|| ApiError::internal("Reload is not wired".to_string()))?;
-        if args.get("active").and_then(Value::as_bool) == Some(true) {
-            return Ok(json!({ "active": reload.active() }));
+        if args.get("all").and_then(Value::as_bool) == Some(true) {
+            return Ok(reload.all());
         }
         let agent = self.agent(args)?;
-        let ack = args.get("ack").and_then(Value::as_bool).unwrap_or(false);
+        let ack = (args.get("ack").and_then(Value::as_bool) == Some(true))
+            .then(|| args.get("rev").and_then(Value::as_u64))
+            .flatten();
         Ok(reload.state(&agent, ack))
     }
 }

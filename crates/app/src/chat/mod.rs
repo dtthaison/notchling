@@ -100,6 +100,7 @@ mod prompts_permission_tests;
 #[cfg(test)]
 mod question_parity_tests;
 pub mod reload;
+pub mod reload_feed;
 pub mod remote;
 pub mod remote_control;
 #[cfg(test)]

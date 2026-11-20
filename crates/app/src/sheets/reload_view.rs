@@ -38,6 +38,10 @@ pub fn body(card: &Card, a: Appearance) -> Div {
                 .then(|| card_row(a).child(label(&card.command, TypeRole::Mono, Ink::Text, a))),
         )
         .children(
+            card.refusal()
+                .map(|text| label(text, TypeRole::Meta, Ink::Needs, a)),
+        )
+        .children(
             card.note()
                 .map(|text| label(&text, TypeRole::Meta, Ink::TextMuted, a)),
         )

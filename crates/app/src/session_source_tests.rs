@@ -123,6 +123,24 @@ fn the_real_root_names_the_socket_in_its_data_folder_and_the_binary_beside_the_a
 }
 
 #[test]
+fn a_pushed_reload_change_reaches_the_view_and_an_older_one_is_dropped() {
+    let source = SessionSource::files();
+    let before = source.generation();
+    let push = |rev: u64, phase: &str| Event {
+        event: topics::RELOAD_CHANGED.to_string(),
+        data: serde_json::json!({"id": "s1", "rev": rev, "task": {"phase": phase, "step": "restarting"}}),
+    };
+    source.shared.apply(push(7, "working"));
+    assert!(source.generation() > before);
+    assert!(source.view().reloads.live("s1"));
+    let now = source.generation();
+    source.shared.apply(push(6, "cancelled"));
+    assert_eq!(source.generation(), now);
+    source.absorb_reload("s1", &serde_json::json!({"rev": 8, "task": null}));
+    assert!(source.reloads().task("s1").is_none());
+}
+
+#[test]
 fn a_fixture_source_reads_files_and_says_nothing_about_a_daemon() {
     let source = SessionSource::for_run(
         Some(&DataRoot::fixture(Path::new("/f"))),

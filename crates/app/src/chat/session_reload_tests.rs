@@ -4,9 +4,9 @@ use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, NodeRef};
 use serde_json::{json, Value};
 
 use super::data::{Session, Tool};
+use super::reload_feed::ReloadFeed;
 use super::session_reload::{
-    lead, mode, parse, Act, Applied, Card, Mode, Stage, State, Status, Task, Via, NOTE_MS, POLL_MS,
-    SCAN_MS,
+    lead, mode, parse_task, Act, Card, Intent, Mode, Settle, Stage, State, Task, NOTE_MS,
 };
 use crate::acting::{ops, Request};
 
@@ -47,11 +47,29 @@ fn catalog() -> Vec<ModelInfo> {
 }
 
 fn open_card() -> Card {
-    Card::open(&agent(AgentTarget::Job("j1".into())), "Lead.".into()).unwrap()
+    Card::open(&agent(AgentTarget::Job("j1".into())), "Lead.".into(), 0).unwrap()
 }
 
-fn status(task: Value) -> Status {
-    parse(&json!({"offered": true, "kind": "job", "task": task})).unwrap()
+fn card_for(id: &str, floor: u64) -> Card {
+    let mut a = agent(AgentTarget::Job("j1".into()));
+    a.id = id.into();
+    Card::open(&a, "Lead.".into(), floor).unwrap()
+}
+
+fn push(feed: &mut ReloadFeed, id: &str, rev: u64, task: Value) {
+    assert!(feed.apply(&json!({"id": id, "rev": rev, "task": task})));
+}
+
+fn waiting() -> Value {
+    json!({"phase": "waiting", "by": {"why": "turn"}, "after_turn": true, "since_ms": 1})
+}
+
+fn working() -> Value {
+    json!({"phase": "working", "step": "restarting"})
+}
+
+fn done() -> Value {
+    json!({"phase": "done", "result": "reloaded"})
 }
 
 #[test]
@@ -115,7 +133,7 @@ fn with_nothing_read_yet_it_says_only_that_the_conversation_is_re_read() {
 
 #[test]
 fn a_terminal_session_gets_instructions_and_no_reload_button() {
-    let card = Card::open(&agent(AgentTarget::Process(42)), "Lead.".into()).unwrap();
+    let card = Card::open(&agent(AgentTarget::Process(42)), "Lead.".into(), 0).unwrap();
     assert_eq!(card.stage, Stage::Terminal);
     assert_eq!(card.command, "claude --resume 's1'");
     assert!(card.intro().contains("terminal Notchling didn't start"));
@@ -154,38 +172,45 @@ fn helpers_are_counted_in_the_waiting_line() {
 }
 
 #[test]
-fn the_daemons_state_is_read_with_its_phase_and_new_id() {
-    let parsed = status(json!({
+fn the_terminal_command_quotes_the_id_and_prefers_the_resume_id() {
+    let mut a = agent(AgentTarget::Process(7));
+    a.id = "it's".into();
+    assert_eq!(
+        Card::open(&a, String::new(), 0).unwrap().command,
+        "claude --resume 'it'\\''s'"
+    );
+    a.resume_session_id = Some("old-conv".into());
+    assert_eq!(
+        Card::open(&a, String::new(), 0).unwrap().command,
+        "claude --resume 'old-conv'"
+    );
+}
+
+#[test]
+fn the_daemons_task_is_read_with_its_phase_new_id_and_a_cancel_asked() {
+    let task = parse_task(&json!({
         "phase": "waiting", "by": {"why": "tasks", "count": 2},
-        "after_turn": true, "since_ms": 9
+        "after_turn": true, "since_ms": 9, "cancelling": true
     }));
     assert_eq!(
-        parsed.task,
+        task,
         Some(Task {
             phase: Phase::Waiting {
                 by: Wait::Tasks { count: 2 }
             },
             since_ms: 9,
-            session: None
+            session: None,
+            cancelling: true,
         })
     );
-    let done = status(json!({"phase": "done", "result": "reloaded", "session": "n2"}));
-    assert_eq!(done.task.unwrap().session.as_deref(), Some("n2"));
-    let needs = status(json!({
-        "phase": "needs_you", "need": {"need": "busy", "by": {"why": "turn"}}
-    }));
-    assert!(matches!(needs.task.unwrap().phase, Phase::NeedsYou { .. }));
-    assert_eq!(parse(&json!({"nope": 1})), None);
-    assert_eq!(
-        parse(&json!({"offered": false, "kind": "terminal", "task": null}))
-            .unwrap()
-            .task,
-        None
-    );
+    let moved = parse_task(&json!({"phase": "done", "result": "reloaded", "session": "n2"}));
+    assert_eq!(moved.unwrap().session.as_deref(), Some("n2"));
+    assert_eq!(parse_task(&Value::Null), None);
+    assert_eq!(parse_task(&json!({"nope": 1})), None);
 }
 
 #[test]
-fn the_requests_are_the_reload_op_and_the_quiet_state_read() {
+fn the_requests_are_the_reload_op_its_cancel_and_an_ack_of_one_rev() {
     let go = Request::reload("s1", true);
     assert_eq!(go.op, ops::SESSION_RELOAD);
     assert_eq!(go.args, json!({"id": "s1", "afterTurn": true}));
@@ -193,274 +218,214 @@ fn the_requests_are_the_reload_op_and_the_quiet_state_read() {
         Request::reload_cancel("s1").args,
         json!({"id": "s1", "cancel": true})
     );
-    let read = Request::reload_state("s1", false);
-    assert_eq!(read.op, ops::SESSION_RELOAD_STATE);
-    assert_eq!(read.args, json!({"id": "s1"}));
-    assert_eq!(Request::reload_state("s1", true).args["ack"], true);
+    let ack = Request::reload_ack("s1", 7);
+    assert_eq!(ack.op, ops::SESSION_RELOAD_STATE);
+    assert_eq!(ack.args, json!({"id": "s1", "ack": true, "rev": 7}));
 }
 
 #[test]
-fn polling_moves_the_card_along_and_ends_with_a_note() {
-    let mut state = State {
-        card: Some(open_card()),
-        ..State::default()
-    };
-    let waiting = status(json!({"phase": "waiting", "by": {"why": "turn"}}));
-    assert_eq!(state.apply("s1", &waiting, 0), Applied::Changed);
-    assert_eq!(state.apply("s1", &waiting, 0), Applied::Nothing);
-    assert!(state.card.as_ref().unwrap().live());
-    let working = status(json!({"phase": "working", "step": "restarting"}));
-    assert_eq!(state.apply("s1", &working, 0), Applied::Changed);
+fn the_feed_keeps_the_newest_rev_and_drops_a_late_older_push() {
+    let mut feed = ReloadFeed::seed(&json!({"tasks": [
+        {"id": "s1", "rev": 5, "task": waiting()},
+        {"id": "s2", "rev": 3, "task": null}
+    ]}));
+    assert!(feed.live("s1"));
+    assert_eq!(feed.rev("s2"), 3);
+    assert!(!feed.apply(&json!({"id": "s1", "rev": 4, "task": done()})));
+    assert!(feed.live("s1"));
+    assert!(feed.absorb("s1", &json!({"offered": true, "rev": 6, "task": working()})));
+    assert_eq!(feed.rev("s1"), 6);
+    assert!(!feed.absorb("s1", &json!({"offered": true, "rev": 6, "task": done()})));
+    push(&mut feed, "s1", 8, done());
+    assert!(!feed.live("s1"));
     assert_eq!(
-        state.note("s1", 0).unwrap(),
-        "Reloading… the conversation is kept"
+        feed.ended()
+            .map(|(id, rev, _)| (id, rev))
+            .collect::<Vec<_>>(),
+        [("s1", 8)]
     );
-    let done = status(json!({"phase": "done", "result": "reloaded"}));
-    assert_eq!(
-        state.apply("s1", &done, 1_000),
-        Applied::Finished { followed: None }
-    );
-    assert!(state.card.is_none());
-    assert_eq!(state.note("s1", 1_001).unwrap(), "Session reloaded");
-    assert_eq!(state.note("s1", 1_000 + NOTE_MS + 1), None);
 }
 
 #[test]
-fn a_session_that_took_a_new_id_is_said_to_continue() {
-    let mut state = State {
-        card: Some(open_card()),
-        ..State::default()
-    };
-    let done = status(json!({"phase": "done", "result": "reloaded", "session": "n2"}));
-    assert_eq!(
-        state.apply("s1", &done, 0),
-        Applied::Finished {
-            followed: Some("n2".into())
-        }
-    );
-    assert!(state.note("n2", 1).unwrap().contains("new session id"));
-    assert_eq!(state.note("s1", 1), None);
-}
-
-#[test]
-fn a_reload_goes_on_being_watched_with_the_sheet_closed_until_it_ends() {
+fn the_card_follows_the_daemon_and_done_closes_it_with_a_note_and_one_ack() {
     let mut state = State::default();
-    state.start("s1", 5_000);
-    assert!(state.live("s1"));
+    let mut card = state.open(card_for("s1", 0));
+    card.begin(0);
+    state.card = Some(card);
+    let mut feed = ReloadFeed::default();
+    assert_eq!(state.sync(&feed, 0).settle, Some(Settle::Changed));
+    assert_eq!(state.card.as_ref().unwrap().stage, Stage::Starting);
+    push(&mut feed, "s1", 5, waiting());
+    state.sync(&feed, 0);
+    assert_eq!(
+        state.card.as_ref().unwrap().stage,
+        Stage::Waiting(Wait::Turn)
+    );
     assert_eq!(state.row_line("s1"), Some("Reloading…"));
-    assert_eq!(state.row_line("s2"), None);
-    assert_eq!(state.polls(), ["s1"]);
-    assert!(!state.due(5_000));
-    assert!(state.due(5_000 + POLL_MS));
-    let waiting = status(json!({"phase": "waiting", "by": {"why": "turn"}}));
-    assert_eq!(state.apply("s1", &waiting, 0), Applied::Nothing);
-    assert!(state.live("s1"));
-    let done = status(json!({"phase": "done", "result": "reloaded", "session": "n2"}));
-    assert_eq!(
-        state.apply("s1", &done, 0),
-        Applied::Finished {
-            followed: Some("n2".into())
-        }
-    );
-    assert!(!state.live("s1"));
-    assert!(state.polls().is_empty());
-    assert!(!state.due(1_000_000));
+    push(&mut feed, "s1", 6, working());
+    state.sync(&feed, 0);
+    assert_eq!(state.card.as_ref().unwrap().stage, Stage::Working);
+    assert!(state.card.as_ref().unwrap().acts().is_empty());
+    push(&mut feed, "s1", 7, done());
+    let synced = state.sync(&feed, 100);
+    assert_eq!(synced.settle, Some(Settle::Close));
+    assert_eq!(synced.acks, [("s1".to_string(), 7)]);
+    assert!(state.card.is_none());
+    assert_eq!(state.note("s1", 100).as_deref(), Some("Session reloaded"));
+    assert_eq!(state.note("s1", 100 + NOTE_MS), None);
+    assert_eq!(state.row_line("s1"), None);
 }
 
 #[test]
-fn a_problem_with_no_sheet_open_is_a_note_and_stops_the_watch() {
+fn nothing_is_asked_of_the_daemon_once_every_task_is_final() {
     let mut state = State::default();
-    state.start("s1", 0);
-    let needs = status(json!({
-        "phase": "needs_you", "need": {"need": "failed", "text": "no such job"}
-    }));
-    assert_eq!(
-        state.apply("s1", &needs, 0),
-        Applied::Finished { followed: None }
-    );
-    assert!(!state.live("s1"));
-    assert_eq!(state.note("s1", 1).unwrap(), "no such job");
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s1", 4, done());
+    push(&mut feed, "s2", 5, json!({"phase": "cancelled"}));
+    assert_eq!(state.sync(&feed, 0).acks.len(), 2);
+    assert_eq!(state.sync(&feed, 0), Default::default());
+    push(&mut feed, "s1", 9, Value::Null);
+    push(&mut feed, "s2", 10, Value::Null);
+    assert_eq!(state.sync(&feed, 0), Default::default());
+    assert!(!state.live("s1") && !state.live("s2"));
 }
 
 #[test]
-fn a_cancelled_reload_with_no_sheet_is_acked_and_forgotten() {
+fn cancel_closes_nothing_until_the_daemon_says_cancelled() {
     let mut state = State::default();
-    state.start("s1", 0);
-    let cancelled = status(json!({"phase": "cancelled"}));
-    assert_eq!(
-        state.apply("s1", &cancelled, 0),
-        Applied::Finished { followed: None }
-    );
-    assert!(!state.live("s1"));
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s1", 5, waiting());
+    state.sync(&feed, 0);
+    let card = state.open(card_for("s1", feed.rev("s1")));
+    assert_eq!(card.stage, Stage::Waiting(Wait::Turn));
+    assert_eq!(card.acts(), [Act::CancelReload]);
+    let card = state.card.as_mut().unwrap();
+    card.intent = Intent::Cancelling;
+    assert_eq!(card.settle(5, feed.task("s1")), Settle::Changed);
+    assert_eq!(card.stage, Stage::Cancelling);
+    card.intent = Intent::Following;
+    let mut asked = waiting();
+    asked["cancelling"] = json!(true);
+    push(&mut feed, "s1", 6, asked);
+    assert_eq!(state.sync(&feed, 0).settle, Some(Settle::Same));
+    assert_eq!(state.card.as_ref().unwrap().stage, Stage::Cancelling);
+    assert!(state.card.as_ref().unwrap().acts().is_empty());
+    push(&mut feed, "s1", 7, json!({"phase": "cancelled"}));
+    let synced = state.sync(&feed, 0);
+    assert_eq!(synced.settle, Some(Settle::Close));
+    assert_eq!(state.note("s1", 0), None);
 }
 
 #[test]
-fn the_terminal_command_quotes_the_id_and_prefers_the_resume_id() {
-    let mut a = agent(AgentTarget::Process(7));
-    a.id = "it's".into();
-    assert_eq!(
-        Card::open(&a, String::new()).unwrap().command,
-        "claude --resume 'it'\\''s'"
-    );
-    a.resume_session_id = Some("old-conv".into());
-    assert_eq!(
-        Card::open(&a, String::new()).unwrap().command,
-        "claude --resume 'old-conv'"
-    );
+fn a_refused_cancel_keeps_the_card_on_the_daemons_state_and_says_why() {
+    let mut state = State::default();
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s1", 5, working());
+    state.sync(&feed, 0);
+    state.open(card_for("s1", 5));
+    let card = state.card.as_mut().unwrap();
+    card.intent = Intent::Refused("Already restarting.".into());
+    card.settle(5, feed.task("s1"));
+    assert_eq!(card.stage, Stage::Working);
+    assert_eq!(card.refusal(), Some("Already restarting."));
+    assert_eq!(card.note(), None);
+    push(&mut feed, "s1", 6, done());
+    assert_eq!(state.sync(&feed, 0).settle, Some(Settle::Close));
 }
 
 #[test]
-fn something_for_the_person_becomes_a_problem_with_try_again() {
-    let mut state = State {
-        card: Some(open_card()),
-        ..State::default()
-    };
-    let needs = status(json!({
-        "phase": "needs_you", "need": {"need": "failed", "text": "no such job"}
-    }));
-    assert_eq!(state.apply("s1", &needs, 0), Applied::Changed);
+fn a_sheet_belongs_to_one_session_and_another_sessions_end_leaves_it() {
+    let mut state = State::default();
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s1", 3, done());
+    state.sync(&feed, 0);
+    let card = state.open(card_for("s1", feed.rev("s1")));
+    assert_eq!(card.stage, Stage::Ask);
+    push(&mut feed, "s2", 4, waiting());
+    push(&mut feed, "s2", 5, done());
+    let synced = state.sync(&feed, 0);
+    assert_eq!(synced.settle, Some(Settle::Same));
+    assert_eq!(synced.acks, [("s2".to_string(), 5)]);
+    assert_eq!(state.card.as_ref().unwrap().session, "s1");
+    assert_eq!(state.card.as_ref().unwrap().stage, Stage::Ask);
+    state.open(card_for("s2", feed.rev("s2")));
+    assert_eq!(state.card.as_ref().unwrap().session, "s2");
+    assert_eq!(state.card.as_ref().unwrap().stage, Stage::Ask);
+}
+
+#[test]
+fn a_reload_already_running_shows_live_when_the_sheet_opens() {
+    let mut state = State::default();
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s1", 5, working());
+    state.sync(&feed, 0);
+    let card = state.open(card_for("s1", 5));
+    assert_eq!(card.stage, Stage::Working);
+}
+
+#[test]
+fn a_problem_is_a_note_with_no_sheet_and_stays_on_the_sheet_after_the_ack() {
+    let needs = json!({"phase": "needs_you", "need": {"need": "tasks_unknown"}});
+    let mut state = State::default();
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s2", 5, needs.clone());
+    state.sync(&feed, 0);
+    assert!(state.note("s2", 0).unwrap().contains("background work"));
+    let mut card = state.open(card_for("s1", 0));
+    card.begin(0);
+    state.card = Some(card);
+    push(&mut feed, "s1", 6, needs);
+    let synced = state.sync(&feed, 0);
+    assert_eq!(synced.acks, [("s1".to_string(), 6)]);
+    assert_eq!(state.note("s1", 0), None);
     let card = state.card.as_ref().unwrap();
     assert!(card.problem());
-    assert_eq!(card.status().unwrap(), "no such job");
     assert_eq!(card.acts(), [Act::TryAgain, Act::Close]);
-    assert_eq!(
-        Card {
-            stage: Stage::Needs(Need::Busy { by: Wait::Turn }),
-            ..open_card()
-        }
-        .status()
-        .unwrap(),
-        "The turn didn't end in time. Try again when it has."
-    );
+    push(&mut feed, "s1", 7, Value::Null);
+    state.sync(&feed, 0);
+    assert!(state.card.as_ref().unwrap().problem());
+    let mut card = state.card.clone().unwrap();
+    card.begin(feed.rev("s1"));
+    card.settle(feed.rev("s1"), feed.task("s1"));
+    assert_eq!(card.stage, Stage::Starting);
 }
 
 #[test]
-fn a_cancelled_reload_closes_the_card_without_a_note() {
-    let mut state = State {
-        card: Some(open_card()),
-        ..State::default()
-    };
-    let cancelled = status(json!({"phase": "cancelled"}));
-    assert_eq!(
-        state.apply("s1", &cancelled, 0),
-        Applied::Finished { followed: None }
-    );
-    assert!(state.card.is_none());
-    assert_eq!(state.note("s1", 1), None);
+fn a_start_the_daemon_refuses_shows_why_with_try_again() {
+    let mut card = card_for("s1", 0);
+    card.begin(0);
+    card.intent = Intent::Ended(Need::Failed {
+        text: "Act on Sessions is off.".into(),
+    });
+    card.settle(0, None);
+    assert_eq!(card.status().as_deref(), Some("Act on Sessions is off."));
+    assert_eq!(card.acts(), [Act::TryAgain, Act::Close]);
 }
 
 #[test]
-fn polls_run_only_while_the_card_is_live_and_a_failing_poll_gives_up() {
+fn a_session_that_took_a_new_id_is_followed_and_noted_under_it() {
     let mut state = State::default();
-    assert!(!state.due(10_000));
-    let mut card = open_card();
-    state.card = Some(card.clone());
-    assert!(!state.due(10_000));
-    card.stage = Stage::Waiting(Wait::Turn);
-    state.card = Some(card);
-    assert!(state.due(10_000));
-    state.last_poll_ms = 10_000;
-    assert!(!state.due(10_000 + POLL_MS - 1));
-    assert!(state.due(10_000 + POLL_MS));
-    for _ in 0..4 {
-        assert!(!state.poll_failed("s1"));
-    }
-    assert!(state.poll_failed("s1"));
-}
-
-fn waiting() -> Status {
-    status(json!({"phase": "waiting", "by": {"why": "turn"}}))
-}
-
-#[test]
-fn a_late_start_reply_cannot_rearm_watching_after_cancel() {
-    let mut state = State::default();
-    let start = state.start("s1", 0);
-    let cancel = state.cancelling("s1");
-    assert_ne!(start, cancel);
-    state.watching.remove("s1");
-    assert_eq!(
-        state.apply_via("s1", &waiting(), 0, Via::Start, start),
-        Applied::Nothing
+    let mut feed = ReloadFeed::default();
+    push(
+        &mut feed,
+        "s1",
+        5,
+        json!({"phase": "done", "result": "reloaded", "session": "n2"}),
     );
-    assert!(!state.live("s1"));
-    let cancelled = status(json!({"phase": "cancelled"}));
-    assert_eq!(
-        state.apply_via("s1", &cancelled, 0, Via::Cancel, cancel),
-        Applied::Finished { followed: None }
-    );
+    let synced = state.sync(&feed, 0);
+    assert_eq!(synced.follows, [("s1".to_string(), "n2".to_string())]);
+    assert!(state.note("n2", 0).unwrap().contains("new session id"));
 }
 
 #[test]
-fn a_cancel_that_fails_keeps_watching() {
+fn an_agents_reload_shows_on_its_row_from_the_push_alone() {
     let mut state = State::default();
-    state.start("s1", 0);
-    state.cancelling("s1");
-    assert!(state.live("s1"));
-}
-
-#[test]
-fn a_poll_in_flight_cannot_drop_what_a_new_start_added() {
-    let mut state = State::default();
-    let old = state.generation("s1");
-    let fresh = state.start("s1", 0);
-    assert_ne!(old, fresh);
-    let none = status(Value::Null);
-    assert_eq!(
-        state.apply_via("s1", &none, 0, Via::Poll, old),
-        Applied::Nothing
-    );
-    assert!(state.live("s1"));
-}
-
-#[test]
-fn poll_failures_are_counted_per_session() {
-    let mut state = State::default();
-    state.watching.insert("a".into());
-    state.watching.insert("b".into());
-    for _ in 0..4 {
-        assert!(!state.poll_failed("b"));
-        state.apply("a", &waiting(), 0);
-    }
-    assert!(state.poll_failed("b"));
-    assert!(!state.live("b"));
-    assert!(state.live("a"));
-}
-
-#[test]
-fn opening_keeps_a_task_that_just_finished_but_drops_a_stale_cancel() {
-    let mut state = State {
-        card: Some(open_card()),
-        ..State::default()
-    };
-    let gen = state.generation("s1");
-    let cancelled = status(json!({"phase": "cancelled"}));
-    assert_eq!(
-        state.apply_via("s1", &cancelled, 0, Via::Open, gen),
-        Applied::Stale
-    );
-    assert!(state.card.is_some());
-    let done = status(json!({"phase": "done", "result": "reloaded", "session": "n2"}));
-    assert_eq!(
-        state.apply_via("s1", &done, 0, Via::Open, gen),
-        Applied::Finished {
-            followed: Some("n2".into())
-        }
-    );
-    assert!(state.note("n2", 1).is_some());
-}
-
-#[test]
-fn reloads_the_daemon_runs_for_an_agent_are_discovered_and_shown() {
-    let mut state = State::default();
-    assert!(state.scan_due(SCAN_MS));
-    state.last_scan_ms = SCAN_MS;
-    assert!(!state.scan_due(SCAN_MS + 1));
-    state.scanning = true;
-    assert!(!state.scan_due(SCAN_MS * 3));
-    state.scanning = false;
-    assert_eq!(state.row_line("s9"), None);
-    state.seen_active(&["s9".to_string()]);
-    assert_eq!(state.row_line("s9"), Some("Reloading…"));
-    assert!(state.due(1_000_000));
+    let mut feed = ReloadFeed::default();
+    push(&mut feed, "s3", 5, waiting());
+    state.sync(&feed, 0);
+    assert_eq!(state.row_line("s3"), Some("Reloading…"));
+    assert_eq!(state.note("s3", 0).as_deref(), Some("Reloading…"));
+    push(&mut feed, "s3", 6, done());
+    state.sync(&feed, 0);
+    assert_eq!(state.row_line("s3"), None);
 }

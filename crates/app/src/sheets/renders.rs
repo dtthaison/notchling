@@ -260,7 +260,7 @@ pub fn reload_card(shown: Shown) -> Option<crate::chat::session_reload::Card> {
     };
     let catalog = Catalog::built_in().models(Tool::Claude, &[]);
     let words = lead(184_000, Some("claude-opus-5-5"), &catalog);
-    let mut card = Card::open(&agent, words)?;
+    let mut card = Card::open(&agent, words, 0)?;
     if shown == Shown::ReloadWaiting {
         card.stage = Stage::Waiting(Wait::Tasks { count: 3 });
     }

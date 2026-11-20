@@ -1,4 +1,4 @@
-use crate::acting_ops::ActingOps;
+use crate::acting_ops::{ActingOps, Room};
 use crate::acting_ops_tests::{app, caller, code, sessions, setup_in, Setup, GONE, PROMPT};
 use crate::op_group::OpGroup;
 use crate::outbox_ops::OutboxOps;
@@ -23,8 +23,14 @@ impl Drop for Dir {
     }
 }
 
+type Probe = Arc<dyn Fn() + Send + Sync>;
+
 #[derive(Default)]
 struct Log {
+    on_tasks: Option<Probe>,
+    crash: bool,
+    hosts: u32,
+    most_hosts: u32,
     turns: VecDeque<bool>,
     dialogs: VecDeque<bool>,
     tasks: VecDeque<Option<u32>>,
@@ -42,8 +48,17 @@ struct Fake(Arc<Mutex<Log>>);
 
 struct FakeHost(Fake);
 
+impl Drop for FakeHost {
+    fn drop(&mut self) {
+        let mut log = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
+        log.hosts -= 1;
+    }
+}
+
 impl Host for FakeHost {
     fn turn_running(&mut self) -> bool {
+        let crash = (self.0).0.lock().unwrap().crash;
+        assert!(!crash, "the fake host crashed");
         let mut log = (self.0).0.lock().unwrap();
         log.hold || log.turns.pop_front().unwrap_or(false)
     }
@@ -57,6 +72,10 @@ impl Host for FakeHost {
             .unwrap_or(false)
     }
     fn tasks_in_flight(&mut self) -> Option<u32> {
+        let probe = (self.0).0.lock().unwrap().on_tasks.clone();
+        if let Some(probe) = probe {
+            probe();
+        }
         (self.0)
             .0
             .lock()
@@ -98,6 +117,10 @@ impl Host for FakeHost {
 
 impl Hosts for Fake {
     fn host(&self, _agent: &Agent) -> Box<dyn Host + Send> {
+        let mut log = self.0.lock().unwrap();
+        log.hosts += 1;
+        log.most_hosts = log.most_hosts.max(log.hosts);
+        drop(log);
         Box::new(FakeHost(self.clone()))
     }
     fn current(&self, _agent: &Agent) -> Option<String> {
@@ -125,6 +148,14 @@ fn faked(tag: &str, fake: &Fake, inline: bool) -> (Dir, Setup) {
     } else {
         ReloadOps::new(Arc::new(fake.clone()))
     };
+    let room = s.room.clone();
+    reload.set_publish(Arc::new(move |data| {
+        room.publish(
+            notchling_local_api::topics::PROMPTS,
+            notchling_local_api::topics::RELOAD_CHANGED,
+            data,
+        )
+    }));
     s.ops.attach_reload(reload);
     (dir, s)
 }
@@ -334,18 +365,26 @@ fn a_session_that_took_a_new_id_is_followed() {
 }
 
 #[test]
-fn a_finished_task_is_cleared_when_read_with_ack() {
+fn a_finished_task_is_cleared_only_by_an_ack_of_the_rev_that_was_read() {
     let fake = Fake::default();
     let (_d, s) = faked("ack", &fake, true);
-    reload(&s, "job-a", true).unwrap();
+    let done = reload(&s, "job-a", true).unwrap();
     assert_eq!(phase_of(&s, "job-a")["phase"], "done");
-    s.ops
-        .call(
-            &app(),
-            ops::SESSION_RELOAD_STATE,
-            &json!({"id": "job-a", "ack": true}),
-        )
-        .unwrap();
+    let rev = done["rev"].as_u64().unwrap();
+    let ack = |rev: u64| {
+        s.ops
+            .call(
+                &app(),
+                ops::SESSION_RELOAD_STATE,
+                &json!({"id": "job-a", "ack": true, "rev": rev}),
+            )
+            .unwrap()
+    };
+    ack(rev - 1);
+    assert_eq!(phase_of(&s, "job-a")["phase"], "done");
+    let cleared = ack(rev);
+    assert!(cleared["task"].is_null());
+    assert!(cleared["rev"].as_u64().unwrap() > rev);
     assert!(phase_of(&s, "job-a").is_null());
 }
 
@@ -635,33 +674,32 @@ fn a_respawn_that_times_out_restores_the_flags_and_clears_pending() {
 }
 
 #[test]
-fn a_cancelled_reload_can_be_started_again_at_once_and_the_old_worker_cannot_touch_it() {
+fn a_cancel_is_written_by_the_worker_and_a_new_start_runs_one_worker_at_a_time() {
     let fake = Fake::default();
     fake.0.lock().unwrap().tasks = VecDeque::from(vec![Some(2); 400]);
     fake.0.lock().unwrap().slow = true;
     let (_d, s) = faked("again", &fake, false);
     reload(&s, "job-a", true).unwrap();
-    let cancelled = s
-        .ops
-        .call(
-            &app(),
-            ops::SESSION_RELOAD,
-            &json!({"id": "job-a", "cancel": true}),
-        )
-        .unwrap();
-    assert_eq!(cancelled["task"]["phase"], "cancelled");
+    let asked = cancel(&s, "job-a").unwrap();
+    assert_eq!(asked["task"]["cancelling"], true);
+    assert!(wait_over(&s, "job-a"));
+    assert_eq!(phase_of(&s, "job-a")["phase"], "cancelled");
     let again = reload(&s, "job-a", true).unwrap();
     assert_eq!(again["task"]["phase"], "waiting");
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    assert!(again["task"].get("cancelling").is_none());
+    std::thread::sleep(std::time::Duration::from_millis(100));
     assert_eq!(phase_of(&s, "job-a")["phase"], "waiting");
     assert_eq!(fake.0.lock().unwrap().restarts, 0);
+    assert_eq!(fake.0.lock().unwrap().most_hosts, 1);
+    cancel(&s, "job-a").unwrap();
+    assert!(wait_over(&s, "job-a"));
+}
+
+fn wait_over(s: &Setup, id: &str) -> bool {
     s.ops
-        .call(
-            &app(),
-            ops::SESSION_RELOAD,
-            &json!({"id": "job-a", "cancel": true}),
-        )
-        .unwrap();
+        .reload()
+        .unwrap()
+        .wait_over(id, std::time::Duration::from_secs(10))
 }
 
 fn until_phase(s: &Setup, id: &str, phase: &str) {
@@ -693,7 +731,7 @@ fn a_reload_inside_the_restart_cannot_be_cancelled_and_finishes() {
     until_phase(&s, "job-a", "working");
     let refused = cancel(&s, "job-a").unwrap_err();
     assert_eq!(refused.0, ErrorCode::BadRequest);
-    assert!(refused.1.contains("restarting"), "{}", refused.1);
+    assert_eq!(refused.1, crate::reload_ops::RESTARTING);
     assert_eq!(phase_of(&s, "job-a")["phase"], "working");
     fake.0.lock().unwrap().gate = false;
     assert_eq!(until_over(&s, "job-a")["phase"], "done");
@@ -707,8 +745,15 @@ fn a_second_start_while_a_worker_is_inside_the_restart_starts_nothing() {
     let (_d, s) = faked("working-start", &fake, false);
     reload(&s, "job-a", true).unwrap();
     until_phase(&s, "job-a", "working");
+    let seen = s
+        .ops
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"id": "job-a"}))
+        .unwrap();
     let again = reload(&s, "job-a", true).unwrap();
     assert_eq!(again["task"]["phase"], "working");
+    assert_eq!(again["rev"], seen["rev"]);
+    assert_eq!(again["task"]["since_ms"], seen["task"]["since_ms"]);
+    assert_eq!(fake.0.lock().unwrap().most_hosts, 1);
     fake.0.lock().unwrap().gate = false;
     assert_eq!(until_over(&s, "job-a")["phase"], "done");
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -746,7 +791,7 @@ fn the_flags_swap_never_writes_a_pending_record() {
 }
 
 #[test]
-fn cancel_wakes_a_waiting_worker_at_once_and_the_next_start_follows() {
+fn cancel_wakes_a_waiting_worker_at_once() {
     let fake = Fake::default();
     fake.0.lock().unwrap().tasks = VecDeque::from(vec![Some(2); 50]);
     fake.0.lock().unwrap().slow = true;
@@ -755,34 +800,75 @@ fn cancel_wakes_a_waiting_worker_at_once_and_the_next_start_follows() {
     until_phase(&s, "job-a", "waiting");
     let started = std::time::Instant::now();
     cancel(&s, "job-a").unwrap();
-    let again = reload(&s, "job-a", true).unwrap();
-    assert_eq!(again["task"]["phase"], "waiting");
+    assert!(wait_over(&s, "job-a"));
     assert!(started.elapsed() < std::time::Duration::from_millis(1_500));
-    cancel(&s, "job-a").unwrap();
+    assert_eq!(phase_of(&s, "job-a")["phase"], "cancelled");
 }
 
 #[test]
-fn the_app_can_list_the_reloads_that_are_running() {
+fn the_app_reads_every_task_with_its_rev_and_each_change_is_pushed_in_order() {
     let fake = Fake::default();
-    fake.0.lock().unwrap().gate = true;
-    let (_d, s) = faked("active", &fake, false);
+    fake.0.lock().unwrap().turns = VecDeque::from([true]);
+    let (_d, s) = faked("all", &fake, true);
     let none = s
         .ops
-        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"active": true}))
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"all": true}))
         .unwrap();
-    assert_eq!(none["active"], json!([]));
+    assert_eq!(none["tasks"], json!([]));
     reload(&s, "job-a", true).unwrap();
-    until_phase(&s, "job-a", "working");
-    let some = s
+    let pushed = s.room.named(notchling_local_api::topics::RELOAD_CHANGED);
+    let phases: Vec<&str> = pushed
+        .iter()
+        .map(|e| e["task"]["phase"].as_str().unwrap_or("gone"))
+        .collect();
+    assert_eq!(phases, ["waiting", "working", "done"]);
+    let revs: Vec<u64> = pushed.iter().map(|e| e["rev"].as_u64().unwrap()).collect();
+    assert!(revs.windows(2).all(|w| w[0] < w[1]), "{revs:?}");
+    assert!(pushed.iter().all(|e| e["id"] == "job-a"));
+    let all = s
         .ops
-        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"active": true}))
+        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"all": true}))
         .unwrap();
-    assert_eq!(some["active"], json!(["job-a"]));
-    fake.0.lock().unwrap().gate = false;
-    until_over(&s, "job-a");
-    let after = s
-        .ops
-        .call(&app(), ops::SESSION_RELOAD_STATE, &json!({"active": true}))
-        .unwrap();
-    assert_eq!(after["active"], json!([]));
+    assert_eq!(all["tasks"][0]["id"], "job-a");
+    assert_eq!(all["tasks"][0]["task"]["phase"], "done");
+    assert_eq!(all["tasks"][0]["rev"], json!(revs[2]));
+}
+
+#[test]
+fn a_cancel_that_lands_just_before_the_restart_wins_and_nothing_restarts() {
+    let fake = Fake::default();
+    let (_d, s) = faked("gate", &fake, false);
+    let reload_ops = s.ops.reload().unwrap().clone();
+    let agent = s.ops.agent(&json!({"id": "job-a"})).unwrap();
+    let answer = Arc::new(Mutex::new(None));
+    let seen = answer.clone();
+    fake.0.lock().unwrap().on_tasks = Some(Arc::new(move || {
+        let mut seen = seen.lock().unwrap();
+        if seen.is_none() {
+            *seen = Some(reload_ops.cancel(&agent).map_err(|e| e.message));
+        }
+    }));
+    reload(&s, "job-a", true).unwrap();
+    assert!(wait_over(&s, "job-a"));
+    let answer = answer.lock().unwrap().clone().unwrap().unwrap();
+    assert_eq!(answer["task"]["cancelling"], true);
+    assert_eq!(phase_of(&s, "job-a")["phase"], "cancelled");
+    assert_eq!(fake.0.lock().unwrap().restarts, 0);
+}
+
+#[test]
+fn a_worker_that_crashes_leaves_a_failure_and_the_next_start_runs() {
+    let fake = Fake::default();
+    fake.0.lock().unwrap().crash = true;
+    let (_d, s) = faked("crash", &fake, false);
+    reload(&s, "job-a", true).unwrap();
+    assert!(wait_over(&s, "job-a"));
+    let task = phase_of(&s, "job-a");
+    assert_eq!(task["phase"], "needs_you");
+    assert_eq!(task["need"]["text"], crate::reload_ops::STOPPED);
+    fake.0.lock().unwrap().crash = false;
+    reload(&s, "job-a", true).unwrap();
+    assert!(wait_over(&s, "job-a"));
+    assert_eq!(phase_of(&s, "job-a")["phase"], "done");
+    assert_eq!(fake.0.lock().unwrap().restarts, 1);
 }

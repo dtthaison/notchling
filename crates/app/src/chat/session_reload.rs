@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use notchling_engine::catalog::ModelInfo;
 use notchling_engine::cluster::id::Tool as ClusterTool;
@@ -12,10 +12,9 @@ use crate::accounts::cost::dollars;
 use crate::chat::claude_picker::{find, model_label};
 use crate::chat::data::{Session, Tool};
 use crate::chat::format::tokens;
+use crate::chat::reload_feed::ReloadFeed;
 
-pub const POLL_MS: i64 = 1_000;
 pub const NOTE_MS: i64 = 6_000;
-pub const POLL_FAILS: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -50,28 +49,22 @@ pub struct Task {
     pub phase: Phase,
     pub since_ms: i64,
     pub session: Option<String>,
+    pub cancelling: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Status {
-    pub offered: bool,
-    pub task: Option<Task>,
-}
-
-pub fn parse(value: &Value) -> Option<Status> {
-    let offered = value.get("offered").and_then(Value::as_bool)?;
-    let task = match value.get("task") {
-        None | Some(Value::Null) => None,
-        Some(task) => Some(Task {
-            phase: serde_json::from_value(task.clone()).ok()?,
-            since_ms: task.get("since_ms").and_then(Value::as_i64).unwrap_or(0),
-            session: task
-                .get("session")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-        }),
-    };
-    Some(Status { offered, task })
+pub fn parse_task(task: &Value) -> Option<Task> {
+    if task.is_null() {
+        return None;
+    }
+    Some(Task {
+        phase: serde_json::from_value(task.clone()).ok()?,
+        since_ms: task.get("since_ms").and_then(Value::as_i64).unwrap_or(0),
+        session: task
+            .get("session")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        cancelling: task.get("cancelling").and_then(Value::as_bool) == Some(true),
+    })
 }
 
 pub fn lead(tokens_read: u64, model: Option<&str>, catalog: &[ModelInfo]) -> String {
@@ -118,10 +111,30 @@ impl Act {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stage {
     Ask,
+    Starting,
     Waiting(Wait),
     Working,
+    Cancelling,
     Needs(Need),
     Terminal,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Intent {
+    Ask,
+    Terminal,
+    Starting,
+    Following,
+    Cancelling,
+    Refused(String),
+    Ended(Need),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Settle {
+    Same,
+    Changed,
+    Close,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -130,13 +143,15 @@ pub struct Card {
     pub lead: String,
     pub stage: Stage,
     pub command: String,
+    pub intent: Intent,
+    pub floor: u64,
 }
 
 impl Card {
-    pub fn open(agent: &Agent, lead: String) -> Option<Card> {
-        let stage = match mode_of(agent)? {
-            Mode::Reload => Stage::Ask,
-            Mode::Terminal => Stage::Terminal,
+    pub fn open(agent: &Agent, lead: String, floor: u64) -> Option<Card> {
+        let (stage, intent) = match mode_of(agent)? {
+            Mode::Reload => (Stage::Ask, Intent::Ask),
+            Mode::Terminal => (Stage::Terminal, Intent::Terminal),
         };
         let id = agent.id.clone();
         let resume = agent.resume_session_id.as_deref().unwrap_or(&agent.id);
@@ -145,7 +160,43 @@ impl Card {
             session: id,
             lead,
             stage,
+            intent,
+            floor,
         })
+    }
+
+    pub fn begin(&mut self, floor: u64) {
+        self.intent = Intent::Starting;
+        self.floor = floor;
+    }
+
+    pub fn settle(&mut self, rev: u64, task: Option<&Task>) -> Settle {
+        let task = task.filter(|t| !t.phase.is_over() || rev > self.floor);
+        let stage = match (&self.intent, task) {
+            (Intent::Terminal, _) => Stage::Terminal,
+            (_, Some(task)) => match &task.phase {
+                Phase::Done { .. } | Phase::Cancelled => return Settle::Close,
+                Phase::NeedsYou { need } => {
+                    self.intent = Intent::Ended(need.clone());
+                    self.floor = rev;
+                    Stage::Needs(need.clone())
+                }
+                Phase::Waiting { .. } if task.cancelling || self.intent == Intent::Cancelling => {
+                    Stage::Cancelling
+                }
+                Phase::Waiting { by } => Stage::Waiting(*by),
+                Phase::Working { .. } => Stage::Working,
+            },
+            (Intent::Starting, None) => Stage::Starting,
+            (Intent::Cancelling, None) => Stage::Cancelling,
+            (Intent::Ended(need), None) => Stage::Needs(need.clone()),
+            (Intent::Ask | Intent::Following | Intent::Refused(_), None) => Stage::Ask,
+        };
+        if self.stage == stage {
+            return Settle::Same;
+        }
+        self.stage = stage;
+        Settle::Changed
     }
 
     pub fn intro(&self) -> String {
@@ -170,17 +221,28 @@ impl Card {
     pub fn status(&self) -> Option<String> {
         Some(match &self.stage {
             Stage::Ask | Stage::Terminal => return None,
+            Stage::Starting => t::chat::reload_starting().to_owned(),
             Stage::Waiting(Wait::Turn) => t::chat::reload_wait_turn().to_owned(),
             Stage::Waiting(Wait::Dialog) => t::chat::reload_wait_dialog().to_owned(),
             Stage::Waiting(Wait::Tasks { count }) => t::chat::reload_wait_tasks(*count),
             Stage::Working => t::chat::reload_working().to_owned(),
+            Stage::Cancelling => t::chat::reload_cancelling().to_owned(),
             Stage::Needs(need) => Card::problem_text(need),
         })
     }
 
+    pub fn refusal(&self) -> Option<&str> {
+        match (&self.intent, &self.stage) {
+            (Intent::Refused(text), Stage::Waiting(_) | Stage::Working) => Some(text),
+            _ => None,
+        }
+    }
+
     pub fn note(&self) -> Option<String> {
         match self.stage {
-            Stage::Waiting(_) => Some(t::chat::reload_wait_note().to_owned()),
+            Stage::Waiting(_) if self.refusal().is_none() => {
+                Some(t::chat::reload_wait_note().to_owned())
+            }
             _ => None,
         }
     }
@@ -193,190 +255,99 @@ impl Card {
         match &self.stage {
             Stage::Ask => vec![Act::Reload, Act::Cancel],
             Stage::Waiting(_) => vec![Act::CancelReload],
-            Stage::Working => Vec::new(),
+            Stage::Starting | Stage::Working | Stage::Cancelling => Vec::new(),
             Stage::Needs(_) => vec![Act::TryAgain, Act::Close],
             Stage::Terminal => vec![Act::CopyCommand, Act::Close],
         }
     }
 
     pub fn live(&self) -> bool {
-        matches!(self.stage, Stage::Waiting(_) | Stage::Working)
+        matches!(
+            self.stage,
+            Stage::Starting | Stage::Waiting(_) | Stage::Working | Stage::Cancelling
+        )
     }
 }
 
-pub const SCAN_MS: i64 = 3_000;
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Synced {
+    pub acks: Vec<(String, u64)>,
+    pub follows: Vec<(String, String)>,
+    pub settle: Option<Settle>,
+}
 
 #[derive(Default)]
 pub struct State {
     pub card: Option<Card>,
     pub notes: HashMap<String, (String, i64)>,
-    pub watching: HashSet<String>,
-    pub asking: HashSet<String>,
-    pub poll_fails: HashMap<String, u32>,
-    pub gens: HashMap<String, u64>,
-    pub last_poll_ms: i64,
-    pub last_scan_ms: i64,
-    pub scanning: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Via {
-    Start,
-    Poll,
-    Open,
-    Cancel,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Applied {
-    Nothing,
-    Changed,
-    Stale,
-    Finished { followed: Option<String> },
+    pub handled: HashMap<String, u64>,
+    pub feed: ReloadFeed,
 }
 
 impl State {
-    pub fn generation(&self, id: &str) -> u64 {
-        self.gens.get(id).copied().unwrap_or(0)
+    pub fn open(&mut self, mut card: Card) -> Card {
+        card.settle(self.feed.rev(&card.session), self.feed.task(&card.session));
+        self.card = Some(card.clone());
+        card
     }
 
-    fn bump(&mut self, id: &str) -> u64 {
-        let next = self.generation(id) + 1;
-        self.gens.insert(id.to_owned(), next);
-        next
+    pub fn card_for(&mut self, id: &str) -> Option<&mut Card> {
+        self.card.as_mut().filter(|card| card.session == id)
     }
 
-    pub fn poll_failed(&mut self, id: &str) -> bool {
-        let fails = self.poll_fails.entry(id.to_owned()).or_insert(0);
-        *fails += 1;
-        if *fails >= POLL_FAILS {
-            self.poll_fails.remove(id);
-            self.watching.remove(id);
-            return true;
-        }
-        false
-    }
-
-    pub fn apply(&mut self, id: &str, status: &Status, now_ms: i64) -> Applied {
-        let gen = self.generation(id);
-        self.apply_via(id, status, now_ms, Via::Poll, gen)
-    }
-
-    pub fn apply_via(
-        &mut self,
-        id: &str,
-        status: &Status,
-        now_ms: i64,
-        via: Via,
-        gen: u64,
-    ) -> Applied {
-        if gen != self.generation(id) {
-            return Applied::Nothing;
-        }
-        self.poll_fails.remove(id);
-        let Some(task) = &status.task else {
-            self.watching.remove(id);
-            return Applied::Nothing;
-        };
-        let shown = self.card.as_ref().is_some_and(|c| c.session == id);
-        let stage = match &task.phase {
-            Phase::Waiting { by } => Stage::Waiting(*by),
-            Phase::Working { .. } => Stage::Working,
-            Phase::NeedsYou { need } => Stage::Needs(need.clone()),
-            Phase::Cancelled => {
-                if via == Via::Open {
-                    return Applied::Stale;
-                }
-                self.watching.remove(id);
-                if shown {
-                    self.card = None;
-                }
-                return Applied::Finished { followed: None };
+    pub fn sync(&mut self, feed: &ReloadFeed, now_ms: i64) -> Synced {
+        let mut out = Synced::default();
+        for (id, rev, task) in feed.ended() {
+            if self.handled.get(id).is_some_and(|seen| *seen >= rev) {
+                continue;
             }
-            Phase::Done { .. } => {
-                self.watching.remove(id);
-                if shown {
-                    self.card = None;
+            self.handled.insert(id.to_owned(), rev);
+            out.acks.push((id.to_owned(), rev));
+            let carded = self
+                .card
+                .as_ref()
+                .is_some_and(|card| card.session == id && rev > card.floor);
+            match &task.phase {
+                Phase::Done { .. } => {
+                    let text = match &task.session {
+                        Some(_) => t::chat::reload_done_new(),
+                        None => t::chat::reload_done(),
+                    };
+                    let under = task.session.as_deref().unwrap_or(id);
+                    self.notes
+                        .insert(under.to_owned(), (text.to_owned(), now_ms + NOTE_MS));
+                    if let Some(next) = &task.session {
+                        out.follows.push((id.to_owned(), next.clone()));
+                    }
                 }
-                let text = match &task.session {
-                    Some(_) => t::chat::reload_done_new(),
-                    None => t::chat::reload_done(),
-                };
-                let under = task.session.as_deref().unwrap_or(id);
-                self.notes
-                    .insert(under.to_owned(), (text.to_owned(), now_ms + NOTE_MS));
-                return Applied::Finished {
-                    followed: task.session.clone(),
-                };
+                Phase::NeedsYou { need } if !carded => {
+                    self.notes
+                        .insert(id.to_owned(), (Card::problem_text(need), now_ms + NOTE_MS));
+                }
+                _ => {}
             }
-        };
-        if matches!(stage, Stage::Waiting(_) | Stage::Working) {
-            self.watching.insert(id.to_owned());
-        } else {
-            self.watching.remove(id);
         }
-        let Some(card) = self.card.as_mut().filter(|c| c.session == id) else {
-            if let Stage::Needs(need) = &stage {
-                let text = Card::problem_text(need);
-                self.notes.insert(id.to_owned(), (text, now_ms + NOTE_MS));
-                return Applied::Finished { followed: None };
+        if let Some(card) = self.card.as_mut() {
+            let settle = card.settle(feed.rev(&card.session), feed.task(&card.session));
+            if settle == Settle::Close {
+                self.card = None;
             }
-            return Applied::Nothing;
-        };
-        if card.stage == stage {
-            return Applied::Nothing;
+            out.settle = Some(settle);
         }
-        card.stage = stage;
-        Applied::Changed
-    }
-
-    pub fn seen_active(&mut self, ids: &[String]) {
-        for id in ids {
-            self.watching.insert(id.clone());
-        }
-    }
-
-    pub fn scan_due(&self, now_ms: i64) -> bool {
-        !self.scanning && now_ms - self.last_scan_ms >= SCAN_MS
+        self.feed = feed.clone();
+        out
     }
 
     pub fn live(&self, id: &str) -> bool {
-        self.watching.contains(id)
+        self.feed.live(id)
             || self
                 .card
                 .as_ref()
                 .is_some_and(|c| c.session == id && c.live())
     }
 
-    pub fn start(&mut self, id: &str, now_ms: i64) -> u64 {
-        self.watching.insert(id.to_owned());
-        self.asking.insert(id.to_owned());
-        self.last_poll_ms = now_ms;
-        self.bump(id)
-    }
-
-    pub fn cancelling(&mut self, id: &str) -> u64 {
-        self.bump(id)
-    }
-
-    pub fn stop(&mut self, id: &str) {
-        self.watching.remove(id);
-        self.poll_fails.remove(id);
-    }
-
     pub fn row_line(&self, id: &str) -> Option<&'static str> {
         self.live(id).then(t::chat::reload_row)
-    }
-
-    pub fn polls(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.watching.iter().cloned().collect();
-        if let Some(card) = self.card.as_ref().filter(|c| c.live()) {
-            if !ids.contains(&card.session) {
-                ids.push(card.session.clone());
-            }
-        }
-        ids.sort();
-        ids
     }
 
     pub fn note(&self, id: &str, now_ms: i64) -> Option<String> {
@@ -385,18 +356,13 @@ impl State {
                 return card.status();
             }
         }
-        if self.watching.contains(id) {
+        if self.feed.live(id) {
             return Some(t::chat::reload_row().to_owned());
         }
         self.notes
             .get(id)
             .filter(|(_, until)| *until > now_ms)
             .map(|(text, _)| text.clone())
-    }
-
-    pub fn due(&self, now_ms: i64) -> bool {
-        (self.card.as_ref().is_some_and(Card::live) || !self.watching.is_empty())
-            && now_ms - self.last_poll_ms >= POLL_MS
     }
 }
 
