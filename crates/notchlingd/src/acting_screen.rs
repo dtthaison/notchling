@@ -6,6 +6,26 @@ use notchling_engine::terminal::screen_dialog::{DialogPick, ScreenDialog};
 
 const SHELL_COMMAND_MAX: usize = 64 * 1024;
 
+pub(super) struct AtPrompt<'a> {
+    pub(super) inner: &'a dyn ScreenCheck,
+    pub(super) still: &'a dyn Fn() -> bool,
+}
+
+impl ScreenCheck for AtPrompt<'_> {
+    fn dialog_open(&self, lines: &[String]) -> bool {
+        self.inner.dialog_open(lines)
+    }
+    fn shows(&self, question: &str, lines: &[String]) -> bool {
+        self.inner.shows(question, lines)
+    }
+    fn is_review(&self, lines: &[String]) -> bool {
+        self.inner.is_review(lines)
+    }
+    fn at_prompt(&self) -> bool {
+        self.inner.at_prompt() && (self.still)()
+    }
+}
+
 fn dialog_json(dialog: &ScreenDialog) -> Value {
     let options: Vec<Value> = dialog
         .options
@@ -169,11 +189,14 @@ impl ActingOps {
             let AgentTarget::Job(job) = &agent.target else {
                 return Err(bad("this session has no terminal to read").into());
             };
-            let status = fresh::job_status(&self.roots, &Probes::from_proc(), job);
-            if !matches!(status.as_deref(), Some("waiting" | "idle")) {
+            let at_prompt = || {
+                let status = fresh::job_status(&self.roots, &Probes::from_proc(), job);
+                matches!(status.as_deref(), Some("waiting" | "idle"))
+            };
+            if !at_prompt() {
                 return Err(ApiError::new(ErrorCode::Failed, NOT_AT_A_PROMPT).into());
             }
-            self.play_locked(agent, &plan::dismiss(), &mut NoLog, None)
+            self.play_inner(agent, &plan::dismiss(), &mut NoLog, None, Some(&at_prompt))
         })?;
         Ok(json!({"dismissed": true}))
     }

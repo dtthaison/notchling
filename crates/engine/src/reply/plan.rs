@@ -15,6 +15,7 @@ pub enum Step {
     RefuseDialog,
     RequireDialog,
     RequireAnyDialog,
+    RequireAtPrompt,
     AwaitInput {
         timeout_ms: u64,
     },
@@ -79,6 +80,7 @@ impl Step {
             Step::RefuseDialog => "refuse dialog",
             Step::RequireDialog => "require dialog",
             Step::RequireAnyDialog => "require any dialog",
+            Step::RequireAtPrompt => "require at prompt",
             Step::AwaitInput { .. } => "await input",
             Step::AwaitEmpty { .. } => "await empty",
             Step::Keys(_) => "keys",
@@ -213,6 +215,7 @@ pub fn dismiss() -> Plan {
         steps: vec![
             attach(None),
             Step::RequireAnyDialog,
+            Step::RequireAtPrompt,
             Step::Keys(ESC.into()),
             Step::Pause(KEY_PAUSE_MS),
             Step::WaitFor {

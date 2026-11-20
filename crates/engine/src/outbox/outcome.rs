@@ -69,7 +69,8 @@ pub fn after(end: &TryEnd, tried: Tried, tries: u32, now_ms: i64) -> After {
             | Failure::NotPermission
             | Failure::PermissionMismatch
             | Failure::NoAlways
-            | Failure::PermissionStillOpen => retry,
+            | Failure::PermissionStillOpen
+            | Failure::Working => retry,
         },
     }
 }

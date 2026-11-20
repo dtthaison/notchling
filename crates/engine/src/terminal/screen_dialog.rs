@@ -107,10 +107,11 @@ fn is_counter(part: &str) -> bool {
 }
 
 fn without_counter(part: &str) -> &str {
-    match part.rsplit_once(' ') {
-        Some((head, last)) if is_counter(last) => head.trim_end(),
-        _ => part,
-    }
+    part.char_indices()
+        .filter(|(_, c)| *c == ' ')
+        .map(|(at, _)| (&part[..at], &part[at + 1..]))
+        .find(|(_, tail)| is_counter(tail))
+        .map_or(part, |(head, _)| head.trim_end())
 }
 
 fn is_hint(part: &str) -> bool {
@@ -126,7 +127,7 @@ fn is_hint(part: &str) -> bool {
         && words.len() <= MAX_VERB_WORDS
         && words
             .iter()
-            .all(|w| !w.is_empty() && w.chars().all(|c| c.is_lowercase() || c == '-'))
+            .all(|w| !w.is_empty() && w.chars().all(|c| c.is_alphabetic() || c == '-' || c == '/'))
 }
 
 fn is_footer(row: &str) -> bool {
@@ -183,6 +184,12 @@ fn footer_below(below: &[&str]) -> Option<bool> {
         return Some(false);
     }
     (is_footer(&text.join(" ")) || text.iter().all(|row| is_footer(row))).then_some(true)
+}
+
+fn closed_by_rule(below: &[&str]) -> bool {
+    below.iter().position(|row| is_rule(row)).is_some_and(|at| {
+        footer_below(&below[..at]).is_some() && !below[at..].iter().any(|row| is_past_dialog(row))
+    })
 }
 
 fn rule_above(rows: &[&str], first: usize) -> bool {
@@ -375,13 +382,13 @@ fn read_rows(lines: &[String], rows: &[&str]) -> Option<ScreenDialog> {
         .rposition(|row| option_row(0, row).is_some())?;
     let end = continuation_end(lines, rows, tail, drawn);
     let below = &rows[end..drawn];
-    let footed = footer_below(below)?;
+    let footed = footer_below(below) == Some(true);
     let found = numbered(rows, tail)?;
     if found.len() < 2 {
         return None;
     }
     let marked = found.iter().any(|n| n.selected);
-    let ruled = below.iter().any(|row| is_rule(row)) && rule_above(rows, found[0].row);
+    let ruled = closed_by_rule(below) && rule_above(rows, found[0].row);
     if !footed && !(marked && ruled) {
         return None;
     }

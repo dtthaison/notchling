@@ -448,7 +448,7 @@ impl ActingOps {
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
     ) -> Result<Outcome, PlayError> {
-        self.play_inner(agent, plan, log, keep)
+        self.play_inner(agent, plan, log, keep, None)
     }
 
     fn play_inner(
@@ -457,6 +457,7 @@ impl ActingOps {
         plan: &Plan,
         log: &mut dyn QueueLog,
         keep: Option<&Expected>,
+        at_prompt: Option<&dyn Fn() -> bool>,
     ) -> Result<Outcome, PlayError> {
         if plan.is_empty() {
             return Ok(Outcome::default());
@@ -479,7 +480,12 @@ impl ActingOps {
             },
             any: false,
         };
-        let check = self.attacher.screen_check();
+        let base = self.attacher.screen_check();
+        let guarded = at_prompt.map(|still| screen::AtPrompt { inner: base, still });
+        let check: &dyn ScreenCheck = match &guarded {
+            Some(guarded) => guarded,
+            None => base,
+        };
         let mut pty = pty;
         let played = execute_clearing(plan, pty.as_mut(), check, log, &mut trail, &clearing);
         if let (Err(failure), Some(expect), Some(file)) = (&played, keep, &self.screen_file) {

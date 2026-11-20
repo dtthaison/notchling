@@ -1,4 +1,4 @@
-use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty};
+use super::exec::{execute, Failure, Markers, NoQueueLog, Outcome, Pty, ScreenCheck};
 use super::fake::FakePrompt;
 use super::keys::timing::PERMISSION_DRAW_WAIT_MS;
 use super::plan::{self, DialogPick};
@@ -104,6 +104,7 @@ fn a_dismiss_checks_a_dialog_is_open_before_it_sends_its_one_esc() {
         [
             "wait quiet",
             "require any dialog",
+            "require at prompt",
             "keys",
             "pause",
             "wait for"
@@ -115,6 +116,29 @@ fn a_dismiss_checks_a_dialog_is_open_before_it_sends_its_one_esc() {
     assert_eq!(pty.writes, ["\x1b"]);
     assert!(pty.picked.is_empty(), "no option number typed");
     assert!(!pty.dialog_shown(), "it waited for the dialog to go");
+}
+
+struct Working;
+
+impl ScreenCheck for Working {
+    fn shows(&self, _question: &str, _lines: &[String]) -> bool {
+        false
+    }
+    fn is_review(&self, _lines: &[String]) -> bool {
+        false
+    }
+    fn at_prompt(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_dismiss_sends_no_esc_once_the_session_is_no_longer_at_a_prompt() {
+    let mut pty = FakePrompt::new(&[]).with_dialog(SWITCH);
+    let done = execute(&plan::dismiss(), &mut pty, &Working, &mut NoQueueLog);
+    assert_eq!(done, Err(Failure::Working));
+    assert!(pty.writes.is_empty(), "no Esc into a working turn");
+    assert!(pty.dialog_shown());
 }
 
 #[test]

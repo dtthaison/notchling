@@ -115,12 +115,17 @@ struct FakeAttacher {
     closed: Arc<Mutex<Option<CloseHook>>>,
     dialog: DialogSlot,
     refuse: Arc<AtomicBool>,
+    attaching: Arc<Mutex<Option<CloseHook>>>,
 }
 
 impl Attacher for FakeAttacher {
     fn attach(&self, job: &str, config_dir: Option<&str>) -> Result<Box<dyn Pty + Send>, ApiError> {
         if self.refuse.load(Ordering::SeqCst) {
             return Err(ApiError::new(ErrorCode::Failed, "no terminal"));
+        }
+        let hook = self.attaching.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
         }
         self.attached
             .lock()
@@ -194,6 +199,7 @@ pub(crate) struct Setup {
     pub closed: Arc<Mutex<Option<CloseHook>>>,
     pub dialog: DialogSlot,
     pub refuse: Arc<AtomicBool>,
+    pub attaching: Arc<Mutex<Option<CloseHook>>>,
 }
 
 pub(crate) fn setup(on: bool, screen: &[&str], list: Value) -> Setup {
@@ -224,6 +230,7 @@ pub(crate) fn setup_in(
     let closed = attacher.closed.clone();
     let dialog = attacher.dialog.clone();
     let refuse = attacher.refuse.clone();
+    let attaching = attacher.attaching.clone();
     let me = std::process::id();
     let mut ops = ActingOps::new(
         Arc::new(Acting::in_memory(on)),
@@ -251,6 +258,7 @@ pub(crate) fn setup_in(
         closed,
         dialog,
         refuse,
+        attaching,
     }
 }
 

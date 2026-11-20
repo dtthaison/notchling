@@ -89,6 +89,9 @@ pub trait ScreenCheck {
     }
     fn shows(&self, question: &str, lines: &[String]) -> bool;
     fn is_review(&self, lines: &[String]) -> bool;
+    fn at_prompt(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -156,6 +159,7 @@ pub enum Failure {
     PermissionMismatch,
     NoAlways,
     PermissionStillOpen,
+    Working,
 }
 
 impl Failure {
@@ -216,6 +220,10 @@ impl std::fmt::Display for Failure {
             Failure::PermissionStillOpen => write!(
                 f,
                 "The answer was typed, but the permission is still open in the terminal. Check it there."
+            ),
+            Failure::Working => write!(
+                f,
+                "The session started working, so Esc wasn't sent."
             ),
         }
     }
@@ -698,6 +706,11 @@ impl Run<'_> {
             Step::RequireAnyDialog => {
                 let lines = self.pty.screen();
                 self.closing = Some(self.closable(&lines).ok_or(Failure::QuestionGone)?);
+            }
+            Step::RequireAtPrompt => {
+                if !self.check.at_prompt() {
+                    return Err(Failure::Working);
+                }
             }
             Step::AwaitInput { timeout_ms } => {
                 self.await_prompt(*timeout_ms)?;

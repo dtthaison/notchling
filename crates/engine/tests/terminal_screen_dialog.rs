@@ -215,6 +215,40 @@ fn a_marked_list_between_rules_is_a_card_with_no_footer() {
 }
 
 #[test]
+fn a_status_line_under_a_closed_box_keeps_the_card() {
+    let dialog = card(&[
+        RULE,
+        " Switch model?",
+        " ❯ 1. Yes, switch",
+        "   2. No, go back",
+        RULE,
+        "  Opus 5.5 · ctx 12% · main",
+    ])
+    .expect("a dialog");
+    assert_eq!(dialog.options.len(), 2);
+    for under in ["❯ ", "  ? for shortcuts", "⏺ Done."] {
+        let rows = [
+            RULE,
+            " Switch model?",
+            " ❯ 1. Yes, switch",
+            "   2. No, go back",
+            RULE,
+            under,
+        ];
+        assert_eq!(card(&rows), None, "{under}");
+    }
+    let prose = card(&[
+        RULE,
+        " Switch model?",
+        " ❯ 1. Yes, switch",
+        "   2. No, go back",
+        " Pick one and press enter.",
+        RULE,
+    ]);
+    assert_eq!(prose, None, "prose inside the box is no footer");
+}
+
+#[test]
 fn a_footer_wrapped_over_two_rows_is_read() {
     let dialog = card(&[
         RULE,
@@ -236,6 +270,10 @@ fn common_hint_variants_are_footers() {
         " Enter to confirm · Esc to cancel (1/2)",
         " Step 1 of 2 · Enter to select",
         " Enter to submit · Shift+Tab to go back",
+        " Enter to confirm · Esc to cancel (1 of 2)",
+        " Enter to confirm · Esc to cancel Step 1 of 2",
+        " Enter to Confirm · Esc to Exit",
+        " Enter to accept/reject · Esc to cancel",
     ] {
         let dialog = card(&[
             " Switch model?",

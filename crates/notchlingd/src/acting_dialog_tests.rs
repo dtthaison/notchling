@@ -3,10 +3,12 @@ use crate::acting_events::NOT_AT_A_PROMPT;
 use crate::acting_ops_tests::{
     app, caller, code, sessions, setup, setup_in, Setup, PROMPT, SESSION,
 };
+use notchling_engine::reply::exec::Failure;
 use notchling_engine::sessions::Roots;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const SWITCH: &str = include_str!("../../engine/tests/fixtures/dialog-made-up/switch-model.txt");
 
@@ -159,21 +161,25 @@ const UNREADABLE: [&str; 3] = [
 
 struct Live(PathBuf);
 
+fn write_status(dir: &Path, status: &str) {
+    for (n, job) in [(1, "abcd1234"), (2, "idle0001")] {
+        let live = json!({"pid": std::process::id(), "sessionId": SESSION, "jobId": job,
+            "status": status, "statusUpdatedAt": 1_794_697_000_000.0});
+        std::fs::write(
+            dir.join(format!("claude/sessions/{n}.json")),
+            live.to_string(),
+        )
+        .unwrap();
+    }
+}
+
 impl Live {
     fn at(tag: &str, status: Option<&str>) -> Live {
         let dir = std::env::temp_dir().join(format!("nl-dismiss-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("claude/sessions")).unwrap();
         if let Some(status) = status {
-            for (n, job) in [(1, "abcd1234"), (2, "idle0001")] {
-                let live = json!({"pid": std::process::id(), "sessionId": SESSION, "jobId": job,
-                    "status": status, "statusUpdatedAt": 1_794_697_000_000.0});
-                std::fs::write(
-                    dir.join(format!("claude/sessions/{n}.json")),
-                    live.to_string(),
-                )
-                .unwrap();
-            }
+            write_status(&dir, status);
         }
         Live(dir)
     }
@@ -238,6 +244,23 @@ fn dismissing_is_refused_while_the_session_works_even_with_a_dialog_open() {
         );
         assert!(s.attached.lock().unwrap().is_empty(), "never attached");
     }
+}
+
+#[test]
+fn dismissing_checks_the_status_again_right_before_the_esc() {
+    let live = Live::at("turned-busy", Some("waiting"));
+    let s = live.setup(None);
+    let dir = live.0.clone();
+    *s.attaching.lock().unwrap() = Some(Arc::new(move || write_status(&dir, "busy")));
+    let (code, message) = code(dismiss(&s, "job-a"));
+    assert_eq!(code, ErrorCode::Failed);
+    assert_eq!(message, Failure::Working.to_string());
+    assert_eq!(
+        s.attached.lock().unwrap().len(),
+        1,
+        "it got past the first check"
+    );
+    assert!(s.writes.lock().unwrap().is_empty(), "no Esc into the turn");
 }
 
 #[test]
