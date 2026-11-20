@@ -108,7 +108,7 @@ pub fn abilities_line(a: Option<&MachineAbilities>, os: Option<MachineOs>) -> St
         }
         if let Some(total) = a.disk_gb {
             parts.push(match a.free_disk_gb {
-                Some(free) => format!("{total} GB disk ({free} free)"),
+                Some(free) => format!("{total} GB disk ({} free)", free.min(total)),
                 None => format!("{total} GB disk"),
             });
         }

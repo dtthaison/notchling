@@ -1,10 +1,10 @@
-use super::addresses::{AddressKind, MachineAddress};
 use super::forms::abilities_line;
-use super::names::{connect_hosts, short_host};
+use super::names::short_host;
 use super::registry::{MachineAbilities, MachineOs};
-use super::specs::{cpu_model, disk_gb, ram_gb};
+use super::specs::{cpu_model, disk_gb, free_gb, ram_gb};
 use super::step::StepId;
 use super::tests_machine_steps::{check, linux, parse, script, step};
+use super::tests_reach::{login, ts, with, Rig, PERSON};
 
 const FULL: &str = "oracle-sg.tail6e77ec.ts.net";
 
@@ -29,25 +29,6 @@ fn other_hosts_are_shown_whole() {
     ] {
         assert_eq!(short_host(host), host, "{host}");
     }
-}
-
-#[test]
-fn a_tailscale_name_connects_by_the_short_name_then_the_full_one() {
-    let address = MachineAddress::new(AddressKind::TailscaleName, FULL);
-    assert_eq!(
-        connect_hosts(&address),
-        vec!["oracle-sg".to_owned(), FULL.to_owned()]
-    );
-}
-
-#[test]
-fn only_a_tailscale_name_gets_a_short_try() {
-    let ip = MachineAddress::new(AddressKind::TailscaleIp, "100.64.0.9");
-    assert_eq!(connect_hosts(&ip), vec!["100.64.0.9".to_owned()]);
-    let public = MachineAddress::new(AddressKind::Public, FULL);
-    assert_eq!(connect_hosts(&public), vec![FULL.to_owned()]);
-    let plain = MachineAddress::new(AddressKind::TailscaleName, "vps-sing-1");
-    assert_eq!(connect_hosts(&plain), vec!["vps-sing-1".to_owned()]);
 }
 
 #[test]
@@ -184,4 +165,95 @@ fn the_new_fields_round_trip_under_their_names() {
         assert!(text.contains(key), "{key}");
     }
     assert_eq!(serde_json::from_str::<MachineAbilities>(&text).unwrap(), a);
+}
+
+#[test]
+fn a_dash_or_blank_cpu_model_is_left_out() {
+    for text in ["-", " - ", "", "   ", "--"] {
+        assert_eq!(cpu_model(text), None, "{text:?}");
+    }
+    assert_eq!(cpu_model("Cortex-A72"), Some("Cortex-A72".to_owned()));
+}
+
+#[test]
+fn huge_sizes_do_not_overflow() {
+    assert!(ram_gb(i64::MAX).is_some());
+    assert!(disk_gb(i64::MAX).is_some());
+    assert!(free_gb(i64::MAX).is_some());
+    assert_eq!(free_gb(-1), None);
+}
+
+#[test]
+fn free_and_total_round_the_same_way() {
+    assert_eq!(free_gb(850_000), Some(1));
+    assert_eq!(disk_gb(900_000), Some(1));
+    assert_eq!(free_gb(0), Some(0));
+    assert_eq!(free_gb(2_097_152), Some(2));
+}
+
+#[test]
+fn a_stale_free_figure_never_shows_more_than_the_total() {
+    let a = MachineAbilities {
+        disk_gb: Some(100),
+        free_disk_gb: Some(150),
+        ..MachineAbilities::default()
+    };
+    assert_eq!(
+        abilities_line(Some(&a), Some(MachineOs::Linux)),
+        "Linux · 100 GB disk (100 free)"
+    );
+}
+
+#[test]
+fn the_probe_runs_df_once_and_reads_in_the_c_locale() {
+    let text = script(&step(StepId::REACHABLE, &linux()));
+    assert_eq!(text.matches("df -Pk").count(), 1);
+    assert!(text.contains("LC_ALL=C lscpu"));
+    assert!(text.contains("LC_ALL=C sed"));
+    for word in [
+        "getconf _NPROCESSORS_ONLN",
+        "^processor",
+        "Hardware",
+        "hw.model",
+    ] {
+        assert!(text.contains(word), "{word}");
+    }
+}
+
+#[test]
+fn the_probe_output_of_an_arm_machine_with_no_model_leaves_the_model_out() {
+    let out = "os=Linux\narch=aarch64\nhome=/home/opc\nversion=Oracle Linux 9\ndisk_total_kb=209715200\ndisk_kb=160432128\ncpus=4\ncpu_model=-\nmem_kb=\n";
+    let a = parse(StepId::REACHABLE, out, 0, &linux())
+        .detected
+        .abilities
+        .unwrap();
+    assert_eq!(a.cpu_model, None);
+    assert_eq!(a.cpu_cores, Some(4));
+    assert_eq!(a.ram_gb, None);
+}
+
+#[test]
+fn a_ts_net_address_is_connected_by_its_full_stored_name_without_a_try() {
+    let rig = Rig::new(&[], &[]);
+    let m = with("oracle", vec![ts(FULL, PERSON)]);
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
+    assert_eq!(pick.choice().unwrap().route.host, FULL);
+    assert!(rig.probes().is_empty());
+}
+
+#[test]
+fn a_ts_net_address_is_only_ever_probed_by_its_full_name() {
+    let rig = Rig::new(&[FULL], &[]);
+    let ip = super::addresses::MachineAddress::new(
+        super::addresses::AddressKind::TailscaleIp,
+        "100.64.0.9",
+    )
+    .on_tailnet(PERSON);
+    let m = with("oracle", vec![ts(FULL, PERSON), ip]);
+    let pick = rig.router.pick(&m, std::slice::from_ref(&m));
+    assert_eq!(pick.choice().unwrap().route.host, "100.64.0.9");
+    let probes = rig.probes();
+    assert_eq!(probes.len(), 2);
+    assert_eq!(login(&probes[0]), format!("agent@{FULL}"));
+    assert!(probes.iter().all(|p| !login(p).ends_with("@oracle-sg")));
 }

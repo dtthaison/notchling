@@ -8,18 +8,22 @@ const MODEL_LENGTH: usize = 80;
 const MAX_CORES: i64 = 4096;
 
 pub fn ram_gb(kb: i64) -> Option<i64> {
-    (kb > 0).then(|| (kb + KB_PER_GB - 1) / KB_PER_GB)
+    (kb > 0).then(|| kb.saturating_add(KB_PER_GB - 1) / KB_PER_GB)
 }
 
 pub fn disk_gb(kb: i64) -> Option<i64> {
-    (kb > 0).then(|| ((kb + KB_PER_GB / 2) / KB_PER_GB).max(1))
+    (kb > 0).then(|| (kb.saturating_add(KB_PER_GB / 2) / KB_PER_GB).max(1))
+}
+
+pub fn free_gb(kb: i64) -> Option<i64> {
+    (kb >= 0).then(|| kb.saturating_add(KB_PER_GB / 2) / KB_PER_GB)
 }
 
 pub fn cpu_model(text: &str) -> Option<String> {
     let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let cut: String = joined.chars().take(MODEL_LENGTH).collect();
     let cut = cut.trim().to_owned();
-    (!cut.is_empty()).then_some(cut)
+    cut.chars().any(char::is_alphanumeric).then_some(cut)
 }
 
 fn number(kv: &BTreeMap<String, String>, key: &str) -> Option<i64> {

@@ -42,3 +42,10 @@ fn no_check_time_leaves_the_line_out() {
     assert_eq!(checked_line(Some(&MachineAbilities::default()), 5.0), None);
     assert_eq!(checked_line(None, 5.0), None);
 }
+
+#[test]
+fn odd_clocks_and_times_never_panic() {
+    assert_eq!(checked_line(Some(&at(1_000)), f64::INFINITY), None);
+    assert_eq!(checked_line(Some(&at(1_000)), f64::NAN), None);
+    assert!(checked_line(Some(&at(i64::MIN)), 1.0e18).is_some());
+}

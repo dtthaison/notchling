@@ -154,8 +154,6 @@ mod tests_poller;
 #[cfg(test)]
 mod tests_reach;
 #[cfg(test)]
-mod tests_reach_short;
-#[cfg(test)]
 mod tests_registry;
 #[cfg(test)]
 mod tests_release_download;

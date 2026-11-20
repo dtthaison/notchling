@@ -1,5 +1,4 @@
 use super::addresses::{address_problems, AddressKind, MachineAddress, Route};
-use super::names::connect_hosts;
 use super::registry::Machine;
 use super::runner::{Call, CommandResult, Runner};
 use super::shell::ssh_prefix;
@@ -288,31 +287,23 @@ impl Router {
         let only_one = candidates.len() == 1 && skipped.is_empty();
         let mut refused: Option<Choice> = None;
         for (index, address) in candidates {
-            let hosts = connect_hosts(address);
-            let single = hosts.len() == 1;
-            for host in hosts {
-                let named = MachineAddress {
-                    host,
-                    ..address.clone()
-                };
-                let Some(route) = self.route_for(m, &named, all, trail) else {
-                    continue;
-                };
-                let choice = Choice {
-                    index,
-                    address: address.clone(),
-                    route,
-                };
-                if only_one && single && address.kind != AddressKind::Jump {
-                    return Pick::Reached(choice);
+            let Some(route) = self.route_for(m, address, all, trail) else {
+                continue;
+            };
+            let choice = Choice {
+                index,
+                address: address.clone(),
+                route,
+            };
+            if only_one && address.kind != AddressKind::Jump {
+                return Pick::Reached(choice);
+            }
+            match probe(live, &choice.route) {
+                Probed::Up => return Pick::Reached(choice),
+                Probed::Reached => {
+                    refused.get_or_insert(choice);
                 }
-                match probe(live, &choice.route) {
-                    Probed::Up => return Pick::Reached(choice),
-                    Probed::Reached => {
-                        refused.get_or_insert(choice);
-                    }
-                    Probed::Down => {}
-                }
+                Probed::Down => {}
             }
         }
         if let Some(choice) = refused {
