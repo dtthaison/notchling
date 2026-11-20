@@ -488,7 +488,7 @@ impl ActingOps {
         if let (Err(failure), Some((chars, file))) = (&played, reply) {
             if !matches!(failure, Failure::Pty(_)) {
                 let head = crate::reply_screen::head(&job, failure, chars, pty.cursor(), &trail);
-                keep_screen(file, &head, &crate::reply_screen::masked(&pty.screen()));
+                crate::reply_screen::keep(file, &job, failure, &head, &pty.screen(), now_ms());
             }
         }
         if let Some(text) = plan.reply_text() {

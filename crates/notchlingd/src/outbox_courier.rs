@@ -1,5 +1,5 @@
 use crate::acting_events::{attach_why, session_ref, why_of};
-use crate::acting_ops::{keep_screen, shown_box, ActingOps, NoLog};
+use crate::acting_ops::{shown_box, ActingOps, NoLog};
 use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
@@ -409,7 +409,8 @@ impl ClaudeCourier {
         }
         let chars = row.text.chars().count();
         let head = crate::reply_screen::head(&row.session, failure, chars, pty.cursor(), trail);
-        keep_screen(file, &head, &crate::reply_screen::masked(&pty.screen()));
+        let now = (self.clock)();
+        crate::reply_screen::keep(file, &row.session, failure, &head, &pty.screen(), now);
     }
 
     fn note(&self, row: &Row, agent: &Agent, failure: Option<FailWhy>) {

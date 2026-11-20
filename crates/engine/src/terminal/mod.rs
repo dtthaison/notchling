@@ -2,6 +2,8 @@ pub mod ask_dialog;
 mod csi;
 pub mod input_box;
 #[cfg(test)]
+mod input_box_blank_tests;
+#[cfg(test)]
 mod input_box_chips_tests;
 #[cfg(test)]
 mod input_box_guard_tests;
