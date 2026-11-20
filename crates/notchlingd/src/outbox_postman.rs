@@ -2,8 +2,9 @@ use crate::acting::Acting;
 use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
-    after, gate, idle_at_prompt, recount, After, Anchor, Gate, Job, QueuedVerdict, Row, State,
-    Tool, TryEnd, Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX, TURN_SETTLE_MS,
+    after, gate, idle_at_prompt, recount, After, Anchor, Facts, Gate, Job, QueuedVerdict, Row,
+    State, Tool, TryEnd, Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
+    TURN_SETTLE_MS,
 };
 use notchling_engine::transcript::sent::Seen;
 use notchling_events::kinds::agents::OutboxThen;
@@ -697,6 +698,11 @@ impl Postman {
 
     fn gate(&mut self, row: &Row, now: i64) -> Option<i64> {
         let facts = self.courier().facts(row, now);
+        let now = (self.inner.clock)().max(now);
+        let facts = Facts {
+            now_ms: now,
+            ..facts
+        };
         let read_again = match self.inner.ops.store().get(&row.id) {
             Ok(Some(after)) if after.unmoved_since(row) => after,
             Ok(_) => return None,
@@ -704,7 +710,7 @@ impl Postman {
         };
         let row = &read_again;
         let counted = recount(row, &facts.job)
-            .and_then(|counting| self.inner.ops.store().count_done(&row.id, counting).ok())
+            .and_then(|counting| self.inner.ops.store().count_done(row, counting).ok())
             .map(|done_from| Row {
                 done_from,
                 ..row.clone()

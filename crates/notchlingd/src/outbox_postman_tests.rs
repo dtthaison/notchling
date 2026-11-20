@@ -803,3 +803,17 @@ fn a_sending_head_left_by_a_dropped_postman_is_settled_when_acting_turns_on() {
     );
     assert_eq!(r.returns(), 1, "typed once");
 }
+
+#[test]
+fn a_slow_read_never_stamps_a_row_with_the_time_before_it() {
+    use notchling_engine::sessions::fresh::Ended;
+    let r = rig();
+    let row = r.send("job-a", "hi");
+    r.files.read_as(BUSY, Ended::Unknown);
+    r.files.reads_take(&r.clock, 1_500);
+    let mut p = r.postmen.postman(BUSY);
+    p.pass(r.at(T0));
+    let after = r.row(&row.id).unwrap();
+    assert_eq!(after.state, State::Waiting);
+    assert_eq!(after.updated_ms, T0 + 1_500);
+}

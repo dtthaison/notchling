@@ -9,7 +9,7 @@ const FD_VNODE_PATH_INFO_SIZE: usize = 1200;
 const FD_VNODE_PATH_OFFSET: usize = 176;
 
 #[cfg(target_os = "macos")]
-pub fn start_time(pid: u32) -> Option<u64> {
+fn bsdinfo(pid: u32) -> Option<libc::proc_bsdinfo> {
     let pid = libc::c_int::try_from(pid).ok()?;
     // SAFETY: proc_bsdinfo is plain data; all zeroes is a valid value.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
@@ -24,7 +24,40 @@ pub fn start_time(pid: u32) -> Option<u64> {
             size,
         )
     };
-    (n == size).then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+    (n == size).then_some(info)
+}
+
+#[cfg(target_os = "macos")]
+pub fn start_time(pid: u32) -> Option<u64> {
+    let info = bsdinfo(pid)?;
+    Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn status_is_zombie(status: u32) -> bool {
+    status == 5
+}
+
+#[cfg(target_os = "macos")]
+fn zombie(pid: u32) -> bool {
+    bsdinfo(pid).is_some_and(|info| status_is_zombie(info.pbi_status))
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn stat_is_dead(stat: &str) -> bool {
+    stat.rsplit_once(')')
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+        .is_some_and(|state| matches!(state, "Z" | "X"))
+}
+
+#[cfg(target_os = "linux")]
+fn zombie(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| stat_is_dead(&stat))
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+fn zombie(_pid: u32) -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]
@@ -66,6 +99,9 @@ pub fn process(pid: u32) -> Process {
             Some(libc::EPERM) => Process::Other,
             _ => Process::Gone,
         };
+    }
+    if zombie(pid) {
+        return Process::Gone;
     }
     Process::Ours {
         started_ms: started_ms(pid),

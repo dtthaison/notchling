@@ -17,6 +17,11 @@ fn done_from(store: &OutboxStore, id: &str) -> Option<u32> {
     store.get(id).unwrap().unwrap().done_from
 }
 
+fn counted(store: &OutboxStore, id: &str, counting: bool) -> Option<u32> {
+    let seen = store.get(id).unwrap().unwrap();
+    store.count_done(&seen, counting).unwrap()
+}
+
 fn tries(store: &OutboxStore, id: &str) -> u32 {
     store.get(id).unwrap().unwrap().tries
 }
@@ -25,9 +30,9 @@ fn tries(store: &OutboxStore, id: &str) -> u32 {
 fn the_done_count_stays_on_the_row_and_only_a_persons_action_starts_it_again() {
     let store = OutboxStore::in_memory_for_tests();
     let id = store.insert(&new("hi"), 1).unwrap().id;
-    assert_eq!(store.count_done(&id, true).unwrap(), Some(0));
+    assert_eq!(counted(&store, &id, true), Some(0));
     store.take(&id, 2).unwrap().unwrap();
-    assert_eq!(store.count_done(&id, true).unwrap(), Some(0));
+    assert_eq!(counted(&store, &id, true), Some(0));
     assert_eq!(store.get(&id).unwrap().unwrap().updated_ms, 2);
     store.untake(&id, false, 1, 3).unwrap();
     assert_eq!(
@@ -40,22 +45,22 @@ fn the_done_count_stays_on_the_row_and_only_a_persons_action_starts_it_again() {
     store.requeue(&id, &[State::Sending], false, 5).unwrap();
     assert_eq!((done_from(&store, &id), tries(&store, &id)), (None, 2));
 
-    assert_eq!(store.count_done(&id, true).unwrap(), Some(2));
+    assert_eq!(counted(&store, &id, true), Some(2));
     store.take(&id, 6).unwrap().unwrap();
     store.restart(&id, &[State::Sending], false, 7).unwrap();
     assert_eq!((done_from(&store, &id), tries(&store, &id)), (None, 0));
 
-    assert_eq!(store.count_done(&id, true).unwrap(), Some(0));
+    assert_eq!(counted(&store, &id, true), Some(0));
     assert_eq!(store.edit(&id, "again", 8).unwrap(), Change::Done);
     assert_eq!(done_from(&store, &id), None);
 
-    assert_eq!(store.count_done(&id, true).unwrap(), Some(0));
-    assert_eq!(store.count_done(&id, false).unwrap(), None);
+    assert_eq!(counted(&store, &id, true), Some(0));
+    assert_eq!(counted(&store, &id, false), None);
     store.run_sql_for_tests(&format!(
         "UPDATE outbox SET done_from = 7 WHERE id = '{id}'"
     ));
     assert_eq!(
-        store.count_done(&id, true).unwrap(),
+        counted(&store, &id, true),
         Some(0),
         "a start above the tries is taken again from the tries"
     );
@@ -71,7 +76,7 @@ fn a_counted_row_is_read_and_changed_by_an_older_daemon() {
     let dir = tmp.path("data");
     let outbox = OutboxStore::open(&dir).unwrap();
     let id = outbox.insert(&new("hi"), 1).unwrap().id;
-    outbox.count_done(&id, true).unwrap();
+    counted(&outbox, &id, true);
     outbox.insert(&new("next"), 2).unwrap();
     let db = rusqlite::Connection::open(store::db_path(&dir)).unwrap();
     let version: i64 = db
@@ -126,7 +131,7 @@ fn a_database_from_before_the_count_gets_the_column_and_keeps_its_rows() {
     let outbox = OutboxStore::open(&dir).unwrap();
     let row = outbox.get(&id).unwrap().unwrap();
     assert_eq!((row.text.as_str(), row.done_from), ("kept", None));
-    assert_eq!(outbox.count_done(&id, true).unwrap(), Some(0));
+    assert_eq!(counted(&outbox, &id, true), Some(0));
     let version: i64 = store::open(&dir)
         .unwrap()
         .pragma_query_value(None, "user_version", |r| r.get(0))
@@ -142,14 +147,14 @@ fn a_queued_row_takes_its_done_count_from_its_tries_again_whoever_put_it_back() 
         "UPDATE outbox SET tries = 3, done_from = 0 WHERE id = '{id}'"
     ));
     assert_eq!(
-        store.count_done(&id, true).unwrap(),
+        counted(&store, &id, true),
         Some(3),
         "an older daemon put it back in line and left the count"
     );
     store.run_sql_for_tests(&format!(
         "UPDATE outbox SET state = 'waiting', tries = 5 WHERE id = '{id}'"
     ));
-    assert_eq!(store.count_done(&id, true).unwrap(), Some(3));
+    assert_eq!(counted(&store, &id, true), Some(3));
 }
 
 #[test]
@@ -170,4 +175,60 @@ fn a_row_that_moved_since_it_was_read_is_not_written_over() {
         Ok(true)
     );
     assert_eq!(store.get(&id).unwrap().unwrap().state, State::Stopped);
+}
+
+#[test]
+fn a_row_put_back_in_the_same_millisecond_is_not_written_over() {
+    let from = [State::Queued, State::Waiting];
+    let store = OutboxStore::in_memory_for_tests();
+    let id = store.insert(&new("hi"), 1).unwrap().id;
+    store
+        .set_state(&id, &[State::Queued], State::Waiting, None, None, 5)
+        .unwrap();
+    let seen = store.get(&id).unwrap().unwrap();
+    assert_eq!((seen.state, seen.updated_ms), (State::Waiting, 5));
+    store.requeue(&id, &[State::Waiting], false, 5).unwrap();
+    assert_eq!(
+        store.set_state_of(&seen, &from, State::Stopped, None, None, 6),
+        Ok(false),
+        "put back as queued at the same time"
+    );
+    assert_eq!(store.get(&id).unwrap().unwrap().state, State::Queued);
+
+    let store = OutboxStore::in_memory_for_tests();
+    let id = store.insert(&new("hi"), 1).unwrap().id;
+    let seen = store.get(&id).unwrap().unwrap();
+    store.take(&id, 1).unwrap().unwrap();
+    store.untake(&id, false, 7, 1).unwrap();
+    let now = store.get(&id).unwrap().unwrap();
+    assert_eq!((now.state, now.updated_ms), (seen.state, seen.updated_ms));
+    assert_eq!(
+        store.set_state_of(&seen, &from, State::Stopped, None, None, 2),
+        Ok(false),
+        "put back with other tries at the same time"
+    );
+    assert_eq!(tries(&store, &id), 7);
+    assert_eq!(store.get(&id).unwrap().unwrap().state, State::Queued);
+}
+
+#[test]
+fn a_row_that_moved_in_the_same_millisecond_is_not_counted_from_its_old_reading() {
+    let store = OutboxStore::in_memory_for_tests();
+    let id = store.insert(&new("hi"), 1).unwrap().id;
+    store
+        .set_state(&id, &[State::Queued], State::Waiting, None, None, 5)
+        .unwrap();
+    let seen = store.get(&id).unwrap().unwrap();
+    store.requeue(&id, &[State::Waiting], false, 5).unwrap();
+    assert_eq!(store.count_done(&seen, true), Ok(None));
+    assert_eq!(done_from(&store, &id), None, "its state changed");
+
+    let store = OutboxStore::in_memory_for_tests();
+    let id = store.insert(&new("hi"), 1).unwrap().id;
+    let seen = store.get(&id).unwrap().unwrap();
+    store.take(&id, 1).unwrap().unwrap();
+    store.untake(&id, false, 2, 1).unwrap();
+    assert_eq!(store.count_done(&seen, true), Ok(None));
+    assert_eq!(done_from(&store, &id), None, "its tries changed");
+    assert_eq!(counted(&store, &id, true), Some(2), "read afresh it counts");
 }

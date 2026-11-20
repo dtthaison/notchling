@@ -103,6 +103,10 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     })
 }
 
+fn unmoved(row: &Row, seen: &Row) -> bool {
+    row.state == seen.state && row.tries == seen.tries && row.updated_ms == seen.updated_ms
+}
+
 fn states(list: &[State]) -> String {
     list.iter()
         .map(|state| format!("'{}'", state.as_str()))
@@ -318,13 +322,19 @@ impl OutboxStore {
         next_ms: Option<i64>,
         now_ms: i64,
     ) -> Result<bool, String> {
-        let unmoved = (seen.id.as_str(), Some(seen.updated_ms));
-        self.move_state(unmoved, from, to, why, next_ms, now_ms)
+        self.move_state(
+            (seen.id.as_str(), Some(seen)),
+            from,
+            to,
+            why,
+            next_ms,
+            now_ms,
+        )
     }
 
     fn move_state(
         &self,
-        (id, seen_ms): (&str, Option<i64>),
+        (id, seen): (&str, Option<&Row>),
         from: &[State],
         to: State,
         why: Option<Why>,
@@ -335,7 +345,7 @@ impl OutboxStore {
         let Some(row) = fetch(&db, id)? else {
             return Ok(false);
         };
-        if !from.contains(&row.state) || seen_ms.is_some_and(|seen| seen != row.updated_ms) {
+        if !from.contains(&row.state) || seen.is_some_and(|seen| !unmoved(&row, seen)) {
             return Ok(false);
         }
         let struck: i64 = db
@@ -350,7 +360,8 @@ impl OutboxStore {
             "UPDATE outbox SET state = ?2, why = ?3, next_ms = ?4, updated_ms = ?5,
                  aside_at_ms = ?6, aside_ms = NULL,
                  strike = CASE WHEN ?2 = 'unsure' THEN 1 ELSE strike END
-             WHERE id = ?1 AND state IN ({}) AND (?7 IS NULL OR updated_ms = ?7)",
+             WHERE id = ?1 AND state IN ({})
+               AND (?7 IS NULL OR (updated_ms = ?7 AND state = ?8 AND tries = ?9))",
             states(from)
         );
         let changed = db
@@ -363,7 +374,9 @@ impl OutboxStore {
                     next_ms,
                     now_ms,
                     aside_at,
-                    seen_ms
+                    seen.map(|seen| seen.updated_ms),
+                    seen.map(|seen| seen.state.as_str()),
+                    seen.map(|seen| i64::from(seen.tries))
                 ],
             )
             .map_err(db_err)?;
@@ -621,18 +634,30 @@ impl OutboxStore {
         self.requeue_with(id, &[State::Sending], clear_box, back, now_ms)
     }
 
-    pub fn count_done(&self, id: &str, counting: bool) -> Result<Option<u32>, String> {
+    pub fn count_done(&self, seen: &Row, counting: bool) -> Result<Option<u32>, String> {
+        let id = seen.id.as_str();
         let db = self.lock();
         let sql = if counting {
             "UPDATE outbox SET done_from = tries
-             WHERE id = ?1
+             WHERE id = ?1 AND updated_ms = ?2 AND state = ?3 AND tries = ?4
                AND (done_from IS NULL OR done_from > tries
                     OR (state = 'queued' AND done_from != tries))"
         } else {
-            "UPDATE outbox SET done_from = NULL WHERE id = ?1 AND done_from IS NOT NULL"
+            "UPDATE outbox SET done_from = NULL
+             WHERE id = ?1 AND updated_ms = ?2 AND state = ?3 AND tries = ?4
+               AND done_from IS NOT NULL"
         };
-        db.execute(sql, [id]).map_err(db_err)?;
-        Ok(fetch(&db, id)?.and_then(|row| row.done_from))
+        let guard = params![
+            id,
+            seen.updated_ms,
+            seen.state.as_str(),
+            i64::from(seen.tries)
+        ];
+        db.execute(sql, guard).map_err(db_err)?;
+        Ok(fetch(&db, id)?.and_then(|row| match unmoved(&row, seen) {
+            true => row.done_from,
+            false => seen.done_from,
+        }))
     }
 
     fn requeue_with(

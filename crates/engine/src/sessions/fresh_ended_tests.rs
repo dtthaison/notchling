@@ -286,10 +286,16 @@ fn a_session_file_that_cannot_be_read_holds_only_while_it_may_be_a_running_proce
         w.runs(PID, ITS_OWN);
         assert_eq!(w.ended(), Ended::Unknown, "{state}: its pid runs");
         assert_eq!(w.later(MID_WRITE_MS - 1), Ended::Unknown, "{state}");
-        assert_eq!(w.later(1), ended, "{state}: unchanged, left behind");
+        assert_eq!(w.later(1), Ended::Unknown, "{state}: unchanged, still runs");
+        assert_eq!(w.later(86_400_000), Ended::Unknown, "{state}: for good");
+        w.runs(PID, NEWER);
+        assert_eq!(w.later(MID_WRITE_MS), Ended::Unknown, "{state}: any start");
+        w.runs(PID, Process::Gone);
+        assert_eq!(w.ended(), ended, "{state}: it exited");
         w.dir.write("lane-b/sessions/odd-name.json", "{\"pid\": 12");
         assert_eq!(w.ended(), Ended::Unknown, "{state}: named by no pid");
         assert_eq!(w.later(MID_WRITE_MS), ended, "{state}");
+        w.runs(PID, ITS_OWN);
         w.dir
             .write("claude/sessions/4242.json", &session(PID).to_string());
         let live = match state {
@@ -415,6 +421,7 @@ fn over_every_mix_stopped_needs_a_stopped_record_and_a_stopped_job_always_gets_t
                     let all_stopped =
                         !readable.is_empty() && readable.iter().all(|said| *said == "stopped");
                     let live = process == Some(ITS_OWN);
+                    let torn_runs = torn == Some(ITS_OWN);
                     let first = w.ended();
                     let mut last = first;
                     for _ in 0..3 {
@@ -431,11 +438,18 @@ fn over_every_mix_stopped_needs_a_stopped_record_and_a_stopped_job_always_gets_t
                             assert!(matches!(seen, Ended::No | Ended::Unknown), "{case}");
                         }
                     }
-                    if all_stopped && !live {
+                    if all_stopped && !live && !torn_runs {
                         assert_eq!(last, Ended::Stopped, "{case}: bounded");
                     }
-                    if readable == ["done"] && !live {
+                    if readable == ["done"] && !live && !torn_runs {
                         assert_eq!(last, Ended::Done, "{case}: bounded");
+                    }
+                    let ended_says = !readable.is_empty()
+                        && readable
+                            .iter()
+                            .all(|said| matches!(*said, "stopped" | "done"));
+                    if torn_runs && !live && ended_says {
+                        assert_eq!(last, Ended::Unknown, "{case}: a running pid holds");
                     }
                     if readable.is_empty() && !live {
                         assert_eq!(last, Ended::Unknown, "{case}: no record to read");
@@ -444,4 +458,28 @@ fn over_every_mix_stopped_needs_a_stopped_record_and_a_stopped_job_always_gets_t
             }
         }
     }
+}
+
+#[test]
+fn a_start_written_at_the_end_of_the_number_line_does_not_overflow() {
+    let w = world("ended-overflow-written");
+    w.state("stopped");
+    w.runs(PID, ITS_OWN);
+    let late = json!({"pid": PID, "jobId": JOB, "status": "idle", "startedAt": i64::MAX});
+    w.dir.write("claude/sessions/4242.json", &late.to_string());
+    assert_eq!(w.ended(), Ended::Unknown);
+}
+
+#[test]
+fn a_process_start_at_the_other_end_of_the_number_line_does_not_overflow() {
+    let w = world("ended-overflow-began");
+    w.state("stopped");
+    let began = Process::Ours {
+        started_ms: Some(i64::MIN),
+        ticks: None,
+    };
+    w.runs(PID, began);
+    let dated = json!({"pid": PID, "jobId": JOB, "status": "idle", "procStart": BEGAN});
+    w.dir.write("claude/sessions/4242.json", &dated.to_string());
+    assert_eq!(w.ended(), Ended::Stopped);
 }

@@ -161,10 +161,10 @@ impl Look<'_> {
             ticks.zip(counted).map(|(now, then)| now == then),
             started_ms
                 .zip(dated)
-                .map(|(now, then)| (now - then).abs() <= PROC_START_SLACK_MS),
+                .map(|(now, then)| now.abs_diff(then) <= PROC_START_SLACK_MS.unsigned_abs()),
             started_ms
                 .zip(written)
-                .map(|(began, written)| began <= written + START_SLACK_MS),
+                .map(|(began, written)| began <= written.saturating_add(START_SLACK_MS)),
         ]
         .into_iter()
         .flatten()
@@ -181,10 +181,11 @@ impl Look<'_> {
             .file_stem()
             .and_then(|stem| stem.to_str())
             .and_then(|stem| stem.parse::<u32>().ok());
-        if pid.is_some_and(|pid| !matches!((self.process)(pid), Process::Ours { .. })) {
-            return false;
+        match pid.map(|pid| (self.process)(pid)) {
+            Some(Process::Ours { .. }) => true,
+            Some(_) => false,
+            None => !(self.settled)(&mark),
         }
-        !(self.settled)(&mark)
     }
 }
 
