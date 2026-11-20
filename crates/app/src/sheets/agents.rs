@@ -1,4 +1,6 @@
-use notchling_engine::install::hooks::{FENCE_EVENT, FENCE_MATCHER};
+use notchling_engine::install::hooks::{
+    FENCE_EVENT, FENCE_MATCHER, GUARD_START_EVENT, GUARD_STOP_EVENT, GUARD_TOOLS,
+};
 use notchling_locale::{self as t, Text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,7 +114,7 @@ pub struct HookInfo {
     pub what: Text,
 }
 
-pub const HOOKS: [HookInfo; 6] = [
+pub const HOOKS: [HookInfo; 9] = [
     HookInfo {
         event: "PermissionRequest",
         matcher: "*",
@@ -142,6 +144,21 @@ pub const HOOKS: [HookInfo; 6] = [
         event: FENCE_EVENT,
         matcher: FENCE_MATCHER,
         what: t::settings::HOOK_FENCE,
+    },
+    HookInfo {
+        event: FENCE_EVENT,
+        matcher: GUARD_TOOLS,
+        what: t::settings::HOOK_GUARD_TOOLS,
+    },
+    HookInfo {
+        event: GUARD_START_EVENT,
+        matcher: FENCE_MATCHER,
+        what: t::settings::HOOK_GUARD_START,
+    },
+    HookInfo {
+        event: GUARD_STOP_EVENT,
+        matcher: FENCE_MATCHER,
+        what: t::settings::HOOK_GUARD_STOP,
     },
 ];
 

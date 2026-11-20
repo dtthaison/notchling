@@ -135,6 +135,7 @@ pub mod grant_use;
 pub mod grant_wiring;
 pub mod hook;
 pub mod hook_fence;
+pub mod hook_guard;
 pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
@@ -338,6 +339,8 @@ mod codex_children_tests;
 #[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]
+mod cost_guard_report_tests;
+#[cfg(test)]
 mod cost_ops_tests;
 #[cfg(test)]
 mod cost_profile_ops_tests;
@@ -374,6 +377,8 @@ mod git_testkit;
 #[cfg(test)]
 mod hook_fence_tests;
 #[cfg(test)]
+mod hook_guard_tests;
+#[cfg(test)]
 mod hook_ops_tests;
 #[cfg(test)]
 mod hook_pages_tests;
@@ -387,6 +392,8 @@ mod inbox_ops_more_tests;
 mod inbox_ops_tests;
 #[cfg(test)]
 mod install_events_tests;
+#[cfg(test)]
+mod install_guard_tests;
 #[cfg(test)]
 mod install_ops_cluster_tests;
 #[cfg(test)]
@@ -541,6 +548,10 @@ pub fn run(command: Command) -> i32 {
         },
         Command::HookFence => match Layout::from_env(None) {
             Some(l) => hook_fence::run(&l),
+            None => 0,
+        },
+        Command::HookGuard => match Layout::from_env(None) {
+            Some(l) => hook_guard::run(&l),
             None => 0,
         },
         Command::Hook { socket } => match Layout::from_env(socket.as_deref()) {

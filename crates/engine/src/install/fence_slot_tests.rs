@@ -27,6 +27,7 @@ fn only_fence(want: Want) -> Wanted {
         prompt: Want::Leave,
         pages: Want::Leave,
         fence: want,
+        guard: Want::Leave,
     }
 }
 

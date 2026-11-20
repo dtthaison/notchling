@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA: i64 = 2;
+pub const SCHEMA: i64 = 3;
 const BUSY: Duration = Duration::from_secs(2);
 
 const SCHEMA_SQL: &str = "
@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS files (
   path TEXT PRIMARY KEY, size INTEGER NOT NULL, off INTEGER NOT NULL, state TEXT NOT NULL,
   fp TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS guard_events (
+  ts REAL NOT NULL, session TEXT NOT NULL, agent TEXT NOT NULL, tool TEXT NOT NULL,
+  rule TEXT NOT NULL, action TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS guard_events_ts ON guard_events(ts);
+CREATE TABLE IF NOT EXISTS guard_batches (id TEXT PRIMARY KEY, ts REAL NOT NULL);
 ";
 
 #[cfg(unix)]
@@ -294,4 +299,6 @@ pub fn set_meta(db: &Connection, key: &str, value: &str) {
 pub fn prune(db: &Connection, rows_before: f64, rollups_before: &str) {
     let _ = db.execute("DELETE FROM calls WHERE ts < ?1", [rows_before]);
     let _ = db.execute("DELETE FROM rollups WHERE day < ?1", [rollups_before]);
+    let _ = db.execute("DELETE FROM guard_events WHERE ts < ?1", [rows_before]);
+    let _ = db.execute("DELETE FROM guard_batches WHERE ts < ?1", [rows_before]);
 }

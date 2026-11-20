@@ -900,6 +900,7 @@ impl Wired {
                 layout,
                 &self.catalog,
                 &self.switches,
+                &self.install,
             ))
             .with_group(self.sidecar.clone())
             .with_group(self.providers.clone())

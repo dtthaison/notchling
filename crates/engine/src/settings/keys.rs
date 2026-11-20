@@ -273,6 +273,8 @@ pub const KEYS: &[KeySpec] = &[
         .ask("Cost Profile for Codex", "Let the Cost Profile set up Codex", "it decides which files Set Up writes in Codex's folder"),
     key("costAgy", K::Bool, D::Bool(true), false, "The Cost Profile covers Antigravity")
         .ask("Cost Profile for Antigravity", "Let the Cost Profile set up Antigravity", "it decides which files Set Up writes in Antigravity's folder"),
+    choice("costGuard", "log", &["log", "off"], false, "The Cost Profile's guard hook for Claude Code: log (records what it would have done and never changes a call) or off")
+        .never("Cost Profile guard", "Whether Claude Code's cost guard records what it would have done: log or off", "it puts a hook in Claude Code's settings.json: only the app changes it"),
     key("costProfileApp", K::Json, D::None, false, "The Cost Profile's guard levels, habit edits and rules imported from the user's own files (JSON)")
         .never("Cost Profile (app only)", "Guard levels, habit edits and the lines imported from your own rule files", "free text from the user's files and guard levels: only the app changes them"),
     key("vaultReminderSent", K::Dict, D::Empty, false, "Vault expiry reminders already sent: secret to days")

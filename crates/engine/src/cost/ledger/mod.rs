@@ -1,5 +1,6 @@
 pub mod claude;
 pub mod db;
+pub mod guard;
 pub mod ingest;
 pub mod other;
 
@@ -7,7 +8,7 @@ use super::tracker::{Root, ZoneFn};
 use crate::catalog::Catalog;
 use crate::pages::clock::local_offset_secs;
 use rusqlite::Connection;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -111,6 +112,7 @@ pub struct Ledger {
     roots: Vec<Root>,
     catalog: Arc<Catalog>,
     zone: ZoneFn,
+    guard_dir: Option<PathBuf>,
 }
 
 impl Ledger {
@@ -132,7 +134,35 @@ impl Ledger {
             roots,
             catalog,
             zone: local_offset_secs,
+            guard_dir: None,
         }
+    }
+
+    pub fn with_guard_dir(mut self, dir: PathBuf) -> Ledger {
+        self.guard_dir = Some(dir);
+        self
+    }
+
+    pub fn take_guard(&self) -> usize {
+        let Some(dir) = self.guard_dir.as_deref() else {
+            return 0;
+        };
+        let mut total = 0;
+        for _ in 0..4 {
+            let Some(taken) = crate::guard::spool::take(dir) else {
+                break;
+            };
+            let Ok(added) = guard::insert_all(&self.db, &taken) else {
+                break;
+            };
+            total += added;
+            taken.done();
+        }
+        total
+    }
+
+    pub fn guard_since(&self, from: f64, to: f64, days: u32) -> guard::GuardReport {
+        guard::summary(&self.db, from, to, days)
     }
 
     pub fn with_zone(mut self, zone: ZoneFn) -> Ledger {

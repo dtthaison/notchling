@@ -53,12 +53,14 @@ pub fn wanted(prompt: Want, pages: Want) -> Wanted {
         prompt,
         pages,
         fence: Want::Leave,
+        guard: Want::Leave,
     }
 }
 
 pub fn install_all() -> Wanted {
     Wanted {
         fence: Want::Install,
+        guard: Want::Leave,
         ..wanted(Want::Install, Want::Install)
     }
 }
@@ -66,6 +68,7 @@ pub fn install_all() -> Wanted {
 pub fn remove_all() -> Wanted {
     Wanted {
         fence: Want::Remove,
+        guard: Want::Leave,
         ..wanted(Want::Remove, Want::Remove)
     }
 }

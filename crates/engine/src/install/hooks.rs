@@ -11,6 +11,11 @@ pub const FENCE_TIMEOUT: u64 = 30;
 pub const FENCE_FLAG: &str = "--fence";
 pub const FENCE_MATCHER: &str = "*";
 pub const FENCE_EVENT: &str = "PreToolUse";
+pub const GUARD_TIMEOUT: u64 = 5;
+pub const GUARD_FLAG: &str = "--guard";
+pub const GUARD_TOOLS: &str = "Bash|Read|Agent";
+pub const GUARD_START_EVENT: &str = "SubagentStart";
+pub const GUARD_STOP_EVENT: &str = "SubagentStop";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Want {
@@ -24,6 +29,7 @@ pub enum Category {
     Prompt,
     Pages,
     Fence,
+    Guard,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -34,7 +40,7 @@ pub struct Slot {
     pub timeout: u64,
 }
 
-pub const SLOTS: [Slot; 6] = [
+pub const SLOTS: [Slot; 9] = [
     Slot {
         category: Category::Prompt,
         event: "PreToolUse",
@@ -71,6 +77,24 @@ pub const SLOTS: [Slot; 6] = [
         matcher: FENCE_MATCHER,
         timeout: FENCE_TIMEOUT,
     },
+    Slot {
+        category: Category::Guard,
+        event: "PreToolUse",
+        matcher: GUARD_TOOLS,
+        timeout: GUARD_TIMEOUT,
+    },
+    Slot {
+        category: Category::Guard,
+        event: GUARD_START_EVENT,
+        matcher: "*",
+        timeout: GUARD_TIMEOUT,
+    },
+    Slot {
+        category: Category::Guard,
+        event: GUARD_STOP_EVENT,
+        matcher: "*",
+        timeout: GUARD_TIMEOUT,
+    },
 ];
 
 #[derive(Clone, Debug)]
@@ -79,6 +103,7 @@ pub struct Wanted {
     pub prompt: Want,
     pub pages: Want,
     pub fence: Want,
+    pub guard: Want,
 }
 
 impl Wanted {
@@ -87,12 +112,14 @@ impl Wanted {
             Category::Prompt => self.prompt,
             Category::Pages => self.pages,
             Category::Fence => self.fence,
+            Category::Guard => self.guard,
         }
     }
 
     fn command_for(&self, slot: &Slot) -> String {
         match slot.category {
             Category::Fence => format!("{} {FENCE_FLAG}", self.command),
+            Category::Guard => format!("{} {GUARD_FLAG}", self.command),
             _ => self.command.clone(),
         }
     }
@@ -299,7 +326,7 @@ pub fn plan_hooks(text: &str, wanted: &Wanted) -> Result<HookPlan, Refused> {
                     }
                 }
             }
-        } else if ours.is_empty() {
+        } else if ours.is_empty() && slot.category != Category::Guard {
             notes.push(format!("{place}: not installed"));
         }
     }
