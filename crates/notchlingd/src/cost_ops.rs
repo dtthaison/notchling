@@ -52,7 +52,9 @@ impl CostSetup {
         let roots = self.roots.clone();
         let catalog = self.catalog.clone();
         match &self.cache_data {
-            Some(data) => Ledger::open(&data.join("daemon").join(FILE), roots, catalog).ok(),
+            Some(data) => Ledger::open(&data.join("daemon").join(FILE), roots, catalog)
+                .ok()
+                .map(|l| l.with_guard_dir(data.join(notchling_engine::guard::DIR))),
             None => Ledger::in_memory(roots, catalog).ok(),
         }
     }

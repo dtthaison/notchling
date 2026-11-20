@@ -29,6 +29,7 @@ pub struct InstallSetup {
     pub binary: Option<PathBuf>,
     pub os: Os,
     pub skills: Vec<SkillSpec>,
+    pub guard_data: Option<PathBuf>,
 }
 
 impl InstallSetup {
@@ -54,6 +55,7 @@ impl InstallSetup {
             binary,
             os: Os::current(),
             skills,
+            guard_data: Some(layout.data_dir.clone()),
         }
     }
 }
@@ -133,6 +135,7 @@ struct Request {
     direction: Direction,
     prompt: Want,
     pages: Want,
+    guard: Want,
     skills: Vec<(String, Want)>,
     with_swift_hooks: bool,
 }
@@ -238,7 +241,11 @@ impl InstallOps {
             },
             _ => Direction::Install,
         };
-        let mut names: Vec<String> = vec![install::PROMPT_HOOKS.into(), install::PAGE_HOOKS.into()];
+        let mut names: Vec<String> = vec![
+            install::PROMPT_HOOKS.into(),
+            install::PAGE_HOOKS.into(),
+            install::GUARD_HOOKS.into(),
+        ];
         names.extend(self.setup.skills.iter().map(|s| s.name.clone()));
         let chosen: Vec<String> = match args.get("what") {
             None | Some(Value::Null) => names.clone(),
@@ -267,6 +274,10 @@ impl InstallOps {
                 Want::Leave
             }
         };
+        let guard = match (want(install::GUARD_HOOKS), self.guard_open()) {
+            (Want::Install, false) => Want::Remove,
+            (other, _) => other,
+        };
         let flag = args.get("with_swift_hooks");
         if flag.is_some_and(|f| !f.is_boolean() && !f.is_null()) {
             return Err(bad("with_swift_hooks is true or false"));
@@ -275,6 +286,7 @@ impl InstallOps {
             direction,
             prompt: want(install::PROMPT_HOOKS),
             pages: want(install::PAGE_HOOKS),
+            guard,
             skills: self
                 .setup
                 .skills
@@ -283,6 +295,13 @@ impl InstallOps {
                 .collect(),
             with_swift_hooks: flag.and_then(Value::as_bool).unwrap_or(false),
         })
+    }
+
+    fn guard_open(&self) -> bool {
+        self.setup
+            .guard_data
+            .as_deref()
+            .is_some_and(notchling_engine::cost_profile::guard::enabled)
     }
 
     fn wanted(&self, request: &Request) -> Result<Wanted, ApiError> {
@@ -296,6 +315,7 @@ impl InstallOps {
             prompt: request.prompt,
             pages: request.pages,
             fence: request.prompt,
+            guard: request.guard,
         })
     }
 
@@ -332,10 +352,15 @@ impl InstallOps {
         let wanted = self.wanted(request)?;
         let mut backup = None;
         let mut plan = plan;
-        if request.prompt != Want::Leave || request.pages != Want::Leave {
+        if request.prompt != Want::Leave
+            || request.pages != Want::Leave
+            || request.guard != Want::Leave
+        {
             match install::apply(&self.setup.settings, &wanted, (self.clock)()) {
                 Ok(done) => {
-                    self.note_hook(request.direction, DoneOrFailed::Done);
+                    if done.wrote || request.prompt != Want::Leave || request.pages != Want::Leave {
+                        self.note_hook(request.direction, DoneOrFailed::Done);
+                    }
                     backup = done.backup.map(|p| p.to_string_lossy().into_owned());
                     plan.hooks = Ok(done.plan);
                 }

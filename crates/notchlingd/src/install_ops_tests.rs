@@ -91,6 +91,7 @@ pub(crate) fn rig(dir: &Dir, settings: Option<&str>) -> InstallSetup {
         binary: Some(PathBuf::from(BINARY)),
         os: Os::Mac,
         skills: default_skills(Path::new(BINARY), &tools.codex),
+        guard_data: None,
         tools,
     }
 }

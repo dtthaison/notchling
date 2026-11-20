@@ -141,8 +141,10 @@ impl CostService {
         let progress = ledger.refresh(options.now, Some(budget));
         let from = options.now - f64::from(options.days) * 86_400.0;
         let window = ledger.calls_since(from);
+        let mut report = analyse(&window, ledger.catalog(), &options);
+        report.guard = ledger.guard_since(from, options.now, options.days);
         Some(Checked {
-            report: analyse(&window, ledger.catalog(), &options),
+            report,
             complete: progress.complete(),
             scanned: ledger.scanned(),
             calls: ledger.call_count(),

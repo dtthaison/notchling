@@ -37,6 +37,10 @@ const SETTINGS: &str =
     "{\n  \"env\": {\"API_TOKEN\": \"sk-ant-NEVERSHOWN\"},\n  \"hooks\": {}\n}\n";
 
 fn rig(tag: &str, on: bool) -> Rig {
+    build(tag, on, None)
+}
+
+fn build(tag: &str, on: bool, after: Option<Arc<dyn Fn() + Send + Sync>>) -> Rig {
     static N: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nl-costops-{tag}-{}-{}",
@@ -63,7 +67,10 @@ fn rig(tag: &str, on: bool) -> Rig {
         codex_snapshot: None,
     };
     let switch = SwitchFlag::in_memory(INSTALL, INSTALL_OFF, on);
-    let ops = CostProfileOps::new(service, switch.clone());
+    let mut ops = CostProfileOps::new(service, switch.clone());
+    if let Some(after) = after {
+        ops = ops.with_after(after);
+    }
     Rig { dir, ops, switch }
 }
 
@@ -368,4 +375,116 @@ fn a_consent_the_person_did_not_give_leaves_that_part_an_offer() {
     assert!(fs::read_to_string(claude(&r, "rules/model-choice.md"))
         .unwrap()
         .contains("sonnet high for code"));
+}
+
+fn counted() -> (Arc<AtomicUsize>, Arc<dyn Fn() + Send + Sync>) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = count.clone();
+    (
+        count,
+        Arc::new(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
+        }),
+    )
+}
+
+fn policy_file(r: &Rig) -> PathBuf {
+    r.dir.join("data/guard/policy.json")
+}
+
+#[test]
+fn the_profile_tells_the_guard_level_and_whether_it_is_on() {
+    let r = rig("guard-get", false);
+    let reply = call(&r, Tier::Agent, ops::COST_PROFILE_GET, json!({})).unwrap();
+    assert_eq!(
+        reply["profile"]["guard"],
+        json!({"level": "log", "set_up": false, "on": false})
+    );
+}
+
+#[test]
+fn set_up_turns_the_guard_policy_on_and_undo_turns_it_off() {
+    let (count, after) = counted();
+    let r = build("guard-apply", true, Some(after));
+    assert!(!policy_file(&r).exists());
+    call(&r, Tier::App, ops::COST_SETUP_APPLY, json!({})).unwrap();
+    assert!(policy_file(&r).exists());
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let text: Value = serde_json::from_str(&fs::read_to_string(policy_file(&r)).unwrap()).unwrap();
+    assert_eq!(text["level"], "log");
+    assert_eq!(text["cap"], 5);
+    let got = call(&r, Tier::App, ops::COST_PROFILE_GET, json!({})).unwrap();
+    assert_eq!(got["profile"]["guard"]["on"], true);
+    call(
+        &r,
+        Tier::App,
+        ops::COST_SETUP_UNDO,
+        json!({"tool": "claude"}),
+    )
+    .unwrap();
+    assert!(!policy_file(&r).exists());
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_set_up_that_changed_nothing_leaves_the_guard_alone() {
+    let (count, after) = counted();
+    let r = build("guard-off-switch", false, Some(after));
+    call(&r, Tier::App, ops::COST_SETUP_APPLY, json!({})).unwrap();
+    assert!(!policy_file(&r).exists());
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn the_guard_level_is_set_by_the_app_and_off_stops_the_policy() {
+    let (count, after) = counted();
+    let r = build("guard-set", true, Some(after));
+    call(&r, Tier::App, ops::COST_SETUP_APPLY, json!({})).unwrap();
+    let off = call(
+        &r,
+        Tier::App,
+        ops::COST_PROFILE_SET,
+        json!({"guard": "off"}),
+    )
+    .unwrap();
+    assert_eq!(off["profile"]["guard"]["level"], "off");
+    assert_eq!(off["profile"]["guard"]["on"], false);
+    assert!(!policy_file(&r).exists());
+    let store = Settings::open(&r.dir.join("data/settings.json")).unwrap();
+    assert_eq!(store.get_str("costGuard").as_deref(), Some("off"));
+    let on = call(
+        &r,
+        Tier::App,
+        ops::COST_PROFILE_SET,
+        json!({"guard": "log"}),
+    )
+    .unwrap();
+    assert_eq!(on["profile"]["guard"]["on"], true);
+    assert!(policy_file(&r).exists());
+    assert_eq!(count.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn a_bad_guard_level_is_refused_and_an_agent_cannot_set_one() {
+    let r = rig("guard-bad", true);
+    for bad in [json!("loud"), json!(5), json!(null), json!("block")] {
+        let e = call(&r, Tier::App, ops::COST_PROFILE_SET, json!({"guard": bad})).unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+    }
+    assert_eq!(r.ops.spec(ops::COST_PROFILE_SET), Some(OpSpec::APP));
+}
+
+#[test]
+fn the_builder_cap_in_the_policy_follows_the_profile() {
+    let r = build("guard-cap", true, None);
+    call(&r, Tier::App, ops::COST_SETUP_APPLY, json!({})).unwrap();
+    call(
+        &r,
+        Tier::App,
+        ops::COST_PROFILE_SET,
+        json!({"habits": {"parallelCap": 3}}),
+    )
+    .unwrap();
+    let text: Value = serde_json::from_str(&fs::read_to_string(policy_file(&r)).unwrap()).unwrap();
+    assert_eq!(text["cap"], 3);
 }

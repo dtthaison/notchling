@@ -3,6 +3,7 @@ pub mod apply;
 pub mod check;
 pub mod detect;
 pub mod diff;
+pub mod guard;
 pub mod import;
 pub mod keys;
 pub mod manifest;

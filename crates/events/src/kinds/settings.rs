@@ -54,6 +54,7 @@ log_choice! {
         CostClaude = "costClaude",
         CostCodex = "costCodex",
         CostAgy = "costAgy",
+        CostGuard = "costGuard",
         CostProfileApp = "costProfileApp",
         VaultReminderSent = "vaultReminderSent",
         BridgeEnabled = "bridgeEnabled",
@@ -88,6 +89,7 @@ log_choice! {
         Panel = "panel",
         Browser = "browser",
         Saver = "saver",
+        Log = "log",
         Balanced = "balanced",
         Quality = "quality",
     }

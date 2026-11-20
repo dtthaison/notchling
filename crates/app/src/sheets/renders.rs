@@ -265,6 +265,9 @@ pub fn hooks(shown: Shown) -> HooksShown {
             hook("PostToolUse", "Artifact", "notchling", true),
             hook("PostToolUseFailure", "Artifact", "notchling", true),
             hook("PreToolUse", "*", "notchling", true),
+            hook("PreToolUse", "Bash|Read|Agent", "notchling", true),
+            hook("SubagentStart", "*", "notchling", true),
+            hook("SubagentStop", "*", "notchling", true),
         ],
     };
     let reply = json!({"on": false, "applied": false,
@@ -521,9 +524,9 @@ mod tests {
         assert_eq!(trust.stage, Stage::Untrusted);
         assert_eq!(acting(Shown::TrustFolder), Acting::On);
         assert_eq!(banners().all().len(), 4);
-        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 6);
-        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 7);
-        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 6);
+        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 9);
+        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 10);
+        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 9);
         assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
         assert_eq!(page(Shown::Settings), Page::General);
         assert_eq!(page(Shown::SettingsAgents), Page::Agents);

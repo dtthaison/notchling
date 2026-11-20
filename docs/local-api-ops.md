@@ -373,7 +373,7 @@ The Cost Profile's Set Up ([decision XXXX](decisions/XXXX-cost-profile.md)): one
 | Op | Tier | Args | Reply |
 | --- | --- | --- | --- |
 | `cost.profile.get` | agent | none | `{profile}` |
-| `cost.profile.set` | app | `{preset?, picks?, habits?, tools?, guards?, reset?}` | `{profile}` after saving |
+| `cost.profile.set` | app | `{preset?, picks?, habits?, tools?, guards?, guard?: "log" or "off", reset?}` | `{profile}` after saving; `profile.guard` is `{level, set_up, on}` |
 | `cost.setup.plan` | agent | `{consent?, wait?}` | `{on, plan}`; writes nothing |
 | `cost.setup.apply` | app | `{consent?, wait?}` | `{on, applied, failed, results, plan}`; with `install` off, the plan and `message` |
 | `cost.setup.undo` | app | `{tool}` | `{on, tool, results, conflicts}` |
@@ -849,14 +849,25 @@ account), and writes only the daemon's own cache.
             "findings": [{"id": "premium_subagents", "saving": 850.0, "saving_share": 0.079, "tokens_avoided": null,
                           "evidence": [{"name": "runs", "value": 282.0}], "detail": {"target": "claude-sonnet-5-5"}}],
             "not_worth": [{"id": "main_effort", "saving": null, "saving_share": null, "tokens_avoided": null, "evidence": [], "detail": {}}],
-            "unknown": [{"id": "cache_ttl", "count": 120}], "saving": 1500.0, "saving_share": 0.14}}
+            "unknown": [{"id": "cache_ttl", "count": 120}], "saving": 1500.0, "saving_share": 0.14,
+            "guard": {"days": 14, "total": 5, "sessions": 3,
+                      "rules": [{"rule": "poll", "count": 3, "sessions": 2}]}}}
 ```
+
+- `guard` is "What the guard would have done": the log-only PreToolUse guard's events in the window, counted per rule (`model`, `review`, `cap`, `read`, `tree`, `poll`, `size`) with the sessions each touched, and `sessions` the distinct sessions over all rules. The text report prints the section only when `total` is above zero. The guard never changed, denied or delayed a call; see "The guard hook" below.
 
 - `findings` are ranked by `saving`, biggest first; a finding whose price is missing has `saving: null` and comes last. `not_worth` holds the levers under the bar (1% of spend or $5) and the ones already low. `saving` over all findings counts each call once: a call a finding claimed is skipped by the ones after it.
 - Dollar amounts are API list prices. `money` is `"estimate"` for `plan: "api"` and `"api_equivalent"` otherwise; for a subscription a client leads with `saving_share` and `tokens_avoided`.
 - A `null` is unknown, never zero: `totals.cost` is `null` when no call had a priced model; `unknown` lists what the transcripts could not tell (`price`, `cache_ttl`, `agent_type`, `effort`), each with a call count.
 - `cache` counts main sessions and helper runs by the time their own `cache_creation` numbers show: `5m` or `1h` is read from `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`, `mixed` has both, `unknown` has no split to read. The check never assumes an hour.
 - `complete` is `false` when the first reading of the transcripts hit the 20 s budget; ask again for the rest.
+
+### The guard hook (log only)
+
+`notchling hook --guard` is a Claude Code hook of its own, separate from the fence (`hook --fence`, 30 s): `PreToolUse` matching `Bash|Read|Agent`, plus `SubagentStart` and `SubagentStop`, each with a 5 s timeout. It reads a small policy file (`<data>/guard/policy.json`, written by the daemon), decides with pure rules, appends one line per "would" to `<data>/guard/events.log` and prints nothing, whatever happens: no policy, bad input, a locked file, a 200 ms deadline all exit 0 quietly. It never calls the daemon. The daemon moves the lines into the ledger's `guard_events` table (time, session id, agent id, tool name, rule, action; never a command, path, prompt or description) and keeps them 30 days.
+
+- Installed through `install.apply` as the part `guard_hooks` (`what: ["guard_hooks"]`; a default install includes it). It goes in only when the Cost Profile says so: Claude Code was Set Up (`costClaude` on and a record in `daemon/cost-setup.json`) and the `costGuard` setting is not `off` (`log` by default, app only). Otherwise a `guard_hooks` install removes any guard entries of ours and leaves the user's other hooks alone.
+- `cost.setup.apply`, `cost.setup.undo` and `cost.profile.set` rewrite the policy file and then ask `install.apply` for `guard_hooks`, so the hook follows Set Up and the level at once; with the `install` switch off only the policy changes, and the policy alone turns the hook into a no-op.
 
 ## `daemon_wiring.rs` and `every_session.rs`
 

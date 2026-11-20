@@ -29,6 +29,7 @@ fn setup(tag: &str) -> (PathBuf, InstallSetup) {
         binary: Some(PathBuf::from(BINARY)),
         os: Os::Mac,
         skills: default_skills(Path::new(BINARY), &tools.codex),
+        guard_data: None,
         tools,
     };
     (dir, setup)

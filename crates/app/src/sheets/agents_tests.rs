@@ -10,6 +10,7 @@ fn written() -> BTreeSet<(String, String)> {
         prompt: Want::Install,
         pages: Want::Install,
         fence: Want::Install,
+        guard: Want::Install,
     };
     let plan = plan_hooks("{}", &wanted).expect("an empty settings file takes the hooks");
     detect(&plan.text)

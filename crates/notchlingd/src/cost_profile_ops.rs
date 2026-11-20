@@ -1,14 +1,17 @@
 use crate::catalog_ops::CatalogService;
 use crate::cost_profile_json as view;
-use crate::install_ops::InstallSetup;
+use crate::install_ops::{InstallOps, InstallSetup};
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use crate::switches::{SwitchFlag, INSTALL_OFF};
 use notchling_engine::catalog::Tool;
+use notchling_engine::cost_profile::guard;
 use notchling_engine::cost_profile::model::{habit_range, parse_tool, tool_key, HABIT_KEYS};
 use notchling_engine::cost_profile::presets::data;
 use notchling_engine::cost_profile::probe::{CommandProbe, NoProbe};
 use notchling_engine::cost_profile::{Cell, Choice, Options, Profile, Role, Service, CONSENTS};
+use notchling_engine::install::GUARD_HOOKS;
+use notchling_engine::settings::Settings;
 use notchling_engine::tools::codex::{models as codex_models, plan::find_binary};
 use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -28,6 +31,7 @@ pub struct CostProfileOps {
     switch: Arc<SwitchFlag>,
     writing: Mutex<()>,
     clock: Box<dyn Fn() -> u64 + Send + Sync>,
+    after: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 fn system_ms() -> u64 {
@@ -52,7 +56,31 @@ impl CostProfileOps {
             switch,
             writing: Mutex::new(()),
             clock: Box::new(system_ms),
+            after: None,
         }
+    }
+
+    pub fn with_after(mut self, after: Arc<dyn Fn() + Send + Sync>) -> CostProfileOps {
+        self.after = Some(after);
+        self
+    }
+
+    fn guard_changed(&self) {
+        let cap = self.service.profile().habits().parallel_cap;
+        guard::sync(&self.service.data_dir, cap);
+        if let Some(after) = &self.after {
+            after();
+        }
+    }
+
+    fn guard_view(&self, mut out: Value) -> Value {
+        let dir = &self.service.data_dir;
+        out["profile"]["guard"] = json!({
+            "level": guard::level(dir),
+            "set_up": guard::set_up(dir),
+            "on": guard::enabled(dir),
+        });
+        out
     }
 
     pub fn with_clock(mut self, clock: Box<dyn Fn() -> u64 + Send + Sync>) -> CostProfileOps {
@@ -131,7 +159,9 @@ impl CostProfileOps {
 
     fn get(&self, caller: &Caller) -> Value {
         let avail = self.service.available();
-        json!({"profile": view::profile(&self.service.profile(), &avail, caller.tier)})
+        self.guard_view(
+            json!({"profile": view::profile(&self.service.profile(), &avail, caller.tier)}),
+        )
     }
 
     fn set(&self, args: &Value) -> Result<Value, ApiError> {
@@ -141,9 +171,13 @@ impl CostProfileOps {
             .as_object()
             .ok_or_else(|| bad("cost.profile.set takes an object"))?;
         for key in object.keys() {
-            if !["preset", "tools", "picks", "habits", "guards", "reset"].contains(&key.as_str()) {
+            if ![
+                "preset", "tools", "picks", "habits", "guards", "guard", "reset",
+            ]
+            .contains(&key.as_str())
+            {
                 return Err(bad(format!(
-                    "cost.profile.set takes preset, tools, picks, habits, guards or reset, not {key}"
+                    "cost.profile.set takes preset, tools, picks, habits, guards, guard or reset, not {key}"
                 )));
             }
         }
@@ -166,12 +200,31 @@ impl CostProfileOps {
         Self::set_habits(&mut profile, object.get("habits"))?;
         Self::set_guards(&mut profile, object.get("guards"))?;
         self.service.save_profile(&profile).map_err(failed)?;
+        self.set_guard(object.get("guard"))?;
+        self.guard_changed();
         Ok(self.get_for_app())
+    }
+
+    fn set_guard(&self, value: Option<&Value>) -> Result<(), ApiError> {
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let level = value
+            .as_str()
+            .filter(|l| *l == guard::LOG || *l == guard::OFF)
+            .ok_or_else(|| bad("guard is \"log\" or \"off\""))?;
+        let mut store =
+            Settings::open(&self.service.settings_file()).map_err(|e| failed(e.to_string()))?;
+        store
+            .set(guard::KEY, Value::from(level))
+            .map_err(|e| failed(e.to_string()))
     }
 
     fn get_for_app(&self) -> Value {
         let avail = self.service.available();
-        json!({"profile": view::profile(&self.service.profile(), &avail, Tier::App)})
+        self.guard_view(
+            json!({"profile": view::profile(&self.service.profile(), &avail, Tier::App)}),
+        )
     }
 
     fn set_tools(profile: &mut Profile, value: Option<&Value>) -> Result<(), ApiError> {
@@ -305,6 +358,9 @@ impl CostProfileOps {
             return Ok(out);
         }
         let (plan, applied, saved) = self.service.apply(&opts, (self.clock)()).map_err(failed)?;
+        if applied.results.iter().any(|r| r.done) {
+            self.guard_changed();
+        }
         let mut out = json!({
             "on": true,
             "applied": applied.results.iter().any(|r| r.done),
@@ -333,6 +389,7 @@ impl CostProfileOps {
             return Ok(off);
         }
         let results = self.service.undo(tool, (self.clock)()).map_err(failed)?;
+        self.guard_changed();
         Ok(json!({
             "on": true,
             "tool": tool_key(tool),
@@ -409,10 +466,14 @@ pub fn wired(
     layout: &Layout,
     catalog: &Arc<CatalogService>,
     switches: &crate::switches::Switches,
+    install: &Arc<InstallOps>,
 ) -> Arc<CostProfileOps> {
-    Arc::new(CostProfileOps::for_daemon(
-        layout,
-        catalog.clone(),
-        switches.install.clone(),
-    ))
+    let install = install.clone();
+    let after: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+        let _ = install.run(ops::INSTALL_APPLY, &json!({"what": [GUARD_HOOKS]}));
+    });
+    Arc::new(
+        CostProfileOps::for_daemon(layout, catalog.clone(), switches.install.clone())
+            .with_after(after),
+    )
 }
