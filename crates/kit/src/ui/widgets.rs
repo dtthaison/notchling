@@ -1,8 +1,8 @@
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    div, linear_color_stop, linear_gradient, prelude::*, px, Div, ElementId, FontWeight, Image,
-    ImageFormat, Stateful, StyleRefinement,
+    div, linear_color_stop, linear_gradient, prelude::*, px, CursorStyle, Div, ElementId,
+    FontWeight, Image, ImageFormat, Stateful, StyleRefinement,
 };
 
 use super::icons::{icon, icon_in};
@@ -49,13 +49,19 @@ fn interactive(
     pressed: Look,
     role: Option<TypeRole>,
 ) -> Stateful<Div> {
+    let element = element.cursor(cursor_for(state));
     match state {
         PartState::Rest => element
-            .cursor_pointer()
             .hover(move |style| state_style(style, &hover, role))
             .active(move |style| state_style(style, &pressed, role)),
-        PartState::Disabled => element,
-        _ => element.cursor_pointer(),
+        _ => element,
+    }
+}
+
+pub fn cursor_for(state: PartState) -> CursorStyle {
+    match state {
+        PartState::Disabled => CursorStyle::Arrow,
+        _ => CursorStyle::PointingHand,
     }
 }
 
@@ -533,6 +539,23 @@ mod press_tests {
         let text = style.text.expect("a text style");
         assert_eq!(text.font_size, Some(px(TypeRole::Label.spec().size).into()));
         assert!(text.color.is_some());
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_disabled_control_keeps_the_arrow() {
+        for state in PartState::ALL {
+            let want = if state == PartState::Disabled {
+                CursorStyle::Arrow
+            } else {
+                CursorStyle::PointingHand
+            };
+            assert_eq!(cursor_for(state), want, "{state:?}");
+        }
     }
 }
 
