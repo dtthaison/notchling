@@ -139,13 +139,23 @@ fn without_paths(text: &str) -> (String, Vec<PathBuf>) {
     )
 }
 
+fn is_each_of(kept: &[PathBuf], paths: &[PathBuf]) -> bool {
+    let mut left: Vec<&PathBuf> = paths.iter().collect();
+    kept.iter().all(|path| {
+        left.iter()
+            .position(|own| *own == path)
+            .map(|at| left.remove(at))
+            .is_some()
+    })
+}
+
 fn kept_as_text(message: &Message, text: &str, shown: usize) -> bool {
     if message.pictures == 0 {
         return false;
     }
     let (words, kept) = without_paths(text);
     !kept.is_empty()
-        && kept.iter().all(|path| message.paths.contains(path))
+        && is_each_of(&kept, &message.paths)
         && kept.len() + shown >= message.pictures
         && words == message.text
 }
@@ -270,9 +280,10 @@ pub(super) fn entry_matches(message: &Message, content: &str) -> bool {
         return false;
     }
     let text = plain(content);
-    text == message.text
+    let chips = chip_count(content);
+    (text == message.text && chips >= message.pictures)
         || message.bash.as_deref() == Some(text.as_str())
-        || kept_as_text(message, content, chip_count(content))
+        || kept_as_text(message, content, chips)
 }
 
 fn line_matches(message: &Message, text: &str, images: usize) -> bool {

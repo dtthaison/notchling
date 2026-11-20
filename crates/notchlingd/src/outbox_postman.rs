@@ -344,6 +344,13 @@ fn earliest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
     }
 }
 
+struct Calm {
+    id: String,
+    unsure_ms: i64,
+    since: i64,
+    last: i64,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Early {
     Stepped,
@@ -370,7 +377,7 @@ pub(crate) struct Postman {
     cut_short: Option<String>,
     looked: HashMap<String, (i64, i64)>,
     aside_timer: Option<i64>,
-    idle_since: Option<i64>,
+    idle_since: Option<Calm>,
 }
 
 fn baseline(row: &Row) -> Seen {
@@ -413,9 +420,15 @@ impl Postman {
             self.aside_timer = earliest(holds, aside);
             let row = match self.inner.ops.store().head(&self.session) {
                 Ok(Some(row)) => row,
-                Ok(None) => return self.rest(now, None),
+                Ok(None) => {
+                    self.idle_since = None;
+                    return self.rest(now, None);
+                }
                 Err(_) => return self.rest(now, Some(now + TICK_MS)),
             };
+            if row.state != State::Unsure {
+                self.idle_since = None;
+            }
             self.courier = Some(self.inner.couriers.of(row.tool).clone());
             let timer = match row.state {
                 State::Sending if self.cut_short.as_deref() != Some(row.id.as_str()) => {
@@ -423,10 +436,12 @@ impl Postman {
                 }
                 State::Unsure => {
                     if self.step_aside(&row, now) {
+                        self.idle_since = None;
                         continue;
                     }
                     let looked = self.look_again(&row, now);
                     if matches!(looked, Again::Landed) {
+                        self.idle_since = None;
                         continue;
                     }
                     let early = self.early_aside(&row, now);
@@ -548,8 +563,24 @@ impl Postman {
             self.idle_since = None;
             return Early::Waits;
         }
-        let since = *self.idle_since.get_or_insert(now);
-        if now - since < TURN_SETTLE_MS || now - row.updated_ms < TURN_SETTLE_MS {
+        let calm = match self.idle_since.take() {
+            Some(calm)
+                if calm.id == row.id
+                    && calm.unsure_ms == row.updated_ms
+                    && now - calm.last <= 2 * TICK_MS =>
+            {
+                Calm { last: now, ..calm }
+            }
+            _ => Calm {
+                id: row.id.clone(),
+                unsure_ms: row.updated_ms,
+                since: now,
+                last: now,
+            },
+        };
+        let settled = now - calm.since >= TURN_SETTLE_MS && now - row.updated_ms >= TURN_SETTLE_MS;
+        if !settled {
+            self.idle_since = Some(calm);
             return Early::Waits;
         }
         self.idle_since = None;

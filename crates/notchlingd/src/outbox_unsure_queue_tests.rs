@@ -31,6 +31,8 @@ fn a_row_queued_behind_an_unsure_one_goes_once_the_session_has_stayed_idle() {
     let (first, mut p) = unsure_first(&r, "is it right");
     let second = r.send("job-idle", "add id to the lists");
     p.pass(r.at(T0 + 1_000));
+    p.pass(r.at(T0 + 2_000));
+    p.pass(r.at(T0 + 3_000));
     assert_eq!(
         state(&r, &second.id),
         Some((State::Queued, None)),
@@ -74,7 +76,9 @@ fn the_unsure_row_keeps_holding_while_the_session_is_in_a_turn() {
     r.files.set_status(IDLE, "idle");
     p.pass(r.at(T0 + 31_000));
     assert_eq!(r.returns(), 1, "one reading of idle is not enough");
-    p.pass(r.at(T0 + 35_000));
+    p.pass(r.at(T0 + 32_000));
+    p.pass(r.at(T0 + 33_000));
+    p.pass(r.at(T0 + 34_000));
     assert_eq!(r.row(&second.id), None, "it went once the turn stayed over");
     assert_eq!(r.returns(), 2);
 }
@@ -97,8 +101,9 @@ fn a_second_unsure_in_a_row_still_holds_the_rows_behind_it() {
     let (_, mut p) = unsure_first(&r, "first message");
     r.verifier.waits.lock().unwrap().push_back(Verdict::Unsure);
     let second = r.send("job-idle", "second message");
-    p.pass(r.at(T0 + 1_000));
-    p.pass(r.at(T0 + 4_000));
+    for step in 1..5 {
+        p.pass(r.at(T0 + step * 1_000));
+    }
     assert_eq!(
         state(&r, &second.id),
         Some((State::Unsure, Some(Why::NotFound)))
@@ -180,8 +185,9 @@ fn rows_that_join_into_one_message_are_all_in_what_was_typed() {
         .iter()
         .map(|text| r.send("job-idle", text))
         .collect();
-    p.pass(r.at(T0 + 1_000));
-    p.pass(r.at(T0 + 4_000));
+    for step in 1..5 {
+        p.pass(r.at(T0 + step * 1_000));
+    }
     let typed = r.typed();
     for (row, text) in rows.iter().zip(["add id", "to the accounts list", "done"]) {
         assert_eq!(r.row(&row.id), None);
@@ -192,4 +198,21 @@ fn rows_that_join_into_one_message_are_all_in_what_was_typed() {
         removed.iter().all(|g| g["why"] != "removed"),
         "nothing was removed as the person's call: {removed:?}"
     );
+}
+
+#[test]
+fn readings_of_idle_far_apart_do_not_add_up() {
+    let r = rig();
+    let (first, mut p) = unsure_first(&r, "is it right");
+    let second = r.send("job-idle", "add id to the lists");
+    p.pass(r.at(T0 + 1_000));
+    p.pass(r.at(T0 + 2_000));
+    p.pass(r.at(T0 + 10_000));
+    assert_eq!(state(&r, &second.id), Some((State::Queued, None)));
+    assert_eq!(r.row(&first).unwrap().aside_ms, None);
+    p.pass(r.at(T0 + 11_000));
+    p.pass(r.at(T0 + 12_000));
+    assert_eq!(state(&r, &second.id), Some((State::Queued, None)));
+    p.pass(r.at(T0 + 13_000));
+    assert_eq!(r.row(&second.id), None, "three seconds of steady idle");
 }

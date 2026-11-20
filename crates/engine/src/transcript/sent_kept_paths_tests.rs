@@ -207,3 +207,31 @@ fn a_queue_entry_with_fewer_pictures_than_the_row_is_not_listed() {
     };
     assert_eq!(chip_and_path.listed(&message), 1);
 }
+
+#[test]
+fn a_repeated_path_does_not_stand_in_for_a_missing_one() {
+    let row = format!("look\n\n'{SHOT}' '{OTHER}'");
+    let message = message(&row);
+    let twice = format!("look '{SHOT}' '{SHOT}'");
+    assert_eq!(counted(&message, &twice, 0), Some(Seen::default()));
+    let queue = QueueState {
+        waiting: vec![twice],
+        unknown: 0,
+    };
+    assert_eq!(queue.listed(&message), 0);
+}
+
+#[test]
+fn a_queue_entry_with_the_words_but_no_picture_is_not_listed() {
+    let message = message(&the_row());
+    let bare = QueueState {
+        waiting: vec!["is it right".to_string()],
+        unknown: 0,
+    };
+    assert_eq!(bare.listed(&message), 0);
+    let chipped = QueueState {
+        waiting: vec!["[Image #4]is it right".to_string()],
+        unknown: 0,
+    };
+    assert_eq!(chipped.listed(&message), 1);
+}

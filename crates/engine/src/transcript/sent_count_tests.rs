@@ -272,7 +272,7 @@ fn merged_line_needs_the_pictures_too() {
     };
     assert_eq!(
         count_since(&fixture("merged.jsonl"), &with_picture, at(0)),
-        seen(2, 0)
+        seen(0, 0)
     );
 }
 
