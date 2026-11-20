@@ -1,5 +1,6 @@
 use crate::acting_events::{attach_why, session_ref, why_of};
-use crate::acting_ops::{keep_screen, shown_box, ActingOps, NoLog};
+use crate::acting_ops::{shown_box, ActingOps, NoLog};
+use crate::screen_keep::keep_screen;
 use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;

@@ -187,7 +187,10 @@ pub mod providers_ops;
 pub mod quiet_ops;
 mod reply_attempts;
 mod reply_outbox;
+pub mod reload_cli;
+pub mod reload_ops;
 mod reply_screen;
+mod screen_keep;
 pub mod service;
 pub mod settings_asks;
 pub mod settings_cli;
@@ -271,6 +274,10 @@ mod catalog_ops_tests;
 mod catalog_roles_tests;
 #[cfg(test)]
 mod chrome_ops_tests;
+#[cfg(test)]
+mod reload_cli_tests;
+#[cfg(test)]
+mod reload_ops_tests;
 #[cfg(test)]
 mod cluster_fence_keeper_kit;
 #[cfg(test)]
@@ -527,6 +534,13 @@ pub fn run(command: Command) -> i32 {
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
+        Command::Session { args } => match args.first().map(String::as_str) {
+            Some("reload") => reload_cli::run(&args),
+            _ => {
+                eprintln!("{}", reload_cli::USAGE);
+                reload_cli::TROUBLE
+            }
+        },
         Command::Ask { args } => ask_cli::run_ask(&args, None),
         Command::Asks { args } => ask_cli::run_asks(&args, None),
         Command::Answer { args } => ask_cli::run_answer(&args, None),

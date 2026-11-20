@@ -322,6 +322,7 @@ impl ChatView {
         self.vault_tick(cx);
         self.inbox_tick(cx);
         self.chrome_tick(cx);
+        self.reload_tick(cx);
         self.cluster_tick(cx);
         let dot = self.bridge_on();
         if dot != self.phone_dot {

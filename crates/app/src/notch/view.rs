@@ -53,6 +53,7 @@ pub struct NotchView {
     pub(super) forced_pet: Option<PetMode>,
     pub(super) perch: Option<Perch>,
     pub(super) scene_window: Option<AxFrame>,
+    pub(super) reload_menu: bool,
 }
 
 impl NotchView {
@@ -82,6 +83,7 @@ impl NotchView {
             forced_pet: None,
             perch: None,
             scene_window: None,
+            reload_menu: false,
         }
     }
 
@@ -509,6 +511,7 @@ impl NotchView {
                 .flex_col()
                 .gap(px(10.0))
                 .child(self.header(agent, cx))
+                .children(self.reload_menu_panel(agent, cx))
                 .child(conversation)
                 .child(footer.flex_shrink_0())
                 .part_inside("Notch Detail", Corner::BottomTrailing, A, cx),
@@ -551,6 +554,7 @@ impl NotchView {
                     .child(text(sub, TypeRole::Meta, Ink::TextMuted).elide()),
             )
             .child(status_pill(group_status, group_status.word(), A))
+            .children(self.reload_button(agent, cx))
             .child(
                 icon_button(
                     "notch-close",

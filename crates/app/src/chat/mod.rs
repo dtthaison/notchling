@@ -16,8 +16,11 @@ pub mod changes_target;
 #[cfg(test)]
 mod children_tests;
 pub mod chrome;
+pub mod reload;
 #[cfg(test)]
 mod chrome_tests;
+#[cfg(test)]
+mod reload_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;

@@ -559,6 +559,14 @@ impl Wired {
             }
         }));
         acting.attach_chrome(chrome);
+        let reload = crate::reload_ops::ReloadOps::new(crate::reload_ops::LiveHosts::new(&acting));
+        let noting = Arc::downgrade(&acting);
+        reload.set_audit(Arc::new(move |agent, word, result| {
+            if let Some(acting) = noting.upgrade() {
+                acting.note_chrome(agent, word, result);
+            }
+        }));
+        acting.attach_reload(reload);
         crate::chrome_ops::reconcile_when_acting_turns_on(&acting);
         let node_slot = crate::ask_wiring::Slot::default();
         let worker = crate::ask_wiring::worker_in(node_slot.clone());

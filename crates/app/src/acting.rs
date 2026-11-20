@@ -25,6 +25,8 @@ pub mod ops {
     pub const SESSION_QUESTION: &str = "session.question";
     pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
     pub const SESSION_CHROME: &str = "session.chrome";
+    pub const SESSION_RELOAD: &str = "session.reload";
+    pub const SESSION_RELOAD_STATE: &str = "session.reload.state";
     pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
     pub const CLUSTER_FOLLOW: &str = "cluster.follow";
     pub const CLUSTER_RETURN: &str = "cluster.return";
@@ -387,6 +389,25 @@ impl Request {
             args["ack"] = json!(true);
         }
         Request::new(ops::SESSION_CHROME, args)
+    }
+
+    pub fn reload(id: &str, after_turn: bool) -> Request {
+        Request::new(
+            ops::SESSION_RELOAD,
+            json!({ "id": id, "afterTurn": after_turn }),
+        )
+    }
+
+    pub fn reload_cancel(id: &str) -> Request {
+        Request::new(ops::SESSION_RELOAD, json!({ "id": id, "cancel": true }))
+    }
+
+    pub fn reload_state(id: &str, ack: bool) -> Request {
+        let mut args = json!({ "id": id });
+        if ack {
+            args["ack"] = json!(true);
+        }
+        Request::new(ops::SESSION_RELOAD_STATE, args)
     }
 
     pub fn command(id: &str, command: &str) -> Request {

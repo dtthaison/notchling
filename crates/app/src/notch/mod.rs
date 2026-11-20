@@ -22,6 +22,8 @@ pub mod pet;
 pub mod pet_view;
 pub mod prefs;
 pub mod renders;
+#[cfg(target_os = "macos")]
+pub mod reload;
 pub mod requests;
 pub mod source;
 #[cfg(target_os = "macos")]

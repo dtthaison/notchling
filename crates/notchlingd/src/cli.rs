@@ -73,6 +73,9 @@ pub enum Command {
     Cluster {
         args: Vec<String>,
     },
+    Session {
+        args: Vec<String>,
+    },
     Ask {
         args: Vec<String>,
     },
@@ -125,6 +128,8 @@ pub fn usage() -> &'static str {
      notchling settings get <key> [--json]  one setting\n  \
      notchling settings set <key> <value> [--json]\n  \
      \u{20}                                           change a setting; some wait for the user's approval in the Inbox\n  \
+     notchling session reload <id|self> [--after-turn] [--json]\n  \
+     \u{20}                                           restart a session's process with the same conversation, to pick up new MCP servers, settings, skills and hooks\n  \
      notchling cluster status [--json]     this machine's cluster and its members\n  \
      notchling cluster join --token-stdin   join the cluster whose token is on stdin\n  \
      notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>\n  \
@@ -219,6 +224,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "cluster" => {
             return Ok(Command::Cluster {
+                args: args.collect(),
+            })
+        }
+        "session" => {
+            return Ok(Command::Session {
                 args: args.collect(),
             })
         }

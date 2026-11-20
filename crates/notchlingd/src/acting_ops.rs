@@ -7,6 +7,7 @@ use crate::hook_ops::Parents;
 use crate::late_emit::Events;
 use crate::outbox_ops::OutboxOps;
 use crate::prompts::{fit_list, question_json, Kind, Prompt, PromptStore};
+use crate::screen_keep::keep_screen;
 use crate::typing_locks::TypingLocks;
 use notchling_engine::control::{Command, LaunchError, LaunchOutput, Launcher, PtyScript};
 use notchling_engine::reply::exec::{
@@ -26,7 +27,7 @@ use notchling_events::{Ref, Session};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -141,6 +142,7 @@ pub struct ActingOps {
     catalog: OnceLock<Arc<CatalogService>>,
     outbox: OnceLock<Arc<OutboxOps>>,
     chrome: OnceLock<Arc<crate::chrome_ops::ChromeOps>>,
+    reload: OnceLock<Arc<crate::reload_ops::ReloadOps>>,
     pub(crate) login: OnceLock<Arc<dyn crate::cluster_logins::LoginEnv>>,
     screen_file: Option<PathBuf>,
     pub(crate) reply_screen_file: Option<PathBuf>,
@@ -176,6 +178,7 @@ impl ActingOps {
             catalog: OnceLock::new(),
             outbox: OnceLock::new(),
             chrome: OnceLock::new(),
+            reload: OnceLock::new(),
             login: OnceLock::new(),
             screen_file: None,
             reply_screen_file: None,
@@ -216,6 +219,14 @@ impl ActingOps {
 
     pub(crate) fn chrome(&self) -> Option<&Arc<crate::chrome_ops::ChromeOps>> {
         self.chrome.get()
+    }
+
+    pub fn attach_reload(&self, reload: Arc<crate::reload_ops::ReloadOps>) {
+        let _ = self.reload.set(reload);
+    }
+
+    pub(crate) fn reload(&self) -> Option<&Arc<crate::reload_ops::ReloadOps>> {
+        self.reload.get()
     }
 
     fn chrome_state(&self, args: &Value) -> Result<Value, ApiError> {
@@ -281,10 +292,13 @@ impl ActingOps {
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SET_ACTING | ops::PROMPTS_LIST => Some(OpSpec::APP),
-            ops::SETTINGS_GET_ACTING | ops::SESSION_QUESTION | ops::HOOK_REQUEST => {
-                Some(OpSpec::AGENT)
+            ops::SETTINGS_GET_ACTING
+            | ops::SESSION_QUESTION
+            | ops::HOOK_REQUEST
+            | ops::SESSION_RELOAD => Some(OpSpec::AGENT),
+            ops::SESSION_SHELL_OUTPUT | ops::SESSION_CHROME | ops::SESSION_RELOAD_STATE => {
+                Some(OpSpec::APP)
             }
-            ops::SESSION_SHELL_OUTPUT | ops::SESSION_CHROME => Some(OpSpec::APP),
             op if ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -313,6 +327,11 @@ impl ActingOps {
             ops::SESSION_CHROME => {
                 app_only(caller)?;
                 self.chrome_state(args)
+            }
+            ops::SESSION_RELOAD => self.reload_call(caller, args),
+            ops::SESSION_RELOAD_STATE => {
+                app_only(caller)?;
+                self.reload_state(args)
             }
             ops::HOOK_REQUEST => self.hook_request(caller, args),
             ops::SESSION_REPLY => self.reply(caller, args),
@@ -952,42 +971,6 @@ fn typing_key(agent: &Agent) -> String {
     match &agent.target {
         AgentTarget::Job(job) => job.clone(),
         _ => agent.id.clone(),
-    }
-}
-
-pub(crate) fn keep_screen(file: &Path, head: &[String], lines: &[String]) {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static WRITES: AtomicU64 = AtomicU64::new(0);
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let mut name = file.as_os_str().to_os_string();
-    name.push(format!(
-        ".{}.{}.tmp",
-        std::process::id(),
-        WRITES.fetch_add(1, Ordering::Relaxed)
-    ));
-    let temp = PathBuf::from(name);
-    let Ok(mut out) = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp)
-    else {
-        return;
-    };
-    for line in head {
-        let _ = writeln!(out, "{line}");
-    }
-    let _ = writeln!(out, "----- screen ({} lines) -----", lines.len());
-    for line in lines {
-        let _ = writeln!(out, "{line}");
-    }
-    drop(out);
-    if std::fs::rename(&temp, file).is_err() {
-        let _ = std::fs::remove_file(&temp);
     }
 }
 
