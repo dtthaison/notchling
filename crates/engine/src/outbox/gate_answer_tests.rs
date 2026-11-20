@@ -27,6 +27,7 @@ fn row(why: Option<Why>, updated_ms: i64) -> Row {
         hold_ms: None,
         joined: 0,
         awaited: false,
+        done_from: None,
     }
 }
 

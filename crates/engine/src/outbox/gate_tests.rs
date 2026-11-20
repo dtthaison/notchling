@@ -27,6 +27,7 @@ fn row(kind: Kind) -> Row {
         hold_ms: None,
         joined: 0,
         awaited: false,
+        done_from: None,
     }
 }
 
@@ -68,10 +69,25 @@ fn stopped_job_needs_user() {
     );
 }
 
+fn checking_since(kind: Kind, since_ms: i64) -> Row {
+    Row {
+        state: State::Waiting,
+        why: None,
+        updated_ms: since_ms,
+        ..row(kind)
+    }
+}
+
+fn unknown(now_ms: i64) -> Facts {
+    Facts {
+        job: Job::Unknown,
+        ..facts(now_ms)
+    }
+}
+
 #[test]
 fn an_unknown_job_waits_to_check_and_is_never_stopped() {
-    let mut f = facts(10_000);
-    f.job = Job::Unknown { since_ms: 10_000 };
+    let mut f = unknown(10_000);
     assert_eq!(
         gate(&row(Kind::Prompt), &f),
         Gate::Wait {
@@ -81,7 +97,7 @@ fn an_unknown_job_waits_to_check_and_is_never_stopped() {
     );
     f.now_ms = 10_000 + UNREADABLE_AFTER_MS - 1;
     assert!(matches!(
-        gate(&row(Kind::Prompt), &f),
+        gate(&checking_since(Kind::Prompt, 10_000), &f),
         Gate::Wait {
             why: Why::Checking,
             ..
@@ -91,10 +107,9 @@ fn an_unknown_job_waits_to_check_and_is_never_stopped() {
 
 #[test]
 fn an_unknown_job_for_long_is_unreadable_and_keeps_waiting() {
-    let mut f = facts(10_000 + UNREADABLE_AFTER_MS);
-    f.job = Job::Unknown { since_ms: 10_000 };
+    let mut f = unknown(10_000 + UNREADABLE_AFTER_MS);
     assert_eq!(
-        gate(&row(Kind::Prompt), &f),
+        gate(&checking_since(Kind::Prompt, 10_000), &f),
         Gate::Wait {
             why: Why::Unreadable,
             until_ms: 10_000 + UNREADABLE_AFTER_MS + 15_000
@@ -102,7 +117,7 @@ fn an_unknown_job_for_long_is_unreadable_and_keeps_waiting() {
     );
     f.now_ms += 3_600_000;
     assert!(matches!(
-        gate(&row(Kind::Command), &f),
+        gate(&checking_since(Kind::Command, 10_000), &f),
         Gate::Wait {
             why: Why::Unreadable,
             ..
@@ -111,12 +126,49 @@ fn an_unknown_job_for_long_is_unreadable_and_keeps_waiting() {
 }
 
 #[test]
+fn the_unknown_wait_is_the_rows_own_and_starts_again_when_the_row_is_put_back_in_line() {
+    let f = unknown(10_000 + UNREADABLE_AFTER_MS + 5_000);
+    let waiting = checking_since(Kind::Prompt, 10_000);
+    assert!(
+        matches!(
+            gate(&waiting, &f),
+            Gate::Wait {
+                why: Why::Unreadable,
+                ..
+            }
+        ),
+        "the start is the row's updated_ms, so a daemon restart keeps it"
+    );
+    let queued = Row {
+        state: State::Queued,
+        ..waiting.clone()
+    };
+    let retry = Row {
+        why: Some(Why::Retry),
+        ..waiting.clone()
+    };
+    let ahead = Row {
+        updated_ms: f.now_ms + 60_000,
+        ..waiting
+    };
+    for (name, row) in [("queued", queued), ("retry", retry), ("clock", ahead)] {
+        assert_eq!(
+            gate(&row, &f),
+            Gate::Wait {
+                why: Why::Checking,
+                until_ms: f.now_ms + 1_000
+            },
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn an_unknown_job_is_looked_at_less_often_the_longer_it_lasts() {
     let since = 10_000;
     let until = |age: i64| {
-        let mut f = facts(since + age);
-        f.job = Job::Unknown { since_ms: since };
-        match gate(&row(Kind::Prompt), &f) {
+        let f = unknown(since + age);
+        match gate(&checking_since(Kind::Prompt, since), &f) {
             Gate::Wait { until_ms, .. } => until_ms - (since + age),
             other => panic!("{other:?}"),
         }
@@ -133,10 +185,9 @@ fn an_unknown_job_is_looked_at_less_often_the_longer_it_lasts() {
 #[test]
 fn an_unknown_job_is_looked_at_again_when_it_turns_unreadable() {
     let since = 10_000;
-    let mut f = facts(since + UNREADABLE_AFTER_MS - 1_000);
-    f.job = Job::Unknown { since_ms: since };
+    let f = unknown(since + UNREADABLE_AFTER_MS - 1_000);
     assert_eq!(
-        gate(&row(Kind::Prompt), &f),
+        gate(&checking_since(Kind::Prompt, since), &f),
         Gate::Wait {
             why: Why::Checking,
             until_ms: since + UNREADABLE_AFTER_MS
@@ -145,23 +196,47 @@ fn an_unknown_job_is_looked_at_again_when_it_turns_unreadable() {
 }
 
 #[test]
-fn a_done_job_is_tried_and_is_stopped_only_after_the_tries_on_it_fail() {
-    let mut f = facts(1_000);
-    let r = row(Kind::Prompt);
-    f.job = Job::Done { failed: 0 };
-    assert_eq!(gate(&r, &f), Gate::Go { guarded: false });
-    f.job = Job::Done {
-        failed: DONE_STOPS_AFTER_TRIES - 1,
+fn the_done_count_starts_on_done_is_dropped_on_any_other_job_and_kept_while_unknown() {
+    let mut r = row(Kind::Prompt);
+    r.tries = 4;
+    assert_eq!(recount(&r, &Job::Done), Some(true));
+    assert_eq!(recount(&r, &Job::Unknown), None);
+    assert_eq!(recount(&r, &Job::Stopped), None);
+    r.done_from = Some(4);
+    assert_eq!(recount(&r, &Job::Done), None);
+    assert_eq!(recount(&r, &Job::Unknown), None);
+    assert_eq!(recount(&r, &Job::Live { status: None }), Some(false));
+    assert_eq!(recount(&r, &Job::Missing { since_ms: 0 }), Some(false));
+    r.done_from = Some(9);
+    assert_eq!(recount(&r, &Job::Done), Some(true));
+}
+
+#[test]
+fn a_done_job_is_stopped_only_after_the_tries_counted_on_the_row_fail() {
+    let f = Facts {
+        job: Job::Done,
+        ..facts(1_000)
     };
-    assert_eq!(gate(&r, &f), Gate::Go { guarded: false });
-    f.job = Job::Done {
-        failed: DONE_STOPS_AFTER_TRIES,
-    };
+    let go = Gate::Go { guarded: false };
+    let mut r = row(Kind::Prompt);
+    r.tries = 9;
+    assert_eq!(
+        gate(&r, &f),
+        go,
+        "tries before the job was done count for nothing"
+    );
+    r.done_from = Some(9);
+    assert_eq!(gate(&r, &f), go);
+    r.tries = 9 + DONE_STOPS_AFTER_TRIES - 1;
+    assert_eq!(gate(&r, &f), go);
+    r.tries = 9 + DONE_STOPS_AFTER_TRIES;
     assert_eq!(gate(&r, &f), Gate::NeedsUser(State::Stopped));
-    let mut tried = row(Kind::Prompt);
-    tried.tries = 9;
-    f.job = Job::Done { failed: 0 };
-    assert_eq!(gate(&tried, &f), Gate::Go { guarded: false });
+    r.done_from = Some(40);
+    assert_eq!(
+        gate(&r, &f),
+        go,
+        "a count above the tries never stops a row"
+    );
 }
 
 #[test]

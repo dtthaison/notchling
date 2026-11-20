@@ -4,12 +4,12 @@ use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
-    AnswerWatch, Facts, Job, Kind, Row, Seen, State, Tried, TryEnd, Why, ANSWER_GRACE_MS,
+    AnswerWatch, Facts, Job, Kind, Row, Seen, Tried, TryEnd, Why, ANSWER_GRACE_MS,
     DIALOG_RECHECK_MS, GONE_AFTER_MS, SLOW_READ_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
-use notchling_engine::sessions::fresh::Ended;
+use notchling_engine::sessions::fresh::{Ended, Look};
 use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
@@ -79,7 +79,7 @@ impl Courier for Refuse {
 pub(crate) trait JobFiles: Send + Sync {
     fn row(&self, job: &str) -> Option<Agent>;
     fn state(&self, job: &str) -> Option<String>;
-    fn ended(&self, job: &str) -> Ended;
+    fn ended(&self, job: &str, now_ms: i64) -> Ended;
     fn status(&self, job: &str) -> Option<String>;
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
     fn queue(&self, transcript: &str) -> Option<QueueState>;
@@ -123,8 +123,13 @@ impl JobFiles for LiveFiles {
         fresh::job_state(&self.roots, job)
     }
 
-    fn ended(&self, job: &str) -> Ended {
-        fresh::job_ended(&self.roots, &Probes::from_proc(), job)
+    fn ended(&self, job: &str, now_ms: i64) -> Ended {
+        let look = Look {
+            alive: Probes::from_proc().is_alive,
+            started_ms: &crate::process_facts::started_ms,
+            now_ms,
+        };
+        fresh::job_ended(&self.roots, &look, job)
     }
 
     fn status(&self, job: &str) -> Option<String> {
@@ -233,8 +238,6 @@ pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
 #[derive(Default)]
 struct Memo {
     missing_since: Option<i64>,
-    unknown_since: Option<i64>,
-    done_from: Option<(String, u32)>,
     dialog_at: Option<i64>,
     calm_since: Option<i64>,
     last_seen: Option<i64>,
@@ -315,7 +318,7 @@ impl ClaudeCourier {
     fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
         let status = match job {
             Job::Live { status } => status.as_deref(),
-            Job::Done { .. } => None,
+            Job::Done => None,
             _ => return true,
         };
         if now_ms - row.updated_ms < ANSWER_GRACE_MS {
@@ -352,15 +355,13 @@ impl ClaudeCourier {
     fn job_of(&self, row: &Row, fresh: Option<&Agent>, now_ms: i64) -> (Job, bool) {
         let state = self.files.state(&row.session);
         let asked = (self.clock)();
-        let ended = self.files.ended(&row.session);
+        let ended = self.files.ended(&row.session, asked);
         let late = (self.clock)() - asked >= SLOW_READ_MS;
-        let unknown = Job::Unknown { since_ms: now_ms };
         match (fresh, state.as_deref(), ended) {
-            (_, _, Ended::Unknown) => (unknown, false),
-            (_, _, Ended::Stopped) if late => (unknown, false),
+            (_, _, Ended::Unknown) => (Job::Unknown, false),
+            (_, _, Ended::Stopped | Ended::Done) if late => (Job::Unknown, false),
             (_, _, Ended::Stopped) => (Job::Stopped, false),
-            (_, _, Ended::Done) if late => (unknown, false),
-            (_, _, Ended::Done) => (Job::Done { failed: 0 }, false),
+            (_, _, Ended::Done) => (Job::Done, false),
             (None, None, _) => (Job::Missing { since_ms: now_ms }, true),
             (Some(agent), _, _) if !agent.can_reply() => (
                 Job::Missing {
@@ -524,33 +525,8 @@ impl Courier for ClaudeCourier {
             Job::Missing { .. } if missing => Job::Missing {
                 since_ms: *memo.missing_since.get_or_insert(now_ms),
             },
-            Job::Unknown { .. } => {
-                memo.missing_since = None;
-                let started = if row.state == State::Waiting && row.why.is_none() {
-                    row.updated_ms.min(now_ms)
-                } else {
-                    now_ms
-                };
-                Job::Unknown {
-                    since_ms: *memo.unknown_since.get_or_insert(started),
-                }
-            }
-            Job::Done { .. } => {
-                memo.missing_since = None;
-                memo.unknown_since = None;
-                let from = match memo.done_from.take() {
-                    Some((id, from)) if id == row.id => from.min(row.tries),
-                    _ => row.tries,
-                };
-                memo.done_from = Some((row.id.clone(), from));
-                Job::Done {
-                    failed: row.tries - from,
-                }
-            }
             other => {
                 memo.missing_since = None;
-                memo.unknown_since = None;
-                memo.done_from = None;
                 other
             }
         };
@@ -622,3 +598,7 @@ impl Courier for ClaudeCourier {
 #[cfg(test)]
 #[path = "outbox_courier_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "outbox_stop_tests.rs"]
+mod stop_tests;

@@ -1,10 +1,11 @@
 use super::agent::Agent;
 use super::iso::parse_iso_ms;
-use super::jobs::{agent_from_job, rank, read_json, read_sessions, Rank};
+use super::jobs::{agent_from_job, pid_of, rank, read_json, read_sessions, Rank};
 use super::lanes::{config_dirs, Roots};
 use super::monitor::Probes;
 use crate::transcript::util::modified_secs;
 use serde_json::Value;
+use std::path::Path;
 
 fn named(short_id: &str) -> bool {
     !(short_id.is_empty() || short_id.contains(['/', '\\']) || short_id.starts_with('.'))
@@ -67,20 +68,52 @@ pub enum Ended {
     Done,
 }
 
-pub fn job_ended(roots: &Roots, probes: &Probes, short_id: &str) -> Ended {
+pub const MID_WRITE_MS: i64 = 10_000;
+pub const START_SLACK_MS: i64 = 5_000;
+
+pub struct Look<'a> {
+    pub alive: &'a dyn Fn(u32) -> bool,
+    pub started_ms: &'a dyn Fn(u32) -> Option<i64>,
+    pub now_ms: i64,
+}
+
+impl Look<'_> {
+    fn writing(&self, at: Option<i64>) -> bool {
+        at.is_some_and(|at| (self.now_ms - at).abs() < MID_WRITE_MS)
+    }
+
+    fn runs(&self, session: &Value) -> bool {
+        let Some(pid) = pid_of(session) else {
+            return false;
+        };
+        if !(self.alive)(pid) {
+            return false;
+        }
+        let written = session.get("startedAt").and_then(ms_of);
+        match (written, (self.started_ms)(pid)) {
+            (Some(written), Some(began)) => began <= written + START_SLACK_MS,
+            _ => true,
+        }
+    }
+}
+
+pub fn job_ended(roots: &Roots, look: &Look, short_id: &str) -> Ended {
     if !named(short_id) {
         return Ended::No;
     }
-    let mut unreadable: Vec<Option<i64>> = Vec::new();
+    let configs = config_dirs(roots);
+    let mut found = false;
+    let mut writing = false;
     let mut best: Option<(Rank, String)> = None;
-    for config in config_dirs(roots) {
+    for config in &configs {
         let dir = config.dir.join("jobs").join(short_id);
         if !dir.is_dir() {
             continue;
         }
+        found = true;
         let path = dir.join("state.json");
         let Some(job) = read_json(&path) else {
-            unreadable.push(modified_ms(&path));
+            writing |= look.writing(modified_ms(&path).or_else(|| modified_ms(&dir)));
             continue;
         };
         let this = rank(&job);
@@ -89,39 +122,38 @@ pub fn job_ended(roots: &Roots, probes: &Probes, short_id: &str) -> Ended {
             best = Some((this, state.to_string()));
         }
     }
-    let Some((newest, state)) = best else {
-        return if unreadable.is_empty() {
-            Ended::No
-        } else {
-            Ended::Unknown
+    if !found {
+        return Ended::No;
+    }
+    let state = best.map(|(_, state)| state);
+    let runs = configs.iter().any(|config| {
+        read_sessions(&config.dir, &|_| true).iter().any(|session| {
+            session.get("jobId").and_then(Value::as_str) == Some(short_id) && look.runs(session)
+        })
+    });
+    if runs {
+        return match state.as_deref() {
+            Some("stopped") => Ended::Unknown,
+            _ => Ended::No,
         };
-    };
-    let unreadable = unreadable
-        .iter()
-        .any(|at| at.is_none_or(|at| at >= newest.updated_ms));
-    let alive = || live_file(roots, probes.is_alive, short_id).is_some();
-    let torn = || {
-        config_dirs(roots)
-            .iter()
-            .any(|c| session_file_unreadable(&c.dir, probes.is_alive))
-    };
-    match state.as_str() {
-        "stopped" if unreadable || alive() || torn() => Ended::Unknown,
-        "stopped" => Ended::Stopped,
-        "done" if alive() => Ended::No,
-        "done" if unreadable || torn() => Ended::Unknown,
-        "done" => Ended::Done,
-        _ => Ended::No,
+    }
+    if writing || configs.iter().any(|c| session_file_writing(&c.dir, look)) {
+        return Ended::Unknown;
+    }
+    match state.as_deref() {
+        None | Some("stopped") => Ended::Stopped,
+        Some("done") => Ended::Done,
+        Some(_) => Ended::No,
     }
 }
 
-fn modified_ms(path: &std::path::Path) -> Option<i64> {
+fn modified_ms(path: &Path) -> Option<i64> {
     let at = std::fs::metadata(path).ok()?.modified().ok()?;
     let since = at.duration_since(std::time::UNIX_EPOCH).ok()?;
     i64::try_from(since.as_millis()).ok()
 }
 
-fn session_file_unreadable(base: &std::path::Path, alive: &dyn Fn(u32) -> bool) -> bool {
+fn session_file_writing(base: &Path, look: &Look) -> bool {
     let Ok(entries) = std::fs::read_dir(base.join("sessions")) else {
         return false;
     };
@@ -129,13 +161,20 @@ fn session_file_unreadable(base: &std::path::Path, alive: &dyn Fn(u32) -> bool) 
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter(|p| look.writing(modified_ms(p)))
         .filter(|p| read_json(p).is_none())
         .any(|p| {
             p.file_stem()
                 .and_then(|stem| stem.to_str())
                 .and_then(|stem| stem.parse::<u32>().ok())
-                .is_none_or(alive)
+                .is_none_or(look.alive)
         })
+}
+
+fn ms_of(at: &Value) -> Option<i64> {
+    at.as_i64()
+        .or_else(|| at.as_f64().map(|f| f as i64))
+        .or_else(|| at.as_str().and_then(parse_iso_ms))
 }
 
 fn live_file(roots: &Roots, alive: &dyn Fn(u32) -> bool, short_id: &str) -> Option<Value> {
@@ -161,12 +200,7 @@ pub fn job_process(roots: &Roots, probes: &Probes, short_id: &str) -> Option<(u3
             .or_else(|| n.as_f64().map(|f| f as u64))
             .and_then(|p| u32::try_from(p).ok())
     })?;
-    let started = live.get("startedAt").and_then(|at| {
-        at.as_i64()
-            .or_else(|| at.as_f64().map(|f| f as i64))
-            .or_else(|| at.as_str().and_then(parse_iso_ms))
-    });
-    Some((pid, started))
+    Some((pid, live.get("startedAt").and_then(ms_of)))
 }
 
 #[cfg(test)]

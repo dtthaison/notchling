@@ -11,7 +11,7 @@ use std::sync::{Mutex, MutexGuard};
 
 const COLUMNS: &str = "n, id, session, tool, kind, text, options, via, state, why, clear_box, \
     queued_ms, updated_ms, attempt_ms, seen_before, queued_before, tries, next_ms, noticed_ms, \
-    anchor_file, anchor_slack_ms, aside_at_ms, aside_ms, hold_ms, joined, awaited";
+    anchor_file, anchor_slack_ms, aside_at_ms, aside_ms, hold_ms, joined, awaited, done_from";
 
 const JOIN: &str = "\n\n";
 
@@ -97,6 +97,9 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         hold_ms: r.get(23)?,
         joined: u32::try_from(r.get::<_, i64>(24)?).unwrap_or(0),
         awaited: r.get::<_, i64>(25)? != 0,
+        done_from: r
+            .get::<_, Option<i64>>(26)?
+            .and_then(|n| u32::try_from(n).ok()),
     })
 }
 
@@ -512,7 +515,7 @@ impl OutboxStore {
         let sql = format!(
             "UPDATE outbox SET text = ?2, kind = ?3, tries = 0, next_ms = NULL, clear_box = 0,
                  why = NULL, state = 'queued', updated_ms = ?4, hold_ms = NULL, joined = 0,
-                 aside_at_ms = NULL, aside_ms = NULL
+                 aside_at_ms = NULL, aside_ms = NULL, done_from = NULL
              WHERE id = ?1 AND state IN ({})",
             states(EDITABLE)
         );
@@ -568,7 +571,7 @@ impl OutboxStore {
         clear_box: bool,
         now_ms: i64,
     ) -> Result<Change, String> {
-        self.requeue_with(id, from, clear_box, None, now_ms)
+        self.requeue_with(id, from, clear_box, (None, true), now_ms)
     }
 
     pub fn restart(
@@ -578,7 +581,7 @@ impl OutboxStore {
         clear_box: bool,
         now_ms: i64,
     ) -> Result<Change, String> {
-        self.requeue_with(id, from, clear_box, Some(0), now_ms)
+        self.requeue_with(id, from, clear_box, (Some(0), true), now_ms)
     }
 
     pub fn untake(
@@ -588,7 +591,20 @@ impl OutboxStore {
         tries: u32,
         now_ms: i64,
     ) -> Result<Change, String> {
-        self.requeue_with(id, &[State::Sending], clear_box, Some(tries), now_ms)
+        let back = (Some(tries), false);
+        self.requeue_with(id, &[State::Sending], clear_box, back, now_ms)
+    }
+
+    pub fn count_done(&self, id: &str, counting: bool) -> Result<Option<u32>, String> {
+        let db = self.lock();
+        let sql = if counting {
+            "UPDATE outbox SET done_from = tries
+             WHERE id = ?1 AND (done_from IS NULL OR done_from > tries)"
+        } else {
+            "UPDATE outbox SET done_from = NULL WHERE id = ?1 AND done_from IS NOT NULL"
+        };
+        db.execute(sql, [id]).map_err(db_err)?;
+        Ok(fetch(&db, id)?.and_then(|row| row.done_from))
     }
 
     fn requeue_with(
@@ -596,7 +612,7 @@ impl OutboxStore {
         id: &str,
         from: &[State],
         clear_box: bool,
-        tries: Option<u32>,
+        (tries, afresh): (Option<u32>, bool),
         now_ms: i64,
     ) -> Result<Change, String> {
         let mut db = self.lock();
@@ -610,14 +626,21 @@ impl OutboxStore {
             "UPDATE outbox SET state = 'queued', clear_box = ?2, why = NULL, attempt_ms = NULL,
                  seen_before = NULL, queued_before = NULL, anchor_file = NULL,
                  anchor_slack_ms = NULL, next_ms = NULL, updated_ms = ?3,
-                 tries = COALESCE(?4, tries), aside_at_ms = NULL, aside_ms = NULL, hold_ms = NULL
+                 tries = COALESCE(?4, tries), aside_at_ms = NULL, aside_ms = NULL, hold_ms = NULL,
+                 done_from = CASE WHEN ?5 THEN NULL ELSE done_from END
              WHERE id = ?1 AND state IN ({})",
             states(from)
         );
         let changed = tx
             .execute(
                 &sql,
-                params![id, i64::from(clear_box), now_ms, tries.map(i64::from)],
+                params![
+                    id,
+                    i64::from(clear_box),
+                    now_ms,
+                    tries.map(i64::from),
+                    afresh
+                ],
             )
             .map_err(db_err)?;
         tx.commit().map_err(db_err)?;

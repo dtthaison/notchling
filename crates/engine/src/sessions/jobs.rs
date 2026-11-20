@@ -251,7 +251,7 @@ fn str_field<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
 }
 
-fn pid_of(s: &Value) -> Option<u32> {
+pub(crate) fn pid_of(s: &Value) -> Option<u32> {
     let n = s.get("pid")?;
     n.as_u64()
         .or_else(|| n.as_f64().map(|f| f as u64))

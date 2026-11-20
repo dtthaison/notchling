@@ -69,7 +69,7 @@ impl JobFiles for FakeFiles {
         let state = self.states.lock().unwrap().get(job).cloned();
         state.or_else(|| known.then(String::new))
     }
-    fn ended(&self, job: &str) -> Ended {
+    fn ended(&self, job: &str, _now_ms: i64) -> Ended {
         if let Some((clock, cost)) = self.slow.lock().unwrap().as_ref() {
             clock.fetch_add(*cost, Ordering::SeqCst);
         }
@@ -414,5 +414,23 @@ impl Rig {
 
     pub(crate) fn acting_switch(&self) -> Arc<Acting> {
         self.acting.acting_switch()
+    }
+
+    pub(crate) fn restarted(&self) -> Postmen {
+        let ticks = self.clock.clone();
+        let now: Clock = Arc::new(move || ticks.load(Ordering::SeqCst));
+        let courier = Arc::new(ClaudeCourier::with_files(
+            self.acting.clone(),
+            self.files.clone(),
+            now.clone(),
+            self.safe.clone(),
+        ));
+        Postmen::build(
+            self.ops.clone(),
+            Couriers::claude_only(courier),
+            self.verifier.clone(),
+            self.acting.acting_switch(),
+            now,
+        )
     }
 }

@@ -18,8 +18,8 @@ impl JobFiles for Elsewhere {
     fn state(&self, job: &str) -> Option<String> {
         self.inner.state(job)
     }
-    fn ended(&self, job: &str) -> Ended {
-        self.inner.ended(job)
+    fn ended(&self, job: &str, now_ms: i64) -> Ended {
+        self.inner.ended(job, now_ms)
     }
     fn status(&self, job: &str) -> Option<String> {
         self.inner.status(job)

@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 pub const DB_NAME: &str = "notchling.db";
 
-const SCHEMA: i64 = 8;
+const SCHEMA: i64 = 9;
 
 const BUSY: Duration = Duration::from_secs(5);
 
@@ -140,7 +140,8 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              hold_ms INTEGER,
              joined INTEGER NOT NULL DEFAULT 0,
              awaited INTEGER NOT NULL DEFAULT 0,
-             strike INTEGER NOT NULL DEFAULT 0
+             strike INTEGER NOT NULL DEFAULT 0,
+             done_from INTEGER
          );
          CREATE INDEX IF NOT EXISTS outbox_session ON outbox(session, n);
          CREATE INDEX IF NOT EXISTS outbox_age ON outbox(queued_ms);
@@ -197,6 +198,7 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("outbox", "joined", "INTEGER NOT NULL DEFAULT 0"),
     ("outbox", "awaited", "INTEGER NOT NULL DEFAULT 0"),
     ("outbox", "strike", "INTEGER NOT NULL DEFAULT 0"),
+    ("outbox", "done_from", "INTEGER"),
 ];
 
 fn add_missing_columns(db: &Connection) -> Result<(), String> {

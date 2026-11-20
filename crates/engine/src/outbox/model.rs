@@ -126,6 +126,8 @@ pub struct Row {
     pub joined: u32,
     #[serde(default)]
     pub awaited: bool,
+    #[serde(default)]
+    pub done_from: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -9,8 +9,8 @@ const RECHECK_MS: i64 = 1_000;
 pub enum Job {
     Missing { since_ms: i64 },
     Stopped,
-    Unknown { since_ms: i64 },
-    Done { failed: u32 },
+    Unknown,
+    Done,
     Live { status: Option<String> },
 }
 
@@ -46,7 +46,8 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
             };
         }
         Job::Stopped => return Gate::NeedsUser(State::Stopped),
-        Job::Unknown { since_ms } => {
+        Job::Unknown => {
+            let since_ms = unknown_since(row, now);
             let age = now - since_ms;
             let why = if age >= UNREADABLE_AFTER_MS {
                 Why::Unreadable
@@ -59,10 +60,10 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
             }
             return Gate::Wait { why, until_ms };
         }
-        Job::Done { failed } if *failed >= DONE_STOPS_AFTER_TRIES => {
+        Job::Done if done_tries(row) >= DONE_STOPS_AFTER_TRIES => {
             return Gate::NeedsUser(State::Stopped);
         }
-        Job::Done { .. } => None,
+        Job::Done => None,
         Job::Live { status } => status.as_deref(),
     };
     if row.why == Some(Why::Answer) {
@@ -93,6 +94,31 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         };
     }
     Gate::Go { guarded: false }
+}
+
+fn unknown_since(row: &Row, now_ms: i64) -> i64 {
+    match (row.state, row.why) {
+        (State::Waiting, None) => row.updated_ms.min(now_ms),
+        _ => now_ms,
+    }
+}
+
+fn done_tries(row: &Row) -> u32 {
+    row.done_from
+        .map_or(0, |from| row.tries.saturating_sub(from))
+}
+
+pub fn recount(row: &Row, job: &Job) -> Option<bool> {
+    let counting = match job {
+        Job::Unknown => return None,
+        Job::Done => true,
+        _ => false,
+    };
+    let settled = match counting {
+        true => row.done_from.is_some_and(|from| from <= row.tries),
+        false => row.done_from.is_none(),
+    };
+    (!settled).then_some(counting)
 }
 
 fn unknown_recheck_ms(age_ms: i64) -> i64 {

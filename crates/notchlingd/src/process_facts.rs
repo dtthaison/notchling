@@ -34,6 +34,27 @@ pub fn start_time(pid: u32) -> Option<u64> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn started_ms(pid: u32) -> Option<i64> {
+    i64::try_from(start_time(pid)? / 1_000).ok()
+}
+
+#[cfg(target_os = "linux")]
+pub fn started_ms(pid: u32) -> Option<i64> {
+    let ticks = start_time(pid)?;
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let boot: u64 = stat
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    // SAFETY: sysconf only reads a system setting.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    let hz = u64::try_from(hz).ok().filter(|hz| *hz > 0)?;
+    i64::try_from(boot.checked_mul(1_000)? + ticks.checked_mul(1_000)? / hz).ok()
+}
+
+#[cfg(target_os = "macos")]
 pub fn argv(pid: u32) -> Option<Vec<String>> {
     let pid = libc::c_int::try_from(pid).ok()?;
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
@@ -153,6 +174,11 @@ pub fn exe(pid: u32) -> Option<PathBuf> {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn start_time(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn started_ms(_pid: u32) -> Option<i64> {
     None
 }
 

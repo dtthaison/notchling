@@ -28,7 +28,7 @@ pub const UNSURE_HOLD_MS: i64 = 120_000;
 pub const HOLD_LEASE_MS: i64 = 600_000;
 
 pub use answer::{AnswerWatch, Seen};
-pub use gate::{gate, idle_at_prompt, Facts, Gate, Job};
+pub use gate::{gate, idle_at_prompt, recount, Facts, Gate, Job};
 pub use model::{
     new_id, Anchor, Change, InsertError, Kind, New, Row, State, Tool, Via, Why, MAX_ROWS, MAX_TEXT,
 };
@@ -67,6 +67,9 @@ mod store_aside_tests;
 #[cfg(test)]
 #[path = "store_blank_tests.rs"]
 mod store_blank_tests;
+#[cfg(test)]
+#[path = "store_done_tests.rs"]
+mod store_done_tests;
 #[cfg(test)]
 #[path = "store_join_tests.rs"]
 mod store_join_tests;
