@@ -1,10 +1,11 @@
 use super::ask_dialog::{self, is_extra, option_row};
-use super::permission_dialog::clean;
+use super::permission_dialog::{self, clean};
 
 const MAX_HEADER_ROWS: usize = 14;
 const MAX_OPTION_ROWS: usize = 24;
 const MAX_TRAILING_ROWS: usize = 2;
-const FOOTERS: [&str; 3] = ["Esc to cancel", "Enter to confirm", "Enter to select"];
+const FOOTERS: [&str; 6] = ["Esc to", "Enter to", "Tab to", "to navigate", "↑/↓", "↑↓"];
+const SPINNERS: [char; 6] = ['✶', '✳', '✢', '✻', '✽', '✺'];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DialogOption {
@@ -64,9 +65,15 @@ fn is_chrome(row: &str) -> bool {
     row.is_empty() || is_rule(row) || is_footer(row)
 }
 
+fn is_streaming(row: &str) -> bool {
+    row.to_lowercase().contains("esc to interrupt")
+        || (row.starts_with(SPINNERS) && row.contains('…'))
+}
+
 fn is_past_dialog(row: &str) -> bool {
     row.starts_with(['⏺', '⎿', '✻', '✽'])
         || row.contains("? for shortcuts")
+        || is_streaming(row)
         || (row.starts_with(['❯', '>', '›']) && option_row(0, row).is_none())
 }
 
@@ -82,9 +89,15 @@ fn numbered(rows: &[&str], from: usize) -> Option<Vec<Numbered>> {
     let floor = from.saturating_sub(MAX_OPTION_ROWS);
     for row in (floor..=from).rev() {
         let Some(option) = option_row(row, rows[row]) else {
+            if is_rule(rows[row]) || is_past_dialog(rows[row]) {
+                return None;
+            }
             continue;
         };
-        let wanted = found.last().map_or(option.number, |n| n.number - 1);
+        let wanted = match found.last() {
+            Some(n) => n.number.checked_sub(1)?,
+            None => option.number,
+        };
         if option.number != wanted {
             return None;
         }
@@ -100,6 +113,18 @@ fn numbered(rows: &[&str], from: usize) -> Option<Vec<Numbered>> {
         }
     }
     None
+}
+
+fn continuation_end(rows: &[&str], tail: usize, drawn: usize) -> usize {
+    let mut end = tail + 1;
+    while end < drawn && end - tail <= MAX_TRAILING_ROWS {
+        let row = rows[end];
+        if is_chrome(row) || is_past_dialog(row) {
+            break;
+        }
+        end += 1;
+    }
+    end
 }
 
 fn options_of(rows: &[&str], found: &[Numbered], end: usize) -> Vec<DialogOption> {
@@ -160,7 +185,7 @@ fn header_of(rows: &[&str], first: usize) -> Vec<Vec<String>> {
 }
 
 pub fn read(lines: &[String]) -> Option<ScreenDialog> {
-    if ask_dialog::page(lines).is_some() {
+    if ask_dialog::page(lines).is_some() || permission_dialog::read(lines).is_some() {
         return None;
     }
     let rows: Vec<&str> = lines.iter().map(|line| clean(line)).collect();
@@ -168,19 +193,19 @@ pub fn read(lines: &[String]) -> Option<ScreenDialog> {
     let tail = rows[..drawn]
         .iter()
         .rposition(|row| option_row(0, row).is_some())?;
-    let trailing: Vec<&str> = rows[tail + 1..drawn]
-        .iter()
-        .copied()
-        .filter(|row| !is_chrome(row))
-        .collect();
-    if trailing.len() > MAX_TRAILING_ROWS || trailing.iter().any(|row| is_past_dialog(row)) {
+    let end = continuation_end(&rows, tail, drawn);
+    if rows[end..drawn].iter().any(|row| !is_chrome(row)) {
         return None;
     }
     let found = numbered(&rows, tail)?;
     if found.len() < 2 {
         return None;
     }
-    let options = options_of(&rows, &found, drawn);
+    let marked = found.iter().any(|n| n.selected);
+    if !marked && !rows[end..drawn].iter().any(|row| is_footer(row)) {
+        return None;
+    }
+    let options = options_of(&rows, &found, end);
     if options.iter().any(|o| is_extra(&o.label)) {
         return None;
     }

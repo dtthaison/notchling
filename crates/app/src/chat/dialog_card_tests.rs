@@ -94,14 +94,14 @@ fn every_card_offers_a_dismiss_that_sends_only_the_session_id() {
 fn a_waiting_claude_job_is_read_once_per_waiting_spell() {
     let waiting = job(AgentGroup::NeedsInput, None);
     assert_eq!(
-        read_key(&waiting, Tool::Claude, false).as_deref(),
+        read_key(&waiting, Tool::Claude, false, 0).as_deref(),
         Some("dialog:sess-1|42")
     );
     let mut later = waiting.clone();
     later.since_ms = 43;
     assert_ne!(
-        read_key(&later, Tool::Claude, false),
-        read_key(&waiting, Tool::Claude, false)
+        read_key(&later, Tool::Claude, false, 0),
+        read_key(&waiting, Tool::Claude, false, 0)
     );
 }
 
@@ -109,23 +109,23 @@ fn a_waiting_claude_job_is_read_once_per_waiting_spell() {
 fn a_question_or_a_permission_keeps_its_own_read() {
     for detail in ["answer: Postgres or SQLite?", "approve Bash: rm -rf build"] {
         let agent = job(AgentGroup::NeedsInput, Some(detail));
-        assert_eq!(read_key(&agent, Tool::Claude, false), None, "{detail}");
+        assert_eq!(read_key(&agent, Tool::Claude, false, 0), None, "{detail}");
     }
 }
 
 #[test]
 fn only_a_local_claude_job_is_read() {
     let working = job(AgentGroup::Working, None);
-    assert_eq!(read_key(&working, Tool::Claude, false), None);
-    assert!(read_key(&working, Tool::Claude, true).is_some());
+    assert_eq!(read_key(&working, Tool::Claude, false, 0), None);
+    assert!(read_key(&working, Tool::Claude, true, 0).is_some());
     let waiting = job(AgentGroup::NeedsInput, None);
-    assert_eq!(read_key(&waiting, Tool::Codex, false), None);
+    assert_eq!(read_key(&waiting, Tool::Codex, false, 0), None);
     let mut asked = waiting.clone();
     asked.command = Some("run it".into());
-    assert_eq!(read_key(&asked, Tool::Claude, false), None);
+    assert_eq!(read_key(&asked, Tool::Claude, false, 0), None);
     let mut process = waiting;
     process.target = AgentTarget::Process(4242);
-    assert_eq!(read_key(&process, Tool::Claude, false), None);
+    assert_eq!(read_key(&process, Tool::Claude, false, 0), None);
 }
 
 #[test]
@@ -171,4 +171,52 @@ fn a_card_shows_only_for_the_key_it_was_read_for() {
         reading.shown("a").is_none(),
         "a new spell drops the old card"
     );
+}
+
+#[test]
+fn a_busy_reply_is_told_from_a_read_and_costs_no_try() {
+    assert!(is_busy(&json!({"dialog": null, "busy": true})));
+    assert!(!is_busy(&json!({"dialog": null})));
+    assert!(!is_busy(&reply()));
+    let mut reading = Reading::default();
+    let mut now = 10_000_000;
+    for _ in 0..5 {
+        assert!(reading.due("k", now));
+        reading.begin("k");
+        reading.busy("k", now);
+        assert_eq!(reading.tries, 0);
+        assert!(!reading.due("k", now + READ_RETRY_MS - 1));
+        now += READ_RETRY_MS;
+    }
+}
+
+#[test]
+fn a_read_that_found_nothing_still_stops_after_its_tries() {
+    let mut reading = Reading::default();
+    let mut now = 1_000;
+    for _ in 0..READ_TRIES {
+        assert!(reading.due("k", now));
+        reading.begin("k");
+        reading.finish("k", None, now);
+        now += READ_RETRY_MS;
+    }
+    assert!(!reading.due("k", now));
+}
+
+#[test]
+fn after_an_answer_the_next_dialog_of_the_same_spell_is_read_afresh() {
+    let waiting = job(AgentGroup::NeedsInput, None);
+    let first = read_key(&waiting, Tool::Claude, false, 0).unwrap();
+    let mut reading = Reading::default();
+    reading.begin(&first);
+    reading.finish(&first, DialogCard::from_reply(&first, &reply()), 1_000);
+    assert!(reading.shown(&first).is_some());
+    reading.next_round();
+    assert_eq!(reading.round(), 1);
+    let second = read_key(&waiting, Tool::Claude, false, reading.round()).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(second, "dialog:sess-1|42|1");
+    assert!(reading.shown(&second).is_none(), "the old card is gone");
+    assert!(reading.shown(&first).is_none());
+    assert!(reading.due(&second, 0), "read at once");
 }

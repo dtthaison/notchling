@@ -111,3 +111,24 @@ fn an_asked_command_comes_back_to_waiting_for_the_answer() {
         }
     );
 }
+
+#[test]
+fn it_is_kept_while_a_dialog_is_still_on_screen_whatever_the_job_says() {
+    let asked = row(Some(Why::Answer), 1_000);
+    for status in ["idle", "busy", "waiting"] {
+        let mut f = facts(1_000 + ANSWER_GRACE_MS + 60_000, status);
+        f.dialog_on_screen = true;
+        assert_eq!(
+            gate(&asked, &f),
+            Gate::Wait {
+                why: Why::Answer,
+                until_ms: f.now_ms + 1_000
+            },
+            "{status}"
+        );
+        f.dialog_on_screen = false;
+        if status != "waiting" {
+            assert_eq!(gate(&asked, &f), Gate::Delivered, "{status}");
+        }
+    }
+}

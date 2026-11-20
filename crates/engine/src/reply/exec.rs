@@ -502,6 +502,10 @@ impl Run<'_> {
         }
     }
 
+    fn any_dialog_open(&self, lines: &[String]) -> bool {
+        self.check.dialog_open(lines) || screen_dialog::read(lines).is_some()
+    }
+
     fn dialog_still_open(&self, lines: &[String]) -> bool {
         match (&self.pressed_dialog, screen_dialog::read(lines)) {
             (Some(pressed), Some(now)) => pressed.same_as(&now),
@@ -682,6 +686,18 @@ impl Run<'_> {
                     return Err(Failure::QuestionGone);
                 }
             }
+            Step::RequireAnyDialog => {
+                let mut lines = self.pty.screen();
+                if !self.any_dialog_open(&lines) {
+                    self.wait_until(PERMISSION_DRAW_WAIT_MS, |run, lines| {
+                        run.any_dialog_open(lines)
+                    });
+                    lines = self.pty.screen();
+                }
+                if !self.any_dialog_open(&lines) {
+                    return Err(Failure::QuestionGone);
+                }
+            }
             Step::AwaitInput { timeout_ms } => {
                 self.await_prompt(*timeout_ms)?;
                 self.require_free()?;
@@ -725,10 +741,13 @@ impl Run<'_> {
                     }
                     Until::PermissionGone => permission_dialog::read(lines) != run.pressed,
                     Until::DialogGone => !run.dialog_still_open(lines),
+                    Until::DialogClosed => !run.any_dialog_open(lines),
                 });
                 if !moved {
                     return Err(match until {
-                        Until::PermissionGone | Until::DialogGone => Failure::PermissionStillOpen,
+                        Until::PermissionGone | Until::DialogGone | Until::DialogClosed => {
+                            Failure::PermissionStillOpen
+                        }
                         _ => Failure::QuestionMismatch,
                     });
                 }

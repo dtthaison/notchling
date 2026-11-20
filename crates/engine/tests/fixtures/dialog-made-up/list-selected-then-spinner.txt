@@ -1,0 +1,7 @@
+⏺ Working on it.
+
+ Pick one
+ ❯ 1. Rewrite the parser
+   2. Patch the parser
+
+✶ Brewing… (esc to interrupt)

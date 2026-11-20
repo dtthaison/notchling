@@ -259,6 +259,8 @@ impl Pty for FakePrompt {
             if typed.len() == 1 && typed.chars().all(|c| c.is_ascii_digit()) {
                 self.dialog_up = false;
                 self.picked.push(typed.clone());
+            } else if typed == keys::ESC {
+                self.dialog_up = false;
             }
             self.writes.push(typed);
             return Ok(());

@@ -10,7 +10,7 @@ use notchling_locale as t;
 use super::prompts::{failed, header, status};
 use super::ChatView;
 use crate::acting::{Control, Request};
-use crate::chat::dialog_card::{asked_by_outbox, read_key, DialogCard};
+use crate::chat::dialog_card::{asked_by_outbox, is_busy, read_key, DialogCard, KEY_PREFIX};
 use crate::chat::prompt_flow::{Sending, Told};
 use crate::chat::prompts::Prompt;
 use crate::mac::gate;
@@ -20,7 +20,12 @@ impl ChatView {
     pub(super) fn dialog_key(&self) -> Option<String> {
         let session = self.selected_session()?;
         let asked = asked_by_outbox(&self.source.outbox_rows(&session.agent));
-        read_key(&session.agent, session.tool, asked)
+        read_key(
+            &session.agent,
+            session.tool,
+            asked,
+            self.prompt.dialog.round(),
+        )
     }
 
     pub(super) fn dialog_prompt(&self, answered: &HashSet<String>) -> Option<Prompt> {
@@ -31,6 +36,12 @@ impl ChatView {
 
     pub(super) fn dialog_card_shown(&self) -> bool {
         matches!(self.prompt.shown, Some(Prompt::Dialog(_)))
+    }
+
+    pub(super) fn reread_dialog_after(&mut self, key: &str) {
+        if key.starts_with(KEY_PREFIX) {
+            self.prompt.dialog.next_round();
+        }
     }
 
     pub(super) fn dismiss_session_dialog(&mut self, cx: &mut Context<Self>) {
@@ -74,10 +85,14 @@ impl ChatView {
                 .spawn(async move { actions.send(&Request::dialog(&row)) })
                 .await;
             this.update(cx, |view, cx| {
+                let busy = result.as_ref().is_ok_and(is_busy);
                 let card = result
                     .ok()
                     .and_then(|reply| DialogCard::from_reply(&key, &reply));
-                view.prompt.dialog.finish(&key, card, now_ms());
+                match busy {
+                    true => view.prompt.dialog.busy(&key, now_ms()),
+                    false => view.prompt.dialog.finish(&key, card, now_ms()),
+                }
                 cx.notify();
             })
             .ok();
@@ -146,10 +161,9 @@ pub(super) fn content(
     )
     .when(open.enabled, |el| {
         el.on_click(cx.listener(move |this, _, _, cx| {
-            let said = t::chat::dialog_dismissed().to_owned();
             let told = Told {
-                went_through: said.clone(),
-                already_answered: said,
+                went_through: t::chat::dialog_dismissed().to_owned(),
+                already_answered: t::chat::dialog_chose_gone().to_owned(),
             };
             this.answer_prompt(
                 key.clone(),

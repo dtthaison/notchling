@@ -1,5 +1,5 @@
 use super::fake::FakePrompt;
-use super::read::read_dialog;
+use super::read::{dialog_up, read_dialog};
 
 const SWITCH: &[&str] = &[
     "────────────────────────────────────────",
@@ -33,4 +33,26 @@ fn a_prompt_with_no_dialog_reads_as_none() {
     ]);
     assert_eq!(read_dialog(&mut pty), Ok(None));
     assert!(pty.writes.is_empty(), "nothing typed");
+}
+
+#[test]
+fn any_open_dialog_is_seen_without_typing() {
+    let mut pty = FakePrompt::new(&[]).with_dialog(SWITCH);
+    assert!(dialog_up(&mut pty));
+    let mut unknown =
+        FakePrompt::new(&[]).with_dialog(&[" Odd", " Enter to confirm · Esc to cancel"]);
+    assert!(dialog_up(&mut unknown));
+    assert!(pty.writes.is_empty() && unknown.writes.is_empty());
+}
+
+#[test]
+fn a_plain_prompt_shows_no_dialog() {
+    let mut pty = FakePrompt::new(&[
+        "⏺ Done.",
+        "────────────────────────────────────────",
+        "❯",
+        "────────────────────────────────────────",
+        "  ? for shortcuts",
+    ]);
+    assert!(!dialog_up(&mut pty));
 }

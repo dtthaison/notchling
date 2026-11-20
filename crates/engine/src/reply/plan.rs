@@ -14,6 +14,7 @@ pub enum Step {
     },
     RefuseDialog,
     RequireDialog,
+    RequireAnyDialog,
     AwaitInput {
         timeout_ms: u64,
     },
@@ -62,6 +63,7 @@ pub enum Until {
     ReviewOrGone,
     PermissionGone,
     DialogGone,
+    DialogClosed,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -76,6 +78,7 @@ impl Step {
             Step::WaitQuiet { .. } => "wait quiet",
             Step::RefuseDialog => "refuse dialog",
             Step::RequireDialog => "require dialog",
+            Step::RequireAnyDialog => "require any dialog",
             Step::AwaitInput { .. } => "await input",
             Step::AwaitEmpty { .. } => "await empty",
             Step::Keys(_) => "keys",
@@ -205,18 +208,20 @@ pub fn interrupt(working: bool) -> Result<Plan, PlanError> {
     })
 }
 
-pub fn dismiss(waiting: bool) -> Option<Plan> {
-    if !waiting {
-        return None;
-    }
-    Some(Plan {
+pub fn dismiss() -> Plan {
+    Plan {
         steps: vec![
             attach(None),
+            Step::RequireAnyDialog,
             Step::Keys(ESC.into()),
             Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::DialogClosed,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
         ],
         detach: detach(),
-    })
+    }
 }
 
 pub fn take_back(latest: &str, keep: &[String]) -> Plan {

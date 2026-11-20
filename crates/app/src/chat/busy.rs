@@ -4,6 +4,7 @@ use serde_json::Value;
 use super::outbox::{Bubble, Status};
 
 pub const COMMAND_KIND: &str = "local_bash";
+pub const READ_AGAIN_MS: i64 = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Busy {
@@ -114,6 +115,7 @@ pub struct Reading {
     job: Option<String>,
     flight: InFlight,
     asked: Option<String>,
+    read_ms: i64,
 }
 
 impl Reading {
@@ -121,12 +123,13 @@ impl Reading {
         job_of(agent).map(|job| format!("{job}|{}", agent.since_ms))
     }
 
-    pub fn due(&self, key: &str) -> bool {
-        self.asked.as_deref() != Some(key)
+    pub fn due(&self, key: &str, now_ms: i64) -> bool {
+        self.asked.as_deref() != Some(key) || now_ms - self.read_ms >= READ_AGAIN_MS
     }
 
-    pub fn begin(&mut self, key: &str) {
+    pub fn begin(&mut self, key: &str, now_ms: i64) {
         self.asked = Some(key.to_owned());
+        self.read_ms = now_ms;
     }
 
     pub fn finish(&mut self, key: &str, flight: InFlight) {

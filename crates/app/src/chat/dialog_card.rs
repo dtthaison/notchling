@@ -84,7 +84,9 @@ pub fn asked_by_outbox(rows: &[OutboxRow]) -> bool {
     })
 }
 
-pub fn read_key(agent: &Agent, tool: Tool, outbox_asks: bool) -> Option<String> {
+pub const KEY_PREFIX: &str = "dialog:";
+
+pub fn read_key(agent: &Agent, tool: Tool, outbox_asks: bool, round: u32) -> Option<String> {
     if tool != Tool::Claude
         || agent.command.is_some()
         || remote::is_remote(agent)
@@ -97,7 +99,14 @@ pub fn read_key(agent: &Agent, tool: Tool, outbox_asks: bool) -> Option<String> 
             .detail
             .as_deref()
             .is_some_and(|d| d.starts_with(ANSWER_PREFIX) || d.starts_with(APPROVE));
-    (waiting || outbox_asks).then(|| format!("dialog:{}|{}", agent.id, agent.since_ms))
+    (waiting || outbox_asks).then(|| match round {
+        0 => format!("{KEY_PREFIX}{}|{}", agent.id, agent.since_ms),
+        round => format!("{KEY_PREFIX}{}|{}|{round}", agent.id, agent.since_ms),
+    })
+}
+
+pub fn is_busy(reply: &Value) -> bool {
+    reply.get("busy").and_then(Value::as_bool) == Some(true)
 }
 
 #[derive(Debug, Default)]
@@ -107,6 +116,7 @@ pub struct Reading {
     pub tries: u8,
     pub retry_ms: i64,
     pub picked: Option<u64>,
+    round: u32,
 }
 
 impl Reading {
@@ -137,6 +147,27 @@ impl Reading {
         if card.is_some() {
             self.card = card;
         }
+    }
+
+    pub fn busy(&mut self, key: &str, now_ms: i64) {
+        if self.asked.as_deref() != Some(key) {
+            return;
+        }
+        self.tries = self.tries.saturating_sub(1);
+        self.retry_ms = now_ms + READ_RETRY_MS;
+    }
+
+    pub fn round(&self) -> u32 {
+        self.round
+    }
+
+    pub fn next_round(&mut self) {
+        self.round += 1;
+        self.card = None;
+        self.asked = None;
+        self.tries = 0;
+        self.retry_ms = 0;
+        self.picked = None;
     }
 
     pub fn shown(&self, key: &str) -> Option<&DialogCard> {

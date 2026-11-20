@@ -237,6 +237,7 @@ impl ChatView {
                 match result {
                     Ok(_) => {
                         view.source.mark_answered(&key);
+                        view.reread_dialog_after(&key);
                         if let (Some(told), Some(row)) = (&told, &row) {
                             view.keep_note(row, told.went_through.clone(), cx);
                         }
@@ -248,6 +249,7 @@ impl ChatView {
                     Err(message) => match (&told, &row) {
                         (Some(told), Some(row)) if is_gone(&message) => {
                             view.source.mark_answered(&key);
+                            view.reread_dialog_after(&key);
                             view.keep_note(row, told.already_answered.clone(), cx);
                             view.reload_now(cx);
                         }

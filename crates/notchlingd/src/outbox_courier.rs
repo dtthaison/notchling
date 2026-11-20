@@ -4,7 +4,7 @@ use crate::outbox_rows::reply_via;
 use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
-    Facts, Job, Kind, Row, Tried, TryEnd, DIALOG_RECHECK_MS, GONE_AFTER_MS,
+    Facts, Job, Kind, Row, Tried, TryEnd, Why, ANSWER_GRACE_MS, DIALOG_RECHECK_MS, GONE_AFTER_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
@@ -28,6 +28,8 @@ use std::time::Duration;
 const CALM_GAP_MS: i64 = 3_000;
 const ASKED_QUIET_MS: u64 = 400;
 const ASKED_WAIT_MS: u64 = 1_500;
+const MODEL_QUIET_MS: u64 = 1_500;
+const MODEL_WAIT_MS: u64 = 5_000;
 
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
@@ -242,11 +244,18 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn asks_something(pty: &mut dyn Pty) -> bool {
-    pty.wait_quiet(
-        Duration::from_millis(ASKED_QUIET_MS),
-        Duration::from_millis(ASKED_WAIT_MS),
-    );
+pub(crate) fn asked_window(text: &str) -> (u64, u64) {
+    match text.trim_start().strip_prefix("/model") {
+        Some(rest) if rest.is_empty() || rest.starts_with(char::is_whitespace) => {
+            (MODEL_QUIET_MS, MODEL_WAIT_MS)
+        }
+        _ => (ASKED_QUIET_MS, ASKED_WAIT_MS),
+    }
+}
+
+fn asks_something(pty: &mut dyn Pty, text: &str) -> bool {
+    let (quiet, wait) = asked_window(text);
+    pty.wait_quiet(Duration::from_millis(quiet), Duration::from_millis(wait));
     screen_dialog::read(&pty.screen()).is_some()
 }
 
@@ -291,6 +300,14 @@ impl ClaudeCourier {
     #[cfg(test)]
     pub(crate) fn open(&self) -> usize {
         lock(&self.attaches).len()
+    }
+
+    fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
+        let waiting = matches!(job, Job::Live { status: Some(s) } if s == "waiting");
+        if row.why != Some(Why::Answer) || waiting || now_ms - row.updated_ms < ANSWER_GRACE_MS {
+            return false;
+        }
+        fresh.is_some_and(|agent| self.acting.dialog_up(agent))
     }
 
     fn calm_now(&self, session: &str) -> bool {
@@ -378,7 +395,7 @@ impl ClaudeCourier {
             return (TryEnd::NotIdle, tried, None);
         }
         match played {
-            Ok(_) if row.kind == Kind::Command && asks_something(pty.as_mut()) => {
+            Ok(_) if row.kind == Kind::Command && asks_something(pty.as_mut(), &row.text) => {
                 self.acting.attempts.forget(&agent.id);
                 self.note(row, agent, None);
                 (TryEnd::Asked, tried, None)
@@ -485,12 +502,15 @@ impl Courier for ClaudeCourier {
                 None
             }
         };
+        let remembered = memo
+            .dialog_at
+            .is_some_and(|at| now_ms - at < DIALOG_RECHECK_MS);
+        drop(memos);
+        let answer_open = self.answer_open(row, &job, fresh.as_ref(), now_ms);
         Facts {
             now_ms,
             job,
-            dialog_on_screen: memo
-                .dialog_at
-                .is_some_and(|at| now_ms - at < DIALOG_RECHECK_MS),
+            dialog_on_screen: remembered || answer_open,
             queue_waiting: queue.waiting.len(),
             safe,
             turn_over_since_ms,

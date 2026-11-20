@@ -95,12 +95,48 @@ fn the_plan_waits_for_the_dialog_to_close_and_detaches_quietly() {
 }
 
 #[test]
-fn a_dismiss_is_one_esc_and_only_while_the_session_waits() {
-    assert_eq!(plan::dismiss(false), None);
+fn a_dismiss_checks_a_dialog_is_open_before_it_sends_its_one_esc() {
+    let names: Vec<&str> = plan::dismiss().steps.iter().map(|s| s.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "wait quiet",
+            "require any dialog",
+            "keys",
+            "pause",
+            "wait for"
+        ]
+    );
     let mut pty = FakePrompt::new(&[]).with_dialog(SWITCH);
-    let plan = plan::dismiss(true).expect("a plan");
-    let done = execute(&plan, &mut pty, &Markers, &mut NoQueueLog);
+    let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
     assert_eq!(done, Ok(Outcome { taken: false }));
     assert_eq!(pty.writes, ["\x1b"]);
     assert!(pty.picked.is_empty(), "no option number typed");
+    assert!(!pty.dialog_shown(), "it waited for the dialog to go");
+}
+
+#[test]
+fn a_dismiss_with_no_dialog_open_sends_no_esc() {
+    let mut pty = FakePrompt::new(&[
+        "⏺ Done.",
+        "────────────────────────────────────────",
+        "❯",
+        "────────────────────────────────────────",
+        "  ? for shortcuts",
+    ]);
+    let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(done, Err(Failure::QuestionGone));
+    assert!(pty.writes.is_empty(), "no Esc into an idle prompt");
+}
+
+#[test]
+fn a_dismiss_also_closes_a_dialog_this_parser_cannot_read() {
+    let mut pty = FakePrompt::new(&[]).with_dialog(&[
+        "────────────────────────────────────────",
+        " Something this parser does not know",
+        " Enter to confirm · Esc to cancel",
+    ]);
+    let done = execute(&plan::dismiss(), &mut pty, &Markers, &mut NoQueueLog);
+    assert_eq!(done, Ok(Outcome { taken: false }));
+    assert_eq!(pty.writes, ["\x1b"]);
 }

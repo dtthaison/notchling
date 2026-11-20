@@ -254,9 +254,9 @@ fn a_read_is_made_once_per_state_of_the_job() {
     let working = agent(AgentGroup::Working, true);
     let key = Reading::key_of(&working).expect("a key");
     assert_eq!(key, "ab12cd34|77");
-    assert!(reading.due(&key));
-    reading.begin(&key);
-    assert!(!reading.due(&key));
+    assert!(reading.due(&key, 1_000));
+    reading.begin(&key, 1_000);
+    assert!(!reading.due(&key, 1_000));
     assert_eq!(reading.of(&working), InFlight::default(), "not read yet");
     let flight = InFlight {
         tasks: 9,
@@ -267,7 +267,7 @@ fn a_read_is_made_once_per_state_of_the_job() {
     let mut later = working.clone();
     later.since_ms = 78;
     let next = Reading::key_of(&later).expect("a key");
-    assert!(reading.due(&next), "the job's file changed");
+    assert!(reading.due(&next, 1_000), "the job's file changed");
     assert_eq!(reading.of(&later), flight, "kept until the new read lands");
     let mut other = working;
     other.target = AgentTarget::Job("ffff0000".into());
@@ -275,10 +275,22 @@ fn a_read_is_made_once_per_state_of_the_job() {
 }
 
 #[test]
+fn the_count_is_read_again_while_the_session_keeps_working() {
+    let mut reading = Reading::default();
+    let key = Reading::key_of(&agent(AgentGroup::Working, true)).expect("a key");
+    reading.begin(&key, 10_000);
+    assert!(!reading.due(&key, 10_000 + READ_AGAIN_MS - 1));
+    assert!(
+        reading.due(&key, 10_000 + READ_AGAIN_MS),
+        "the same spell, a new count"
+    );
+}
+
+#[test]
 fn a_late_answer_for_an_old_read_is_dropped() {
     let mut reading = Reading::default();
-    reading.begin("ab12cd34|1");
-    reading.begin("ab12cd34|2");
+    reading.begin("ab12cd34|1", 1_000);
+    reading.begin("ab12cd34|2", 1_000);
     reading.finish(
         "ab12cd34|1",
         InFlight {

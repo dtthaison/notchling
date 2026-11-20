@@ -1,5 +1,5 @@
 use super::*;
-use notchling_engine::reply::read::read_dialog;
+use notchling_engine::reply::read::{dialog_up, read_dialog};
 use notchling_engine::terminal::screen_dialog::{DialogPick, ScreenDialog};
 
 const SHELL_COMMAND_MAX: usize = 64 * 1024;
@@ -96,6 +96,30 @@ impl ActingOps {
         }
     }
 
+    pub(crate) fn dialog_up(&self, agent: &Agent) -> bool {
+        if !self.acting.is_on() {
+            return false;
+        }
+        let probe = self.try_locked(agent, |agent| -> Result<_, ApiError> {
+            let AgentTarget::Job(job) = &agent.target else {
+                return Ok(None);
+            };
+            let config_dir =
+                config_dir_for_job(&self.roots, job).or_else(|| agent.config_dir.clone());
+            let mut pty = self.attacher.attach(job, config_dir.as_deref())?;
+            let up = dialog_up(pty.as_mut());
+            Ok(Some((up, pty)))
+        });
+        match probe {
+            None => true,
+            Some(Ok(Some((up, pty)))) => {
+                drop(pty);
+                up
+            }
+            Some(_) => false,
+        }
+    }
+
     pub(super) fn dialog_pick(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         if caller.tier != Tier::App {
             return Err(forbidden(
@@ -107,6 +131,9 @@ impl ActingOps {
             .get("number")
             .and_then(Value::as_u64)
             .ok_or_else(|| bad("number is the option to press"))?;
+        if !(1..=9).contains(&number) {
+            return Err(bad("number is one of the options, 1 to 9"));
+        }
         let pick = DialogPick {
             title: text_arg(args, "title")?.to_owned(),
             number,
@@ -135,11 +162,7 @@ impl ActingOps {
         }
         let first = self.agent(args)?;
         self.locked(&first, |agent| {
-            let waiting = agent.group == AgentGroup::NeedsInput;
-            let plan = plan::dismiss(waiting).ok_or_else(|| {
-                bad("the session isn't waiting for an answer, so there's nothing to dismiss (Esc on an idle session opens rewind)")
-            })?;
-            self.play_locked(agent, &plan, &mut NoLog, None)
+            self.play_locked(agent, &plan::dismiss(), &mut NoLog, None)
         })?;
         Ok(json!({"dismissed": true}))
     }

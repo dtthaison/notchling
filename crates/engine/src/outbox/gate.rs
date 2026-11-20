@@ -76,7 +76,9 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
 }
 
 fn answer_gate(row: &Row, status: Option<&str>, facts: &Facts) -> Gate {
-    let asked = status == Some("waiting") || facts.now_ms - row.updated_ms < ANSWER_GRACE_MS;
+    let asked = status == Some("waiting")
+        || facts.dialog_on_screen
+        || facts.now_ms - row.updated_ms < ANSWER_GRACE_MS;
     match asked {
         true => Gate::Wait {
             why: Why::Answer,

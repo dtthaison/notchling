@@ -146,64 +146,81 @@ fn picking_is_refused_while_the_switch_is_off_and_for_other_callers() {
     assert!(on.writes.lock().unwrap().is_empty());
 }
 
-fn waiting() -> Value {
-    let mut rows = sessions();
-    rows.as_array_mut()
-        .unwrap()
-        .push(crate::acting_ops_tests::row(
-            "job-wait",
-            json!({"job": "wait0001"}),
-            "needsInput",
-            None,
-        ));
-    rows
+const UNREADABLE: [&str; 3] = [
+    "────────────────────────────────────────",
+    " Something this parser does not know",
+    " Enter to confirm · Esc to cancel",
+];
+
+#[test]
+fn dismissing_sends_esc_while_a_dialog_is_open_whatever_the_session_says() {
+    for id in ["job-a", "job-idle"] {
+        let s = setup(true, PROMPT, sessions());
+        showing(&s);
+        let done = s
+            .ops
+            .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({ "id": id }))
+            .unwrap();
+        assert_eq!(done, json!({"dismissed": true}), "{id}");
+        assert_eq!(s.writes.lock().unwrap().as_slice(), ["\x1b"], "{id}");
+    }
 }
 
 #[test]
-fn dismissing_sends_esc_to_a_session_that_waits() {
-    let s = setup(true, PROMPT, waiting());
-    showing(&s);
-    let done = s
-        .ops
-        .call(
-            &app(),
-            ops::SESSION_DIALOG_DISMISS,
-            &json!({"id": "job-wait"}),
-        )
+fn dismissing_also_closes_a_dialog_the_parser_cannot_read() {
+    let s = setup(true, PROMPT, sessions());
+    *s.dialog.lock().unwrap() = Some((UNREADABLE.iter().map(|l| l.to_string()).collect(), true));
+    s.ops
+        .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({"id": "job-a"}))
         .unwrap();
-    assert_eq!(done, json!({"dismissed": true}));
     assert_eq!(s.writes.lock().unwrap().as_slice(), ["\x1b"]);
 }
 
 #[test]
-fn dismissing_is_refused_for_a_session_that_is_not_waiting() {
-    let s = setup(true, PROMPT, waiting());
+fn dismissing_sends_no_esc_when_no_dialog_is_open() {
+    let s = setup(true, PROMPT, sessions());
     for id in ["job-a", "job-idle"] {
         let result = s
             .ops
             .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({ "id": id }));
-        assert_eq!(code(result).0, ErrorCode::BadRequest, "{id}");
+        let (_, message) = code(result);
+        assert!(message.contains("isn't open"), "{id}: {message}");
     }
-    assert!(s.attached.lock().unwrap().is_empty());
-    assert!(s.writes.lock().unwrap().is_empty(), "nothing typed");
+    assert!(s.writes.lock().unwrap().is_empty(), "no Esc typed");
 }
 
 #[test]
 fn dismissing_waits_for_the_switch_and_the_app() {
-    let off = setup(false, PROMPT, waiting());
-    let result = off.ops.call(
-        &app(),
-        ops::SESSION_DIALOG_DISMISS,
-        &json!({"id": "job-wait"}),
-    );
+    let off = setup(false, PROMPT, sessions());
+    showing(&off);
+    let result = off
+        .ops
+        .call(&app(), ops::SESSION_DIALOG_DISMISS, &json!({"id": "job-a"}));
     assert_eq!(code(result), (ErrorCode::Forbidden, ACTING_OFF.to_string()));
-    let on = setup(true, PROMPT, waiting());
+    let on = setup(true, PROMPT, sessions());
+    showing(&on);
     let result = on.ops.call(
         &other_caller(),
         ops::SESSION_DIALOG_DISMISS,
-        &json!({"id": "job-wait"}),
+        &json!({"id": "job-a"}),
     );
     assert_eq!(code(result).0, ErrorCode::Forbidden);
     assert!(on.writes.lock().unwrap().is_empty());
     assert!(off.writes.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_number_outside_one_to_nine_is_refused_before_the_terminal_is_touched() {
+    let s = setup(true, PROMPT, sessions());
+    showing(&s);
+    for number in [0, 10, 99] {
+        let result = s.ops.call(
+            &app(),
+            ops::SESSION_DIALOG_PICK,
+            &pick(number, "Yes, switch to Opus 5.5"),
+        );
+        assert_eq!(code(result).0, ErrorCode::BadRequest, "{number}");
+    }
+    assert!(s.attached.lock().unwrap().is_empty(), "never attached");
+    assert!(s.writes.lock().unwrap().is_empty());
 }

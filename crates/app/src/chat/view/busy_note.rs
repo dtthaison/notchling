@@ -6,6 +6,7 @@ use notchling_engine::sessions::AgentGroup;
 use super::ChatView;
 use crate::chat::busy::{self, InFlight, Reading};
 use crate::chat::outbox::Bubble;
+use crate::phone::bridge::now_ms;
 
 impl ChatView {
     pub(super) fn explain_busy(&self, bubbles: &mut [Bubble]) {
@@ -30,7 +31,7 @@ impl ChatView {
         let Some(key) = Reading::key_of(&agent) else {
             return;
         };
-        if agent.group != AgentGroup::Working || !self.busy.due(&key) {
+        if agent.group != AgentGroup::Working || !self.busy.due(&key, now_ms()) {
             return;
         }
         let waiting = self.source.outbox_bubbles(&agent, &self.conversation);
@@ -45,7 +46,7 @@ impl ChatView {
             .as_deref()
             .map_or_else(|| self.root.claude_dir.clone(), PathBuf::from);
         let file = dir.join("jobs").join(job).join("state.json");
-        self.busy.begin(&key);
+        self.busy.begin(&key, now_ms());
         cx.spawn(async move |this, cx| {
             let flight = cx
                 .background_executor()
