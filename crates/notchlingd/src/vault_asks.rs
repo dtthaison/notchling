@@ -60,6 +60,12 @@ impl VaultOps {
         if let Who::Machine(machine) = who {
             event["machine"] = json!(machine);
         }
+        if let Some(session) = match who {
+            Who::Caller(caller) => self.trusted_session(caller),
+            Who::Grant(_) | Who::Machine(_) => None,
+        } {
+            event["session"] = json!(session);
+        }
         self.approvals.describe(&id, &event);
         let by = match who {
             Who::Grant(grant) => Some(*grant),
@@ -119,7 +125,7 @@ impl VaultOps {
         Ok(json!({"answered": self.approvals.answer(id, Answered::by_mac(decision))}))
     }
 
-    pub(super) fn request(&self, args: &Value) -> Result<Value, ApiError> {
+    pub(super) fn request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let name = text(args, "name", MAX_SHORT)?.unwrap_or_default();
         if !valid_name(&name) {
             return Err(ApiError::bad_request(
@@ -173,8 +179,12 @@ impl VaultOps {
             Refused::NoId => ApiError::internal("no randomness for a request id"),
         })?;
         let id = ticket.id.clone();
-        let event = json!({"id": id, "request": request, "entry": entry_json(&entry),
+        let mut event = json!({"id": id, "request": request, "entry": entry_json(&entry),
                            "existing": existing.is_some(), "changes": changes});
+        event["verified"] = crate::vault_caller::verified(self.processes.as_ref(), caller, &folder);
+        if let Some(session) = self.trusted_session(caller) {
+            event["session"] = json!(session);
+        }
         self.requests.describe(&id, &event);
         let raised = self.raise_request(&id, &request);
         self.room

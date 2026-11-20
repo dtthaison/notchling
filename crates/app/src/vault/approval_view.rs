@@ -2,8 +2,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use gpui::{
-    div, prelude::*, px, Context, Div, FocusHandle, Focusable, KeyDownEvent, Render, SharedString,
-    Stateful, Subscription, Window,
+    div, prelude::*, px, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, Render,
+    SharedString, Stateful, Subscription, Window,
 };
 use notchling_kit::metric::{RADIUS_CARD, RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
@@ -13,9 +13,11 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::approval::{ApprovalModel, ALWAYS, COMMAND, DENY, FOLDER, ONCE, WINDOW_TITLE};
+use super::presence::{Done, Presence};
 use super::store::Vault;
 use super::wire::{Approval, Decision};
 use crate::mac::gate;
+use crate::sheets::header::sheet_header_closing;
 use crate::switches::feed::SwitchFeed;
 use crate::switches::Switch;
 
@@ -29,9 +31,15 @@ pub struct VaultApprovalView {
     vault: Arc<Vault>,
     model: ApprovalModel,
     fixed: bool,
+    presence: Presence,
+    visible: bool,
+    active: bool,
+    reset_focus: bool,
     focus: FocusHandle,
     _activation: Option<Subscription>,
 }
+
+impl gpui::EventEmitter<Done> for VaultApprovalView {}
 
 impl VaultApprovalView {
     pub fn live(
@@ -41,30 +49,43 @@ impl VaultApprovalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut model = ApprovalModel::new(approval);
-        model.shown(now_ms());
+        Self::live_in(approval, feed, vault, Presence::Window, window, cx)
+    }
+
+    pub fn live_in(
+        approval: &Approval,
+        feed: Arc<SwitchFeed>,
+        vault: Arc<Vault>,
+        presence: Presence,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let model = ApprovalModel::new(approval);
         let activation = cx.observe_window_activation(window, |view, window, cx| {
-            if window.is_window_active() {
-                view.model.shown(now_ms());
-                view.redraw_when_armed(cx);
-            } else {
-                view.model.hidden();
-            }
-            cx.notify();
+            view.active = window.is_window_active();
+            view.refresh_arming(cx);
         });
-        let view = VaultApprovalView {
+        let mut view = VaultApprovalView {
             feed,
             vault,
             model,
             fixed: false,
+            presence,
+            visible: !presence.embedded(),
+            active: window.is_window_active(),
+            reset_focus: false,
             focus: cx.focus_handle(),
             _activation: Some(activation),
         };
-        view.redraw_when_armed(cx);
+        view.refresh_arming(cx);
         view
     }
 
     pub fn fixed(approval: &Approval, cx: &mut Context<Self>) -> Self {
+        Self::fixed_in(approval, Presence::Window, cx)
+    }
+
+    pub fn fixed_in(approval: &Approval, presence: Presence, cx: &mut Context<Self>) -> Self {
         let mut model = ApprovalModel::new(approval);
         model.shown(-super::approval::ARMING_MS);
         VaultApprovalView {
@@ -72,8 +93,48 @@ impl VaultApprovalView {
             vault: Arc::new(Vault::fixed(Vec::new())),
             model,
             fixed: true,
+            presence,
+            visible: true,
+            active: true,
+            reset_focus: false,
             focus: cx.focus_handle(),
             _activation: None,
+        }
+    }
+
+    pub fn set_presence(&mut self, presence: Presence, cx: &mut Context<Self>) {
+        if self.presence == presence {
+            return;
+        }
+        self.presence = presence;
+        self.reset_focus = true;
+        if !self.fixed {
+            self.model.rearm(false, 0);
+        }
+        self.refresh_arming(cx);
+        cx.notify();
+    }
+
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if !super::presence::keeps_focus(visible, self.presence) && self.visible {
+            self.reset_focus = true;
+            cx.notify();
+        }
+        self.visible = visible;
+        self.refresh_arming(cx);
+    }
+
+    fn refresh_arming(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
+        let exposed = self.visible && self.active;
+        let changed = self.model.expose(exposed, now_ms());
+        if changed {
+            if exposed {
+                self.redraw_when_armed(cx);
+            }
+            cx.notify();
         }
     }
 
@@ -126,6 +187,9 @@ impl VaultApprovalView {
                     view.feed.resolve(&id);
                 }
                 view.model.finished(result);
+                if view.model.resolved {
+                    cx.emit(Done);
+                }
                 cx.notify();
             })
             .ok();
@@ -177,7 +241,17 @@ fn mono(text: &str, ink: Ink, a: Appearance) -> Div {
 impl Render for VaultApprovalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let a = window_appearance(window);
-        if !self.fixed && !self.focus.is_focused(window) {
+        if self.reset_focus {
+            self.reset_focus = false;
+            if self.focus.is_focused(window) {
+                window.blur();
+            }
+        }
+        if !self.fixed
+            && self.presence.takes_focus()
+            && self.visible
+            && !self.focus.is_focused(window)
+        {
             window.focus(&self.focus);
         }
         let prompt = self.model.prompt.clone();
@@ -225,38 +299,21 @@ impl Render for VaultApprovalView {
                     .unchecked
                     .map(|u| label(u, TypeRole::Meta, Ink::TextMuted, a)),
             );
-        div()
-            .id(SharedString::from(prompt.element("vault-approval")))
-            .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
-                    this.answer(Decision::Deny, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .size_full()
+        let title = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(icon(
+                Icon::Permission,
+                TypeRole::Title.spec().size,
+                Ink::AccentText,
+                a,
+            ))
+            .child(label(&prompt.title, TypeRole::Title, Ink::Text, a));
+        let details = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .p(px(SIDE_PADDING + 4.0))
-            .rounded(px(RADIUS_CARD))
-            .border(px(1.0))
-            .border_color(hsla(Ink::Hairline.color(a)))
-            .fill(Ink::Window, a)
-            .child(label(WINDOW_TITLE, TypeRole::Section, Ink::TextFaint, a))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(icon(
-                        Icon::Permission,
-                        TypeRole::Title.spec().size,
-                        Ink::AccentText,
-                        a,
-                    ))
-                    .child(label(&prompt.title, TypeRole::Title, Ink::Text, a)),
-            )
             .children(
                 prompt
                     .requested_by
@@ -291,8 +348,11 @@ impl Render for VaultApprovalView {
                     .note
                     .as_deref()
                     .map(|note| label(note, TypeRole::Meta, Ink::Needs, a)),
-            )
-            .child(div().flex_1())
+            );
+        let tail = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
             .children(
                 prompt
                     .warning
@@ -307,6 +367,76 @@ impl Render for VaultApprovalView {
                     .child(div().flex_1())
                     .child(deny)
                     .child(once),
+            );
+        let frame = div()
+            .id(SharedString::from(prompt.element("vault-approval")))
+            .track_focus(&self.focus)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, _| window.focus(&this.focus)),
             )
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if super::presence::escape_denies(this.visible, &event.keystroke.key) {
+                    this.answer(Decision::Deny, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        match self.presence {
+            Presence::Window => frame
+                .size_full()
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .p(px(SIDE_PADDING + 4.0))
+                .rounded(px(RADIUS_CARD))
+                .border(px(1.0))
+                .border_color(hsla(Ink::Hairline.color(a)))
+                .fill(Ink::Window, a)
+                .child(label(WINDOW_TITLE, TypeRole::Section, Ink::TextFaint, a))
+                .child(title)
+                .child(details)
+                .child(div().flex_1())
+                .child(tail),
+            Presence::Card => frame
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .p(px(14.0))
+                .child(title)
+                .child(details)
+                .child(tail),
+            Presence::Sheet => frame
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(sheet_header_closing(
+                    Icon::Permission,
+                    WINDOW_TITLE,
+                    Vec::new(),
+                    a,
+                    cx,
+                    |this: &mut Self, _, cx| this.answer(Decision::Deny, cx),
+                ))
+                .child(scrollable(
+                    div()
+                        .id(SharedString::from(prompt.element("vault-approval-body")))
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .p(px(SIDE_PADDING + 4.0))
+                        .child(title)
+                        .child(details),
+                ))
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .px(px(SIDE_PADDING + 4.0))
+                        .pb(px(SIDE_PADDING + 4.0))
+                        .child(tail),
+                ),
+        }
     }
 }

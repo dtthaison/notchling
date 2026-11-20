@@ -1318,7 +1318,7 @@ moves in once; the Swift app's stays its own); `Entry` is its shape: `{name, kin
 secretVar, ask?, updated}`. No reply but `vault.use`'s and `vault.admin`'s carries a value, and no event ever does. `vault.admin` is the app's read of one entry's password for a machine's sudo step (Machines, Use From Vault): the same switch, Ask me first and `vault.secret_used` audit as `vault.use` (reason `sudo on <machine>`), refused to every client but the Notchling app.
 
 **Approval.** `vault.use` of an entry marked ask-first publishes `vault.approval.pending {id,
-names, entries, command, folder, verified}` on the `vault` topic (`command` and `folder` as the
+names, entries, command, folder, verified, session?}` on the `vault` topic (`command` and `folder` as the
 caller claims them, `verified` what the kernel says about it: see [`crate::vault_caller`]), which only the app tier may follow, and
 waits up to [`APPROVAL_WAIT`] for `vault.approval.answer`. The id is 128 random bits. The
 answer must come from an app-tier client that said hello as the app; an agent-tier client is
@@ -1328,9 +1328,13 @@ daemon stops. Always Allow turns ask-first off for those entries. A denial is `n
 ("The user didn't allow it."), which `notchling secret` exits 3 on.
 
 **Requests.** `vault.request` publishes `vault.request.pending {id, request, entry, existing,
-changes}` (the form, filled in: an existing entry with the passed fields laid over it, and what
+changes, verified, session?}` (the form, filled in: an existing entry with the passed fields laid over it, and what
 that changed) and waits up to [`REQUEST_WAIT`] for the app's `vault.save {…, request: id}` or
 `vault.request.cancel {id}`. A cancel is `needs_approval` ("The user cancelled.").
+
+`session` is the Claude Code session id of the asking process and is present only when the daemon can vouch for it: `sessions/<pid>.json` names a process on the caller's tree whose resolved executable is an installed Claude (`~/.local/bin/claude`, `/usr/local/bin/claude`, `/opt/homebrew/bin/claude`, anything under `~/.local/share/claude` or `~/.claude/local`), so a process merely named claude, a symlink or a file planted for a shell is ignored. The app puts a card in that session's Chat only when exactly one row carries the id and the caller's verified folder is inside that row's folder or worktree; any other ticket opens the sheet. `verified` is the same kernel lineage as on approvals and the app shows it on both. The remaining limit: an agent inside a real Claude session in the same folder can still ask as that session (and one in another session of the same folder as that one), because the daemon holds no launch record to tell them apart; a card is a convenience placement, never a grant, and Allow still needs a click.
+
+`session` is the Claude Code session id the asking process runs under, found the way `ask` finds it; it is left out when no session is known (a job's grant, a machine's sudo step, a shell), and the app then shows the prompt as a sheet instead of a card in that session.
 
 **Reconnecting.** `vault.pending` answers the `vault.approval.pending` and
 `vault.request.pending` events of the waits still open, oldest first, as they were sent: an

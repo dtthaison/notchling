@@ -106,7 +106,7 @@ pub struct Verified {
 }
 
 impl Verified {
-    fn from_value(v: &Value) -> Option<Verified> {
+    pub fn from_value(v: &Value) -> Option<Verified> {
         v.as_object()?;
         let text = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
         Some(Verified {
@@ -135,6 +135,14 @@ pub struct Approval {
     pub folder: String,
     pub verified: Option<Verified>,
     pub machine: Option<String>,
+    pub session: Option<String>,
+}
+
+fn session_of(data: &Value) -> Option<String> {
+    data.get("session")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 impl Approval {
@@ -169,6 +177,7 @@ impl Approval {
                 .and_then(Value::as_str)
                 .filter(|m| !m.is_empty())
                 .map(str::to_owned),
+            session: session_of(data),
         })
     }
 }
@@ -180,6 +189,8 @@ pub struct PendingRequest {
     pub entry: VaultEntry,
     pub existing: bool,
     pub changes: PrefillChanges,
+    pub session: Option<String>,
+    pub verified: Option<Verified>,
 }
 
 impl PendingRequest {
@@ -206,6 +217,8 @@ impl PendingRequest {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             changes,
+            session: session_of(data),
+            verified: data.get("verified").and_then(Verified::from_value),
         })
     }
 }
@@ -265,6 +278,11 @@ mod tests {
             "command": "gh api", "folder": "/w"}))
         .unwrap();
         assert_eq!(a.names, ["github", "npm"]);
+        assert_eq!(a.session, None);
+        let named = Approval::from_event(&json!({"id": "ap-2", "session": "s-1"})).unwrap();
+        assert_eq!(named.session.as_deref(), Some("s-1"));
+        let blank = Approval::from_event(&json!({"id": "ap-3", "session": ""})).unwrap();
+        assert_eq!(blank.session, None);
         assert_eq!((a.command.as_str(), a.folder.as_str()), ("gh api", "/w"));
         assert_eq!(Approval::from_event(&json!({"names": ["x"]})), None);
         let r = PendingRequest::from_event(&json!({"id": "r1",

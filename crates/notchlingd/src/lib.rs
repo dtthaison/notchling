@@ -260,6 +260,8 @@ mod bridge_models_tests;
 #[cfg(test)]
 mod caller_session_tests;
 #[cfg(test)]
+mod caller_trusted_tests;
+#[cfg(test)]
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;

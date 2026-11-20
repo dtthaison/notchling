@@ -8,6 +8,7 @@ pub mod list;
 pub mod pick;
 #[cfg(target_os = "macos")]
 pub mod pick_view;
+pub mod presence;
 #[cfg(target_os = "macos")]
 pub mod prompt_view;
 pub mod renders;

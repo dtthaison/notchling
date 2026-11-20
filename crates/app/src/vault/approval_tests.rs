@@ -125,6 +125,34 @@ fn allow_waits_for_arming_after_the_window_shows_and_deny_never_does() {
 }
 
 #[test]
+fn a_prompt_is_unarmed_while_covered_or_in_a_window_that_is_not_in_front() {
+    let mut m = ApprovalModel::new(&approval("ap-1"));
+    assert!(!m.is_shown(), "a new prompt starts unarmed");
+    assert!(!m.expose(false, 0), "nothing changes while it stays hidden");
+    assert!(m.expose(true, 1_000), "showing starts the delay");
+    assert!(!m.expose(true, 1_500), "staying shown keeps the same start");
+    assert!(m.live(Decision::Once, 1_000 + ARMING_MS));
+    assert!(m.expose(false, 5_000), "a cover disarms it");
+    assert!(!m.live(Decision::Once, 99_000));
+    assert!(m.expose(true, 9_000), "uncovering restarts the delay");
+    assert!(!m.live(Decision::Once, 9_000 + ARMING_MS - 1));
+    assert!(m.live(Decision::Once, 9_000 + ARMING_MS));
+    assert!(m.live(Decision::Deny, 0), "Deny never waits");
+}
+
+#[test]
+fn changing_the_look_restarts_the_delay_only_when_the_prompt_is_exposed() {
+    let mut m = ApprovalModel::new(&approval("ap-1"));
+    m.shown(0);
+    m.rearm(true, 10_000);
+    assert!(!m.live(Decision::Once, 10_000 + ARMING_MS - 1));
+    assert!(m.live(Decision::Once, 10_000 + ARMING_MS));
+    m.rearm(false, 20_000);
+    assert!(!m.is_shown());
+    assert!(!m.live(Decision::Once, 99_000));
+}
+
+#[test]
 fn the_model_is_bound_to_its_approval_and_resolves_only_when_the_daemon_takes_it() {
     let mut m = ApprovalModel::new(&approval("ap-1"));
     assert_eq!(m.prompt.element("vault-once"), "vault-once-ap-1");

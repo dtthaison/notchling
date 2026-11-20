@@ -5,7 +5,7 @@ use notchling_engine::vault::entry::{
 };
 use serde_json::{json, Value};
 
-use super::wire::PendingRequest;
+use super::wire::{PendingRequest, Verified};
 use crate::views::ViewSpec;
 
 pub const NOW: f64 = 1_794_096_000.0;
@@ -116,6 +116,14 @@ pub fn pending_request() -> PendingRequest {
             }),
         },
         request,
+        session: Some("s-chat".into()),
+        verified: Some(Verified {
+            exe: Some("/usr/local/bin/notchling".into()),
+            pid: Some(4242),
+            cwd: Some("/Users/me/work/notchling".into()),
+            parents: vec!["zsh".into(), "claude".into(), "Terminal".into()],
+            folder_matches: Some(true),
+        }),
     }
 }
 

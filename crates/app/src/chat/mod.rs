@@ -144,6 +144,7 @@ pub mod terminal_sample;
 #[cfg(test)]
 mod tree_tests;
 pub mod used;
+pub mod vault_ask;
 #[cfg(target_os = "macos")]
 pub mod view;
 #[cfg(test)]
