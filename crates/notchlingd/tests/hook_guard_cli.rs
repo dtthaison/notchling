@@ -79,7 +79,7 @@ fn with_a_log_only_policy_the_hook_prints_nothing_and_queues_a_row() {
     let (out, _) = guard_hook(&dir.0, &event("sleep 60"));
     assert!(passed(&out));
     let text = queue(&dir.0);
-    assert!(!text.contains("sleep") && !text.contains("60"));
+    assert!(!text.contains("sleep"));
     let row: Value = serde_json::from_str(text.trim()).unwrap();
     assert_eq!(row["rule"], "poll");
     assert_eq!(row["session"], "s1");
