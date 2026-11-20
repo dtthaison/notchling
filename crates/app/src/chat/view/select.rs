@@ -195,6 +195,14 @@ pub fn copied_in(scope: Scope) -> Option<String> {
     })
 }
 
+pub fn keep_only(file: bool, details: bool) {
+    for (scope, mounted) in [(Scope::File, file), (Scope::Details, details)] {
+        if !mounted {
+            state(scope, |s| *s.borrow_mut() = State::default());
+        }
+    }
+}
+
 pub fn clear() {
     for scope in [Scope::File, Scope::Details] {
         state(scope, |s| {
@@ -605,6 +613,39 @@ mod tests {
         take_over(Scope::File);
         assert_eq!(copied(), None);
         assert!(!selected_in(Scope::Details));
+    }
+
+    #[test]
+    fn a_scope_that_is_not_mounted_loses_its_selection_notes_and_copy() {
+        selected_note(Scope::File, "file-line", "from the file");
+        selected_note(Scope::Details, "fact-0", "from the details");
+        keep_only(true, true);
+        assert_eq!(copied().as_deref(), Some("from the file"));
+        keep_only(false, true);
+        assert!(!selected_in(Scope::File));
+        assert_eq!(copied().as_deref(), Some("from the details"));
+        state(Scope::File, |s| {
+            let s = s.borrow();
+            assert!(s.notes.is_empty() && s.at.is_empty() && s.hits.is_empty());
+            assert!(s.anchor.is_none() && s.focus.is_none() && !s.dragging);
+        });
+        keep_only(false, false);
+        assert!(!selected_in(Scope::Details));
+        assert_eq!(copied(), None);
+        state(Scope::Details, |s| assert!(s.borrow().notes.is_empty()));
+    }
+
+    #[test]
+    fn a_scope_that_is_mounted_keeps_everything_it_had() {
+        selected_note(Scope::Details, "fact-0", "from the details");
+        state(Scope::Details, |s| s.borrow_mut().dragging = true);
+        keep_only(false, true);
+        assert!(selected_in(Scope::Details));
+        state(Scope::Details, |s| {
+            let s = s.borrow();
+            assert_eq!(s.notes.len(), 1);
+            assert!(s.dragging);
+        });
     }
 
     #[test]

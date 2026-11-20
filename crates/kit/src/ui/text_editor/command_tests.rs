@@ -78,6 +78,21 @@ fn a_shortcut_needs_command_alone_and_takes_either_case_of_the_letter() {
         shift: true,
         ..Modifiers::default()
     }));
+    let shifted = Modifiers {
+        platform: true,
+        shift: true,
+        ..Modifiers::default()
+    };
+    assert!(is_shortcut(&shifted), "Cmd+Shift+Z stays redo");
+    assert!(
+        !edit_shortcut(&shifted),
+        "Cmd+Shift+C, X, V and A are not ours"
+    );
+    assert!(edit_shortcut(&Modifiers {
+        platform: true,
+        ..Modifiers::default()
+    }));
+    assert!(!edit_shortcut(&keys(false, false)));
     assert_eq!(shortcut_letter("C"), "c");
     assert_eq!(shortcut_letter("v"), "v");
     assert_eq!(shortcut_letter("enter"), "enter");

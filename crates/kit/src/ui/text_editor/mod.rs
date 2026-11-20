@@ -54,6 +54,10 @@ pub(crate) fn is_shortcut(m: &Modifiers) -> bool {
     m.platform && !m.alt && !m.control
 }
 
+pub(crate) fn edit_shortcut(m: &Modifiers) -> bool {
+    is_shortcut(m) && !m.shift
+}
+
 pub(crate) fn shortcut_letter(key: &str) -> String {
     key.to_ascii_lowercase()
 }
@@ -301,6 +305,7 @@ impl TextEditor {
         let before = self.edit.text().to_owned();
         let mut vertical = false;
         let shortcut = is_shortcut(m);
+        let edit = edit_shortcut(m);
         let letter = shortcut_letter(&k.key);
         match letter.as_str() {
             "enter" => {
@@ -333,22 +338,22 @@ impl TextEditor {
             }
             "home" => self.edit.move_left(Unit::Document, extend),
             "end" => self.edit.move_right(Unit::Document, extend),
-            "a" if shortcut && !m.shift => self.apply(Command::SelectAll, cx),
-            "c" if shortcut
+            "a" if edit => self.apply(Command::SelectAll, cx),
+            "c" if edit
                 && route(Command::Copy, self.edit.selection().is_empty(), self.masked)
                     == Route::Pass =>
             {
                 return
             }
-            "x" if shortcut
+            "x" if edit
                 && route(Command::Cut, self.edit.selection().is_empty(), self.masked)
                     == Route::Pass =>
             {
                 return
             }
-            "c" if shortcut => self.apply(Command::Copy, cx),
-            "x" if shortcut => self.apply(Command::Cut, cx),
-            "v" if shortcut => self.apply(Command::Paste, cx),
+            "c" if edit => self.apply(Command::Copy, cx),
+            "x" if edit => self.apply(Command::Cut, cx),
+            "v" if edit => self.apply(Command::Paste, cx),
             "z" if shortcut => self.apply(
                 if m.shift {
                     Command::Redo

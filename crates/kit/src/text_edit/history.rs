@@ -34,6 +34,9 @@ impl History {
     }
 
     pub fn record(&mut self, before: State, group: Option<Group>) {
+        if self.off {
+            return;
+        }
         self.redo.clear();
         if group.is_some() && group == self.open {
             return;

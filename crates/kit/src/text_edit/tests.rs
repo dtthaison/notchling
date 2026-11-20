@@ -451,3 +451,25 @@ fn a_move_to_an_edge_takes_the_start_or_the_end_and_extends_from_the_anchor() {
     e.move_to_edge(false, true);
     assert_eq!(e.selection(), 0..4);
 }
+
+#[test]
+fn a_history_that_is_off_records_nothing_even_when_asked_directly() {
+    use super::history::{Group, History, State};
+    let state = |text: &str| State {
+        text: text.to_owned(),
+        anchor: 0,
+        head: 0,
+    };
+    let mut history = History::default();
+    history.stop();
+    history.record(state("secret"), Some(Group::Typing));
+    history.record(state("secret two"), None);
+    assert!(history.undo(state("now")).is_none());
+    assert!(history.redo(state("now")).is_none());
+    let mut on = History::default();
+    on.record(state("kept"), None);
+    assert_eq!(
+        on.undo(state("now")).map(|s| s.text).as_deref(),
+        Some("kept")
+    );
+}
