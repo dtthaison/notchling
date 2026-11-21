@@ -26,6 +26,7 @@ pub mod ops {
     pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
     pub const SETTINGS_GET_ACTING: &str = "settings.get_acting";
     pub const PROMPTS_LIST: &str = "prompts.list";
+    pub const PROMPTS_MINE: &str = "prompts.mine";
     pub const SESSION_QUESTION: &str = "session.question";
     pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
     pub const SESSION_DIALOG: &str = "session.dialog";
@@ -135,6 +136,7 @@ pub mod ops {
     pub const GIT_BRANCH_LIST: &str = "git.branch_list";
 
     pub const ACTIVITY_LIST: &str = "activity.list";
+    pub const ACTIVITY_MINE: &str = "activity.mine";
     pub const LOG_VERIFY: &str = "log.verify";
     pub const LOG_CHAIN_START: &str = "log.chain.start";
     pub const LOG_AUDIT_DELETE: &str = "log.audit.delete";
@@ -171,6 +173,7 @@ pub mod ops {
 
     pub const SESSION_SEND: &str = "session.send";
     pub const OUTBOX_LIST: &str = "outbox.list";
+    pub const OUTBOX_MINE: &str = "outbox.mine";
     pub const OUTBOX_EDIT: &str = "outbox.edit";
     pub const OUTBOX_REMOVE: &str = "outbox.remove";
     pub const OUTBOX_HOLD: &str = "outbox.hold";
@@ -265,6 +268,14 @@ pub mod topics {
     pub const ASKS: &str = "asks";
     pub const ASK_CHANGED: &str = "ask.changed";
     pub const ASK_REMOVED: &str = "ask.removed";
+
+    pub const MINE_CONSENTS: &str = "mine.consents";
+    pub const MINE_ASKS: &str = "mine.asks";
+    pub const MINE_JOBS: &str = "mine.jobs";
+    pub const MINE_SESSIONS: &str = "mine.sessions";
+    pub const CONSENT_CHANGED: &str = "consent.changed";
+    pub const MINE_PREFIX: &str = "mine.";
+    pub const SCOPED: [&str; 2] = [MINE_CONSENTS, MINE_ASKS];
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -64,6 +64,7 @@ pub const EXIT_CODES: &[(i32, &str, &str)] = &[
 pub const REASONS: &[&str] = &[
     "usage",
     "bad_value",
+    "unknown_topic",
     "unknown_key",
     "key_reused",
     "not_running",
@@ -105,7 +106,7 @@ pub fn name_of(exit: i32) -> &'static str {
 
 pub fn exit_of_reason(reason: &str) -> Option<i32> {
     Some(match reason {
-        "usage" | "bad_value" | "unknown_key" | "key_reused" => BAD_REQUEST,
+        "usage" | "bad_value" | "unknown_topic" | "unknown_key" | "key_reused" => BAD_REQUEST,
         "not_running" | "untrusted_daemon" | "old_daemon" | "timeout" => NOT_RUNNING,
         "switch_off" | "app_only" | "no_app" | "not_yet" | "never" | "internal_op"
         | "other_session" | "other_organization" | "no_session" | "needs_consent" | "other" => {
@@ -145,6 +146,10 @@ pub const VALUE_FLAGS: &[&str] = &[
     "--tool",
     "--pool",
     "--since",
+    "--topic",
+    "--until",
+    "--count",
+    "--limit",
 ];
 
 pub fn wants_json(args: &[String]) -> bool {

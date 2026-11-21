@@ -3,7 +3,7 @@ use crate::peer::{same_user, PeerInfo};
 use crate::server::{AgentCall, AgentIdentity, Caller, OpHome, OpSpec, Shared, Slot};
 use crate::transport::{self, Stream};
 use crate::wire::{
-    err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
+    err_reply, ok_reply, ops, topics, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
     Subscribe, Tier, API_VERSION,
 };
 use notchling_events::kinds::choices::AgentResult;
@@ -302,13 +302,46 @@ impl Session {
     fn subscribe(&mut self, args: &Value) -> Result<Value, ApiError> {
         let subscribe: Subscribe = serde_json::from_value(args.clone())
             .map_err(|e| ApiError::bad_request(format!("bad subscribe: {e}")))?;
+        let scoped = subscribe
+            .topics
+            .iter()
+            .any(|t| t.starts_with(topics::MINE_PREFIX));
+        if let Some(reserved) = subscribe.topics.iter().find_map(|t| match t.as_str() {
+            topics::MINE_JOBS => Some(5),
+            topics::MINE_SESSIONS => Some(4),
+            _ => None,
+        }) {
+            return Err(ApiError::bad_request("This topic is not available yet.")
+                .with_data(serde_json::json!({"reason": "not_yet", "phase": reserved})));
+        }
         let known = self.shared.handler.topics();
         if let Some(bad) = subscribe
             .topics
             .iter()
-            .find(|t| !known.contains(&t.as_str()))
+            .find(|t| !known.contains(&t.as_str()) && !topics::SCOPED.contains(&t.as_str()))
         {
-            return Err(ApiError::bad_request(format!("no topic named {bad}")));
+            return Err(
+                ApiError::bad_request(format!("no topic named {bad}")).with_reason("unknown_topic")
+            );
+        }
+        let owner = self
+            .identity
+            .as_ref()
+            .filter(|i| i.verified)
+            .and_then(|i| i.session.clone());
+        if scoped && owner.is_none() {
+            self.shared.refused(
+                ops::EVENTS_SUBSCRIBE,
+                Some(self.tier),
+                self.peer(),
+                RefusedWhy::Forbidden,
+                None,
+            );
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "Only an agent inside a Notchling session can follow its own topics.",
+            )
+            .with_reason("no_session"));
         }
         let app_only = subscribe
             .topics
@@ -337,7 +370,9 @@ impl Session {
                 "only the Notchling app may follow this topic",
             ));
         }
-        self.shared.hub.subscribe(self.id, &subscribe.topics);
+        self.shared
+            .hub
+            .subscribe(self.id, &subscribe.topics, owner.as_deref());
         self.subscribed |= !subscribe.topics.is_empty();
         Ok(serde_json::json!({ "topics": subscribe.topics }))
     }

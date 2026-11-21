@@ -48,6 +48,21 @@ pub(crate) fn wire(row: &Row, position: usize, note: Option<&str>, shown: Option
     out
 }
 
+pub(crate) fn receipt(row: &Row) -> Value {
+    let mut out = json!({
+        "id": row.id,
+        "state": row.state.as_str(),
+        "tries": row.tries,
+        "queuedMs": row.queued_ms,
+        "updatedMs": row.updated_ms,
+        "via": row.via.as_str(),
+    });
+    if let Some(why) = row.why {
+        out["why"] = json!(why.as_str());
+    }
+    out
+}
+
 pub(crate) fn keeps_note(row: &Row) -> bool {
     row.state == State::Box || shows_error(row)
 }

@@ -23,6 +23,8 @@ mod server_audit_reason_tests;
 mod server_audit_tests;
 #[cfg(test)]
 mod server_events_tests;
+#[cfg(test)]
+mod server_scoped_tests;
 
 #[cfg(test)]
 mod agent_called_tests;

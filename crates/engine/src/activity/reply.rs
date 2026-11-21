@@ -43,6 +43,7 @@ pub struct Query {
     pub groups: Vec<String>,
     pub event_kinds: Vec<String>,
     pub session: Option<String>,
+    pub involving: Option<String>,
     pub before_seq: Option<u64>,
 }
 
@@ -109,6 +110,7 @@ impl Query {
             groups,
             event_kinds,
             session,
+            involving: None,
             before_seq,
         })
     }
@@ -121,6 +123,7 @@ impl Query {
             groups: Vec::new(),
             event_kinds: Vec::new(),
             session: None,
+            involving: None,
             before_seq: None,
         }
     }
@@ -132,6 +135,7 @@ impl Query {
             kinds: self.event_kinds.clone(),
             groups: self.groups.clone(),
             session: self.session.clone(),
+            involving: self.involving.clone(),
             limit: if self.kinds.is_empty() {
                 self.limit
             } else {

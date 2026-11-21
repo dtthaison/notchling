@@ -2,7 +2,9 @@ use crate::late_emit::LateSalt;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use notchling_engine::activity::{self, ActivityRow, EventsDb, ImportFiles, Lookup, Query};
-use notchling_local_api::{ops, ApiError, Caller, OpSpec};
+use notchling_events::registry;
+use notchling_events::spec::AgentsRead;
+use notchling_local_api::{bound_identity, ops, ApiError, Caller, OpSpec};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -78,24 +80,70 @@ impl ActivityOps {
     }
 }
 
+fn own_kinds() -> Vec<String> {
+    registry::all()
+        .into_iter()
+        .filter(|k| k.agents_read == AgentsRead::Own)
+        .map(|k| k.name.to_owned())
+        .collect()
+}
+
+impl ActivityOps {
+    fn mine(&self, args: &Value) -> Result<Value, ApiError> {
+        let Some(session) = bound_identity()
+            .filter(|who| who.verified)
+            .and_then(|who| who.session)
+        else {
+            return Ok(serde_json::json!({"rows": [], "truncated": false, "reason": "no_session"}));
+        };
+        let mut query = Query::from_args(args).map_err(ApiError::bad_request)?;
+        let allowed = own_kinds();
+        query.event_kinds = if query.event_kinds.is_empty() {
+            allowed
+        } else {
+            query
+                .event_kinds
+                .into_iter()
+                .filter(|k| allowed.contains(k))
+                .collect()
+        };
+        query.session = None;
+        query.groups = Vec::new();
+        query.involving = Some(session);
+        if query.event_kinds.is_empty() {
+            return Ok(serde_json::json!({"rows": [], "truncated": false}));
+        }
+        Ok(self.reply_of(&query))
+    }
+
+    fn reply_of(&self, query: &Query) -> Value {
+        let rows = {
+            let db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
+            activity::fetch(&db, query)
+        };
+        match &self.lazy {
+            Some(lazy) => activity::reply_with(&rows, query, &*self.names, &*lazy()),
+            None => activity::reply(&rows, query, &*self.names),
+        }
+    }
+}
+
 impl OpGroup for ActivityOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        (op == ops::ACTIVITY_LIST).then_some(OpSpec::APP_QUIET)
+        match op {
+            ops::ACTIVITY_LIST => Some(OpSpec::APP_QUIET),
+            ops::ACTIVITY_MINE => Some(OpSpec::AGENT_READ),
+            _ => None,
+        }
     }
 
     fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         match op {
             ops::ACTIVITY_LIST => {
                 let query = Query::from_args(args).map_err(ApiError::bad_request)?;
-                let rows = {
-                    let db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
-                    activity::fetch(&db, &query)
-                };
-                Ok(match &self.lazy {
-                    Some(lazy) => activity::reply_with(&rows, &query, &*self.names, &*lazy()),
-                    None => activity::reply(&rows, &query, &*self.names),
-                })
+                Ok(self.reply_of(&query))
             }
+            ops::ACTIVITY_MINE => self.mine(args),
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }
     }

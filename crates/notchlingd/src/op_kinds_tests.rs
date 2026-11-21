@@ -66,7 +66,7 @@ const OWN_QUIET: [&str; 17] = [
     ops::CONSENT_LIST,
 ];
 
-const NEVER_QUIET: [&str; 141] = [
+const NEVER_QUIET: [&str; 144] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -205,6 +205,9 @@ const NEVER_QUIET: [&str; 141] = [
     ops::TAILSCALE_SWITCH,
     ops::CONSENT_GET,
     ops::CONSENT_MINE,
+    ops::OUTBOX_MINE,
+    ops::ACTIVITY_MINE,
+    ops::PROMPTS_MINE,
     ops::CONSENT_CANCEL,
     ops::CONSENT_ANSWER,
     ops::CONSENT_OPENED,

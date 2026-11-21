@@ -251,6 +251,13 @@ impl ServerHandle {
         }
     }
 
+    pub fn publish_to(&self, owner: &str, topic: &str, event: &str, data: &Value) -> usize {
+        match crate::framing::encode_line(&crate::wire::event_line(event, data)) {
+            Some(line) => self.shared.hub.publish_to(owner, topic, &line),
+            None => 0,
+        }
+    }
+
     pub fn shutdown(&self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.shared.hub.close_all();

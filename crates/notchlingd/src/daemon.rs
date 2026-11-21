@@ -105,6 +105,12 @@ impl Room for LateRoom {
         self.1.relay(now_ms(), topic, event, data);
     }
 
+    fn publish_to(&self, owner: &str, topic: &str, event: &str, data: &Value) {
+        if let Some(handle) = self.0.get() {
+            handle.publish_to(owner, topic, event, data);
+        }
+    }
+
     fn can_answer(&self) -> bool {
         self.0.get().is_some_and(ServerHandle::app_attached)
     }

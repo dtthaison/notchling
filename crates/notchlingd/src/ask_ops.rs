@@ -271,6 +271,17 @@ impl AskOps {
             topics::ASK_CHANGED,
             &json!({"row": wire(row, self.waiting(&row.id), true)}),
         );
+        self.tell_owner(row);
+    }
+
+    fn tell_owner(&self, row: &Row) {
+        let Some(owner) = row.session_id.as_deref() else {
+            return;
+        };
+        let data =
+            json!({"row": wire(row, self.waiting(&row.id), false), "state": row.state.as_str()});
+        self.room
+            .publish_to(owner, topics::MINE_ASKS, topics::ASK_CHANGED, &data);
     }
 
     pub fn emit_then(&self, row: &Row, then: AskThen) {

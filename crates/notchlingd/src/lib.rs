@@ -178,6 +178,7 @@ pub mod log_queue;
 pub mod log_retention;
 pub mod log_rotate;
 pub mod log_start;
+pub mod mine_cli;
 pub mod models_cli;
 pub mod models_ops;
 pub mod op_group;
@@ -242,6 +243,7 @@ pub mod versions_drift;
 pub mod versions_ops;
 pub mod versions_update;
 pub mod wake_loop;
+pub mod watch_cli;
 
 #[cfg(test)]
 mod accounts_late_tests;
@@ -261,6 +263,8 @@ mod acting_ops_tests;
 mod acting_permission_tests;
 #[cfg(test)]
 mod acting_shell_output_tests;
+#[cfg(test)]
+mod activity_mine_tests;
 #[cfg(test)]
 mod activity_ops_tests;
 #[cfg(test)]
@@ -444,6 +448,8 @@ mod log_ops_tests;
 #[cfg(test)]
 mod log_retention_tests;
 #[cfg(test)]
+mod mine_cli_tests;
+#[cfg(test)]
 mod models_ops_tests;
 #[cfg(test)]
 mod organizations_ops_tests;
@@ -453,6 +459,8 @@ mod outbox_testkit;
 mod pages_ops_tests;
 #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod process_facts_tests;
+#[cfg(test)]
+mod prompts_mine_tests;
 #[cfg(test)]
 mod providers_add_tests;
 #[cfg(test)]
@@ -509,6 +517,8 @@ mod versions_soak_tests;
 mod versions_update_tests;
 #[cfg(test)]
 mod wake_loop_tests;
+#[cfg(test)]
+mod watch_cli_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;
@@ -565,6 +575,8 @@ pub fn run(command: Command) -> i32 {
         Command::Consent { args } => consent_cli::run(&args, false),
         Command::Consents { args } => consent_cli::run(&args, true),
         Command::Read { name, args } => reads_cli::run(&name, &args),
+        Command::Watch { args } => watch_cli::run(&args),
+        Command::Mine { read, args } => mine_cli::run(read, &args),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Session { args } => match args.first().map(String::as_str) {
             Some("reload") => reload_cli::run(&args),

@@ -99,6 +99,36 @@ Whatever `session.send` refuses, `session.reply` refuses the same way, before an
 
 What may be cleared. A box that holds the whole message, or the whole or a start or an end (at least 10 letters and digits) of a text this daemon tried to put in that session and did not see go out (the last five per session, 12 hours, in memory), is cleared with the reply's usual keys (Ctrl+E, Ctrl+U, Backspace per line; never Ctrl+K, Esc or Ctrl+C) and the new message goes on. Any other text is never typed over. `clear_box: true` (on `session.send` or `session.reply`, or `outbox.resend {clear_box: true}` for a message already saved) clears the box with those keys whatever it holds, checks that it is empty (a box that does not empty, or that a person typed into meanwhile, is `box` again, with nothing pasted and no Enter) and then types and sends as usual. A folded paste (`[Pasted text #N +M lines]`) is only ever cleared that way. The error's `data` is a general, additive part of the wire: `{"code", "message", "data"?}`.
 
+## `events.subscribe` scoped topics and the session reads
+
+Phase 2 of the [design](superpowers/specs/2026-11-21-agents-first-design.md): an agent follows its own events instead of polling, and reads its own session's data. No consent class: every op here is a read.
+
+**Scoped topics.** `events.subscribe` takes two more topics, `mine.consents` and `mine.asks`. The hub (`local-api/src/hub.rs`) delivers an event on a scoped topic only to a subscriber whose verified session owns it; `ServerHandle::publish_to(owner, topic, event, data)` is the only way to send one, and `publish` never reaches a scoped subscriber. A caller with no verified session (`verified: false`, or no session id) that asks for a scoped topic is refused with `forbidden`, reason `no_session`, and nothing is subscribed; asking for the public topics (`settings`) alone works for every agent. `mine.jobs` and `mine.sessions` are reserved: asking for one is `bad_request` with data `{reason: "not_yet", phase: 5 or 4}`.
+
+| Topic | Event | Data |
+| --- | --- | --- |
+| `mine.consents` | `consent.changed` | `{request, state}`: the request as the `consent_ops.rs` view and its state, on every step (asked, opened, allowed, applied and the rest) |
+| `mine.asks` | `ask.changed` | `{row, state}`: the question's row without the answer's waiter flag |
+| `mine.asks` | `ask.removed` | `{id, state: "removed"}` |
+
+The public events of the `settings` topic are `settings.changed` and `settings.switch`. `notchling watch` (`watch_cli.rs`) maps `--topic mine.consents`, `mine.asks`, `settings.changed` and `settings.switch` to them and prints one JSON line per event (the wire event). With no `--topic` and no `--until` it asks for all four and, when the daemon refuses the scoped ones (a shell, not a session), falls back to the two public ones. `--until <state>` ends on the first event whose `data.state` equals it (`applied` for a consent request); only `mine.consents` and `mine.asks` events carry a state, so `--until` never falls back to the public topics (a shell gets `no_session`, exit 4), `--until` with only `settings.*` topics is a usage error (exit 2) and so is an empty state. `--count <n>` ends after n events; `--timeout <seconds>` ends with exit 124 (a value too large to count is no timeout). Exit 0 on `--until` or `--count`; a dropped connection is retried like `notchling ask` does, within the timeout, and only while the daemon is not running: any other failure on the way back (a refused topic, an old daemon) ends the watch with that error, and no connection is opened after the timeout.
+
+**The session reads.** All agent tier, `OpSpec::AGENT_READ`, answered for the caller's own verified session only. A caller with no verified session (a shell, an unverified peer) gets an empty reply with `reason: "no_session"`, never another session's rows and never data mapped to a default session.
+
+| Op | Args | Reply |
+| --- | --- | --- |
+| `outbox.mine` | `{receipts?: bool}` | `{rows, others: {messages, sessions}}`: the session's queued messages as `outbox.list` shows them (text included); with `receipts: true` each row is `{id, state, tries, queuedMs, updatedMs, via, why?}` and never the text. Other sessions' messages are counted in `others`, never listed. |
+| `activity.mine` | `{event_kinds?, since?, limit?, kinds?}` | `{rows, truncated}` as `activity.list` shows them, only events that belong to the session (`session` is its id, or `session` is empty and the actor is its id) and only kinds whose `agents_read` is `Own`. `session` and `groups` in the args are ignored; `event_kinds` can only narrow. |
+| `prompts.mine` | `{}` | `{rows}`: the session's pending prompts (permission and question), as `prompts.list` shows them; the Antigravity sidecar's too. Never an answer. |
+
+| Command | Op | Notes |
+| --- | --- | --- |
+| `notchling outbox [--json]` | `outbox.mine` | One line per message: `id  state  first line`, then the count of other sessions' messages. |
+| `notchling receipts [--json]` | `outbox.mine` with `receipts`, `activity.mine` with `session.outbox` | `id  state  why` for each queued message, then `time  event  result` for each delivered one (the session's `session.outbox` events, `events` in `--json`); `Nothing.` when both are empty. Other sessions' counts are `notchling outbox` only. |
+| `notchling activity [--kind <event>]... [--since <ms>] [--limit <n>] [--json]` | `activity.mine` | `time  event  result`. |
+| `notchling prompts [--json]` | `prompts.mine` | `id  kind  summary`. |
+| `notchling watch [--topic <t>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]` | `events.subscribe` | As above. |
+
 ## `activity_ops.rs`
 
 What Settings > Activity shows: `activity.list`, over `notchling_engine::activity`. App tier, read only,
@@ -284,7 +314,7 @@ Reply: `{api, daemon, caller: {tier, tool, verified, session?}, app: {attached, 
 
 ### `data.reason`
 
-An error's `data` carries `reason`, one of a closed list the command line turns into an exit code (`contract.rs`, `REASONS`): `usage`, `bad_value`, `unknown_key`, `key_reused`, `not_running`, `untrusted_daemon`, `old_daemon`, `timeout`, `switch_off`, `app_only`, `no_app`, `not_yet`, `never`, `internal_op`, `other_session`, `other_organization`, `no_session`, `needs_consent`, `busy`, `denied`, `cancelled`, `expired`, `withdrawn`, `already_answered`, `failed`, `internal`, `other`. The daemon sends the ones it knows (`switch_off` with `switch`, `no_app`, `never` with `never: true`, `unknown_key`, `bad_value`, `busy`, `already_answered`); the command adds `usage`, `not_running`, `untrusted_daemon`, `old_daemon` and `timeout`. An error with no `reason` is read by its `code`: `bad_request` is `bad_value`, `forbidden` is `other`, `needs_approval` is `no_app`, `failed` is `failed`. The field is additive.
+An error's `data` carries `reason`, one of a closed list the command line turns into an exit code (`contract.rs`, `REASONS`): `usage`, `bad_value`, `unknown_topic`, `unknown_key`, `key_reused`, `not_running`, `untrusted_daemon`, `old_daemon`, `timeout`, `switch_off`, `app_only`, `no_app`, `not_yet`, `never`, `internal_op`, `other_session`, `other_organization`, `no_session`, `needs_consent`, `busy`, `denied`, `cancelled`, `expired`, `withdrawn`, `already_answered`, `failed`, `internal`, `other`. The daemon sends the ones it knows (`switch_off` with `switch`, `no_app`, `never` with `never: true`, `unknown_key`, `unknown_topic` for a topic `events.subscribe` does not know (answered before any check of who is asking, and never recorded as a refusal), `bad_value`, `busy`, `already_answered`); the command adds `usage`, `not_running`, `untrusted_daemon`, `old_daemon` and `timeout`. An error with no `reason` is read by its `code`: `bad_request` is `bad_value`, `forbidden` is `other`, `needs_approval` is `no_app`, `failed` is `failed`. The field is additive.
 
 A refusal by tier of an app-tier op from an agent is `forbidden` with the registry's answer (`Handler::agent_path`): `app_only` for the app's own views, `not_yet` with `phase` and `ask` for an op whose agent path comes in a later phase, `never` with `never: true` for a user-only op, `internal_op` for the hook and node ops. `crates/notchlingd/tests/golden/agent-paths.json` and `docs/agent-paths.md` list every op's place; `GUARD-AGENT-PATH` checks them.
 
