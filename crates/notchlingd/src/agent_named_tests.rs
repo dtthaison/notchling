@@ -278,7 +278,7 @@ fn the_lazy_lookup_gives_the_same_answer_as_the_eager_one() {
     ));
     let lazy = lazy_label(salt(), sessions);
     let eager = call(AgentTool::Claude, Some("ba1000001"), None);
-    let events = run(&main, &[eager.clone()]);
+    let events = run(&main, std::slice::from_ref(&eager));
     let row = called_row(&eager.identity);
     let (asker, agent) = lazy(&row).expect("a label");
     assert_eq!(Some(asker), text(&events[0], "asker"));
