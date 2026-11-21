@@ -4,7 +4,7 @@ use crate::vault_caller::Processes;
 use notchling_engine::ask::delegate_tool;
 use notchling_engine::ask::evidence::{command_hash, output_hash};
 use notchling_engine::control::session::home_of;
-use notchling_engine::organizations::Organizations;
+use notchling_engine::organizations::{Organizations, PERSONAL_ID};
 use notchling_engine::sessions::Roots;
 use notchling_events::kinds::choices::AgentTool;
 use notchling_local_api::AgentIdentity;
@@ -98,6 +98,9 @@ impl Identifier {
         });
         let mut who = AgentIdentity::shell();
         who.root = self.root_of(pid);
+        let file_cwd = hit
+            .as_ref()
+            .and_then(|h| h.cwd.clone().map(|cwd| (h.session_id.clone(), cwd)));
         match (self.launched(&chain), self.delegated(&chain), hit) {
             (Some((tool, session)), delegated, _) => {
                 who.tool = delegated.unwrap_or(tool);
@@ -117,7 +120,9 @@ impl Identifier {
             (None, None, None) => who.tool = self.tool_by_name(&chain),
         }
         if let Some(session) = who.session.as_deref() {
-            who.folder = self.folder_of(session);
+            who.folder = self
+                .folder_of(session)
+                .or_else(|| file_cwd.filter(|(id, _)| id == session).map(|(_, cwd)| cwd));
         }
         if who.verified {
             who.organization = self.organization_of(who.folder.as_deref());
@@ -235,22 +240,33 @@ impl Identifier {
 
     fn folder_of(&self, session: &str) -> Option<String> {
         let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        list.as_array()?
-            .iter()
-            .find(|row| row.get("id").and_then(Value::as_str) == Some(session))
-            .and_then(|row| row.get("cwd").and_then(Value::as_str))
-            .filter(|cwd| !cwd.is_empty())
-            .map(str::to_string)
+        folder_in(&list, session)
     }
 
     fn organization_of(&self, folder: Option<&str>) -> Option<String> {
-        let found = self
-            .organizations
-            .as_ref()?
-            .view()
-            .folder_here(Path::new(folder?), &self.home);
-        Some(found.organization)
+        let book = self.organizations.as_ref()?;
+        let Some(folder) = folder else {
+            return Some(PERSONAL_ID.to_owned());
+        };
+        Some(
+            book.view()
+                .folder_here(Path::new(folder), &self.home)
+                .organization,
+        )
     }
+}
+
+pub(crate) fn folder_in(list: &Value, session: &str) -> Option<String> {
+    let rows = list.as_array()?;
+    let by = |key: &str| {
+        rows.iter()
+            .find(|row| row.get(key).and_then(Value::as_str) == Some(session))
+    };
+    by("id")
+        .or_else(|| by("resumeSessionId"))
+        .and_then(|row| row.get("cwd").and_then(Value::as_str))
+        .filter(|cwd| !cwd.is_empty())
+        .map(str::to_string)
 }
 
 pub fn for_daemon(
@@ -285,3 +301,7 @@ pub fn for_daemon(
 #[cfg(test)]
 #[path = "identity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "identity_job_tests.rs"]
+mod job_tests;

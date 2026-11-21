@@ -104,12 +104,7 @@ impl ReadsOps {
 
     fn folder_of(&self, session: &str) -> Option<String> {
         let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        list.as_array()?
-            .iter()
-            .find(|row| row.get("id").and_then(Value::as_str) == Some(session))
-            .and_then(|row| row.get("cwd").and_then(Value::as_str))
-            .filter(|cwd| !cwd.is_empty())
-            .map(str::to_string)
+        crate::identity::folder_in(&list, session)
     }
 
     fn org_of_folder(&self, folder: &str) -> String {

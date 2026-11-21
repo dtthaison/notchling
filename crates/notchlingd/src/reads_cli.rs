@@ -214,9 +214,13 @@ fn limits(query: Value, json: bool, ask: &mut Ask<'_>) -> i32 {
         return contract::OK;
     }
     if reply["reason"] == json!("no_session") {
-        return Failure::failed("No session: limits are read for a verified session only.")
-            .with_op(ops::LIMITS_SUMMARY)
-            .report_with(json, &reply);
+        return Failure::new(
+            contract::FAILED,
+            "no_session",
+            "No session: limits are read for a verified session only.",
+        )
+        .with_op(ops::LIMITS_SUMMARY)
+        .report_with(json, &reply);
     }
     let verdict = if query.get("pool").is_some() {
         reply["pool"].clone()
