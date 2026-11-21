@@ -192,9 +192,11 @@ impl VaultOps {
         };
         if args.get("dryRun").and_then(Value::as_bool) == Some(true) {
             let would = consent.would(&opening)?;
-            return Ok(json!({"dryRun": true, "op": ops::VAULT_REQUEST, "would": "ask",
+            return Ok(
+                json!({"dryRun": true, "op": ops::VAULT_REQUEST, "would": "ask",
                              "change": {"name": request.name, "update": existing.is_some()},
-                             "request": would, "error": null}));
+                             "request": would, "error": null}),
+            );
         }
         let opened = consent.open(caller, opening)?;
         let row = opened.row().clone();

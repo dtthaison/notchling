@@ -323,7 +323,11 @@ fn set(
     let end = Instant::now() + flags.timeout;
     let mut last = first;
     while Instant::now() < end {
-        let slice = POLL.min(end.saturating_duration_since(Instant::now()).as_secs().max(1));
+        let slice = POLL.min(
+            end.saturating_duration_since(Instant::now())
+                .as_secs()
+                .max(1),
+        );
         last = call(
             ops::SETTINGS_ASKED,
             json!({"id": id, "wait": slice}),

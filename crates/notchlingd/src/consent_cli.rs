@@ -95,11 +95,16 @@ pub fn failure_of(request: &Value, op: &str) -> Failure {
     let state = state_of(request);
     let code = exit_of(state);
     let (reason, message) = match state {
-        "waiting" | "opened" | "applying" => ("needs_consent", "The request still waits for the user."),
+        "waiting" | "opened" | "applying" => {
+            ("needs_consent", "The request still waits for the user.")
+        }
         "denied" => ("denied", "The user denied this request."),
         "cancelled" => ("cancelled", "The request was withdrawn."),
         "expired" => ("expired", "The user didn't answer in time."),
-        "withdrawn" => ("withdrawn", "The request was withdrawn before it was applied."),
+        "withdrawn" => (
+            "withdrawn",
+            "The request was withdrawn before it was applied.",
+        ),
         _ => ("failed", "The request didn't go through."),
     };
     let mut failure = Failure::new(code, reason, message)

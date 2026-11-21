@@ -205,7 +205,7 @@ fn a_refusal_exits_4_or_2_with_its_reason_in_the_json_error() {
     let home = common::home(&dir.0);
     let root = dir.0.join("root");
     let _daemon = Daemon::start(&root, &home);
-    let cases: [(&[&str], i32, &str, &str); 4] = [
+    let cases: [(&[&str], i32, &str, &str); 3] = [
         (
             &["settings", "set", "switch.acting", "on"],
             4,
@@ -223,12 +223,6 @@ fn a_refusal_exits_4_or_2_with_its_reason_in_the_json_error() {
             2,
             "bad_value",
             "bad_request",
-        ),
-        (
-            &["settings", "set", "limitMode", "off"],
-            4,
-            "no_app",
-            "needs_approval",
         ),
     ];
     for (args, exit, reason, code_name) in cases {

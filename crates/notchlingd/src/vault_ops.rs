@@ -411,9 +411,10 @@ impl VaultOps {
         let entry = entry_from(args.get("entry"))?;
         let value = value_from(args.get("value"))?;
         let used = match (&request, self.consent.get()) {
-            (Some(id), Some(consent)) => {
-                Some((consent, consent.use_for_app(caller, id, SECRET_REQUEST, &entry.name)?))
-            }
+            (Some(id), Some(consent)) => Some((
+                consent,
+                consent.use_for_app(caller, id, SECRET_REQUEST, &entry.name)?,
+            )),
             _ => None,
         };
         let ended = |outcome: Result<Value, String>| {

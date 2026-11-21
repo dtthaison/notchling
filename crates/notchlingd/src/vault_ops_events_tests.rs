@@ -8,7 +8,6 @@ use notchling_engine::inbox::ActionId as Action;
 use notchling_events::envelope::{Actor, ActorTier};
 use notchling_events::scope::Scope;
 use notchling_events::{Device, Ref};
-use std::sync::atomic::Ordering;
 
 const TOKEN: &str = "fake-token-value-0001";
 
@@ -172,7 +171,7 @@ fn a_cancelled_request_is_pushed() {
         )
         .unwrap();
     ended(&s, event["id"].as_str().unwrap());
-    until(|| Some(()).filter(|_| !results(&s.sink, "vault.secret_requested").is_empty()));
+    until(|| (!results(&s.sink, "vault.secret_requested").is_empty()).then_some(()));
     assert_eq!(results(&s.sink, "vault.secret_requested"), ["cancelled"]);
     assert_eq!(s.sink.commits(), 0);
 }
@@ -180,7 +179,10 @@ fn a_cancelled_request_is_pushed() {
 #[test]
 fn an_unanswered_request_expires_and_is_pushed() {
     let s = setup("ev-request-expired", true);
-    let (reply, _) = ask(&s, json!({"name": "npm", "consent": {"expiresInMs": 60_000}}));
+    let (reply, _) = ask(
+        &s,
+        json!({"name": "npm", "consent": {"expiresInMs": 60_000}}),
+    );
     let id = reply["request"]["id"].as_str().unwrap().to_string();
     s.advance(61_000);
     assert_eq!(ended(&s, &id)["state"], "expired");

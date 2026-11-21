@@ -157,9 +157,12 @@ fn an_agent_reads_and_changes_settings_through_the_command_line() {
     assert_eq!(code, 2);
     assert!(err.starts_with("No setting named theme."), "{err}");
 
-    let (code, _, err) = run(root, &["settings", "set", "limitMode", "off"]);
-    assert_eq!(code, 4, "an ask with no app open to answer it: {err}");
-    assert!(err.contains("the app isn't open"), "{err}");
+    let (code, _, err) = run(root, &["settings", "set", "limitMode", "off", "--no-wait"]);
+    assert_eq!(code, 6, "an ask with no app open is saved and waits: {err}");
+    assert!(
+        err.contains("Still waiting for the user's approval"),
+        "{err}"
+    );
     assert_eq!(stored(root, "limitMode"), None);
 
     let (code, _, err) = run(root, &["settings", "set", "chatHistory"]);
@@ -177,10 +180,7 @@ fn an_agent_reads_and_changes_settings_through_the_command_line() {
         .filter(|l| l["kind"] == "settings.agent")
         .map(|l| l["f"]["result"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert_eq!(
-        results,
-        ["set", "refused", "refused", "bad_value", "no_app"]
-    );
+    assert_eq!(results, ["set", "refused", "refused", "bad_value", "asked"]);
     let text = serde_json::to_string(&lines).unwrap();
     assert!(
         !text.contains("maybe"),

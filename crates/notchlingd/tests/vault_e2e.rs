@@ -86,7 +86,7 @@ fn with_the_switch_off_every_vault_path_says_so() {
     wait_for_socket(&socket);
 
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();
-    for op in [ops::VAULT_FIND, ops::VAULT_USE, ops::VAULT_REQUEST] {
+    for op in [ops::VAULT_FIND, ops::VAULT_USE] {
         match client.call(op, json!({"names": ["gh"], "name": "gh"})) {
             Err(ClientError::Api(e)) => {
                 assert_eq!(
@@ -118,15 +118,29 @@ fn with_the_switch_off_every_vault_path_says_so() {
     let (code, _, err) = run(&root, &["secret", "gh", "--", &command]);
     assert_eq!((code, err.trim()), (125, off("stopped").as_str()));
     assert!(!marker.exists(), "the command never ran");
-    let (code, _, err) = run(&root, &["secret-request", "gh", "--kind", "token"]);
-    assert_eq!((code, err.trim()), (4, off("refused").as_str()));
+    let (code, out, err) = run(
+        &root,
+        &[
+            "secret-request",
+            "gh",
+            "--kind",
+            "token",
+            "--no-wait",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        code, 6,
+        "a request is saved with the Vault off: {out} {err}"
+    );
+    assert!(err.is_empty(), "{err}");
 
     assert!(!root.join("notchling/daemon/vault.json").exists());
     assert!(!root.join("notchling/vault.json").exists());
     let lines = common::audit::wait_until(&root, |all| {
         all.iter().any(|l| {
             l["kind"] == "api.refused"
-                && l["f"]["op"] == "vault.request"
+                && l["f"]["op"] == "vault.use"
                 && l["f"]["exe"] == "notchling"
         })
     });

@@ -325,3 +325,28 @@ fn the_golden_files_match_the_registry() {
     );
     golden(root().join("docs/agent-paths.md"), markdown());
 }
+
+#[test]
+fn the_consent_commands_and_the_requests_that_need_no_switch() {
+    let find = |name: &str| COMMANDS.iter().find(|r| r.command == name).unwrap();
+    let get = find("consent");
+    assert_eq!((get.ops[0].op, get.ops[0].acts), ("consent.get", false));
+    assert!(get.exits.contains(&6) && get.exits.contains(&124));
+    let mine = find("consents");
+    assert_eq!((mine.ops[0].op, mine.ops[0].acts), ("consent.mine", false));
+    let cancel = find("consent cancel");
+    assert_eq!(
+        (cancel.ops[0].op, cancel.ops[0].acts),
+        ("consent.cancel", true)
+    );
+    let secret = find("secret-request");
+    assert_eq!(secret.ops[0].op, "vault.request");
+    assert_eq!(
+        secret.ops[0].switch, None,
+        "a secret request never needs the Vault on"
+    );
+    assert!(secret.waits && secret.idempotent);
+    assert_eq!(why_not("consent.answer").unwrap().1["reason"], "never");
+    assert_eq!(why_not("consent.opened").unwrap().1["reason"], "app_only");
+    assert_eq!(why_not("consent.list").unwrap().1["reason"], "app_only");
+}

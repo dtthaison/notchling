@@ -1,7 +1,7 @@
 use super::tests::{agent, app, ask, ended, pending_use, seed, setup_with, until, Setup};
 use super::*;
-use crate::event_assert::results;
 use crate::acting_ops_tests::FakeRoom as InboxRoom;
+use crate::event_assert::results;
 use crate::inbox_ops::InboxOps;
 use crate::limits_ops_tests::TempDir;
 use std::sync::atomic::Ordering;
@@ -234,7 +234,10 @@ fn request_raises_an_item_the_app_opens() {
         item["detail"],
         "Open the form on your Mac to add it. Its value never reaches the agent."
     );
-    assert!(!item.to_string().contains("to publish"), "the reason stays off the item");
+    assert!(
+        !item.to_string().contains("to publish"),
+        "the reason stays off the item"
+    );
     assert_eq!(
         item["open"],
         json!({"consent": event["id"], "vault_request": event["id"]})
@@ -254,7 +257,10 @@ fn request_raises_an_item_the_app_opens() {
                     "consentId": event["id"]}),
         )
         .unwrap();
-    assert_eq!(ended(&r.s, event["id"].as_str().unwrap())["state"], "applied");
+    assert_eq!(
+        ended(&r.s, event["id"].as_str().unwrap())["state"],
+        "applied"
+    );
     let item = r.closed_item(&id);
     assert_eq!(item["state"], "answered");
     assert_eq!(item["answer"], "allow");
@@ -272,11 +278,8 @@ fn request_deny_from_inbox_denies_request() {
     let item = r.closed_item(&id);
     assert_eq!(item["state"], "answered");
     assert_eq!(item["answer"], "deny");
-    until(|| Some(()).filter(|_| !results(&r.s.sink, "vault.secret_requested").is_empty()));
-    assert_eq!(
-        results(&r.s.sink, "vault.secret_requested"),
-        ["cancelled"]
-    );
+    until(|| (!results(&r.s.sink, "vault.secret_requested").is_empty()).then_some(()));
+    assert_eq!(results(&r.s.sink, "vault.secret_requested"), ["cancelled"]);
 }
 
 #[test]
@@ -291,7 +294,10 @@ fn request_cancel_from_the_form_reads_as_denied_by_the_mac() {
             &json!({"id": event["id"]}),
         )
         .unwrap();
-    assert_eq!(ended(&r.s, event["id"].as_str().unwrap())["state"], "denied");
+    assert_eq!(
+        ended(&r.s, event["id"].as_str().unwrap())["state"],
+        "denied"
+    );
     let item = r.closed_item(&id);
     assert_eq!(item["state"], "answered");
     assert_eq!(item["answer"], "deny");
@@ -330,7 +336,10 @@ fn request_timeout_expires_the_item() {
     );
     let id = r.request_item_id(&event);
     r.s.advance(61_000);
-    assert_eq!(ended(&r.s, reply["request"]["id"].as_str().unwrap())["state"], "expired");
+    assert_eq!(
+        ended(&r.s, reply["request"]["id"].as_str().unwrap())["state"],
+        "expired"
+    );
     assert_eq!(r.item(&id)["state"], "expired");
 }
 
@@ -400,7 +409,10 @@ fn opening_the_form_through_the_inbox_changes_nothing() {
     assert_eq!(out["answered"], false);
     assert_eq!(r.item(&id)["state"], "open");
     r.answer(&id, "deny");
-    assert_eq!(ended(&r.s, event["id"].as_str().unwrap())["state"], "denied");
+    assert_eq!(
+        ended(&r.s, event["id"].as_str().unwrap())["state"],
+        "denied"
+    );
 }
 
 #[test]

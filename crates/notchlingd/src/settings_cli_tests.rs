@@ -159,8 +159,19 @@ fn each_outcome_has_its_words_and_exit_code() {
 #[test]
 fn the_common_flags_are_read_and_sent_in_the_consent_object() {
     let parsed = parse(&args(&[
-        "set", "limitMode", "off", "--reason", "asked", "--no-wait", "--timeout", "30",
-        "--expires-in", "600", "--key", "k1", "--dry-run",
+        "set",
+        "limitMode",
+        "off",
+        "--reason",
+        "asked",
+        "--no-wait",
+        "--timeout",
+        "30",
+        "--expires-in",
+        "600",
+        "--key",
+        "k1",
+        "--dry-run",
     ]))
     .unwrap();
     assert_eq!(parsed.flags.reason.as_deref(), Some("asked"));

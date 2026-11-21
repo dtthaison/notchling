@@ -5,13 +5,15 @@ use crate::inbox_ops::{InboxOps, Responder};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::consent::{
-    clean_reason, item, spec, Consent, ConsentStore, New, Opened, Refusal, State,
-    MAX_EXPIRY_MS, MIN_EXPIRY_MS,
+    clean_reason, item, spec, Consent, ConsentStore, New, Opened, Refusal, State, MAX_EXPIRY_MS,
+    MIN_EXPIRY_MS,
 };
 use notchling_engine::inbox::{ActionId, Item, State as ItemState};
 use notchling_events::kinds::choices::{Answerer, ConsentThen};
 use notchling_events::scope::{self, ConsentNote};
-use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{
+    ops, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
@@ -156,7 +158,8 @@ impl ConsentOps {
         inbox: Arc<InboxOps>,
         events: Events,
     ) -> Arc<ConsentOps> {
-        let store = ConsentStore::open(data_dir).unwrap_or_else(|_| ConsentStore::in_memory_for_tests());
+        let store =
+            ConsentStore::open(data_dir).unwrap_or_else(|_| ConsentStore::in_memory_for_tests());
         ConsentOps::new(Arc::new(store), room, Some(inbox), Some(events))
     }
 
@@ -198,14 +201,14 @@ impl ConsentOps {
                 "Too many requests are waiting, or this one was just denied. Try again later.",
             )
             .with_data(json!({"reason": "busy", "retryAfterMs": retry_after_ms})),
-            Refusal::LongExpiry => ApiError::bad_request(
-                "That end time is longer than this caller may ask for.",
-            )
-            .with_reason("bad_value"),
-            Refusal::KeyReused => ApiError::bad_request(
-                "That key was used for a different request. Use a new key.",
-            )
-            .with_reason("key_reused"),
+            Refusal::LongExpiry => {
+                ApiError::bad_request("That end time is longer than this caller may ask for.")
+                    .with_reason("bad_value")
+            }
+            Refusal::KeyReused => {
+                ApiError::bad_request("That key was used for a different request. Use a new key.")
+                    .with_reason("key_reused")
+            }
             Refusal::Db(why) => failed(why),
         }
     }
@@ -214,8 +217,10 @@ impl ConsentOps {
         let spec = spec(kind).ok_or_else(|| ApiError::internal("no such kind"))?;
         let ms = asked.unwrap_or(spec.default_expiry_ms);
         if !(MIN_EXPIRY_MS..=spec.max_expiry_ms.min(MAX_EXPIRY_MS)).contains(&ms) {
-            return Err(ApiError::bad_request(notchling_engine::consent::rules::BAD_EXPIRY)
-                .with_reason("bad_value"));
+            return Err(
+                ApiError::bad_request(notchling_engine::consent::rules::BAD_EXPIRY)
+                    .with_reason("bad_value"),
+            );
         }
         Ok(ms)
     }
@@ -235,19 +240,16 @@ impl ConsentOps {
         let spec = spec(o.kind).ok_or_else(|| ApiError::internal("no such kind"))?;
         let expires_in_ms = Self::expiry(o.kind, o.expires_in_ms)?;
         let who = self.who(caller);
-        let started = caller
-            .pid
-            .and_then(|pid| crate::vault_caller::Processes::start_time(&crate::vault_caller::SystemProcesses, pid));
+        let started = caller.pid.and_then(|pid| {
+            crate::vault_caller::Processes::start_time(&crate::vault_caller::SystemProcesses, pid)
+        });
         let new = New {
             kind: o.kind.to_string(),
             target: o.target,
             change: o.change,
             facts: o.facts,
             parts: None,
-            reason: o
-                .reason
-                .map(|r| clean_reason(&r))
-                .filter(|r| !r.is_empty()),
+            reason: o.reason.map(|r| clean_reason(&r)).filter(|r| !r.is_empty()),
             session: who.session.clone().filter(|_| who.verified),
             tool: who.tool.name().to_string(),
             verified: who.verified,
@@ -256,7 +258,10 @@ impl ConsentOps {
             organization: who.organization.clone(),
             pid: caller.pid.unwrap_or(0),
             pid_start: started,
-            idem_key: o.key.filter(|k| !k.is_empty()).map(|k| k.chars().take(64).collect()),
+            idem_key: o
+                .key
+                .filter(|k| !k.is_empty())
+                .map(|k| k.chars().take(64).collect()),
             answer_on: spec.answer_on,
             applied_by: spec.applied_by,
             expires_in_ms,
@@ -266,7 +271,9 @@ impl ConsentOps {
         scope::note_consent(&row.id, ConsentNote::Pending);
         if let Opened::Fresh(_) = &opened {
             if !commit(self.events.as_ref(), &row, ConsentThen::Asked, self.now()) {
-                let _ = self.store.finish(&row.id, State::Withdrawn, None, self.now());
+                let _ = self
+                    .store
+                    .finish(&row.id, State::Withdrawn, None, self.now());
                 return Err(failed(LOG_DOWN));
             }
             self.raise(&row);
@@ -330,13 +337,14 @@ impl ConsentOps {
                 ));
             }
             if !row.answer_on.may_allow(by) {
-                return Err(forbidden(
-                    "Only the Mac may allow this.",
-                    "app_only",
-                ));
+                return Err(forbidden("Only the Mac may allow this.", "app_only"));
             }
         }
-        let to = if allow { State::Applying } else { State::Denied };
+        let to = if allow {
+            State::Applying
+        } else {
+            State::Denied
+        };
         let taken = self
             .store
             .answer(id, to, by, parts, self.now())
@@ -350,9 +358,9 @@ impl ConsentOps {
                 self.wake();
                 Ok(json!({"answered": true, "state": row.state.as_str(), "by": by}))
             }
-            notchling_engine::consent::Taken::Lost(row) => Ok(
-                json!({"answered": false, "state": row.state.as_str(), "by": row.by}),
-            ),
+            notchling_engine::consent::Taken::Lost(row) => {
+                Ok(json!({"answered": false, "state": row.state.as_str(), "by": row.by}))
+            }
             notchling_engine::consent::Taken::Gone => Err(failed(NO_SUCH)),
         }
     }
@@ -432,7 +440,10 @@ impl ConsentOps {
         target: &str,
     ) -> Result<Consent, ApiError> {
         if caller.tier != Tier::App || caller.client != ClientKind::App {
-            return Err(forbidden("Only the Notchling app may use a request.", "app_only"));
+            return Err(forbidden(
+                "Only the Notchling app may use a request.",
+                "app_only",
+            ));
         }
         let row = self
             .store
@@ -588,12 +599,18 @@ impl ConsentOps {
             .get("consentId")
             .and_then(Value::as_str)
             .ok_or_else(|| ApiError::bad_request("consent.opened takes {consentId}"))?;
+        let was = self
+            .store
+            .get(id)
+            .map_err(failed)?
+            .ok_or_else(|| failed(NO_SUCH))?
+            .state;
         let row = self
             .store
             .open_sheet(id, self.now())
             .map_err(failed)?
             .ok_or_else(|| failed(NO_SUCH))?;
-        if row.state == State::Opened {
+        if row.state == State::Opened && was == State::Waiting {
             emit(self.events.as_ref(), &row, ConsentThen::Opened, self.now());
             self.wake();
         }
@@ -728,3 +745,7 @@ impl OpGroup for ConsentOps {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "consent_ops_tests.rs"]
+mod tests;

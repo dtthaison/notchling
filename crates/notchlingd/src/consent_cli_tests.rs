@@ -6,7 +6,11 @@ fn words(list: &[&str]) -> Vec<String> {
 
 #[test]
 fn consent_takes_an_id_cancel_takes_cancel_and_an_id_and_consents_takes_nothing() {
-    let get = parse(&words(&["c1", "--wait", "--timeout", "30", "--json"]), false).unwrap();
+    let get = parse(
+        &words(&["c1", "--wait", "--timeout", "30", "--json"]),
+        false,
+    )
+    .unwrap();
     assert_eq!(get.sub, Sub::Get("c1".into()));
     assert!(get.wait && get.json);
     assert_eq!(get.timeout, Duration::from_secs(30));

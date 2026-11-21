@@ -1,10 +1,10 @@
 use super::*;
-use crate::switches::VAULT;
-use notchling_engine::vault::list::VaultIndex;
-use notchling_engine::vault::KeychainError;
 use crate::consent_ops::ConsentOps;
 use crate::consent_testkit::{shell, verified};
+use crate::switches::VAULT;
 use notchling_engine::consent::ConsentStore;
+use notchling_engine::vault::list::VaultIndex;
+use notchling_engine::vault::KeychainError;
 use notchling_events::{MemorySink, Salt};
 use notchling_local_api::ClientKind;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -543,7 +543,10 @@ fn the_app_leaving_or_the_switch_going_off_ends_the_wait() {
 
 pub(super) fn ask(s: &Setup, args: Value) -> (Value, Value) {
     let reply = s.ops.call(&agent(), ops::VAULT_REQUEST, &args).unwrap();
-    let event = s.room.pending(topics::VAULT_REQUEST_PENDING).unwrap_or(Value::Null);
+    let event = s
+        .room
+        .pending(topics::VAULT_REQUEST_PENDING)
+        .unwrap_or(Value::Null);
     (reply, event)
 }
 
@@ -633,7 +636,10 @@ fn a_secret_request_never_turns_the_vault_on() {
     let (reply, event) = ask(&s, json!({"name": "npm", "reason": "to publish"}));
     assert_eq!(reply["state"], "waiting");
     assert!(!s.switch.is_on());
-    assert!(event.is_null(), "no form is announced while the Vault is off");
+    assert!(
+        event.is_null(),
+        "no form is announced while the Vault is off"
+    );
     assert_eq!(*s.item.reads.lock().unwrap(), 0);
     assert!(s.item.data.lock().unwrap().is_none());
     let id = reply["request"]["id"].as_str().unwrap().to_string();
@@ -643,7 +649,10 @@ fn a_secret_request_never_turns_the_vault_on() {
         &json!({"entry": {"name": "npm", "kind": "token"}, "value": {"secret": "fake-npm-1"},
                 "consentId": id}),
     ));
-    assert_eq!((e.code, e.message.as_str()), (ErrorCode::Forbidden, VAULT_OFF));
+    assert_eq!(
+        (e.code, e.message.as_str()),
+        (ErrorCode::Forbidden, VAULT_OFF)
+    );
     assert!(!s.switch.is_on());
     s.switch.set(true);
     let announced = s.room.pending(topics::VAULT_REQUEST_PENDING).unwrap();

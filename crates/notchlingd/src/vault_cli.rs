@@ -116,9 +116,8 @@ pub fn parse_request_flags(
                 continue;
             }
             "--key" => {
-                flags.key = Some(
-                    value.ok_or_else(|| format!("--key needs a value.\n{REQUEST_USAGE}"))?,
-                );
+                flags.key =
+                    Some(value.ok_or_else(|| format!("--key needs a value.\n{REQUEST_USAGE}"))?);
                 continue;
             }
             _ => {}

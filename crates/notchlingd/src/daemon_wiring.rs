@@ -10,8 +10,7 @@ use crate::ask_ops::AskOps;
 use crate::attach::{ClaudeAttacher, LiveLauncher};
 use crate::awake_loop::{power_for, AwakeLoop};
 use crate::awake_ops::AwakeOps;
-use crate::bridge_backend::APPROVAL_WAIT;
-use crate::bridge_ops::{BridgeOps, BridgeSetup};
+use crate::bridge_ops::BridgeOps;
 use crate::catalog_ops::CatalogService;
 use crate::cluster_forward::{acting_gated, Forward};
 use crate::cluster_prompts::RemotePrompts;
@@ -21,11 +20,12 @@ use crate::cluster_sessions::RemoteSessions;
 use crate::cluster_wiring::ClusterParts;
 use crate::codex_children::CodexChildren;
 use crate::codex_ops::CodexOps;
+use crate::consent_ops::ConsentOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::daemon_wiring_setup::{bridge_setup, outbox_ops};
 use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{listed_folders, live_folders, GitOps};
 use crate::identity::{Identifier, Launches};
-use crate::consent_ops::ConsentOps;
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::late_emit::{Events, LateEmit, LateSalt};
@@ -62,7 +62,6 @@ use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::limits::renew::ClaudeRenewer;
-use notchling_engine::outbox::OutboxStore;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::kinds::choices::AgentTool;
@@ -72,7 +71,7 @@ use notchling_local_api::{
     Tier,
 };
 use serde_json::{Map, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -396,51 +395,6 @@ impl Handler for Ops {
 
     fn agent_path(&self, op: &str) -> Option<(String, Value)> {
         crate::commands::why_not(op)
-    }
-}
-
-fn bridge_setup(layout: &Layout, ports: (u16, u16)) -> BridgeSetup {
-    let beside = |dir: &std::path::Path| dir.parent().unwrap_or(dir).join("AgentConsole");
-    let data_dir = beside(&layout.data_dir);
-    let images_dir = match (layout.fixture, notchling_platform::paths::cache_dir()) {
-        (false, Some(cache)) => beside(&cache).join("phone-images"),
-        _ => data_dir.join("phone-images"),
-    };
-    BridgeSetup {
-        data_dir,
-        home: PathBuf::from(home_of(&layout.roots())),
-        images_dir,
-        projects_dir: layout.claude_dir.join("projects"),
-        lan_port: ports.0,
-        tunnel_port: ports.1,
-        loopback_only: false,
-        approval_wait: APPROVAL_WAIT,
-    }
-}
-
-fn outbox_ops(
-    layout: &Layout,
-    sessions: &Arc<Mutex<Value>>,
-    acting: &Arc<ActingOps>,
-    room: &Arc<dyn Room>,
-    events: &Events,
-) -> OutboxOps {
-    let (store, saving) = match OutboxStore::open(&layout.data_dir) {
-        Ok(store) => (store, true),
-        Err(_) => (OutboxStore::in_memory_for_tests(), false),
-    };
-    let ops = OutboxOps::new(
-        Arc::new(store),
-        sessions.clone(),
-        layout.roots(),
-        acting.acting_switch(),
-        room.clone(),
-        Some(events.clone()),
-    );
-    if saving {
-        ops
-    } else {
-        ops.without_store()
     }
 }
 
