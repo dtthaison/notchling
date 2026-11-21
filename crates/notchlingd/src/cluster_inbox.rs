@@ -3,7 +3,7 @@ use crate::inbox_mirrors::{Home, InboxLink, Refusal};
 use crate::inbox_ops::InboxOps;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{LocalCmd, NodeId};
-use notchling_engine::inbox::{ActionId, Change, Item};
+use notchling_engine::inbox::{ActionId, Change, Item, Kind};
 use notchling_local_api::{ops, ApiError, ErrorCode};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -363,12 +363,19 @@ fn coalesced(changes: Vec<Change>) -> Vec<Change> {
         .collect()
 }
 
+fn shown_to_peers(item: &Item) -> Item {
+    let mut shown = item.clone();
+    shown.open = None;
+    if shown.kind == Kind::Consent {
+        shown.kind = Kind::Notice;
+    }
+    shown
+}
+
 fn event_of(change: &Change) -> Value {
     match change {
         Change::Raised(item) | Change::Updated(item) => {
-            let mut shown = item.clone();
-            shown.open = None;
-            json!({"event": "changed", "item": shown})
+            json!({"event": "changed", "item": shown_to_peers(item)})
         }
         Change::Removed(id) => json!({"event": "removed", "id": id}),
     }
@@ -422,10 +429,7 @@ impl Outbox {
     }
 
     fn sync_to(&self, target: &NodeId) -> Result<(), ApiError> {
-        let mut items = self.inbox.own_open();
-        for item in &mut items {
-            item.open = None;
-        }
+        let items: Vec<Item> = self.inbox.own_open().iter().map(shown_to_peers).collect();
         let args = json!({"event": "sync", "items": items});
         self.net
             .call(target, NODE_INBOX, args, OriginTier::Node, FORWARD_WAIT)

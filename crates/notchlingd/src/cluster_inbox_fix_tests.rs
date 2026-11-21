@@ -314,3 +314,64 @@ fn one_flicker_of_the_keeping_role_keeps_the_mirrors() {
     standby.outbox.flush();
     assert!(standby.rig.ops.local_ids().is_empty());
 }
+
+fn consent_item(id: &str) -> notchling_engine::inbox::Item {
+    let mut made = item(id);
+    made.kind = notchling_engine::inbox::Kind::Consent;
+    made
+}
+
+fn kinds_sent(fabric: &Fabric, to: &NodeId) -> Vec<String> {
+    fabric
+        .sent_to(to)
+        .into_iter()
+        .filter(|(_, op, _)| op == "node.inbox")
+        .flat_map(|(_, _, args)| {
+            let one = args.get("item").cloned().into_iter();
+            let many = args
+                .get("items")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            one.chain(many)
+                .filter_map(|i| i["kind"].as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn a_consent_item_reaches_an_older_peer_as_a_notice_in_a_sync_and_in_a_change() {
+    let fabric = quartet();
+    let (home, worker) = (fabric.machine(&node(5)), fabric.machine(&node(9)));
+    worker
+        .rig
+        .ops
+        .raise(consent_item("c"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    let kinds = kinds_sent(&fabric, &node(5));
+    assert!(!kinds.is_empty());
+    assert!(kinds.iter().all(|k| k == "notice"), "{kinds:?}");
+    worker
+        .rig
+        .ops
+        .raise(consent_item("d"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    let kinds = kinds_sent(&fabric, &node(5));
+    assert!(kinds.len() >= 2);
+    assert!(kinds.iter().all(|k| k == "notice"), "{kinds:?}");
+    let mirrored = home
+        .rig
+        .ops
+        .items()
+        .into_iter()
+        .filter(|i| i.id.ends_with("/c") || i.id.ends_with("/d"))
+        .count();
+    assert_eq!(mirrored, 2);
+    assert!(worker
+        .rig
+        .ops
+        .items()
+        .iter()
+        .all(|i| i.kind == notchling_engine::inbox::Kind::Consent));
+}
