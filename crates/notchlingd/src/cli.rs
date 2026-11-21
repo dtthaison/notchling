@@ -92,6 +92,10 @@ pub enum Command {
     Consents {
         args: Vec<String>,
     },
+    Read {
+        name: String,
+        args: Vec<String>,
+    },
     Version,
     Help {
         json: bool,
@@ -252,6 +256,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "consents" => {
             return Ok(Command::Consents {
+                args: args.collect(),
+            })
+        }
+        name if crate::reads_cli::NAMES.contains(&name) => {
+            return Ok(Command::Read {
+                name: name.to_string(),
                 args: args.collect(),
             })
         }

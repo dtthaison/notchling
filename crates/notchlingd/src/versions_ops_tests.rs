@@ -109,10 +109,10 @@ fn get_is_agent_tier() {
 }
 
 #[test]
-fn workers_is_app_tier() {
+fn workers_is_an_agent_read() {
     let rig = rig("versions-workers-tier");
     let spec = rig.ops.spec(ops::VERSIONS_WORKERS).unwrap();
-    assert_eq!(spec.tier, Tier::App);
+    assert_eq!(spec.tier, Tier::Agent);
     assert!(!spec.approval);
 }
 

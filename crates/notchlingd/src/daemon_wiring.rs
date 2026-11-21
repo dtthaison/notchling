@@ -62,6 +62,7 @@ use notchling_engine::control::session::home_of;
 use notchling_engine::control::RealLauncher;
 use notchling_engine::git::SandboxedLauncher;
 use notchling_engine::limits::renew::ClaudeRenewer;
+use notchling_engine::organizations::Organizations;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::kinds::choices::AgentTool;
@@ -82,6 +83,7 @@ pub struct Ops {
     codex: Option<Arc<CodexOps>>,
     agy: Option<Arc<AgyOps>>,
     pages: Option<Arc<PagesOps>>,
+    reads: Option<Arc<crate::reads_ops::ReadsOps>>,
     every: Option<Arc<EverySession>>,
     shells: Option<Arc<ShellJobs>>,
     groups: Vec<Arc<dyn OpGroup>>,
@@ -105,6 +107,7 @@ impl Ops {
             codex: None,
             agy: None,
             pages: None,
+            reads: None,
             every: None,
             shells: None,
             groups: Vec::new(),
@@ -176,6 +179,11 @@ impl Ops {
     pub fn with_agy(mut self, agy: Arc<AgyOps>) -> Ops {
         self.agy = Some(agy);
         self.with_topics()
+    }
+
+    pub fn with_reads(mut self, reads: Arc<crate::reads_ops::ReadsOps>) -> Ops {
+        self.reads = Some(reads.clone());
+        self.with_group(reads)
     }
 
     pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
@@ -355,6 +363,20 @@ impl Handler for Ops {
             return agy.call(op, args);
         }
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
+            if op == ops::SEARCH_QUERY && caller.tier != Tier::App {
+                let Some((reads, org)) = self
+                    .reads
+                    .as_ref()
+                    .and_then(|r| r.search_org(caller).map(|org| (r, org)))
+                else {
+                    return Ok(crate::reads_ops::no_session_search(args));
+                };
+                let mut reply = pages.call(op, args)?;
+                crate::reads_ops::scope_search(&mut reply, Some(&org), args, &|f| {
+                    reads.folder_org(f)
+                });
+                return Ok(reply);
+            }
             return pages.call(op, args);
         }
         if let Some(group) = self.group(op) {
@@ -900,6 +922,16 @@ impl Wired {
             .with_move_gate(self.cluster.gate.clone())
             .with_remote_prompts(self.cluster.prompts.clone())
             .with_group(Arc::new(git))
+            .with_reads(Arc::new(crate::reads_ops::ReadsOps::new(
+                Organizations::new(&layout.data_dir).with_home(&layout.home()),
+                &layout.home(),
+                sessions.clone(),
+                self.inbox.clone(),
+                self.providers.clone(),
+                self.limits.clone(),
+                layout.data_dir.join("daemon").join("accounts"),
+                Arc::new(notchling_engine::transcript::util::now_secs),
+            )))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(Arc::new(OrganizationsOps::for_daemon(layout, folders)))
             .with_group(Arc::new(TailscaleOps::system()))

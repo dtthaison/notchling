@@ -604,3 +604,25 @@ fn a_move_is_recovered_only_when_the_daemon_asks_after_it_has_started() {
         .wait_done(std::time::Duration::from_secs(10));
     assert_ne!(w.cluster.runner.status()["step"], "stop_old");
 }
+
+#[test]
+fn an_agent_search_with_no_organization_or_no_reads_answers_empty_with_no_session() {
+    let (_root, layout, w) = wired("search-org");
+    let agent = Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Cli,
+        peer: None,
+        pid: Some(1),
+    };
+    let args = json!({"text": "anything"});
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let bare = Ops::new(sessions.clone())
+        .with_pages(Arc::new(PagesOps::new(PagesSetup::from_layout(&layout))));
+    let full = w.ops(&layout, sessions, FirstScan::open(), Duration::ZERO);
+    for ops in [&bare, &full] {
+        let reply = ops.call(&agent, ops::SEARCH_QUERY, &args).unwrap();
+        assert_eq!(reply["reason"], json!("no_session"), "{reply}");
+        assert_eq!(reply["pages"], json!([]));
+        assert_eq!(reply["sessions"], json!([]));
+    }
+}

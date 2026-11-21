@@ -391,6 +391,10 @@ impl LimitsOps {
         }
     }
 
+    pub fn claude_observed(&self) -> Option<notchling_engine::limits::claude::Observed> {
+        lock(&self.board).seen.get(CLAUDE.id).cloned()
+    }
+
     fn status(&self) -> Value {
         let on = self.accounts.is_on();
         let board = lock(&self.board);

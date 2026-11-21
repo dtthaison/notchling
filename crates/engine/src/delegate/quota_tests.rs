@@ -248,3 +248,97 @@ fn a_said_out_pool_is_marked_so_the_next_check_refuses_it() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn codex_quota() -> Quota {
+    Quota {
+        fetched: NOW,
+        signed_in: true,
+        reached: None,
+        pools: vec![Pool {
+            name: "Codex".into(),
+            windows: vec![Window {
+                label: "5h".into(),
+                percent: 10.0,
+                resets_at: Some(NOW + 3600.0),
+            }],
+        }],
+    }
+}
+
+#[test]
+fn readiness_is_usable_when_all_is_fine() {
+    assert!(readiness(Some(&codex_quota()), Tool::Codex, NOW).usable);
+    let ready = readiness(Some(&card()), Tool::Agy, NOW);
+    assert!(ready.usable);
+    assert_eq!(ready.reason, None);
+    assert_eq!(ready.age_secs, Some(0.0));
+    assert!(readiness(None, Tool::Codex, NOW).usable);
+}
+
+#[test]
+fn readiness_says_credits_out_when_codex_credits_are_out() {
+    let mut q = codex_quota();
+    q.reached = Some(Reached::Credits);
+    let ready = readiness(Some(&q), Tool::Codex, NOW);
+    assert!(!ready.usable);
+    assert_eq!(ready.reason, Some("credits_out"));
+    assert!(ready.pools.iter().all(|p| !p.usable));
+}
+
+#[test]
+fn readiness_says_pool_full_at_96_percent() {
+    let mut q = codex_quota();
+    q.pools[0].windows[0].percent = 96.0;
+    let ready = readiness(Some(&q), Tool::Codex, NOW);
+    assert!(!ready.usable);
+    assert_eq!(ready.reason, Some("pool_full"));
+    assert_eq!(ready.pools[0].reason, Some("pool_full"));
+    q.pools[0].windows[0].percent = 94.0;
+    assert!(readiness(Some(&q), Tool::Codex, NOW).usable);
+}
+
+#[test]
+fn readiness_of_agy_is_per_pool() {
+    let mut q = card();
+    let first = q.pools[0].name.clone();
+    let label = q.pools[0].windows[0].label.clone();
+    pool_at(&mut q, &first, &label, 96.0);
+    let ready = readiness(Some(&q), Tool::Agy, NOW);
+    assert!(!ready.pools.iter().find(|p| p.name == first).unwrap().usable);
+    assert_eq!(ready.usable, ready.pools.iter().any(|p| p.usable));
+}
+
+#[test]
+fn readiness_says_stale_and_signed_out() {
+    let mut q = codex_quota();
+    q.fetched = NOW - MAX_AGE_SECS - 1.0;
+    assert_eq!(readiness(Some(&q), Tool::Codex, NOW).reason, Some("stale"));
+    q.fetched = NOW;
+    q.signed_in = false;
+    assert_eq!(
+        readiness(Some(&q), Tool::Codex, NOW).reason,
+        Some("signed_out")
+    );
+}
+
+#[test]
+fn a_reached_credit_or_limit_counts_for_every_tool() {
+    for (reached, reason) in [
+        (Reached::Credits, "credits_out"),
+        (Reached::Limit, "limit_reached"),
+    ] {
+        let mut q = card();
+        q.reached = Some(reached);
+        let ready = readiness(Some(&q), Tool::Agy, NOW);
+        assert!(!ready.usable);
+        assert_eq!(ready.reason, Some(reason));
+    }
+}
+
+#[test]
+fn a_signed_out_account_with_no_reading_is_not_usable() {
+    let ready = readiness_of_windows(None, false, Vec::new(), NOW);
+    assert!(!ready.usable);
+    assert_eq!(ready.reason, Some("signed_out"));
+    assert!(readiness_of_windows(None, true, Vec::new(), NOW).usable);
+}

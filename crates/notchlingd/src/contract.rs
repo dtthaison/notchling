@@ -142,6 +142,9 @@ pub const VALUE_FLAGS: &[&str] = &[
     "--for",
     "--key",
     "--expires-in",
+    "--tool",
+    "--pool",
+    "--since",
 ];
 
 pub fn wants_json(args: &[String]) -> bool {
@@ -329,6 +332,15 @@ impl Failure {
             let _ = writeln!(err, "{}", self.line());
         }
         self.exit
+    }
+
+    pub fn report_with(&self, json: bool, result: &Value) -> i32 {
+        if json {
+            let _ = writeln!(std::io::stdout(), "{}", self.to_value_with(result.clone()));
+            self.exit
+        } else {
+            self.report(false)
+        }
     }
 
     pub fn report(&self, json: bool) -> i32 {

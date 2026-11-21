@@ -198,6 +198,98 @@ pub fn refusal(tool: Tool, model: Option<&str>, out: &Out, now: f64) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct PoolReady {
+    pub name: String,
+    pub usable: bool,
+    pub reason: Option<&'static str>,
+    pub windows: Vec<Window>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ready {
+    pub usable: bool,
+    pub reason: Option<&'static str>,
+    pub fetched: Option<f64>,
+    pub age_secs: Option<f64>,
+    pub pools: Vec<PoolReady>,
+}
+
+fn pool_ready(pool: &Pool, whole: Option<&'static str>, now: f64) -> PoolReady {
+    let reason = whole.or_else(|| full_window(&pool.windows, now).map(|_| "pool_full"));
+    PoolReady {
+        name: pool.name.clone(),
+        usable: reason.is_none(),
+        reason,
+        windows: pool.windows.clone(),
+    }
+}
+
+pub fn readiness(quota: Option<&Quota>, tool: Tool, now: f64) -> Ready {
+    let Some(quota) = quota else {
+        return Ready {
+            usable: true,
+            reason: None,
+            fetched: None,
+            age_secs: None,
+            pools: Vec::new(),
+        };
+    };
+    let whole = if now - quota.fetched > MAX_AGE_SECS {
+        Some("stale")
+    } else if !quota.signed_in {
+        Some("signed_out")
+    } else {
+        match quota.reached {
+            Some(Reached::Credits) => Some("credits_out"),
+            Some(Reached::Limit) => Some("limit_reached"),
+            None => None,
+        }
+    };
+    let pools: Vec<PoolReady> = quota
+        .pools
+        .iter()
+        .map(|p| pool_ready(p, whole, now))
+        .collect();
+    let reason = whole.or_else(|| match tool {
+        Tool::Codex => pools.iter().find_map(|p| p.reason),
+        Tool::Agy => (!pools.is_empty() && pools.iter().all(|p| !p.usable)).then_some("pool_full"),
+    });
+    Ready {
+        usable: reason.is_none(),
+        reason,
+        fetched: Some(quota.fetched),
+        age_secs: Some((now - quota.fetched).max(0.0)),
+        pools,
+    }
+}
+
+pub fn readiness_of_windows(
+    fetched: Option<f64>,
+    signed_in: bool,
+    windows: Vec<Window>,
+    now: f64,
+) -> Ready {
+    let Some(fetched) = fetched else {
+        let mut ready = readiness(None, Tool::Agy, now);
+        if !signed_in {
+            ready.usable = false;
+            ready.reason = Some("signed_out");
+        }
+        return ready;
+    };
+    let quota = Quota {
+        fetched,
+        signed_in,
+        reached: None,
+        pools: vec![Pool {
+            name: "Claude".into(),
+            windows,
+        }],
+    };
+    readiness(Some(&quota), Tool::Codex, now)
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Detected {
     pub label: String,
     pub resets_in: Option<f64>,

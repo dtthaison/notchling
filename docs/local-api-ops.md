@@ -1194,6 +1194,34 @@ no op migrates a machines file.
 - Delete is refused for Personal and for an organization that still holds an account, a secret or a machine,
   counted inside one transaction with the removal.
 
+## `reads_ops.rs`
+
+The organization-scoped and public reads of the agents-first design (section 8), served by `ReadsOps`, with the
+`notchling inbox|accounts|limits|orgs|search|switches|awake|versions|roles` commands (`reads_cli.rs`). All are
+`OpSpec::AGENT_READ`: no switch, never recorded as `op.called`. A reply names an organization only for a caller
+whose session the daemon verified; a shell, an unverified caller and an app-less peer get the empty answer below
+with `reason: "no_session"` and are never taken for Personal. Never in a reply: a token, a secret, a full email
+(`a***@e***.com`), another organization's folders, Inbox text or accounts, or another session's text.
+
+| Op | Args | Reply |
+| --- | --- | --- |
+| `inbox.mine` | `{}` | `{own: [{id, kind, state, title, detail, createdMs}], organization: [{kind, state, title}], otherOrganizations}`: `own` is this session's items in full; `organization` the other sessions' items of the same organization without detail; others only counted |
+| `accounts.summary` | `{}` | `{organization, tools: {claude\|codex\|agy: [{id, name (masked), organization, active, plan, needsLogin}]}}`, this organization's accounts only |
+| `limits.summary` | `{tool?, pool?}` | `{organization, tools: {claude\|codex\|agy: {usable, reason, fetched, ageSecs, pools: [{name, usable, reason, windows: [{label, percent, resetsAt}]}]}}}`; with `tool` also `tool` (that entry) and with `pool` also `pool` (the first pool whose name contains it) |
+| `organizations.mine` | `{}` | `{organization: {id, name, color, folders, personal}, others}` |
+| `search.query` | `{text, kind?, since?}` | the existing reply with `pages` and `sessions` cut to rows whose folder is in the caller's organization (rows with no folder are dropped), plus `organization`; `kind` is `pages` or `sessions`, `since` seconds |
+
+- `usable` follows the delegate fail-fast rule: a pool at `FULL_AT` (95) percent or more is full, and a reading
+  older than `MAX_AGE_SECS` (3 hours) is `stale`. `reason` is `credits_out` (Codex credits spent),
+  `limit_reached`, `pool_full`, `signed_out` or `stale`; Antigravity is unusable only when every pool is full.
+  No reading yet counts as usable. A tool whose active account belongs to another organization reports
+  `usable: null`, `reason: "other_organization"`.
+- `notchling limits --tool <claude|codex|agy> [--pool <name>]` exits 0 when usable and 1 (`failed`) when not, the
+  reply in the error's `result`; `--json` prints one value either way.
+- The other commands read ops that already existed and are now `AGENT_READ`: `settings.switches` (`switches`),
+  `awake.state` (`awake`; `awake on|off` sets the free `mode` key through `settings set`), `versions.get`,
+  `versions.latest` and `versions.workers` (`versions [--latest] [--workers]`), and `catalog.roles` (`roles`).
+
 ## `outbox_ops.rs`
 
 The Outbox ([design](superpowers/specs/2026-11-15-outbox-design.md), [decision](decisions/XXXX-outbox.md)): a message to a session is saved in the daemon's `outbox` table first and a postman per session types or starts it as soon as the session can take it, in order. App tier, served by `OutboxOps`. Every op but `outbox.list` is refused with `forbidden` and [`ACTING_OFF`] while the `acting` switch is off (messages already saved wait); `outbox.list` only reads.

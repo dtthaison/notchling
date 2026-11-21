@@ -128,6 +128,10 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
 
     let mut cmd = notchling(&root);
     cmd.arg("daemon")
+        .env(
+            notchling_local_api::APP_TIER_PATHS_ENV,
+            std::env::current_exe().unwrap(),
+        )
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let daemon = Daemon(cmd.spawn().unwrap());

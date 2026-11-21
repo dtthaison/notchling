@@ -43,6 +43,8 @@ Pick it from Notchling, not from memory: `'{binary}' delegate-models --for <role
 
 `'{binary}' delegate-models` shows each model's roles and what it is not for (never review with those). If `--for` says no model is marked, run `delegate-models` and choose.
 
+Before a long or paid job, check `'{binary}' limits --tool <tool>`: it exits 0 when the tool can run and 1 with the reason (`credits_out`, `pool_full`, `signed_out`, `stale`) when it can't.
+
 - agy can't run commands in a review: put the diff and the task text in files under `.review/` and point it at them. Codex can run `git diff` itself.
 - The output is another model's opinion: check each finding against the code before fixing it.
 

@@ -202,6 +202,8 @@ pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
+pub mod reads_cli;
+pub mod reads_ops;
 pub mod reload_cli;
 pub mod reload_ops;
 mod reply_attempts;
@@ -562,6 +564,7 @@ pub fn run(command: Command) -> i32 {
         Command::Settings { args } => settings_cli::run(&args),
         Command::Consent { args } => consent_cli::run(&args, false),
         Command::Consents { args } => consent_cli::run(&args, true),
+        Command::Read { name, args } => reads_cli::run(&name, &args),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Session { args } => match args.first().map(String::as_str) {
             Some("reload") => reload_cli::run(&args),
