@@ -129,7 +129,7 @@ impl CapabilitiesOps {
 
 impl OpGroup for CapabilitiesOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        (op == ops::DAEMON_CAPABILITIES).then_some(OpSpec::AGENT)
+        (op == ops::DAEMON_CAPABILITIES).then_some(OpSpec::AGENT_READ)
     }
 
     fn call(&self, caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {

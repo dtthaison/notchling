@@ -45,7 +45,7 @@ fn now_of(answer: &Value, op: &str) -> Value {
 #[test]
 fn it_is_an_agent_read_op_and_nothing_else() {
     let g = group(&[], Arc::new(FakeRoom::default()));
-    assert_eq!(g.spec(ops::DAEMON_CAPABILITIES), Some(OpSpec::AGENT));
+    assert_eq!(g.spec(ops::DAEMON_CAPABILITIES), Some(OpSpec::AGENT_READ));
     assert_eq!(g.spec(ops::DAEMON_STATUS), None);
     assert!(g
         .call(&caller(Tier::Agent, None), "nope", &Value::Null)
