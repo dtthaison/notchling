@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -11,6 +11,17 @@ pub const GRACE: Duration = Duration::from_secs(3);
 const DEPTH: usize = 256;
 
 const OTHER_TOOLS: [&str; 5] = ["notchling", "notchlingd", "codex", "agy", "antigravity"];
+
+const SHARED: [&str; 8] = [
+    "terminal",
+    "iterm2",
+    "ghostty",
+    "alacritty",
+    "kitty",
+    "wezterm",
+    "tmux",
+    "screen",
+];
 
 #[cfg(target_os = "macos")]
 const LSOF: &str = "/usr/sbin/lsof";
@@ -38,6 +49,15 @@ impl Proc {
             || self.command.contains("/claude/")
             || self.command.contains("/claude-code/")
             || self.command.contains("Notchling.app")
+    }
+
+    fn shared(&self) -> bool {
+        let name = self.name().to_ascii_lowercase();
+        self.command.contains(".app/Contents/")
+            || SHARED.iter().any(|word| {
+                name.strip_prefix(word)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', ':', ' ']))
+            })
     }
 }
 
@@ -227,33 +247,91 @@ fn names_of(path: &str) -> Vec<String> {
     names
 }
 
-pub fn orphan_targets(writers: &[i32], procs: &[Proc], scope: &Scope) -> Vec<Target> {
-    let by_pid: HashMap<i32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
-    let mut found: Vec<&Proc> = Vec::new();
-    for pid in writers {
-        let Some(proc) = by_pid.get(pid).copied() else {
-            continue;
-        };
-        if !proc.zombie && !found.iter().any(|f| f.pid == proc.pid) {
-            found.push(proc);
+fn kept(live: &[&Proc], by_pid: &HashMap<i32, &Proc>, scope: &Scope) -> HashSet<i32> {
+    let mut kept = HashSet::new();
+    let starts = live
+        .iter()
+        .filter(|p| p.protected() || p.name().to_ascii_lowercase().starts_with("notchling"))
+        .map(|p| p.pid)
+        .chain([scope.own_pid, scope.owner]);
+    for start in starts {
+        let mut at = start;
+        for _ in 0..DEPTH {
+            if at <= 1 || !kept.insert(at) {
+                break;
+            }
+            let Some(proc) = by_pid.get(&at) else {
+                break;
+            };
+            at = proc.ppid;
         }
     }
-    let roots: Vec<&Proc> = found
+    kept
+}
+
+fn below_writer(by_pid: &HashMap<i32, &Proc>, writing: &HashSet<i32>, pid: i32) -> bool {
+    let mut at = pid;
+    for _ in 0..DEPTH {
+        let Some(proc) = by_pid.get(&at) else {
+            return false;
+        };
+        if proc.ppid <= 1 || proc.ppid == at {
+            return false;
+        }
+        if writing.contains(&proc.ppid) {
+            return true;
+        }
+        at = proc.ppid;
+    }
+    false
+}
+
+pub fn orphan_targets(writers: &[i32], procs: &[Proc], scope: &Scope) -> Vec<Target> {
+    let live: Vec<&Proc> = procs.iter().filter(|p| !p.zombie).collect();
+    let by_pid: HashMap<i32, &Proc> = live.iter().map(|p| (p.pid, *p)).collect();
+    let writing: HashSet<i32> = writers
         .iter()
         .copied()
-        .filter(|p| !found.iter().any(|q| q.pid == p.ppid))
+        .filter(|pid| by_pid.contains_key(pid))
         .collect();
-    let [root] = roots[..] else {
-        return Vec::new();
+    let kept = kept(&live, &by_pid, scope);
+    let fits = |p: &Proc| {
+        p.pid > 1
+            && p.pid != scope.own_pid
+            && p.pid != scope.owner
+            && !p.protected()
+            && !p.shared()
+            && !kept.contains(&p.pid)
+            && (writing.contains(&p.pid) || below_writer(&by_pid, &writing, p.pid))
+            && (p.ppid == 1 || by_pid.get(&p.ppid).is_some_and(|up| up.pgid == p.pgid))
+            && live
+                .iter()
+                .filter(|c| c.ppid == p.pid)
+                .all(|c| writing.contains(&c.pid) || c.pgid == p.pgid)
     };
-    let clean = root.ppid == 1
-        && found
-            .iter()
-            .all(|p| p.pid > 1 && p.pid != scope.own_pid && p.pid != scope.owner && !p.protected());
-    if !clean {
-        return Vec::new();
+    let mut pgids: Vec<i32> = writing
+        .iter()
+        .filter_map(|pid| by_pid.get(pid))
+        .map(|p| p.pgid)
+        .collect();
+    pgids.sort_unstable();
+    pgids.dedup();
+    let mut targets: Vec<Target> = Vec::new();
+    for pgid in pgids {
+        if pgid <= 1 || pgid == scope.own_pgid || pgid == scope.own_pid || pgid == scope.owner {
+            continue;
+        }
+        let mut members = live.iter().filter(|p| p.pgid == pgid);
+        if members.all(|p| fits(p)) {
+            targets.extend(
+                live.iter()
+                    .filter(|p| p.pgid == pgid && writing.contains(&p.pid))
+                    .map(|p| target_of(p)),
+            );
+        }
     }
-    found.iter().map(|p| target_of(p)).collect()
+    targets.sort_by_key(|t| t.pid);
+    targets
 }
 
 pub fn writers_of_many(paths: &[String]) -> HashMap<String, Vec<i32>> {
@@ -479,17 +557,19 @@ pub fn stop_shell_in(
             survivors: writers.len(),
         });
     };
-    let mut found = plan(&writers, &table, &scope);
-    if request.orphans {
-        let taken = found.every_pid();
-        let rest: Vec<i32> = writers
-            .iter()
-            .copied()
-            .filter(|pid| !taken.contains(pid))
-            .collect();
-        found.pids.extend(orphan_targets(&rest, &table, &scope));
-    }
+    let found = stop_plan(&writers, &table, &scope, request.orphans);
     Ok(execute(&found, &scope, grace))
+}
+
+pub fn stop_plan(writers: &[i32], procs: &[Proc], scope: &Scope, orphans: bool) -> Plan {
+    let owner_alive = scope.owner > 1 && procs.iter().any(|p| p.pid == scope.owner && !p.zombie);
+    if owner_alive || !orphans {
+        return plan(writers, procs, scope);
+    }
+    Plan {
+        groups: Vec::new(),
+        pids: orphan_targets(writers, procs, scope),
+    }
 }
 
 #[cfg(test)]

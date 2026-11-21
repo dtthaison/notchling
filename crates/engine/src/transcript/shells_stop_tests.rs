@@ -420,36 +420,203 @@ mod slash_tmp {
     }
 }
 
-fn orphans() -> Vec<Proc> {
+fn desk() -> Vec<Proc> {
     vec![
         proc(1, 0, 1, "/sbin/launchd"),
-        proc(800, 1, 800, "/bin/zsh"),
-        proc(801, 800, 800, "/bin/sleep"),
-        proc(900, 1, 900, "/bin/zsh"),
+        proc(
+            300,
+            1,
+            300,
+            "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+        ),
+        proc(400, 300, 400, "/bin/zsh"),
+        proc(
+            OWNER,
+            400,
+            OWNER,
+            "/Users/me/.local/share/claude/versions/2.1.0/claude",
+        ),
         proc(612, OWNER, 612, "/bin/zsh"),
-        proc(OWN, 1, OWN, "/usr/local/bin/notchlingd"),
+        proc(613, 612, 612, "/bin/sleep"),
+        proc(
+            OWN,
+            1,
+            OWN,
+            "/Applications/Notchling.app/Contents/MacOS/Notchling",
+        ),
     ]
 }
 
-#[test]
-fn an_orphaned_shell_tree_with_one_root_under_launchd_is_a_target_pid_by_pid() {
-    let got = orphan_targets(&[800, 801], &orphans(), &scope());
-    assert_eq!(got.iter().map(|t| t.pid).collect::<Vec<_>>(), [800, 801]);
+fn gone(procs: Vec<Proc>) -> Vec<Proc> {
+    procs
+        .into_iter()
+        .filter(|p| p.pid != OWNER)
+        .map(|mut p| {
+            if p.ppid == OWNER {
+                p.ppid = 1;
+            }
+            p
+        })
+        .collect()
+}
+
+fn with(mut procs: Vec<Proc>, more: Vec<Proc>) -> Vec<Proc> {
+    procs.extend(more);
+    procs
+}
+
+fn unknown() -> Scope {
+    Scope {
+        owner: 0,
+        ..scope()
+    }
+}
+
+fn picked(writers: &[i32], procs: &[Proc], scope: &Scope) -> Vec<i32> {
+    stop_plan(writers, procs, scope, true).every_pid()
+}
+
+fn tmux() -> Vec<Proc> {
+    vec![
+        proc(710, 1, 710, "/opt/homebrew/bin/tmux"),
+        proc(711, 710, 711, "/bin/zsh"),
+        proc(712, 711, 712, "/usr/bin/vim"),
+    ]
+}
+
+fn editor() -> Vec<Proc> {
+    vec![proc(
+        730,
+        1,
+        730,
+        "/Applications/Zed.app/Contents/MacOS/zed",
+    )]
 }
 
 #[test]
-fn two_roots_or_a_root_with_a_live_parent_are_not_orphans() {
-    assert!(orphan_targets(&[800, 900], &orphans(), &scope()).is_empty());
-    assert!(orphan_targets(&[612], &orphans(), &scope()).is_empty());
-    assert!(orphan_targets(&[404], &orphans(), &scope()).is_empty());
+fn a_tmux_server_writing_the_file_is_left_while_the_owner_is_alive() {
+    let procs = with(desk(), tmux());
+    assert_eq!(picked(&[612, 613, 710], &procs, &scope()), [612, 613]);
 }
 
 #[test]
-fn a_protected_or_own_writer_refuses_the_whole_orphan_tree() {
-    let mut procs = orphans();
-    procs.push(proc(802, 800, 800, "/usr/local/bin/node"));
-    assert!(orphan_targets(&[800, 801, 802], &procs, &scope()).is_empty());
-    assert!(orphan_targets(&[OWN], &procs, &scope()).is_empty());
+fn a_tmux_server_writing_the_file_is_left_when_the_owner_is_gone() {
+    let procs = with(gone(desk()), tmux());
+    for scope in [scope(), unknown()] {
+        assert!(picked(&[710], &procs, &scope).is_empty());
+        assert_eq!(picked(&[612, 613, 710], &procs, &scope), [612, 613]);
+    }
+}
+
+#[test]
+fn an_editor_app_writing_the_file_is_left() {
+    let alive = with(desk(), editor());
+    assert_eq!(picked(&[612, 730], &alive, &scope()), [612, 613]);
+    let procs = with(gone(desk()), editor());
+    for scope in [scope(), unknown()] {
+        assert!(picked(&[730], &procs, &scope).is_empty());
+    }
+}
+
+#[test]
+fn a_server_with_sessions_of_its_own_is_left() {
+    let procs = with(
+        gone(desk()),
+        vec![
+            proc(720, 1, 720, "/usr/local/bin/dtach"),
+            proc(721, 720, 721, "/bin/zsh"),
+        ],
+    );
+    assert!(picked(&[720], &procs, &unknown()).is_empty());
+}
+
+#[test]
+fn a_writer_above_claude_code_or_notchling_is_left() {
+    let procs = with(
+        gone(desk()),
+        vec![
+            proc(660, 1, 660, "/bin/zsh"),
+            proc(661, 660, 660, "/bin/sh"),
+            proc(
+                662,
+                661,
+                662,
+                "/Users/me/.local/share/claude/versions/2.1.0/claude",
+            ),
+            proc(670, 1, 670, "/bin/zsh"),
+            proc(671, 670, 671, "/usr/local/bin/notchlingd"),
+            proc(680, 1, 680, "/bin/zsh"),
+            proc(
+                681,
+                680,
+                680,
+                "/Users/me/notchling/target/debug/notchling-app",
+            ),
+        ],
+    );
+    assert!(picked(&[660, 661], &procs, &unknown()).is_empty());
+    assert!(picked(&[670], &procs, &unknown()).is_empty());
+    assert!(picked(&[680], &procs, &unknown()).is_empty());
+}
+
+#[test]
+fn a_pipeline_orphaned_after_its_shell_died_is_stopped_pid_by_pid() {
+    let procs = with(
+        gone(desk()),
+        vec![
+            proc(640, 1, 639, "/bin/cat"),
+            proc(641, 1, 639, "/usr/bin/grep"),
+        ],
+    );
+    let plan = stop_plan(&[640, 641], &procs, &unknown(), true);
+    assert!(plan.groups.is_empty());
+    assert_eq!(plan.every_pid(), [640, 641]);
+}
+
+#[test]
+fn a_non_writer_middle_process_is_never_a_target() {
+    let procs = with(
+        gone(desk()),
+        vec![
+            proc(650, 1, 650, "/bin/sh"),
+            proc(651, 650, 650, "/bin/sh"),
+            proc(652, 651, 650, "/bin/sleep"),
+        ],
+    );
+    assert_eq!(picked(&[650, 652], &procs, &unknown()), [650, 652]);
+}
+
+#[test]
+fn a_real_orphan_is_stopped_and_a_stranger_is_left_while_the_owner_lives() {
+    let orphan = vec![
+        proc(800, 1, 800, "/bin/zsh"),
+        proc(801, 800, 800, "/bin/sleep"),
+    ];
+    let procs = with(gone(desk()), orphan.clone());
+    for scope in [scope(), unknown()] {
+        assert_eq!(picked(&[800, 801], &procs, &scope), [800, 801]);
+    }
+    assert!(picked(&[800, 801], &with(desk(), orphan), &scope()).is_empty());
+}
+
+#[test]
+fn a_shell_whose_parent_is_alive_is_no_orphan() {
+    assert!(picked(&[612, 613], &desk(), &unknown()).is_empty());
+    assert!(picked(&[404], &desk(), &unknown()).is_empty());
+}
+
+#[test]
+fn a_protected_member_or_our_own_pid_refuses_the_group() {
+    let procs = with(
+        gone(desk()),
+        vec![
+            proc(800, 1, 800, "/bin/zsh"),
+            proc(801, 800, 800, "/bin/sleep"),
+            proc(802, 800, 800, "/usr/local/bin/node"),
+        ],
+    );
+    assert!(picked(&[800, 801], &procs, &unknown()).is_empty());
+    assert!(picked(&[OWN], &procs, &unknown()).is_empty());
 }
 
 #[test]
@@ -494,7 +661,7 @@ mod orphaned {
     fn orphan(output: &Path) {
         let file = std::fs::File::create(output).expect("output file");
         Command::new("sh")
-            .args(["-c", "sh -c 'sleep 60 & wait' & exit 0"])
+            .args(["-c", "sh -c 'sleep 60 & wait' & sleep 60 & exit 0"])
             .stdout(file)
             .stderr(Stdio::null())
             .process_group(0)
