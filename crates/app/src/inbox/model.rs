@@ -15,11 +15,13 @@ pub struct Row {
     pub actions: Vec<(ActionId, String, bool)>,
     pub enabled: bool,
     pub open: Option<Value>,
+    pub node: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InboxModel {
     items: Vec<Item>,
+    consents: Vec<Value>,
     now_ms: i64,
 }
 
@@ -126,12 +128,17 @@ fn row_of(item: &Item, now_ms: i64) -> Row {
             .collect(),
         enabled: item.state == State::Open,
         open: item.open.clone(),
+        node: item.source.node.clone(),
     }
 }
 
 impl InboxModel {
     pub fn from_items(items: Vec<Item>, now_ms: i64) -> InboxModel {
-        InboxModel { items, now_ms }
+        InboxModel {
+            items,
+            consents: Vec::new(),
+            now_ms,
+        }
     }
 
     pub fn load(&mut self, reply: &Value) {
@@ -139,6 +146,18 @@ impl InboxModel {
             return;
         };
         self.items = items.iter().filter_map(item_of).collect();
+    }
+
+    pub fn load_consents(&mut self, reply: &Value) {
+        if let Some(rows) = reply.get("requests").and_then(Value::as_array) {
+            self.consents = rows.clone();
+        }
+    }
+
+    pub fn consent(&self, id: &str) -> Option<&Value> {
+        self.consents
+            .iter()
+            .find(|row| row.get("id").and_then(Value::as_str) == Some(id))
     }
 
     pub fn apply(&mut self, event: &Value) {
@@ -165,6 +184,7 @@ impl InboxModel {
 
     pub fn clear(&mut self) {
         self.items.clear();
+        self.consents.clear();
     }
 
     pub fn set_now(&mut self, now_ms: i64) {
@@ -250,12 +270,20 @@ pub fn target(open: &Value) -> Option<Target> {
     })
 }
 
+pub fn consent_of(open: &Value) -> Option<&str> {
+    open.get("consent").and_then(Value::as_str)
+}
+
 pub fn is_local(action: ActionId) -> bool {
     action == ActionId::Open
 }
 
 pub fn answer_args(id: &str, action: ActionId) -> Value {
     json!({"id": id, "action": action})
+}
+
+pub fn consent_answer_args(id: &str, allow: bool) -> Value {
+    json!({"consentId": id, "decision": if allow { "allow" } else { "deny" }})
 }
 
 pub fn seen_args(ids: &[String]) -> Value {

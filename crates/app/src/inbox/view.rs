@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{
     div, prelude::*, px, AnyView, Context, Div, Entity, Render, SharedString, Stateful, Window,
@@ -14,14 +14,17 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::Value;
 
+use super::consent_card::{ConsentCard, Env};
+use super::consent_view::{buttons, card_body};
 use super::feed::InboxFeed;
 use super::model::{is_local, target, Row, Target};
-use super::renders::{model, shown, NOW_MS};
+use super::renders::{consent_model, model, shown, NOW_MS};
 use super::{MAX_HEIGHT, WIDTH};
 use crate::phone::bridge::now_ms;
 
 const POLL: Duration = Duration::from_millis(500);
 const CLOCK_EVERY: u32 = 20;
+const ALLOW_SETTLED_MS: i64 = 60_000;
 
 pub struct InboxPanelView {
     feed: Arc<InboxFeed>,
@@ -31,6 +34,11 @@ pub struct InboxPanelView {
     busy: HashSet<String>,
     note: Option<String>,
     drawn: u64,
+    shown: HashMap<String, Instant>,
+    fixed_shown_ms: Option<i64>,
+    vault_on: Option<bool>,
+    cards_open: bool,
+    allow_waiting: bool,
 }
 
 impl InboxPanelView {
@@ -43,6 +51,11 @@ impl InboxPanelView {
             busy: HashSet::new(),
             note: None,
             drawn: 0,
+            shown: HashMap::new(),
+            fixed_shown_ms: None,
+            vault_on: None,
+            cards_open: false,
+            allow_waiting: false,
         };
         view.send_seen(cx);
         cx.spawn(async move |this, cx| {
@@ -68,12 +81,23 @@ impl InboxPanelView {
             busy: HashSet::new(),
             note: None,
             drawn: 0,
+            shown: HashMap::new(),
+            fixed_shown_ms: Some(ALLOW_SETTLED_MS),
+            vault_on: Some(true),
+            cards_open: false,
+            allow_waiting: false,
         }
+    }
+
+    pub fn with_vault(mut self, on: bool) -> InboxPanelView {
+        self.vault_on = Some(on);
+        self
     }
 
     fn poll(&mut self, ticks: u32, cx: &mut Context<Self>) {
         let changed = self.feed.generation() != self.drawn;
-        if changed || ticks.is_multiple_of(CLOCK_EVERY) {
+        let counting = self.cards_open && ticks.is_multiple_of(2);
+        if changed || counting || self.allow_waiting || ticks.is_multiple_of(CLOCK_EVERY) {
             cx.notify();
         }
         if changed {
@@ -153,6 +177,40 @@ impl InboxPanelView {
                 view.busy.remove(&id);
                 if let Err(e) = result {
                     view.note = Some(e);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn consent_act(&mut self, id: String, allow: bool, app_applied: bool, cx: &mut Context<Self>) {
+        if !self.busy.insert(id.clone()) {
+            return;
+        }
+        self.note = None;
+        let feed = self.feed.clone();
+        let sent = id.clone();
+        let open_form = allow && app_applied;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    if open_form {
+                        feed.consent_opened(&sent).map(|_| true)
+                    } else {
+                        feed.consent_answer(&sent, allow)
+                    }
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                view.busy.remove(&id);
+                match result {
+                    Ok(_) if open_form => crate::mac::vault_prompts::raise(&id),
+                    Ok(_) => {}
+                    Err(e) => view.note = Some(e),
                 }
                 cx.notify();
             })
@@ -252,6 +310,89 @@ impl InboxPanelView {
             .part("Inbox Row", a, cx)
     }
 
+    fn consent_row(
+        &self,
+        row: &Row,
+        card: &ConsentCard,
+        a: Appearance,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let busy = self.busy.contains(&card.id);
+        let bar = buttons(card, busy, a);
+        let mut allow = bar.allow;
+        let mut deny = bar.deny;
+        if card.allow.enabled() && !busy {
+            let (id, app_applied) = (card.id.clone(), card.app_applied);
+            allow = allow.on_click(cx.listener(move |this, _, _, cx| {
+                this.consent_act(id.clone(), true, app_applied, cx);
+            }));
+        }
+        if card.answerable && !busy {
+            let (id, app_applied) = (card.id.clone(), card.app_applied);
+            deny = deny.on_click(cx.listener(move |this, _, _, cx| {
+                this.consent_act(id.clone(), false, app_applied, cx);
+            }));
+        }
+        div()
+            .px(px(SPACE[2]))
+            .py(px(SPACE[1] + SPACE[0] / 2.0))
+            .flex()
+            .flex_col()
+            .gap(px(SPACE[1]))
+            .border_b(px(1.0))
+            .border_color(hsla(Ink::Hairline.color(a)))
+            .child(card_body(row, card, a))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(SPACE[1]))
+                    .child(allow)
+                    .child(deny),
+            )
+            .part("Consent Card", a, cx)
+    }
+
+    fn cards(
+        &mut self,
+        snapshot: &super::model::InboxModel,
+        rows: &[Row],
+        now: i64,
+        cx: &mut Context<Self>,
+    ) -> HashMap<String, ConsentCard> {
+        let vault_on = self.vault_on.unwrap_or_else(|| {
+            cx.try_global::<crate::mac::shell::AppSwitchFeed>()
+                .is_some_and(|f| f.0.switches().is_on(crate::switches::Switch::Vault))
+        });
+        let mut out = HashMap::new();
+        for row in rows.iter().filter(|r| r.enabled) {
+            let Some(id) = row.open.as_ref().and_then(super::model::consent_of) else {
+                continue;
+            };
+            let Some(view) = snapshot.consent(id) else {
+                continue;
+            };
+            let first = *self.shown.entry(id.to_owned()).or_insert_with(Instant::now);
+            let shown_ms = self
+                .fixed_shown_ms
+                .unwrap_or_else(|| first.elapsed().as_millis() as i64);
+            let env = Env {
+                now_ms: now,
+                vault_on,
+                shown_ms,
+                node: row.node.clone(),
+            };
+            if let Some(card) = ConsentCard::build(view, &env) {
+                out.insert(row.id.clone(), card);
+            }
+        }
+        self.cards_open = !out.is_empty();
+        self.allow_waiting = out
+            .values()
+            .any(|c| matches!(c.allow, super::consent_card::Allow::Wait(_)));
+        out
+    }
+
     fn heading(&self, text: &str, a: Appearance) -> Div {
         div()
             .px(px(SPACE[2]))
@@ -287,7 +428,9 @@ impl Render for InboxPanelView {
         let a = window_appearance(window);
         self.drawn = self.feed.generation();
         let now = self.fixed_now.unwrap_or_else(now_ms);
-        let (needs, done) = self.feed.snapshot(now).sections();
+        let snapshot = self.feed.snapshot(now);
+        let (needs, done) = snapshot.sections();
+        let cards = self.cards(&snapshot, &needs, now, cx);
         let mut list = div()
             .id("inbox-list")
             .min_h(px(0.0))
@@ -305,7 +448,10 @@ impl Render for InboxPanelView {
         } else {
             list = list.child(self.heading("Needs You", a));
             for row in &needs {
-                list = list.child(self.row(row, a, cx));
+                list = match cards.get(&row.id) {
+                    Some(card) => list.child(self.consent_row(row, card, a, cx)),
+                    None => list.child(self.row(row, a, cx)),
+                };
             }
         }
         if !done.is_empty() {
@@ -358,7 +504,17 @@ impl Render for InboxRender {
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let done_open = shown(name)?;
-    let feed = Arc::new(InboxFeed::fixed(model()));
-    let panel = cx.new(|_| InboxPanelView::fixed(feed, NOW_MS, done_open));
+    let consent = name.starts_with("inbox-consent");
+    let fixture = if consent { consent_model() } else { model() };
+    let feed = Arc::new(InboxFeed::fixed(fixture));
+    let vault_off = name == "inbox-consent-vault-off";
+    let panel = cx.new(|_| {
+        let panel = InboxPanelView::fixed(feed, NOW_MS, done_open);
+        if vault_off {
+            panel.with_vault(false)
+        } else {
+            panel
+        }
+    });
     Some(cx.new(|_| InboxRender { panel }).into())
 }
