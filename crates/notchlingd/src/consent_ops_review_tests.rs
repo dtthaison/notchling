@@ -283,7 +283,10 @@ fn an_app_tier_caller_that_is_not_the_app_sees_only_what_an_agent_sees() {
             .call(&caller, ops::CONSENT_GET, &json!({"id": row.id}))
             .unwrap_err();
         assert_eq!(err.data.unwrap()["reason"], "other_session", "{client:?}");
-        assert!(r.consent.pending_for(&caller, SETTING, "limitMode").is_empty());
+        assert!(r
+            .consent
+            .pending_for(&caller, SETTING, "limitMode")
+            .is_empty());
     }
     assert_eq!(
         r.consent

@@ -331,7 +331,9 @@ impl crate::consent_ops::Handler for SecretHandler {
         if let Some(shown) = &shown {
             view["change"] = shown.change.clone();
         }
-        let update = shown.as_ref().and_then(|r| r.change.get("existing").cloned());
+        let update = shown
+            .as_ref()
+            .and_then(|r| r.change.get("existing").cloned());
         let facts = view.get_mut("facts").and_then(Value::as_array_mut);
         for fact in facts.into_iter().flatten() {
             if let Some(args) = fact.get_mut("args").and_then(Value::as_object_mut) {

@@ -1,7 +1,12 @@
 use super::tests::{agent, app, ask, ended, err, seed, setup, setup_full};
 use super::*;
 
-fn save_for(s: &super::tests::Setup, id: &str, name: &str, extra: Value) -> Result<Value, ApiError> {
+fn save_for(
+    s: &super::tests::Setup,
+    id: &str,
+    name: &str,
+    extra: Value,
+) -> Result<Value, ApiError> {
     let mut args = json!({"entry": {"name": name, "kind": "token"},
                           "value": {"secret": "fake-gh-0009"}, "consentId": id});
     for (key, value) in extra.as_object().cloned().unwrap_or_default() {
@@ -73,10 +78,12 @@ fn a_change_under_the_save_lock_is_caught_by_the_store() {
         secret: "fake-npm-0003".into(),
         ..Default::default()
     };
-    let refused = s
-        .ops
-        .store
-        .save_checked(&entry, Some(value), None, "2026-11-21T00:00:00Z", &|_| false);
+    let refused =
+        s.ops
+            .store
+            .save_checked(&entry, Some(value), None, "2026-11-21T00:00:00Z", &|_| {
+                false
+            });
     assert!(matches!(
         refused,
         Err(notchling_engine::vault::VaultError::Changed)

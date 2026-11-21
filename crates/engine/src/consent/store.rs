@@ -1,8 +1,8 @@
+use super::kinds::{SECRET_REQUEST, SETTING};
 use super::model::{
     new_id, AnswerOn, AppliedBy, Consent, New, Refusal, State, IDEM_MS, KEEP_CLOSED_MS,
     OPENED_MIN_MS,
 };
-use super::kinds::{SECRET_REQUEST, SETTING};
 use super::rules;
 use crate::store;
 use rusqlite::{params, Connection, TransactionBehavior};

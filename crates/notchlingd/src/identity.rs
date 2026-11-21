@@ -171,6 +171,9 @@ impl Identifier {
             return unrooted();
         };
         let exe = self.procs.resolve(&exe).unwrap_or(exe);
+        if !exe.to_string_lossy().contains(".app/Contents/MacOS/") {
+            return unrooted();
+        }
         let Some(started) = self.procs.start_time(top) else {
             return unrooted();
         };
