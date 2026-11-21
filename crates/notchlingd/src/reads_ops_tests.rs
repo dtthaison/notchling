@@ -68,6 +68,11 @@ fn planted_registry() -> ProviderRegistry {
         accounts: vec![
             ProviderAccount::new("acc-work", "alice@work-corp.com", Some("max")),
             ProviderAccount::new("acc-far", "bob@far-secret.com", Some("pro")),
+            ProviderAccount::new(
+                "email:erin@work-corp.com",
+                "erin@work-corp.com",
+                Some("pro"),
+            ),
         ],
         active_id: Some("acc-work".into()),
         sign_in_url: Some("https://login.example/TOKEN-SECRET".into()),
@@ -317,8 +322,10 @@ fn accounts_and_limits_answer_for_a_verified_session() {
     assert_eq!(reply["tool"]["reason"], json!("unknown_tool"));
 }
 
-const PLANTED_OF_WORK: [&str; 6] = [
+const PLANTED_OF_WORK: [&str; 8] = [
     "alice@work-corp.com",
+    "erin@work-corp.com",
+    "email:",
     "work-corp",
     "acc-work",
     "OWN-",
@@ -342,12 +349,16 @@ fn assign_work(rig: &Rig) {
     notchling_engine::store::put_doc(
         &data,
         Kind::Claude.doc(),
-        r#"[{"id":"acc-work"},{"id":"acc-far"}]"#,
+        r#"[{"id":"acc-work"},{"id":"acc-far"},{"id":"email:erin@work-corp.com"}]"#,
     )
     .unwrap();
     Organizations::new(&data)
         .with_home(&rig._tmp.path("home"))
         .set_organization(Kind::Claude, "acc-work", &rig.work)
+        .unwrap();
+    Organizations::new(&data)
+        .with_home(&rig._tmp.path("home"))
+        .set_organization(Kind::Claude, "email:erin@work-corp.com", &rig.work)
         .unwrap();
 }
 
@@ -590,4 +601,39 @@ fn a_row_with_an_empty_folder_is_dropped_and_never_placed_in_personal() {
     assert_eq!(reply["pages"].as_array().unwrap().len(), 1);
     assert_eq!(reply["pages"][0]["title"], json!("placed"));
     assert_eq!(reply["sessions"], json!([]));
+}
+
+#[test]
+fn account_ids_in_the_summary_are_opaque_stable_and_resolve_back() {
+    let rig = rig_with("opaque-ids", planted_registry());
+    assign_work(&rig);
+    let _bound = bind_identity(Some(who(true, "s1", Some(&rig.work))));
+    let first = read(&rig, ops::ACCOUNTS_SUMMARY, json!({}));
+    let text = first.to_string();
+    for raw in ["email:", "erin@", "work-corp", "acc-work"] {
+        assert!(!text.contains(raw), "{raw} leaked in {text}");
+    }
+    let rows = first["tools"]["claude"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_ne!(ids[0], ids[1]);
+    assert_eq!(
+        ids[0],
+        opaque_account_id(ProviderId::CLAUDE_CODE, "acc-work")
+    );
+    assert_eq!(rows[0]["active"], json!(true));
+    let again = read(&rig, ops::ACCOUNTS_SUMMARY, json!({}));
+    assert_eq!(first, again);
+    assert_eq!(
+        rig.ops
+            .account_for_opaque(&caller(), "claude", ids[1])
+            .as_deref(),
+        Some("email:erin@work-corp.com")
+    );
+    assert_eq!(
+        rig.ops.account_for_opaque(&caller(), "claude", "acc-work"),
+        None
+    );
+    let far = opaque_account_id(ProviderId::CLAUDE_CODE, "acc-far");
+    assert_eq!(rig.ops.account_for_opaque(&caller(), "claude", &far), None);
 }

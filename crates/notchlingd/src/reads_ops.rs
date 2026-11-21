@@ -9,6 +9,7 @@ use notchling_engine::organizations::{Kind, Organizations, PERSONAL_ID};
 use notchling_engine::providers::ProviderId;
 use notchling_local_api::{bound_identity, ops, AgentIdentity, ApiError, Caller, OpSpec, Tier};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -40,6 +41,20 @@ pub fn mask_email(email: &str) -> String {
     let dom: String = domain.chars().take(1).collect();
     let tld = domain.rsplit_once('.').map_or("", |(_, t)| t);
     format!("{first}***@{dom}***.{tld}")
+}
+
+const ACCOUNT_ID_SALT: &[u8] = b"notchling.accounts.summary.v1";
+
+pub fn opaque_account_id(provider: &str, raw: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(ACCOUNT_ID_SALT);
+    hasher.update([0u8]);
+    hasher.update(provider.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(raw.as_bytes());
+    let digest = hasher.finalize();
+    let hex: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+    format!("acct-{hex}")
 }
 
 fn no_session(extra: Value) -> Value {
@@ -169,7 +184,7 @@ impl ReadsOps {
                 .filter(|a| self.orgs.resolve(kind, &a.id).id == org)
                 .map(|a| {
                     json!({
-                        "id": a.id,
+                        "id": opaque_account_id(&provider, &a.id),
                         "name": mask_email(&a.email),
                         "organization": org,
                         "active": state.active_id.as_deref() == Some(a.id.as_str()),
@@ -181,6 +196,25 @@ impl ReadsOps {
             tools.insert(tool.to_string(), json!(rows));
         }
         json!({"organization": org, "tools": tools})
+    }
+
+    pub fn account_for_opaque(&self, caller: &Caller, tool: &str, opaque: &str) -> Option<String> {
+        let (org, _) = self.mine(caller)?;
+        self.providers
+            .states()
+            .into_iter()
+            .find_map(|(provider, state)| {
+                let (kind, name) = kind_of(&provider)?;
+                if name != tool {
+                    return None;
+                }
+                state
+                    .accounts
+                    .iter()
+                    .filter(|a| self.orgs.resolve(kind, &a.id).id == org)
+                    .find(|a| opaque_account_id(&provider, &a.id) == opaque)
+                    .map(|a| a.id.clone())
+            })
     }
 
     fn active_in(&self, kind: Kind, id: Option<&str>, org: &str) -> bool {
