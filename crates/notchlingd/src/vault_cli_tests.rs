@@ -193,3 +193,13 @@ fn usage_names_all_three() {
     assert!(text.contains("notchling secrets [url | host | words]"));
     assert!(text.contains("notchling secret-request <name>"));
 }
+
+#[test]
+fn asking_secret_request_for_help_succeeds_and_a_missing_name_does_not() {
+    assert_eq!(secret_request(&args(&["--help"])), contract::OK);
+    assert_eq!(secret_request(&args(&["-h", "--json"])), contract::OK);
+    assert_eq!(
+        secret_request(&args(&["--kind", "token"])),
+        contract::BAD_REQUEST
+    );
+}

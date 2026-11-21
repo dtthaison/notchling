@@ -296,7 +296,7 @@ fn print_lines(lines: &[String]) {
     }
 }
 
-type Call<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, ClientError> + 'a;
+type Call<'a> = dyn FnMut(&str, &contract::Ask<'_>, Instant) -> Result<Value, ClientError> + 'a;
 
 fn set(
     call: &mut Call<'_>,
@@ -314,11 +314,16 @@ fn set(
     if let Some(key) = &flags.key {
         consent.insert("key".into(), json!(key));
     }
-    let mut args = json!({"key": key, "value": text, "consent": consent});
+    let mut args = json!({"key": key, "value": text, "wait": 0, "consent": consent});
     if flags.dry_run {
         args["dryRun"] = json!(true);
     }
-    let first = call(ops::SETTINGS_SET, args, CALL_TIMEOUT).map_err(|e| (ops::SETTINGS_SET, e))?;
+    let first = call(
+        ops::SETTINGS_SET,
+        &|_| (args.clone(), CALL_TIMEOUT),
+        Instant::now(),
+    )
+    .map_err(|e| (ops::SETTINGS_SET, e))?;
     if flags.dry_run || str_of(&first, "state") != "waiting" || !flags.wait {
         return Ok(first);
     }
@@ -328,18 +333,19 @@ fn set(
     let id = str_of(&first, "id").to_string();
     let end = Instant::now() + flags.timeout;
     let mut last = first;
-    while Instant::now() < end {
-        let slice = POLL.min(
-            end.saturating_duration_since(Instant::now())
-                .as_secs()
-                .max(1),
-        );
-        last = call(
-            ops::SETTINGS_ASKED,
+    let ask = |left: Duration| {
+        let slice = POLL.min(left.as_secs());
+        (
             json!({"id": id, "wait": slice}),
-            Duration::from_secs(slice + 15),
+            CALL_TIMEOUT + Duration::from_secs(slice),
         )
-        .map_err(|e| (ops::SETTINGS_ASKED, e))?;
+    };
+    while Instant::now() < end {
+        last = match call(ops::SETTINGS_ASKED, &ask, end) {
+            Ok(reply) => reply,
+            Err(e) if contract::transient(&e) => break,
+            Err(e) => return Err((ops::SETTINGS_ASKED, e)),
+        };
         if !matches!(str_of(&last, "state"), "waiting" | "opened" | "applying") {
             break;
         }
@@ -357,39 +363,26 @@ pub fn run(args: &[String]) -> i32 {
         Ok(c) => c,
         Err(failure) => return failure.report(json),
     };
-    let socket = parsed.socket.clone();
-    let mut call = |op: &str, args: Value, timeout: Duration| {
-        client.set_timeout(timeout);
-        let end = Instant::now()
-            + if op == ops::SETTINGS_ASKED {
-                timeout
-            } else {
-                Duration::ZERO
-            };
-        let mut step = 0;
-        loop {
-            match client.call(op, args.clone()) {
-                Err(ClientError::Closed | ClientError::NotRunning(_)) if Instant::now() < end => {
-                    let left = end.saturating_duration_since(Instant::now());
-                    std::thread::sleep(Duration::from_millis(contract::pause_ms(step)).min(left));
-                    step += 1;
-                    if let Ok(mut fresh) = contract::connect(socket.as_deref()) {
-                        fresh.set_timeout(timeout);
-                        client = fresh;
-                    }
-                }
-                other => return other,
-            }
-        }
+    let mut link = contract::Socket {
+        client: &mut client,
+        path: parsed.socket.as_deref(),
     };
+    let mut call = |op: &str, ask: &contract::Ask<'_>, end: Instant| {
+        contract::through_restart(&mut link, op, ask, end, &contract::pause)
+    };
+    let once = |args: Value| move |_: Duration| (args.clone(), CALL_TIMEOUT);
     let plain = |reply: Result<Value, ClientError>, op: &'static str| reply.map_err(|e| (op, e));
     let reply = match &parsed.sub {
         Sub::List => plain(
-            call(ops::SETTINGS_LIST, json!({}), CALL_TIMEOUT),
+            call(ops::SETTINGS_LIST, &once(json!({})), Instant::now()),
             ops::SETTINGS_LIST,
         ),
         Sub::Get(key) => plain(
-            call(ops::SETTINGS_GET, json!({"key": key}), CALL_TIMEOUT),
+            call(
+                ops::SETTINGS_GET,
+                &once(json!({"key": key})),
+                Instant::now(),
+            ),
             ops::SETTINGS_GET,
         ),
         Sub::Set(key, value) => set(&mut call, (key, value), &parsed.flags, json),

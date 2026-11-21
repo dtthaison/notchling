@@ -171,3 +171,124 @@ fn json_is_read_only_before_the_double_dash() {
     assert!(!wants_json(&args(&["gh", "--", "make", "--json"])));
     assert!(!wants_json(&args(&[])));
 }
+
+struct Scripted {
+    sends: Vec<Result<Value, ClientError>>,
+    renews: Vec<Result<(), ClientError>>,
+    sent: Vec<(Value, Duration)>,
+}
+
+impl Link for Scripted {
+    fn send(&mut self, _op: &str, args: Value, timeout: Duration) -> Result<Value, ClientError> {
+        self.sent.push((args, timeout));
+        if self.sends.is_empty() {
+            Err(ClientError::Closed)
+        } else {
+            self.sends.remove(0)
+        }
+    }
+
+    fn renew(&mut self) -> Result<(), ClientError> {
+        if self.renews.is_empty() {
+            Err(ClientError::Closed)
+        } else {
+            self.renews.remove(0)
+        }
+    }
+}
+
+fn scripted(
+    sends: Vec<Result<Value, ClientError>>,
+    renews: Vec<Result<(), ClientError>>,
+) -> Scripted {
+    Scripted {
+        sends,
+        renews,
+        sent: Vec::new(),
+    }
+}
+
+fn left_ms(left: Duration) -> (Value, Duration) {
+    let ms = u64::try_from(left.as_millis())
+        .unwrap_or(u64::MAX)
+        .min(50_000);
+    (json!({"waitMs": ms}), Duration::from_millis(ms + 5))
+}
+
+fn tiny(_: usize) -> Duration {
+    Duration::from_millis(5)
+}
+
+#[test]
+fn a_reconnect_refused_for_good_is_passed_on_at_once() {
+    let mut link = scripted(
+        vec![Err(ClientError::Closed)],
+        vec![
+            Err(ClientError::NotRunning(std::io::ErrorKind::NotFound.into())),
+            Err(ClientError::UntrustedServer("x".into())),
+        ],
+    );
+    let end = Instant::now() + Duration::from_secs(30);
+    let got = through_restart(&mut link, "consent.get", &left_ms, end, &tiny);
+    assert!(
+        matches!(got, Err(ClientError::UntrustedServer(_))),
+        "{got:?}"
+    );
+    assert_eq!(link.sent.len(), 1);
+}
+
+#[test]
+fn a_dead_socket_write_is_retried_and_the_wait_shrinks_to_what_is_left() {
+    let mut link = scripted(
+        vec![
+            Err(ClientError::Io(std::io::ErrorKind::BrokenPipe.into())),
+            Ok(json!({"state": "waiting"})),
+        ],
+        vec![Err(ClientError::Closed), Ok(())],
+    );
+    let end = Instant::now() + Duration::from_secs(20);
+    let got = through_restart(&mut link, "consent.get", &left_ms, end, &tiny).unwrap();
+    assert_eq!(got["state"], "waiting");
+    let first = link.sent[0].0["waitMs"].as_u64().unwrap();
+    let second = link.sent[1].0["waitMs"].as_u64().unwrap();
+    assert!(second < first && second <= 20_000, "{first} {second}");
+    assert_eq!(link.sent[1].1, Duration::from_millis(second + 5));
+}
+
+#[test]
+fn no_reconnect_or_retry_starts_after_the_deadline() {
+    let mut link = scripted(vec![], vec![]);
+    let end = Instant::now() + Duration::from_millis(40);
+    let started = Instant::now();
+    let got = through_restart(&mut link, "consent.get", &left_ms, end, &|_| {
+        Duration::from_millis(30)
+    });
+    assert!(matches!(got, Err(ClientError::Closed)), "{got:?}");
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert!(link.sent.len() <= 2, "{}", link.sent.len());
+    assert!(link
+        .sent
+        .iter()
+        .all(|(a, _)| a["waitMs"].as_u64().unwrap() <= 40));
+}
+
+#[test]
+fn only_a_lost_link_is_transient() {
+    for e in [
+        ClientError::Closed,
+        ClientError::NotRunning(std::io::ErrorKind::NotFound.into()),
+        ClientError::Io(std::io::ErrorKind::BrokenPipe.into()),
+        ClientError::Io(std::io::ErrorKind::ConnectionReset.into()),
+    ] {
+        assert!(transient(&e), "{e}");
+    }
+    for e in [
+        ClientError::UntrustedServer("x".into()),
+        ClientError::Timeout,
+        ClientError::Unsupported,
+        ClientError::Io(std::io::ErrorKind::PermissionDenied.into()),
+        api(ErrorCode::Failed, None),
+    ] {
+        assert!(!transient(&e), "{e}");
+    }
+}

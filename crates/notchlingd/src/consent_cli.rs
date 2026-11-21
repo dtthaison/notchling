@@ -175,35 +175,39 @@ pub fn run(args: &[String], list: bool) -> i32 {
         }
         Sub::Get(id) => {
             let end = Instant::now() + parsed.timeout;
-            let mut request;
-            loop {
+            let until = if parsed.wait { end } else { Instant::now() };
+            let ask = |left: Duration| {
                 let wait_ms = if parsed.wait {
-                    POLL_MS.min(
-                        u64::try_from(end.saturating_duration_since(Instant::now()).as_millis())
-                            .unwrap_or(POLL_MS),
-                    )
+                    contract::wait_slice(left, POLL_MS)
                 } else {
                     0
                 };
-                let until = if parsed.wait { end } else { Instant::now() };
-                request = match contract::call_through_restart(
+                (
+                    json!({"id": id, "waitMs": wait_ms}),
+                    CALL_TIMEOUT + Duration::from_millis(wait_ms),
+                )
+            };
+            let mut last: Option<Value> = None;
+            let request = loop {
+                let request = match contract::call_through_restart(
                     &mut client,
-                    (
-                        parsed.socket.as_deref(),
-                        CALL_TIMEOUT + Duration::from_millis(POLL_MS),
-                    ),
+                    parsed.socket.as_deref(),
                     ops::CONSENT_GET,
-                    &json!({"id": id, "waitMs": wait_ms}),
+                    &ask,
                     until,
                 ) {
                     Ok(r) => r,
-                    Err(f) => return f.report(json),
+                    Err(f) => match last {
+                        Some(pending) if contract::lost(&f) => break pending,
+                        _ => return f.report(json),
+                    },
                 };
                 let pending = exit_of(state_of(&request)) == contract::PENDING;
                 if !pending || !parsed.wait || Instant::now() >= end {
-                    break;
+                    break request;
                 }
-            }
+                last = Some(request);
+            };
             let code = exit_of(state_of(&request));
             if code != contract::OK {
                 return failure_of(&request, ops::CONSENT_GET).report(json);

@@ -127,7 +127,7 @@ fn the_failure_carries_the_request_row_not_the_ask_wrapper() {
 #[test]
 fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
     let mut calls: Vec<String> = Vec::new();
-    let mut call = |op: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
+    let mut call = |op: &str, _: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
         calls.push(op.to_string());
         match op {
             "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
@@ -140,11 +140,30 @@ fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
     assert!(matches!(error, ClientError::Timeout));
     assert_eq!(calls, ["settings.set", "settings.asked"]);
 
-    let mut refused = |_: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
+    let mut refused = |_: &str, _: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
         Err(ClientError::Timeout)
     };
     let (op, _) = set(&mut refused, ("theme", "dark"), &Flags::default(), true).unwrap_err();
     assert_eq!(op, ops::SETTINGS_SET);
+}
+
+#[test]
+fn a_daemon_lost_past_the_deadline_returns_the_request_still_waiting() {
+    let mut sent: Vec<Value> = Vec::new();
+    let mut call = |op: &str, ask: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
+        sent.push(ask(Duration::from_secs(90)).0);
+        match op {
+            "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
+            _ => Err(ClientError::Closed),
+        }
+    };
+    let got = set(&mut call, ("theme", "dark"), &Flags::default(), true).unwrap();
+    assert_eq!(
+        (got["state"].as_str(), got["id"].as_str()),
+        (Some("waiting"), Some("r1"))
+    );
+    assert_eq!(sent[0]["wait"], 0);
+    assert_eq!(sent[1]["wait"], POLL);
 }
 
 #[test]
@@ -194,8 +213,8 @@ fn the_common_flags_are_read_and_sent_in_the_consent_object() {
     assert!(parse(&args(&["set", "a", "b", "--timeout", "soon"])).is_err());
 
     let mut sent: Vec<Value> = Vec::new();
-    let mut call = |_: &str, body: Value, _: Duration| -> Result<Value, ClientError> {
-        sent.push(body);
+    let mut call = |_: &str, ask: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
+        sent.push(ask(Duration::ZERO).0);
         Ok(json!({"state": "waiting", "id": "c1"}))
     };
     let got = set(&mut call, ("limitMode", "off"), &parsed.flags, true).unwrap();

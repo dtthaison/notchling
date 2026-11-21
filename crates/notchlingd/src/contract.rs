@@ -358,31 +358,102 @@ pub fn lost(failure: &Failure) -> bool {
     failure.reason == "not_running"
 }
 
-pub fn call_through_restart(
-    client: &mut Client,
-    (socket, timeout): (Option<&Path>, Duration),
+pub fn pause(step: usize) -> Duration {
+    Duration::from_millis(pause_ms(step))
+}
+
+pub fn transient(e: &ClientError) -> bool {
+    use std::io::ErrorKind;
+    match e {
+        ClientError::NotRunning(_) | ClientError::Closed => true,
+        ClientError::Io(io) => matches!(
+            io.kind(),
+            ErrorKind::BrokenPipe
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::ConnectionRefused
+                | ErrorKind::NotConnected
+                | ErrorKind::UnexpectedEof
+                | ErrorKind::NotFound
+        ),
+        _ => false,
+    }
+}
+
+pub trait Link {
+    fn send(&mut self, op: &str, args: Value, timeout: Duration) -> Result<Value, ClientError>;
+    fn renew(&mut self) -> Result<(), ClientError>;
+}
+
+pub struct Socket<'a> {
+    pub client: &'a mut Client,
+    pub path: Option<&'a Path>,
+}
+
+impl Link for Socket<'_> {
+    fn send(&mut self, op: &str, args: Value, timeout: Duration) -> Result<Value, ClientError> {
+        self.client.set_timeout(timeout);
+        self.client.call(op, args)
+    }
+
+    fn renew(&mut self) -> Result<(), ClientError> {
+        let layout = Layout::from_env(self.path).ok_or(ClientError::Unsupported)?;
+        *self.client = Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION"))?;
+        Ok(())
+    }
+}
+
+pub type Ask<'a> = dyn Fn(Duration) -> (Value, Duration) + 'a;
+
+pub fn through_restart(
+    link: &mut dyn Link,
     op: &str,
-    args: &Value,
+    ask: &Ask<'_>,
     end: Instant,
-) -> Result<Value, Failure> {
+    pause: &dyn Fn(usize) -> Duration,
+) -> Result<Value, ClientError> {
     let mut step = 0;
     loop {
-        match call(client, op, args.clone()) {
-            Err(failure) if lost(&failure) => {
-                let left = end.saturating_duration_since(Instant::now());
-                if left.is_zero() {
-                    return Err(failure);
-                }
-                std::thread::sleep(Duration::from_millis(pause_ms(step)).min(left));
-                step += 1;
-                if let Ok(mut fresh) = connect(socket) {
-                    fresh.set_timeout(timeout);
-                    *client = fresh;
-                }
-            }
+        let (args, timeout) = ask(end.saturating_duration_since(Instant::now()));
+        let mut lost = match link.send(op, args, timeout) {
+            Err(e) if transient(&e) => e,
             other => return other,
+        };
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(lost);
+            }
+            std::thread::sleep(pause(step).min(left));
+            step += 1;
+            if Instant::now() >= end {
+                return Err(lost);
+            }
+            match link.renew() {
+                Ok(()) => break,
+                Err(e) if transient(&e) => lost = e,
+                Err(e) => return Err(e),
+            }
         }
     }
+}
+
+pub fn call_through_restart(
+    client: &mut Client,
+    socket: Option<&Path>,
+    op: &str,
+    ask: &Ask<'_>,
+    end: Instant,
+) -> Result<Value, Failure> {
+    let mut link = Socket {
+        client,
+        path: socket,
+    };
+    through_restart(&mut link, op, ask, end, &pause).map_err(|e| Failure::from_client(Some(op), e))
+}
+
+pub fn wait_slice(left: Duration, most_ms: u64) -> u64 {
+    most_ms.min(u64::try_from(left.as_millis()).unwrap_or(most_ms))
 }
 
 pub fn pretty(value: &Value) -> String {
