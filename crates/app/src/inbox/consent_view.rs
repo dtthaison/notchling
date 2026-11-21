@@ -5,7 +5,7 @@ use notchling_kit::ui::{button, hsla, label, KitStyled};
 use notchling_kit::{Appearance, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::consent_card::{Allow, ConsentCard, Untrusted};
+use super::consent_card::{ConsentCard, Untrusted};
 use super::model::Row;
 
 const LABEL_WIDTH: f32 = 84.0;
@@ -116,11 +116,6 @@ pub fn buttons(card: &ConsentCard, busy: bool, a: Appearance) -> Buttons {
     } else {
         PartState::Disabled
     };
-    let allow_kind = if card.allow == Allow::Off {
-        ButtonKind::Secondary
-    } else {
-        ButtonKind::Primary
-    };
     let deny_state = if card.answerable && !busy {
         PartState::Rest
     } else {
@@ -130,7 +125,7 @@ pub fn buttons(card: &ConsentCard, busy: bool, a: Appearance) -> Buttons {
         allow: button(
             key("allow"),
             t::consent::allow(),
-            allow_kind,
+            ButtonKind::Secondary,
             allow_state,
             a,
         ),

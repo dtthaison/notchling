@@ -505,7 +505,11 @@ impl Render for InboxRender {
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let done_open = shown(name)?;
     let consent = name.starts_with("inbox-consent");
-    let fixture = if consent { consent_model() } else { model() };
+    let fixture = match name {
+        "inbox-consent" => consent_model(0),
+        _ if consent => consent_model(1),
+        _ => model(),
+    };
     let feed = Arc::new(InboxFeed::fixed(fixture));
     let vault_off = name == "inbox-consent-vault-off";
     let panel = cx.new(|_| {

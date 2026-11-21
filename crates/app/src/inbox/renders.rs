@@ -6,7 +6,7 @@ use crate::views::ViewSpec;
 
 pub const NOW_MS: i64 = 1_794_096_000_000;
 
-pub const VIEWS: [ViewSpec; 4] = [
+pub const VIEWS: [ViewSpec; 5] = [
     ViewSpec {
         name: "inbox-panel",
         size: (WIDTH + 32.0, 460.0),
@@ -19,19 +19,26 @@ pub const VIEWS: [ViewSpec; 4] = [
     },
     ViewSpec {
         name: "inbox-consent",
-        size: (WIDTH + 32.0, 720.0),
-        about: "the Inbox panel with two consent cards: a text setting and a secret request, Vault on (made-up data)",
+        size: (WIDTH + 32.0, 600.0),
+        about: "the Inbox panel with a text setting's consent card and the agent's words (made-up data)",
+    },
+    ViewSpec {
+        name: "inbox-consent-secret",
+        size: (WIDTH + 32.0, 560.0),
+        about: "the Inbox panel with a secret request card, Vault on (made-up data)",
     },
     ViewSpec {
         name: "inbox-consent-vault-off",
-        size: (WIDTH + 32.0, 720.0),
-        about: "the Inbox panel with two consent cards while the Vault is off: the secret request's Allow is off (made-up data)",
+        size: (WIDTH + 32.0, 600.0),
+        about: "the Inbox panel with a secret request card while the Vault is off: Allow is off (made-up data)",
     },
 ];
 
 pub fn shown(name: &str) -> Option<bool> {
     match name {
-        "inbox-panel" | "inbox-consent" | "inbox-consent-vault-off" => Some(false),
+        "inbox-panel" | "inbox-consent" | "inbox-consent-secret" | "inbox-consent-vault-off" => {
+            Some(false)
+        }
         "inbox-panel-done" => Some(true),
         _ => None,
     }
@@ -85,7 +92,7 @@ fn approval_actions() -> Value {
     ])
 }
 
-pub fn consent_model() -> InboxModel {
+pub fn consent_model(which: usize) -> InboxModel {
     type Words = &'static str;
     let raised =
         |id: Words, kind: Words, title: Words, detail: Words, ago_ms: i64, secret: bool| {
@@ -108,14 +115,14 @@ pub fn consent_model() -> InboxModel {
                 },
             })
         };
-    let items = json!([
+    let all = [
         raised(
             "consent:c1:1",
             "setting_change",
             "Claude Code asks to change Default Prompt",
             "",
             3 * 60_000,
-            false
+            false,
         ),
         raised(
             "consent:c2:1",
@@ -123,9 +130,10 @@ pub fn consent_model() -> InboxModel {
             "Codex asks you to add the secret stripe-key",
             "",
             9 * 60_000,
-            true
+            true,
         ),
-    ]);
+    ];
+    let items = json!([all[which].clone()]);
     let requests = json!({"requests": [
         {
             "id": "c1", "kind": "setting", "target": "defaultPrompt", "state": "waiting",
