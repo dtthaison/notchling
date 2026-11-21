@@ -336,7 +336,7 @@ impl Failure {
 
     pub fn report_with(&self, json: bool, result: &Value) -> i32 {
         if json {
-            println!("{}", self.to_value_with(result.clone()));
+            let _ = writeln!(std::io::stdout(), "{}", self.to_value_with(result.clone()));
             self.exit
         } else {
             self.report(false)

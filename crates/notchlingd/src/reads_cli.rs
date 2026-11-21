@@ -1,6 +1,7 @@
 use crate::contract::{self, Failure};
 use notchling_local_api::{ops, CALL_TIMEOUT};
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::PathBuf;
 
 pub const NAMES: [&str; 9] = [
@@ -65,7 +66,8 @@ fn has(p: &Parsed, name: &str) -> bool {
 }
 
 fn show(value: &Value) {
-    println!(
+    let _ = writeln!(
+        std::io::stdout(),
         "{}",
         serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
     );

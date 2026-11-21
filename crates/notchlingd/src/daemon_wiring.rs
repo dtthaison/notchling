@@ -925,7 +925,7 @@ impl Wired {
                 self.providers.clone(),
                 self.limits.clone(),
                 layout.data_dir.join("daemon").join("accounts"),
-                Arc::new(|| notchling_engine::transcript::util::now_secs()),
+                Arc::new(notchling_engine::transcript::util::now_secs),
             )))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
             .with_group(Arc::new(OrganizationsOps::for_daemon(layout, folders)))

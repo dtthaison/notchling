@@ -63,24 +63,28 @@ impl AccountProvider for Planted {
 
 fn planted_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
-    let mut claude = ProviderState::default();
-    claude.accounts = vec![
-        ProviderAccount::new("acc-work", "alice@work-corp.com", Some("max")),
-        ProviderAccount::new("acc-far", "bob@far-secret.com", Some("pro")),
-    ];
-    claude.active_id = Some("acc-work".into());
-    claude.sign_in_url = Some("https://login.example/TOKEN-SECRET".into());
+    let claude = ProviderState {
+        accounts: vec![
+            ProviderAccount::new("acc-work", "alice@work-corp.com", Some("max")),
+            ProviderAccount::new("acc-far", "bob@far-secret.com", Some("pro")),
+        ],
+        active_id: Some("acc-work".into()),
+        sign_in_url: Some("https://login.example/TOKEN-SECRET".into()),
+        ..ProviderState::default()
+    };
     registry.register(Arc::new(Planted {
         id: ProviderId::CLAUDE_CODE,
         state: claude,
     }));
-    let mut codex = ProviderState::default();
-    codex.accounts = vec![ProviderAccount::new(
-        "cdx-far",
-        "carol@far-secret.com",
-        None,
-    )];
-    codex.active_id = Some("cdx-far".into());
+    let codex = ProviderState {
+        accounts: vec![ProviderAccount::new(
+            "cdx-far",
+            "carol@far-secret.com",
+            None,
+        )],
+        active_id: Some("cdx-far".into()),
+        ..ProviderState::default()
+    };
     registry.register(Arc::new(Planted {
         id: ProviderId::CODEX,
         state: codex,
