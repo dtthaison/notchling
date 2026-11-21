@@ -388,7 +388,7 @@ pub const COMMANDS: &[Row] = &[
     row(
         "limits",
         "notchling limits [--tool <claude|codex|agy> [--pool <name>]] [--json] [--socket <path>]",
-        "whether each tool can run now, its pools and windows and how old the reading is; with --tool exits 0 when usable and 1 when not, the reason in the error (credits_out, pool_full, signed_out, stale)",
+        "whether each tool can run now, its pools and windows and how old the reading is; with --tool exits 0 when usable and 1 when not (4 for other_organization), the reason in the error (credits_out, pool_full, signed_out, stale, limit_reached, other_organization); a tool or pool that is not there or matches twice is a usage error, exit 2 (unknown_tool, unknown_pool, ambiguous_pool), and the message lists the choices",
         &[read("limits.summary")],
         "none",
         true,

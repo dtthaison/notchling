@@ -231,11 +231,44 @@ fn limits(query: Value, json: bool, ask: &mut Ask<'_>) -> i32 {
         show(&verdict);
         return contract::OK;
     }
-    let why = verdict["reason"].as_str().unwrap_or("unknown");
-    let tool = query["tool"].as_str().unwrap_or("");
-    Failure::failed(format!("{tool} is not usable now: {why}."))
+    not_usable(&query, &verdict)
         .with_op(ops::LIMITS_SUMMARY)
         .report_with(json, &verdict)
+}
+
+fn names_of(verdict: &Value, key: &str) -> String {
+    verdict[key]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn not_usable(query: &Value, verdict: &Value) -> Failure {
+    let why = verdict["reason"].as_str().unwrap_or("unknown");
+    let tool = query["tool"].as_str().unwrap_or("");
+    let pool = query["pool"].as_str().unwrap_or("");
+    let message = match why {
+        "unknown_tool" => format!(
+            "Unknown tool {tool}. Pick one of: {}.",
+            names_of(verdict, "tools")
+        ),
+        "unknown_pool" => format!(
+            "{tool} has no pool {pool}. Pick a pool with --pool: {}.",
+            names_of(verdict, "pools")
+        ),
+        "ambiguous_pool" => format!(
+            "More than one pool of {tool} matches {pool}. Pick a pool with --pool: {}.",
+            names_of(verdict, "pools")
+        ),
+        _ => format!("{tool} is not usable now: {why}."),
+    };
+    match contract::exit_of_reason(why).filter(|_| contract::REASONS.contains(&why)) {
+        Some(exit) => Failure::new(exit, why, message),
+        None => Failure::failed(message),
+    }
 }
 
 #[cfg(test)]

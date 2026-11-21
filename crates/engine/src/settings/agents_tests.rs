@@ -40,6 +40,7 @@ fn switches_logins_and_sandbox_permissions_are_never_an_agents() {
         "debugAccessCertsFile",
         "vaultReminderSent",
         "newSessionChoice",
+        "hiddenAgents",
     ] {
         assert_eq!(spec(name).map(|k| k.access), Some(Access::Never), "{name}");
     }
