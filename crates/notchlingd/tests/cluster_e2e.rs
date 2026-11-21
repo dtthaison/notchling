@@ -119,7 +119,7 @@ fn a_fixture_daemon_is_a_node_that_links_nowhere() {
         &["cluster", "join", "--token-stdin"],
         "nlj1.not-a-token\n",
     );
-    assert_eq!(code, 1, "{err}");
+    assert_eq!(code, 2, "{err}");
 
     let (code, out, _) = run(root, &["cluster", "status", "--json"], "");
     assert_eq!(code, 0);

@@ -181,8 +181,11 @@ fn asks_and_answer_print_and_exit() {
             "Only the person answers this question.",
         )],
     );
-    assert_eq!(rig.run(|env| answer(&mut link, &args, env)), 3);
-    assert_eq!(rig.stderr(), "Only the person answers this question.\n");
+    assert_eq!(rig.run(|env| answer(&mut link, &args, env)), 4);
+    assert_eq!(
+        rig.stderr(),
+        "Only the person answers this question. (refused)\n"
+    );
 
     let mut rig = Rig::new();
     let mut link = Fake::new(&rig.clock, vec![Err(LinkError::Down)]);

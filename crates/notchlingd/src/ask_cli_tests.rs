@@ -377,7 +377,9 @@ fn a_wait_that_is_refused_exits_1() {
         rig.run(|env| ask(&mut link, &ask_args(&["--", "q"]), env)),
         1
     );
-    assert!(rig.stderr().ends_with("No such question.\n"));
+    assert!(rig
+        .stderr()
+        .ends_with("The question is no longer waiting. (failed)\n"));
 }
 
 #[test]
