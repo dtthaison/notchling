@@ -120,7 +120,7 @@ impl CodexOps {
             Arc::new(CodexLaunches::new(
                 Arc::new(RealSpawner),
                 launches.clone(),
-                crate::process_facts::start_time,
+                crate::launch_spawn::Probe::system(),
             )),
             Arc::new(RealLauncher::with_claude(claude.to_path_buf())),
             room,

@@ -430,3 +430,39 @@ fn home_is_the_one_the_engine_names_even_when_the_claude_folder_has_no_parent() 
     );
     assert_eq!(id.home(), Path::new("/"));
 }
+
+#[test]
+fn a_root_with_no_start_time_exe_or_name_shares_the_unrooted_bucket() {
+    let h = home("noroot", &[]);
+    let rows = || Arc::new(Mutex::new(json!([])));
+    let mut no_start = Table::default();
+    no_start.parents.insert(10, 11);
+    no_start.exes.insert(11, PathBuf::from("/System/Terminal"));
+    let who = identify(&h, no_start, rows(), Launches::default(), 10);
+    assert_eq!(who.root.as_deref(), Some("unrooted"));
+    let mut no_name = Table::default();
+    no_name.parents.insert(10, 11);
+    no_name.starts.insert(11, 42);
+    let who = identify(&h, no_name, rows(), Launches::default(), 10);
+    assert_eq!(who.root.as_deref(), Some("unrooted"));
+}
+
+#[test]
+fn a_tree_exactly_as_deep_as_the_limit_is_rooted_and_one_more_is_not() {
+    let h = home("limit", &[]);
+    let chain = |hops: u32| {
+        let mut t = Table::default();
+        for pid in 0..hops {
+            t.parents.insert(10 + pid, 11 + pid);
+        }
+        t.parents.insert(10 + hops, 1);
+        t.exes.insert(10 + hops, PathBuf::from("/System/Terminal"));
+        t.starts.insert(10 + hops, 42);
+        t
+    };
+    let rows = || Arc::new(Mutex::new(json!([])));
+    let at_limit = identify(&h, chain(4096), rows(), Launches::default(), 10);
+    assert_eq!(at_limit.root.as_deref(), Some("/System/Terminal:42"));
+    let past = identify(&h, chain(4097), rows(), Launches::default(), 10);
+    assert_eq!(past.root.as_deref(), Some("unrooted"));
+}

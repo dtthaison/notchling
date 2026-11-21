@@ -1,14 +1,16 @@
 use crate::late_emit::LateSalt;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
-use notchling_engine::activity::{self, ActivityRow, EventsDb, ImportFiles, Query};
+use notchling_engine::activity::{self, ActivityRow, EventsDb, ImportFiles, Lookup, Query};
 use notchling_local_api::{ops, ApiError, Caller, OpSpec};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, PoisonError};
 
 pub type Names = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
 
-pub type LabelFn = Arc<dyn Fn(&ActivityRow) -> Option<(String, Option<String>)> + Send + Sync>;
+pub type Lookups = Box<dyn Fn(&ActivityRow) -> Lookup>;
+
+pub type LabelFn = Arc<dyn Fn() -> Lookups + Send + Sync>;
 
 pub struct ActivityOps {
     db: Arc<Mutex<EventsDb>>,
@@ -90,7 +92,7 @@ impl OpGroup for ActivityOps {
                     activity::fetch(&db, &query)
                 };
                 Ok(match &self.lazy {
-                    Some(lazy) => activity::reply_with(&rows, &query, &*self.names, &**lazy),
+                    Some(lazy) => activity::reply_with(&rows, &query, &*self.names, &*lazy()),
                     None => activity::reply(&rows, &query, &*self.names),
                 })
             }

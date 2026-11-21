@@ -2,7 +2,7 @@ use crate::activity_ops::{session_names, ActivityOps, LabelFn};
 use crate::layout::Layout;
 use crate::limits_ops_tests::TempDir;
 use crate::op_group::OpGroup;
-use notchling_engine::activity::{ActivityRow, EventsDb};
+use notchling_engine::activity::{ActivityRow, EventsDb, Lookup};
 use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -145,9 +145,11 @@ fn an_agent_row_gets_its_label_and_its_session_name_at_read_time() {
     let sessions = Arc::new(Mutex::new(
         json!([{"id": "sess-1", "name": "Fix the parser"}]),
     ));
-    let lazy: LabelFn = Arc::new(|row| {
-        assert_eq!(row.actor_session.as_deref(), Some("sess-1"));
-        Some(("subagent".to_owned(), Some("a1".to_owned())))
+    let lazy: LabelFn = Arc::new(|| {
+        Box::new(|row| {
+            assert_eq!(row.actor_session.as_deref(), Some("sess-1"));
+            Lookup::Found("subagent".to_owned(), Some("a1".to_owned()))
+        })
     });
     let activity = ActivityOps::new(db, session_names(sessions)).with_lazy(lazy);
     let reply = activity

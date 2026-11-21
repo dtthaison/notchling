@@ -9,7 +9,26 @@ use std::io;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
-pub type StartOf = fn(u32) -> Option<u64>;
+#[derive(Clone, Copy)]
+pub struct Probe {
+    pub start_of: fn(u32) -> Option<u64>,
+    pub started_ms: fn(u32) -> Option<i64>,
+    pub now_ms: fn() -> i64,
+}
+
+impl Probe {
+    pub fn system() -> Probe {
+        Probe {
+            start_of: crate::process_facts::start_time,
+            started_ms: crate::process_facts::started_ms,
+            now_ms: || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+            },
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Mark {
@@ -20,18 +39,17 @@ struct Mark {
 }
 
 impl Mark {
-    fn of(
-        launches: &Launches,
-        tool: AgentTool,
-        pid: Option<u32>,
-        start_of: StartOf,
-    ) -> Option<Mark> {
+    fn of(launches: &Launches, tool: AgentTool, pid: Option<u32>, probe: Probe) -> Option<Mark> {
+        let spawned_ms = (probe.now_ms)();
         let pid = pid?;
+        if (probe.started_ms)(pid)? > spawned_ms {
+            return None;
+        }
         Some(Mark {
             launches: launches.clone(),
             tool,
             pid,
-            started: start_of(pid)?,
+            started: (probe.start_of)(pid)?,
         })
     }
 
@@ -48,40 +66,47 @@ impl Mark {
 pub struct CodexLaunches {
     inner: Arc<dyn ToolSpawner>,
     launches: Launches,
-    start_of: StartOf,
+    probe: Probe,
 }
 
 impl CodexLaunches {
-    pub fn new(
-        inner: Arc<dyn ToolSpawner>,
-        launches: Launches,
-        start_of: StartOf,
-    ) -> CodexLaunches {
+    pub fn new(inner: Arc<dyn ToolSpawner>, launches: Launches, probe: Probe) -> CodexLaunches {
         CodexLaunches {
             inner,
             launches,
-            start_of,
+            probe,
         }
     }
 }
 
-fn resumed(spec: &TurnSpec) -> Option<&str> {
+const VALUE_FLAGS: [&str; 6] = ["-c", "-m", "-C", "--config", "--model", "--cd"];
+
+pub(crate) fn resumed(spec: &TurnSpec) -> Option<&str> {
     let args = &spec.args;
-    (args.get(1).map(String::as_str) == Some("resume"))
-        .then(|| args.len().checked_sub(2).and_then(|i| args.get(i)))
-        .flatten()
-        .map(String::as_str)
+    if args.first().map(String::as_str) != Some("exec")
+        || args.get(1).map(String::as_str) != Some("resume")
+    {
+        return None;
+    }
+    let mut positional: Vec<&str> = Vec::new();
+    let mut rest = args[2..].iter().map(String::as_str);
+    while let Some(arg) = rest.next() {
+        if arg == "--" {
+            positional.extend(rest.by_ref());
+        } else if VALUE_FLAGS.contains(&arg) {
+            rest.next();
+        } else if !arg.starts_with('-') {
+            positional.push(arg);
+        }
+    }
+    (positional.len() == 2).then(|| positional[0])
 }
 
 impl ToolSpawner for CodexLaunches {
     fn spawn(&self, spec: &TurnSpec) -> Result<Arc<dyn ToolProcess>, SpawnError> {
         let process = self.inner.spawn(spec)?;
-        let Some(mark) = Mark::of(
-            &self.launches,
-            AgentTool::Codex,
-            process.pid(),
-            self.start_of,
-        ) else {
+        let Some(mark) = Mark::of(&self.launches, AgentTool::Codex, process.pid(), self.probe)
+        else {
             return Ok(process);
         };
         if let Some(session) = resumed(spec) {
@@ -137,15 +162,15 @@ impl Drop for Marked {
 pub struct AcpLaunches {
     inner: Arc<dyn Spawner>,
     launches: Launches,
-    start_of: StartOf,
+    probe: Probe,
 }
 
 impl AcpLaunches {
-    pub fn new(inner: Arc<dyn Spawner>, launches: Launches, start_of: StartOf) -> AcpLaunches {
+    pub fn new(inner: Arc<dyn Spawner>, launches: Launches, probe: Probe) -> AcpLaunches {
         AcpLaunches {
             inner,
             launches,
-            start_of,
+            probe,
         }
     }
 }
@@ -167,7 +192,7 @@ impl Spawner for AcpLaunches {
             &self.launches,
             AgentTool::Antigravity,
             spawned.process.pid(),
-            self.start_of,
+            self.probe,
         ) else {
             return Ok(spawned);
         };
@@ -226,10 +251,11 @@ struct Tracked {
 
 impl AcpProcess for Tracked {
     fn write_line(&mut self, line: &str) -> io::Result<()> {
+        self.process.write_line(line)?;
         if let Some(session) = loaded_session(line) {
             self.mark.register(&session);
         }
-        self.process.write_line(line)
+        Ok(())
     }
 
     fn killer(&self) -> Arc<dyn Killer> {
@@ -238,6 +264,12 @@ impl AcpProcess for Tracked {
 
     fn pid(&self) -> Option<u32> {
         self.process.pid()
+    }
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        self.mark.forget();
     }
 }
 

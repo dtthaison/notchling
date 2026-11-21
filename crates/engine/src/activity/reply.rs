@@ -300,7 +300,14 @@ fn named_by_op(rows: &[ActivityRow]) -> HashMap<String, Value> {
         .collect()
 }
 
-pub type LabelLookup<'a> = &'a dyn Fn(&ActivityRow) -> Option<(String, Option<String>)>;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Lookup {
+    Skipped,
+    Missed,
+    Found(String, Option<String>),
+}
+
+pub type LabelLookup<'a> = &'a dyn Fn(&ActivityRow) -> Lookup;
 
 pub const LAZY_MAX: usize = 25;
 
@@ -322,8 +329,17 @@ fn add_agent(
     let found = if settled || *budget == 0 {
         None
     } else {
-        *budget -= 1;
-        lazy(row).map(|(asker, id)| json!({"as": asker, "id": id}))
+        match lazy(row) {
+            Lookup::Skipped => None,
+            Lookup::Missed => {
+                *budget -= 1;
+                None
+            }
+            Lookup::Found(asker, id) => {
+                *budget -= 1;
+                Some(json!({"as": asker, "id": id}))
+            }
+        }
     };
     if let Some(agent) = found.as_ref().or(stored) {
         out["agent"] = agent.clone();
@@ -342,7 +358,7 @@ pub fn reply(
     q: &Query,
     names: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Value {
-    reply_with(rows, q, names, &|_| None)
+    reply_with(rows, q, names, &|_| Lookup::Skipped)
 }
 
 pub fn reply_with(
@@ -388,7 +404,7 @@ pub fn reply_with(
 }
 
 pub fn list(db: &EventsDb, q: &Query, names: &dyn Fn(&str, &str) -> Option<String>) -> Value {
-    list_with(db, q, names, &|_| None)
+    list_with(db, q, names, &|_| Lookup::Skipped)
 }
 
 pub fn fetch(db: &EventsDb, q: &Query) -> Vec<ActivityRow> {

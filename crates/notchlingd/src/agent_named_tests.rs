@@ -1,6 +1,6 @@
-use crate::agent_named::{lazy_label, AgentNames};
+use crate::agent_named::{key_of, lazy_label, AgentNames, Queued};
 use crate::late_emit::LateSalt;
-use notchling_engine::activity::ActivityRow;
+use notchling_engine::activity::{ActivityRow, Lookup};
 use notchling_engine::ask::evidence::{command_hash, output_hash};
 use notchling_events::field::FieldValue;
 use notchling_events::ids::new_op_id;
@@ -270,37 +270,76 @@ fn called_row(identity: &AgentIdentity) -> ActivityRow {
     row
 }
 
+fn found(lookup: Lookup) -> (String, Option<String>) {
+    match lookup {
+        Lookup::Found(asker, agent) => (asker, agent),
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn the_lazy_lookup_gives_the_same_answer_as_the_eager_one() {
     let (_dir, main) = fixture("lazy");
     let sessions = Arc::new(Mutex::new(
         json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]),
     ));
-    let lazy = lazy_label(salt(), sessions);
+    let lazy = lazy_label(salt(), sessions)();
     let eager = call(AgentTool::Claude, Some("ba1000001"), None);
     let events = run(&main, std::slice::from_ref(&eager));
-    let row = called_row(&eager.identity);
-    let (asker, agent) = lazy(&row).expect("a label");
+    let (asker, agent) = found(lazy(&called_row(&eager.identity)));
     assert_eq!(Some(asker), text(&events[0], "asker"));
     assert_eq!(agent, text(&events[0], "agent"));
     let main_call = call(AgentTool::Claude, Some("bmain0001"), None);
-    assert_eq!(lazy(&called_row(&main_call.identity)).unwrap().0, "main");
+    assert_eq!(found(lazy(&called_row(&main_call.identity))).0, "main");
 }
 
 #[test]
-fn the_lazy_lookup_gives_nothing_for_what_cannot_be_resolved() {
+fn the_lazy_lookup_skips_what_can_never_resolve_and_misses_what_does_not_match() {
     let (_dir, main) = fixture("lazy-none");
     let sessions = Arc::new(Mutex::new(
         json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]),
     ));
-    let lazy = lazy_label(salt(), sessions);
+    let lazy = lazy_label(salt(), sessions)();
     let mut unverified = call(AgentTool::Claude, Some("ba1000001"), None);
     unverified.identity.verified = false;
-    assert!(lazy(&called_row(&unverified.identity)).is_none());
+    assert_eq!(lazy(&called_row(&unverified.identity)), Lookup::Skipped);
     let shell = call(AgentTool::Shell, Some("ba1000001"), None);
-    assert!(lazy(&called_row(&shell.identity)).is_none());
+    assert_eq!(lazy(&called_row(&shell.identity)), Lookup::Skipped);
     let no_evidence = call(AgentTool::Claude, None, None);
-    assert!(lazy(&called_row(&no_evidence.identity)).is_none());
+    assert_eq!(lazy(&called_row(&no_evidence.identity)), Lookup::Skipped);
     let unseen = call(AgentTool::Claude, Some("bnothere9"), None);
-    assert!(lazy(&called_row(&unseen.identity)).is_none());
+    assert_eq!(lazy(&called_row(&unseen.identity)), Lookup::Missed);
+}
+
+#[test]
+fn one_reply_reads_a_sessions_candidates_once_for_rows_close_in_time() {
+    let (_dir, main) = fixture("lazy-cache");
+    let sessions = Arc::new(Mutex::new(
+        json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]),
+    ));
+    let lazy = lazy_label(salt(), sessions.clone())();
+    let first = call(AgentTool::Claude, Some("ba1000001"), None);
+    assert_eq!(
+        found(lazy(&called_row(&first.identity))).1.as_deref(),
+        Some("a1")
+    );
+    *sessions.lock().unwrap() = json!([{"id": SESSION, "transcriptPath": "/nowhere/gone.jsonl"}]);
+    let second = call(AgentTool::Claude, Some("ba2000002"), None);
+    let mut near = called_row(&second.identity);
+    near.ts = AT_MS - 30_000;
+    assert_eq!(found(lazy(&near)).1.as_deref(), Some("a2"));
+    let mut far = called_row(&second.identity);
+    far.ts = AT_MS - 120_000;
+    assert_eq!(lazy(&far), Lookup::Missed);
+}
+
+#[test]
+fn two_calls_with_the_same_evidence_at_different_times_are_looked_up_apart() {
+    let one = call(AgentTool::Claude, Some("ba1000001"), None);
+    let queued = |at_ms| Queued {
+        call: one.clone(),
+        at_ms,
+    };
+    assert_eq!(key_of(&queued(AT_MS)), key_of(&queued(AT_MS)));
+    assert_ne!(key_of(&queued(AT_MS)), key_of(&queued(AT_MS + 1)));
 }

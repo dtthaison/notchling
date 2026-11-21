@@ -1,13 +1,15 @@
 use crate::ask_find::tail_text;
 use crate::late_emit::LateSalt;
+use notchling_engine::activity::{ActivityRow, Lookup};
 use notchling_engine::ask::evidence::Evidence;
-use notchling_engine::ask::{candidates, find_by_evidence, Asker};
+use notchling_engine::ask::{candidates, find_by_evidence, Asker, Candidate};
 use notchling_events::kinds::agents::AgentNamed;
 use notchling_events::kinds::choices::{AgentTool, AskerKind};
 use notchling_events::spec::Outcome;
 use notchling_events::{Emit, Event, Ref};
 use notchling_local_api::{AgentCall, AgentIdentity};
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -15,9 +17,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-struct Queued {
-    call: AgentCall,
-    at_ms: i64,
+pub(crate) struct Queued {
+    pub(crate) call: AgentCall,
+    pub(crate) at_ms: i64,
 }
 
 struct Waiting {
@@ -39,7 +41,18 @@ pub struct Label {
     pub agent: Option<String>,
 }
 
-type Key = (String, Option<String>, Option<String>, Option<String>);
+pub(crate) type Key = (String, Option<String>, Option<String>, Option<String>, i64);
+
+pub(crate) fn key_of(queued: &Queued) -> Key {
+    let who = &queued.call.identity;
+    (
+        format!("{:?}", who.tool),
+        who.session.clone(),
+        who.cmd_hash.clone(),
+        who.out_hash.clone(),
+        queued.at_ms,
+    )
+}
 
 impl AgentNames {
     pub fn spawn(emit: Arc<dyn Emit>, salt: LateSalt, sessions: Arc<Mutex<Value>>) -> AgentNames {
@@ -136,14 +149,8 @@ fn work(
         let mut seen: HashMap<Key, Label> = HashMap::new();
         for mut item in round {
             let who = &item.queued.call.identity;
-            let key: Key = (
-                format!("{:?}", who.tool),
-                who.session.clone(),
-                who.cmd_hash.clone(),
-                who.out_hash.clone(),
-            );
             let label = seen
-                .entry(key)
+                .entry(key_of(&item.queued))
                 .or_insert_with(|| label_for(who, item.queued.at_ms, salt, sessions))
                 .clone();
             if label.asker == AskerKind::Unknown && open && can_resolve_later(who) {
@@ -165,8 +172,25 @@ fn work(
     }
 }
 
+const LAZY_SLACK_MS: i64 = 60_000;
+
+type Cached = HashMap<String, (i64, Arc<Vec<Candidate>>)>;
+
 pub fn lazy_label(salt: LateSalt, sessions: Arc<Mutex<Value>>) -> crate::activity_ops::LabelFn {
-    Arc::new(move |row| {
+    Arc::new(move || {
+        let (salt, sessions) = (salt.clone(), sessions.clone());
+        let cache: RefCell<Cached> = RefCell::default();
+        Box::new(move |row| lazy_lookup(row, &salt, &sessions, &cache))
+    })
+}
+
+fn lazy_lookup(
+    row: &ActivityRow,
+    salt: &LateSalt,
+    sessions: &Mutex<Value>,
+    cache: &RefCell<Cached>,
+) -> Lookup {
+    {
         let f = row.fields();
         let text = |key: &str| f.get(key).and_then(Value::as_str).map(str::to_owned);
         let mut who = AgentIdentity::shell();
@@ -178,11 +202,26 @@ pub fn lazy_label(salt: LateSalt, sessions: Arc<Mutex<Value>>) -> crate::activit
         who.cmd_hash = text("cmd_hash");
         who.out_hash = text("out_hash");
         if !can_resolve_later(&who) {
-            return None;
+            return Lookup::Skipped;
         }
-        let label = label_for(&who, row.ts, &salt, &sessions);
-        (label.asker != AskerKind::Unknown).then(|| (label.asker.name().to_owned(), label.agent))
-    })
+        let label = label_with(&who, row.ts, salt, |session| {
+            let mut cache = cache.borrow_mut();
+            if let Some((at, all)) = cache.get(session) {
+                if row.ts <= *at && *at - row.ts <= LAZY_SLACK_MS {
+                    return Some(all.clone());
+                }
+            }
+            let transcript = transcript_of(sessions, session)?;
+            let all = Arc::new(candidates(&transcript, "", row.ts));
+            cache.insert(session.to_owned(), (row.ts, all.clone()));
+            Some(all)
+        });
+        if label.asker == AskerKind::Unknown {
+            Lookup::Missed
+        } else {
+            Lookup::Found(label.asker.name().to_owned(), label.agent)
+        }
+    }
 }
 
 fn can_resolve_later(who: &AgentIdentity) -> bool {
@@ -197,6 +236,18 @@ pub fn label_for(
     at_ms: i64,
     salt: &LateSalt,
     sessions: &Mutex<Value>,
+) -> Label {
+    label_with(who, at_ms, salt, |session| {
+        let transcript = transcript_of(sessions, session)?;
+        Some(Arc::new(candidates(&transcript, "", at_ms)))
+    })
+}
+
+fn label_with(
+    who: &AgentIdentity,
+    at_ms: i64,
+    salt: &LateSalt,
+    all_for: impl FnOnce(&str) -> Option<Arc<Vec<Candidate>>>,
 ) -> Label {
     let unknown = Label {
         asker: AskerKind::Unknown,
@@ -221,10 +272,9 @@ pub fn label_for(
     let (Some(session), Some(salt)) = (who.session.as_deref(), salt.get()) else {
         return unknown;
     };
-    let Some(transcript) = transcript_of(sessions, session) else {
+    let Some(all) = all_for(session) else {
         return unknown;
     };
-    let all = candidates(&transcript, "", at_ms);
     let evidence = Evidence {
         salt: &salt.0,
         cmd_hash: who.cmd_hash.as_deref(),

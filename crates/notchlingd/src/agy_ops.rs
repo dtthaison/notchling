@@ -762,7 +762,7 @@ impl AgyOps {
             Arc::new(AcpLaunches::new(
                 Arc::new(RealSpawner::new(&home)),
                 launches.clone(),
-                crate::process_facts::start_time,
+                crate::launch_spawn::Probe::system(),
             )),
             AgySetup {
                 root: layout.antigravity_dir(),

@@ -1,5 +1,5 @@
 use crate::identity::Launches;
-use crate::launch_spawn::{AcpLaunches, CodexLaunches};
+use crate::launch_spawn::{resumed, AcpLaunches, CodexLaunches, Probe};
 use notchling_engine::tools::acp::{Killer, Output, Spawned, Spawner, ToolProcess as AcpProcess};
 use notchling_engine::tools::codex::plan::{ExitInfo, TurnSpec};
 use notchling_engine::tools::codex::process::{
@@ -14,8 +14,18 @@ use std::sync::{Arc, Mutex};
 
 const STARTED: u64 = 5_000;
 
+const NOW: i64 = 1_000_000;
+
 fn start_of(pid: u32) -> Option<u64> {
     (pid == 700).then_some(STARTED)
+}
+
+fn probe() -> Probe {
+    Probe {
+        start_of,
+        started_ms: |pid| (pid == 700).then_some(NOW - 5),
+        now_ms: || NOW,
+    }
 }
 
 fn spec(args: &[&str]) -> TurnSpec {
@@ -74,7 +84,7 @@ fn codex(pid: Option<u32>, lines: Vec<Next>, launches: &Launches) -> CodexLaunch
     CodexLaunches::new(
         Arc::new(Spawns(Mutex::new(Some(process)))),
         launches.clone(),
-        start_of,
+        probe(),
     )
 }
 
@@ -140,6 +150,7 @@ fn a_process_with_no_pid_or_no_start_time_is_not_registered() {
 struct Pipe {
     pid: Option<u32>,
     written: Arc<Mutex<Vec<String>>>,
+    fail: bool,
 }
 
 struct NoKill;
@@ -150,6 +161,9 @@ impl Killer for NoKill {
 
 impl AcpProcess for Pipe {
     fn write_line(&mut self, line: &str) -> io::Result<()> {
+        if self.fail {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
+        }
         self.written.lock().unwrap().push(line.to_owned());
         Ok(())
     }
@@ -164,6 +178,7 @@ impl AcpProcess for Pipe {
 }
 
 struct AcpSpawns {
+    fail: bool,
     pid: Option<u32>,
     output: Mutex<Option<Receiver<Output>>>,
     written: Arc<Mutex<Vec<String>>>,
@@ -175,6 +190,7 @@ impl Spawner for AcpSpawns {
             process: Box::new(Pipe {
                 pid: self.pid,
                 written: self.written.clone(),
+                fail: self.fail,
             }),
             output: self.output.lock().unwrap().take().expect("one process"),
         })
@@ -188,12 +204,13 @@ fn acp(
     let (tx, rx) = channel();
     let written = Arc::new(Mutex::new(Vec::new()));
     let inner = AcpSpawns {
+        fail: false,
         pid,
         output: Mutex::new(Some(rx)),
         written: written.clone(),
     };
     (
-        AcpLaunches::new(Arc::new(inner), launches.clone(), start_of),
+        AcpLaunches::new(Arc::new(inner), launches.clone(), probe()),
         tx,
         written,
     )
@@ -249,4 +266,92 @@ fn an_antigravity_process_with_no_pid_passes_straight_through() {
     .unwrap();
     assert!(matches!(spawned.output.recv().unwrap(), Output::Line(_)));
     assert_eq!(launches.find(700, Some(STARTED)), None);
+}
+
+#[test]
+fn the_session_of_a_resume_is_found_among_the_options_and_never_guessed() {
+    let session = |args: &[&str]| resumed(&spec(args)).map(str::to_owned);
+    assert_eq!(
+        session(&["exec", "resume", "--json", "thread-9", "go on"]).as_deref(),
+        Some("thread-9")
+    );
+    assert_eq!(
+        session(&[
+            "exec",
+            "resume",
+            "--json",
+            "--skip-git-repo-check",
+            "-c",
+            "sandbox_mode=\"read-only\"",
+            "-m",
+            "gpt-x",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "--",
+            "thread-9",
+            "--json",
+        ])
+        .as_deref(),
+        Some("thread-9")
+    );
+    assert_eq!(session(&["exec", "resume", "--json", "thread-9"]), None);
+    assert_eq!(session(&["exec", "--json", "hello"]), None);
+    assert_eq!(session(&["resume", "a", "b"]), None);
+    assert_eq!(session(&["exec", "resume", "--json"]), None);
+}
+
+#[test]
+fn a_pid_that_started_after_the_spawn_returned_is_not_ours() {
+    let launches = Launches::default();
+    let reused = Probe {
+        started_ms: |_| Some(NOW + 5),
+        ..probe()
+    };
+    let process: Arc<dyn ToolProcess> = Arc::new(Scripted {
+        pid: Some(700),
+        lines: Mutex::new(VecDeque::new()),
+    });
+    let spawner = CodexLaunches::new(
+        Arc::new(Spawns(Mutex::new(Some(process)))),
+        launches.clone(),
+        reused,
+    );
+    spawner
+        .spawn(&spec(&["exec", "resume", "--json", "thread-9", "go on"]))
+        .unwrap();
+    assert_eq!(launches.find(700, Some(STARTED)), None);
+}
+
+#[test]
+fn an_antigravity_process_that_is_dropped_forgets_its_session_even_while_its_output_is_open() {
+    let launches = Launches::default();
+    let (spawner, tx, _) = acp(Some(700), &launches);
+    let Spawned {
+        mut process,
+        output,
+    } = spawner.spawn("agy", &["acp".to_owned()], "/work").unwrap();
+    let load = r#"{"id":3,"method":"session/load","params":{"sessionId":"agy-7"}}"#;
+    process.write_line(load).unwrap();
+    assert!(launches.find(700, Some(STARTED)).is_some());
+    drop(process);
+    assert_eq!(launches.find(700, Some(STARTED)), None);
+    drop((tx, output));
+}
+
+#[test]
+fn a_load_that_could_not_be_written_registers_nothing() {
+    let launches = Launches::default();
+    let (tx, rx) = channel();
+    let inner = AcpSpawns {
+        fail: true,
+        pid: Some(700),
+        output: Mutex::new(Some(rx)),
+        written: Arc::new(Mutex::new(Vec::new())),
+    };
+    let spawner = AcpLaunches::new(Arc::new(inner), launches.clone(), probe());
+    let mut spawned = spawner.spawn("agy", &["acp".to_owned()], "/work").unwrap();
+    let load = r#"{"id":3,"method":"session/load","params":{"sessionId":"agy-7"}}"#;
+    assert!(spawned.process.write_line(load).is_err());
+    assert_eq!(launches.find(700, Some(STARTED)), None);
+    drop(tx);
 }

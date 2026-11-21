@@ -152,28 +152,28 @@ impl Identifier {
     }
 
     fn root_of(&self, pid: u32) -> Option<String> {
+        let unrooted = || Some(UNROOTED.to_owned());
         let mut seen = HashSet::from([pid]);
         let mut top = pid;
-        let mut reached = false;
-        for _ in 0..ROOT_DEPTH {
-            match self.procs.parent(top).filter(|p| *p > 1) {
-                None => {
-                    reached = true;
-                    break;
-                }
-                Some(p) if seen.insert(p) => top = p,
-                Some(_) => break,
+        let mut hops = 0;
+        while let Some(p) = self.procs.parent(top).filter(|p| *p > 1) {
+            if hops >= ROOT_DEPTH || !seen.insert(p) {
+                return unrooted();
             }
+            hops += 1;
+            top = p;
         }
-        if !reached {
-            return Some(UNROOTED.to_owned());
-        }
-        let exe = self
+        let Some(exe) = self
             .procs
             .exe(top)
-            .or_else(|| self.procs.name(top).map(PathBuf::from))?;
+            .or_else(|| self.procs.name(top).map(PathBuf::from))
+        else {
+            return unrooted();
+        };
         let exe = self.procs.resolve(&exe).unwrap_or(exe);
-        let started = self.procs.start_time(top).unwrap_or(0);
+        let Some(started) = self.procs.start_time(top) else {
+            return unrooted();
+        };
         Some(format!("{}:{started}", exe.to_string_lossy()))
     }
 

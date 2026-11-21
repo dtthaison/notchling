@@ -24,7 +24,9 @@ impl Handler for Probe {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             "act.ok" | "act.fail" | "act.refuse" | "act.pending" | "act.fake" | "act.own"
-            | "act.used" | "act.panic" => Some(OpSpec::AGENT_ACTS),
+            | "act.used" | "act.panic" | "act.panic_noted" | "act.panic_marked" => {
+                Some(OpSpec::AGENT_ACTS)
+            }
             "read.ok" | "read.fail" => Some(OpSpec::AGENT_READ),
             "hook.x" => Some(OpSpec::AGENT_HOOK),
             "app.act" => Some(OpSpec::APP),
@@ -43,6 +45,8 @@ impl Handler for Probe {
             "act.own",
             "act.used",
             "act.panic",
+            "act.panic_noted",
+            "act.panic_marked",
             "read.ok",
             "read.fail",
             "hook.x",
@@ -69,6 +73,14 @@ impl Handler for Probe {
         match op {
             "act.fail" | "read.fail" => Err(ApiError::new(ErrorCode::Failed, "broke")),
             "act.panic" => panic!("a handler bug"),
+            "act.panic_noted" => {
+                scope::note_consent("req-5", ConsentNote::Pending);
+                panic!("a handler bug")
+            }
+            "act.panic_marked" => {
+                scope::mark_recorded();
+                panic!("a handler bug")
+            }
             "act.refuse" => Err(ApiError::new(ErrorCode::Forbidden, "off")),
             "act.pending" => {
                 scope::note_consent("req-1", ConsentNote::Pending);
@@ -179,6 +191,17 @@ fn an_acting_call_whose_handler_panics_is_still_recorded_as_failed() {
     assert_eq!(field_text(&calls[0], "op").as_deref(), Some("act.panic"));
     assert_eq!(field_text(&calls[0], "code").as_deref(), Some("failed"));
     assert_eq!(run.probe.named.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_panic_after_the_handler_noted_a_request_or_marked_its_own_kind_is_still_one_failed_line() {
+    let run = start(Allowlist::empty());
+    let mut agent = connect(&run);
+    assert!(agent.call("act.panic_noted", json!({})).is_err());
+    let mut again = connect(&run);
+    assert!(again.call("act.panic_marked", json!({})).is_err());
+    assert_eq!(results(&run), ["failed", "failed"]);
+    assert!(agent_calls(&run).iter().all(|line| !has(line, "consent")));
 }
 
 #[test]

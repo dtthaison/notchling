@@ -11,8 +11,8 @@ pub use import::{
 };
 pub use import_run::{import_once, ImportFiles, ImportReport};
 pub use reply::{
-    clean, fetch, list, list_with, reply, reply_with, row_json, six_kind, LabelLookup, Query,
-    DEFAULT_LIMIT, KINDS, LAZY_MAX, MAX_BYTES, MAX_LIMIT,
+    clean, fetch, list, list_with, reply, reply_with, row_json, six_kind, LabelLookup, Lookup,
+    Query, DEFAULT_LIMIT, KINDS, LAZY_MAX, MAX_BYTES, MAX_LIMIT,
 };
 pub use row::{ActivityRow, DbQuery};
 

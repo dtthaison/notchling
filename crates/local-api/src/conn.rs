@@ -426,9 +426,13 @@ impl Session {
         let (result, more) = match called {
             Ok(done) => done,
             Err(panic) => {
+                let _ = scope::take_consent();
+                let _ = scope::take_recorded();
                 if spec.records_agent_call() {
                     let failed = Err(ApiError::new(ErrorCode::Failed, "the handler failed"));
-                    self.record_agent_call(op, args, &failed, started);
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        self.record_agent_call(op, args, &failed, started)
+                    }));
                 }
                 std::panic::resume_unwind(panic);
             }
