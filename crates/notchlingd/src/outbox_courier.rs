@@ -5,10 +5,11 @@ use crate::outbox_verify::SafeModes;
 use crate::turn_gate::Guarded;
 use notchling_engine::outbox::{
     AnswerWatch, Facts, Job, Kind, Row, Seen, Tried, TryEnd, Why, ANSWER_GRACE_MS,
-    DIALOG_RECHECK_MS, GONE_AFTER_MS,
+    DIALOG_RECHECK_MS, GONE_AFTER_MS, SLOW_READ_MS,
 };
 use notchling_engine::reply::exec::{execute_clearing, Clearing, Failure, Pty};
 use notchling_engine::reply::plan;
+use notchling_engine::sessions::fresh::{Ended, Look, Mark, Watch};
 use notchling_engine::sessions::jobs::{read_jobs, read_sessions};
 use notchling_engine::sessions::AgentTarget;
 use notchling_engine::sessions::{config_dirs, fresh, Agent, AgentGroup, Probes, Roots};
@@ -24,7 +25,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CALM_GAP_MS: i64 = 3_000;
 const ASKED_QUIET_MS: u64 = 400;
@@ -36,6 +37,11 @@ pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub fn real_clock() -> Clock {
     Arc::new(crate::acting_ops::now_ms)
+}
+
+pub fn running_clock() -> Clock {
+    let began = Instant::now();
+    Arc::new(move || i64::try_from(began.elapsed().as_millis()).unwrap_or(i64::MAX))
 }
 
 pub trait Courier: Send + Sync {
@@ -78,6 +84,7 @@ impl Courier for Refuse {
 pub(crate) trait JobFiles: Send + Sync {
     fn row(&self, job: &str) -> Option<Agent>;
     fn state(&self, job: &str) -> Option<String>;
+    fn ended(&self, job: &str) -> Ended;
     fn status(&self, job: &str) -> Option<String>;
     fn restarted(&self, agent: &Agent, now_ms: i64) -> bool;
     fn queue(&self, transcript: &str) -> Option<QueueState>;
@@ -110,6 +117,8 @@ pub(crate) fn made_ms(path: &str) -> Option<i64> {
 
 pub(crate) struct LiveFiles {
     roots: Roots,
+    watch: Mutex<Watch>,
+    running: Clock,
 }
 
 impl JobFiles for LiveFiles {
@@ -119,6 +128,15 @@ impl JobFiles for LiveFiles {
 
     fn state(&self, job: &str) -> Option<String> {
         fresh::job_state(&self.roots, job)
+    }
+
+    fn ended(&self, job: &str) -> Ended {
+        let settled = |mark: &Mark| lock(&self.watch).settled(mark, (self.running)());
+        let look = Look {
+            process: &crate::process_facts::process,
+            settled: &settled,
+        };
+        fresh::job_ended(&self.roots, &look, job)
     }
 
     fn status(&self, job: &str) -> Option<String> {
@@ -221,7 +239,11 @@ fn owns(projects: &Path, path: &Path) -> bool {
 }
 
 pub(crate) fn live_files(roots: Roots) -> Arc<dyn JobFiles> {
-    Arc::new(LiveFiles { roots })
+    Arc::new(LiveFiles {
+        roots,
+        watch: Mutex::default(),
+        running: running_clock(),
+    })
 }
 
 #[derive(Default)]
@@ -237,6 +259,7 @@ pub struct ClaudeCourier {
     acting: Arc<ActingOps>,
     files: Arc<dyn JobFiles>,
     clock: Clock,
+    stopwatch: Clock,
     attaches: Mutex<HashMap<String, Box<dyn Pty + Send>>>,
     memos: Mutex<HashMap<String, Memo>>,
     safe: Arc<SafeModes>,
@@ -273,7 +296,10 @@ impl ClaudeCourier {
         clock: Clock,
         safe: Arc<SafeModes>,
     ) -> ClaudeCourier {
-        ClaudeCourier::with_files(acting, live_files(roots), clock, safe)
+        ClaudeCourier {
+            stopwatch: running_clock(),
+            ..ClaudeCourier::with_files(acting, live_files(roots), clock, safe)
+        }
     }
 
     pub(crate) fn with_files(
@@ -285,6 +311,7 @@ impl ClaudeCourier {
         ClaudeCourier {
             acting,
             files,
+            stopwatch: clock.clone(),
             clock,
             attaches: Mutex::new(HashMap::new()),
             memos: Mutex::new(HashMap::new()),
@@ -305,8 +332,10 @@ impl ClaudeCourier {
     }
 
     fn answer_open(&self, row: &Row, job: &Job, fresh: Option<&Agent>, now_ms: i64) -> bool {
-        let Job::Live { status } = job else {
-            return true;
+        let status = match job {
+            Job::Live { status } => status.as_deref(),
+            Job::Done => None,
+            _ => return true,
         };
         if now_ms - row.updated_ms < ANSWER_GRACE_MS {
             return true;
@@ -318,7 +347,7 @@ impl ClaudeCourier {
             .take();
         let mut watch = taken.unwrap_or_default();
         let key = (row.id.as_str(), row.updated_ms);
-        let open = watch.open(key, status.as_deref(), now_ms, || {
+        let open = watch.open(key, status, now_ms, || {
             let seen = match fresh {
                 Some(agent) => self.acting.dialog_seen(agent),
                 None => Seen::Unknown,
@@ -341,22 +370,28 @@ impl ClaudeCourier {
 
     fn job_of(&self, row: &Row, fresh: Option<&Agent>, now_ms: i64) -> (Job, bool) {
         let state = self.files.state(&row.session);
-        match (fresh, state.as_deref()) {
-            (_, Some("stopped")) => (Job::Stopped, false),
-            (None, None) => (Job::Missing { since_ms: now_ms }, true),
-            (Some(agent), _) if !agent.can_reply() => (
+        let asked = (self.stopwatch)();
+        let ended = self.files.ended(&row.session);
+        let late = (self.stopwatch)() - asked >= SLOW_READ_MS;
+        match (fresh, state.as_deref(), ended) {
+            (_, _, Ended::Unknown) => (Job::Unknown, false),
+            (_, _, Ended::Stopped | Ended::Done) if late => (Job::Unknown, false),
+            (_, _, Ended::Stopped) => (Job::Stopped, false),
+            (_, _, Ended::Done) => (Job::Done, false),
+            (None, None, _) => (Job::Missing { since_ms: now_ms }, true),
+            (Some(agent), _, _) if !agent.can_reply() => (
                 Job::Missing {
                     since_ms: now_ms - GONE_AFTER_MS,
                 },
                 false,
             ),
-            (Some(_), _) => (
+            (Some(_), _, _) => (
                 Job::Live {
                     status: self.files.status(&row.session),
                 },
                 false,
             ),
-            (None, Some(_)) => (Job::Live { status: None }, false),
+            (None, Some(_), _) => (Job::Live { status: None }, false),
         }
     }
 
@@ -579,3 +614,7 @@ impl Courier for ClaudeCourier {
 #[cfg(test)]
 #[path = "outbox_courier_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "outbox_stop_tests.rs"]
+mod stop_tests;

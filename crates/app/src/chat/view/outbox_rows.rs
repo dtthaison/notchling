@@ -29,6 +29,7 @@ pub fn status_icon(status: &Status, a: Appearance) -> Div {
         | Status::AnswerUnseen
         | Status::BoxHasText(_)
         | Status::BoxHoldsThis => (Icon::Warning, Ink::Needs),
+        Status::Unreadable => (Icon::Warning, Ink::Needs),
         Status::Stopped => (Icon::Stop, Ink::TextFaint),
         Status::NotFound => (Icon::Fail, Ink::Needs),
         Status::NeedsAnswer => (Icon::Question, Ink::Needs),
@@ -63,6 +64,8 @@ pub fn status_line_at(status: &Status, now_ms: Option<i64>) -> String {
     match status {
         Status::Queued => t::chat::outbox_queued().to_owned(),
         Status::QueuedRetry => t::chat::outbox_retry().to_owned(),
+        Status::Checking => t::chat::outbox_checking().to_owned(),
+        Status::Unreadable => t::chat::outbox_unreadable().to_owned(),
         Status::WaitingDialog => t::chat::outbox_dialog().to_owned(),
         Status::NeedsAnswer => t::chat::outbox_answer().to_owned(),
         Status::Busy(Busy::Tasks {

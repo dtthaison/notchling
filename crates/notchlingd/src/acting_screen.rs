@@ -78,10 +78,7 @@ impl ActingOps {
     }
 
     fn running_now(&self, job: &str) -> bool {
-        matches!(
-            fresh::job_status(&self.roots, &Probes::from_proc(), job).as_deref(),
-            Some("busy" | "shell")
-        )
+        matches!(self.job_status(job).as_deref(), Some("busy" | "shell"))
     }
 
     pub(super) fn dialog(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -189,10 +186,7 @@ impl ActingOps {
             let AgentTarget::Job(job) = &agent.target else {
                 return Err(bad("this session has no terminal to read").into());
             };
-            let at_prompt = || {
-                let status = fresh::job_status(&self.roots, &Probes::from_proc(), job);
-                matches!(status.as_deref(), Some("waiting" | "idle"))
-            };
+            let at_prompt = || matches!(self.job_status(job).as_deref(), Some("waiting" | "idle"));
             if !at_prompt() {
                 return Err(ApiError::new(ErrorCode::Failed, NOT_AT_A_PROMPT).into());
             }

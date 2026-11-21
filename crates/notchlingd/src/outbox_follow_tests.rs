@@ -1,6 +1,7 @@
 use super::*;
 use crate::outbox_courier::JobFiles;
 use crate::outbox_testkit::FakeFiles;
+use notchling_engine::sessions::fresh::Ended;
 use notchling_engine::sessions::Agent;
 
 struct Elsewhere {
@@ -16,6 +17,9 @@ impl JobFiles for Elsewhere {
     }
     fn state(&self, job: &str) -> Option<String> {
         self.inner.state(job)
+    }
+    fn ended(&self, job: &str) -> Ended {
+        self.inner.ended(job)
     }
     fn status(&self, job: &str) -> Option<String> {
         self.inner.status(job)

@@ -1,14 +1,12 @@
 use crate::acting::ACTING_OFF;
 use crate::acting_events::NOT_AT_A_PROMPT;
-use crate::acting_ops_tests::{
-    app, caller, code, sessions, setup, setup_in, Setup, PROMPT, SESSION,
-};
+use crate::acting_ops_tests::{app, caller, code, sessions, setup, setup_in, Setup, PROMPT};
 use notchling_engine::reply::exec::Failure;
 use notchling_engine::sessions::Roots;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 const SWITCH: &str = include_str!("../../engine/tests/fixtures/dialog-made-up/switch-model.txt");
 
@@ -159,49 +157,34 @@ const UNREADABLE: [&str; 3] = [
     " Enter to confirm · Esc to cancel",
 ];
 
-struct Live(PathBuf);
-
-fn write_status(dir: &Path, status: &str) {
-    for (n, job) in [(1, "abcd1234"), (2, "idle0001")] {
-        let live = json!({"pid": std::process::id(), "sessionId": SESSION, "jobId": job,
-            "status": status, "statusUpdatedAt": 1_794_697_000_000.0});
-        std::fs::write(
-            dir.join(format!("claude/sessions/{n}.json")),
-            live.to_string(),
-        )
-        .unwrap();
-    }
-}
+#[derive(Clone)]
+struct Live(Arc<Mutex<Option<String>>>);
 
 impl Live {
-    fn at(tag: &str, status: Option<&str>) -> Live {
-        let dir = std::env::temp_dir().join(format!("nl-dismiss-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("claude/sessions")).unwrap();
-        if let Some(status) = status {
-            write_status(&dir, status);
-        }
-        Live(dir)
+    fn at(status: Option<&str>) -> Live {
+        Live(Arc::new(Mutex::new(status.map(str::to_owned))))
+    }
+
+    fn turn_to(&self, status: &str) {
+        *self.0.lock().unwrap() = Some(status.to_owned());
     }
 
     fn setup(&self, screen: Option<&[&str]>) -> Setup {
         let roots = Roots {
-            main_dir: self.0.join("claude"),
-            lanes_file: self.0.join("none/lanes.json"),
+            main_dir: PathBuf::from("/nonexistent/claude"),
+            lanes_file: PathBuf::from("/nonexistent/lanes.json"),
         };
-        let s = setup_in(true, PROMPT, sessions(), roots, None);
+        let mut s = setup_in(true, PROMPT, sessions(), roots, None);
+        let status = self.0.clone();
+        s.ops = s
+            .ops
+            .with_status_reader(Arc::new(move |_, _| status.lock().unwrap().clone()));
         let shown: Vec<String> = match screen {
             Some(lines) => lines.iter().map(|l| l.to_string()).collect(),
             None => dialog_screen(),
         };
         *s.dialog.lock().unwrap() = Some((shown, true));
         s
-    }
-}
-
-impl Drop for Live {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -213,7 +196,7 @@ fn dismiss(s: &Setup, id: &str) -> Result<Value, ApiError> {
 #[test]
 fn dismissing_sends_esc_while_a_dialog_is_open_at_a_prompt() {
     for status in ["waiting", "idle"] {
-        let live = Live::at(status, Some(status));
+        let live = Live::at(Some(status));
         for id in ["job-a", "job-idle"] {
             let s = live.setup(None);
             assert_eq!(
@@ -233,7 +216,7 @@ fn dismissing_sends_esc_while_a_dialog_is_open_at_a_prompt() {
 #[test]
 fn dismissing_is_refused_while_the_session_works_even_with_a_dialog_open() {
     for status in [Some("busy"), Some("working"), Some("shell"), None] {
-        let live = Live::at(&format!("{status:?}"), status);
+        let live = Live::at(status);
         let s = live.setup(None);
         let (code, message) = code(dismiss(&s, "job-a"));
         assert_eq!(code, ErrorCode::Failed, "{status:?}");
@@ -248,10 +231,10 @@ fn dismissing_is_refused_while_the_session_works_even_with_a_dialog_open() {
 
 #[test]
 fn dismissing_checks_the_status_again_right_before_the_esc() {
-    let live = Live::at("turned-busy", Some("waiting"));
+    let live = Live::at(Some("waiting"));
     let s = live.setup(None);
-    let dir = live.0.clone();
-    *s.attaching.lock().unwrap() = Some(Arc::new(move || write_status(&dir, "busy")));
+    let turned = live.clone();
+    *s.attaching.lock().unwrap() = Some(Arc::new(move || turned.turn_to("busy")));
     let (code, message) = code(dismiss(&s, "job-a"));
     assert_eq!(code, ErrorCode::Failed);
     assert_eq!(message, Failure::Working.to_string());
@@ -265,7 +248,7 @@ fn dismissing_checks_the_status_again_right_before_the_esc() {
 
 #[test]
 fn dismissing_also_closes_a_dialog_the_parser_cannot_read() {
-    let live = Live::at("unreadable", Some("waiting"));
+    let live = Live::at(Some("waiting"));
     let s = live.setup(Some(&UNREADABLE));
     dismiss(&s, "job-a").unwrap();
     assert_eq!(s.writes.lock().unwrap().as_slice(), ["\x1b"]);
@@ -273,7 +256,7 @@ fn dismissing_also_closes_a_dialog_the_parser_cannot_read() {
 
 #[test]
 fn dismissing_over_a_bare_esc_hint_sends_no_esc() {
-    let live = Live::at("bare-hint", Some("idle"));
+    let live = Live::at(Some("idle"));
     let s = live.setup(Some(&[
         "⏺ The menu you will see:",
         "  Use the arrows to move.",
@@ -286,17 +269,9 @@ fn dismissing_over_a_bare_esc_hint_sends_no_esc() {
 
 #[test]
 fn dismissing_sends_no_esc_when_no_dialog_is_open() {
-    let live = Live::at("none", Some("waiting"));
-    let s = setup_in(
-        true,
-        PROMPT,
-        sessions(),
-        Roots {
-            main_dir: live.0.join("claude"),
-            lanes_file: live.0.join("none/lanes.json"),
-        },
-        None,
-    );
+    let live = Live::at(Some("waiting"));
+    let s = live.setup(None);
+    *s.dialog.lock().unwrap() = None;
     for id in ["job-a", "job-idle"] {
         let (_, message) = code(dismiss(&s, id));
         assert!(message.contains("isn't open"), "{id}: {message}");

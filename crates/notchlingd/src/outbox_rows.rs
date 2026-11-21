@@ -2,7 +2,7 @@ use notchling_engine::outbox::{Row, State, Why};
 use notchling_events::kinds::agents::ReplyVia;
 use serde_json::{json, Value};
 
-pub(crate) fn wire(row: &Row, position: usize, note: Option<&str>) -> Value {
+pub(crate) fn wire(row: &Row, position: usize, note: Option<&str>, shown: Option<Why>) -> Value {
     let mut out = json!({
         "id": row.id,
         "session": row.session,
@@ -15,7 +15,11 @@ pub(crate) fn wire(row: &Row, position: usize, note: Option<&str>) -> Value {
         "updatedMs": row.updated_ms,
         "via": row.via.as_str(),
     });
-    if let Some(why) = row.why {
+    let why = match (row.state, row.why) {
+        (State::Waiting, None) => shown,
+        (_, stored) => stored,
+    };
+    if let Some(why) = why {
         out["why"] = json!(why.as_str());
     }
     if let (State::Unsure, Some(attempt)) = (row.state, row.attempt_ms) {

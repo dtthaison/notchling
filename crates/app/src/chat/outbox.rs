@@ -76,6 +76,8 @@ impl OutboxRow {
 pub enum Status {
     Queued,
     QueuedRetry,
+    Checking,
+    Unreadable,
     WaitingDialog,
     NeedsAnswer,
     Busy(Busy),
@@ -142,9 +144,14 @@ pub fn bubble(row: &OutboxRow) -> Bubble {
         State::Waiting if row.why == Some(Why::Answer) => {
             (Status::NeedsAnswer, vec![Button::Remove])
         }
+        State::Waiting if row.why == Some(Why::Unreadable) => (
+            Status::Unreadable,
+            vec![Button::ShowTerminal, Button::Edit, Button::Remove],
+        ),
         State::Waiting => {
             let status = match row.why {
                 Some(Why::Retry) => Status::QueuedRetry,
+                Some(Why::Checking) => Status::Checking,
                 Some(Why::Dialog) => Status::WaitingDialog,
                 Some(Why::Turn) => Status::WaitsForTurn,
                 Some(Why::Queue) => Status::WaitsForQueue(row.tool),

@@ -1,6 +1,6 @@
 use super::{
-    Kind, Row, State, Why, ANSWER_GRACE_MS, ANSWER_HOLD_MS, DIALOG_RECHECK_MS, GONE_AFTER_MS,
-    QUEUE_STALE_MS, TURN_SETTLE_MS,
+    Kind, Row, State, Why, ANSWER_GRACE_MS, ANSWER_HOLD_MS, DIALOG_RECHECK_MS,
+    DONE_STOPS_AFTER_TRIES, GONE_AFTER_MS, QUEUE_STALE_MS, TURN_SETTLE_MS, UNREADABLE_AFTER_MS,
 };
 
 const RECHECK_MS: i64 = 1_000;
@@ -9,6 +9,8 @@ const RECHECK_MS: i64 = 1_000;
 pub enum Job {
     Missing { since_ms: i64 },
     Stopped,
+    Unknown,
+    Done,
     Live { status: Option<String> },
 }
 
@@ -44,6 +46,24 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
             };
         }
         Job::Stopped => return Gate::NeedsUser(State::Stopped),
+        Job::Unknown => {
+            let since_ms = unknown_since(row, now);
+            let age = now - since_ms;
+            let why = if age >= UNREADABLE_AFTER_MS {
+                Why::Unreadable
+            } else {
+                Why::Checking
+            };
+            let mut until_ms = now + unknown_recheck_ms(age);
+            if why == Why::Checking {
+                until_ms = until_ms.min(since_ms + UNREADABLE_AFTER_MS);
+            }
+            return Gate::Wait { why, until_ms };
+        }
+        Job::Done if done_tries(row) >= DONE_STOPS_AFTER_TRIES => {
+            return Gate::NeedsUser(State::Stopped);
+        }
+        Job::Done => None,
         Job::Live { status } => status.as_deref(),
     };
     if row.why == Some(Why::Answer) {
@@ -74,6 +94,46 @@ pub fn gate(row: &Row, facts: &Facts) -> Gate {
         };
     }
     Gate::Go { guarded: false }
+}
+
+fn unknown_since(row: &Row, now_ms: i64) -> i64 {
+    match (row.state, row.why) {
+        (State::Waiting, None) => row.updated_ms.min(now_ms),
+        _ => now_ms,
+    }
+}
+
+fn done_tries(row: &Row) -> u32 {
+    if row.state == State::Queued {
+        return 0;
+    }
+    row.done_from
+        .map_or(0, |from| row.tries.saturating_sub(from))
+}
+
+pub fn recount(row: &Row, job: &Job) -> Option<bool> {
+    let counting = match job {
+        Job::Unknown => return None,
+        Job::Done => true,
+        _ => false,
+    };
+    let afresh = row.state == State::Queued;
+    let settled = match (counting, row.done_from) {
+        (true, Some(from)) => from == row.tries || (from < row.tries && !afresh),
+        (true, None) => false,
+        (false, from) => from.is_none(),
+    };
+    (!settled).then_some(counting)
+}
+
+fn unknown_recheck_ms(age_ms: i64) -> i64 {
+    match age_ms {
+        ..5_000 => RECHECK_MS,
+        5_000..15_000 => 2 * RECHECK_MS,
+        15_000..30_000 => 5 * RECHECK_MS,
+        30_000..60_000 => 15 * RECHECK_MS,
+        _ => 30 * RECHECK_MS,
+    }
 }
 
 pub fn idle_at_prompt(facts: &Facts) -> bool {

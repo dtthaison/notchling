@@ -179,6 +179,8 @@ fn every_status_has_words_and_every_button_a_label_and_an_id() {
             Status::QueuedRetry,
             "Couldn't reach the session, trying again",
         ),
+        (Status::Checking, "Checking the session…"),
+        (Status::Unreadable, "Can't read the session's status"),
         (Status::WaitingDialog, "Waiting for a dialog"),
         (Status::WaitsForTurn, "Waiting for the turn to end"),
         (

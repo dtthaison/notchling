@@ -69,7 +69,18 @@ words!(Why {
     NotCleared => "not_cleared",
     Mixed => "mixed",
     Answer => "answer",
+    Checking => "checking",
+    Unreadable => "unreadable",
 });
+
+impl Why {
+    pub fn stored(self) -> Option<Why> {
+        match self {
+            Why::Checking | Why::Unreadable => None,
+            other => Some(other),
+        }
+    }
+}
 
 impl Kind {
     pub fn of(tool: Tool, text: &str) -> Kind {
@@ -115,6 +126,19 @@ pub struct Row {
     pub joined: u32,
     #[serde(default)]
     pub awaited: bool,
+    #[serde(default)]
+    pub done_from: Option<u32>,
+}
+
+impl Row {
+    pub fn unmoved_since(&self, before: &Row) -> bool {
+        self.state == before.state
+            && self.why == before.why
+            && self.updated_ms == before.updated_ms
+            && self.tries == before.tries
+            && self.kind == before.kind
+            && self.text == before.text
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

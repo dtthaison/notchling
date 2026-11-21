@@ -2,8 +2,9 @@ use crate::acting::Acting;
 use crate::outbox_courier::{real_clock, Clock, Courier, Refuse};
 use crate::outbox_ops::{OutboxOps, Wake};
 use notchling_engine::outbox::{
-    after, gate, idle_at_prompt, After, Anchor, Gate, Job, QueuedVerdict, Row, State, Tool, TryEnd,
-    Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX, TURN_SETTLE_MS,
+    after, gate, idle_at_prompt, recount, After, Anchor, Facts, Gate, Job, QueuedVerdict, Row,
+    State, Tool, TryEnd, Verdict, Why, ATTACH_IDLE_MS, GONE_RECHECK_MS, POSTMEN_MAX,
+    TURN_SETTLE_MS,
 };
 use notchling_engine::transcript::sent::Seen;
 use notchling_events::kinds::agents::OutboxThen;
@@ -697,16 +698,50 @@ impl Postman {
 
     fn gate(&mut self, row: &Row, now: i64) -> Option<i64> {
         let facts = self.courier().facts(row, now);
-        match gate(row, &facts) {
+        let now = (self.inner.clock)().max(now);
+        let facts = Facts {
+            now_ms: now,
+            ..facts
+        };
+        let read_again = match self.inner.ops.store().get(&row.id) {
+            Ok(Some(after)) if after.unmoved_since(row) => after,
+            Ok(_) => return None,
+            Err(_) => return Some(now + TICK_MS),
+        };
+        let row = &read_again;
+        let counted = recount(row, &facts.job)
+            .and_then(|counting| self.inner.ops.store().count_done(row, counting).ok())
+            .map(|done_from| Row {
+                done_from,
+                ..row.clone()
+            });
+        let row = counted.as_ref().unwrap_or(row);
+        let verdict = gate(row, &facts);
+        let shown = match verdict {
+            Gate::Wait {
+                why: why @ (Why::Checking | Why::Unreadable),
+                ..
+            } => Some(why),
+            _ => None,
+        };
+        let ops = &self.inner.ops;
+        if shown.is_none() {
+            ops.set_shown(&row.id, None);
+        }
+        match verdict {
             Gate::Wait { why, until_ms } => {
-                if row.state != State::Waiting || row.why != Some(why) {
-                    let store = self.inner.ops.store();
+                if row.state != State::Waiting || row.why != why.stored() {
+                    let store = ops.store();
                     let from = [State::Queued, State::Waiting];
                     if let Ok(true) =
-                        store.set_state(&row.id, &from, State::Waiting, Some(why), row.next_ms, now)
+                        store.set_state_of(row, &from, State::Waiting, Some(why), row.next_ms, now)
                     {
+                        ops.set_shown(&row.id, shown);
                         self.publish(&row.id);
                     }
+                } else if ops.shown(&row.id) != shown {
+                    ops.set_shown(&row.id, shown);
+                    self.publish(&row.id);
                 }
                 Some(until_ms)
             }
@@ -721,7 +756,7 @@ impl Postman {
                 }
                 let store = self.inner.ops.store();
                 let from = [State::Queued, State::Waiting];
-                if let Ok(true) = store.set_state(&row.id, &from, state, None, None, now) {
+                if let Ok(true) = store.set_state_of(row, &from, state, None, None, now) {
                     self.publish(&row.id);
                     if let Some(then) = then {
                         self.inner.ops.emit_then(row, then);

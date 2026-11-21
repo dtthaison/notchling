@@ -68,6 +68,7 @@ pub struct OutboxOps {
     room: Arc<dyn Room>,
     events: Option<Events>,
     notes: Mutex<HashMap<String, String>>,
+    shown: Mutex<HashMap<String, Why>>,
     wake: Mutex<Option<Wake>>,
     forget: Mutex<Option<Wake>>,
     resume: Mutex<Option<Resume>>,
@@ -164,6 +165,7 @@ impl OutboxOps {
             room,
             events,
             notes: Mutex::new(HashMap::new()),
+            shown: Mutex::new(HashMap::new()),
             wake: Mutex::new(None),
             forget: Mutex::new(None),
             resume: Mutex::new(None),
@@ -343,15 +345,39 @@ impl OutboxOps {
         lock(&self.notes).get(id).cloned()
     }
 
+    pub fn set_shown(&self, id: &str, why: Option<Why>) {
+        let mut shown = lock(&self.shown);
+        match why {
+            Some(why) => {
+                shown.insert(id.to_string(), why);
+            }
+            None => {
+                shown.remove(id);
+            }
+        }
+    }
+
+    pub fn shown(&self, id: &str) -> Option<Why> {
+        lock(&self.shown).get(id).copied()
+    }
+
     pub fn publish_changed(&self, row: &Row) {
         if !keeps_note(row) {
             self.set_note(&row.id, None);
+        }
+        if row.state != State::Waiting {
+            self.set_shown(&row.id, None);
         }
         let position = self
             .store
             .list(Some(&row.session))
             .map_or(1, |rows| position_of(&rows, &row.id));
-        let wire = wire(row, position, self.note(&row.id).as_deref());
+        let wire = wire(
+            row,
+            position,
+            self.note(&row.id).as_deref(),
+            self.shown(&row.id),
+        );
         self.room.publish(
             topics::OUTBOX,
             topics::OUTBOX_CHANGED,
@@ -364,6 +390,7 @@ impl OutboxOps {
     pub fn publish_joined(&self, id: &str, session: &str, into: &str) {
         self.settle.removed(id, "joined");
         self.set_note(id, None);
+        self.set_shown(id, None);
         let forget = lock(&self.forget).clone();
         if let Some(forget) = forget {
             forget(id);
@@ -383,6 +410,7 @@ impl OutboxOps {
     pub fn publish_removed(&self, id: &str, session: &str, why: &str) {
         self.settle.removed(id, why);
         self.set_note(id, None);
+        self.set_shown(id, None);
         let forget = lock(&self.forget).clone();
         if let Some(forget) = forget {
             forget(id);
@@ -574,10 +602,18 @@ impl OutboxOps {
             .list(session.as_deref())
             .map_err(|_| save_failed())?;
         let notes = lock(&self.notes).clone();
+        let shown = lock(&self.shown).clone();
         let mut rows: Vec<Value> = rows
             .iter()
             .zip(positions(&rows))
-            .map(|(row, position)| wire(row, position, notes.get(&row.id).map(String::as_str)))
+            .map(|(row, position)| {
+                wire(
+                    row,
+                    position,
+                    notes.get(&row.id).map(String::as_str),
+                    shown.get(&row.id).copied(),
+                )
+            })
             .collect();
         rows.extend(self.remote_rows(args.get("session").and_then(Value::as_str)));
         Ok(Value::Array(rows))
@@ -705,11 +741,12 @@ impl OutboxOps {
             (State::Waiting, Some(Why::Retry)) => (State::Waiting, row.clear_box),
             _ => return Err(bad("There's nothing to send again.")),
         };
-        match self
-            .store
-            .requeue(&row.id, &[from], clear_box, now_ms())
-            .map_err(|_| save_failed())?
-        {
+        let now = now_ms();
+        let requeued = match from {
+            State::Stopped => self.store.restart(&row.id, &[from], clear_box, now),
+            _ => self.store.requeue(&row.id, &[from], clear_box, now),
+        };
+        match requeued.map_err(|_| save_failed())? {
             Change::Done => {}
             Change::Busy | Change::Stale => return Err(failed("The message changed; try again.")),
             Change::Missing => return Err(bad(NO_MESSAGE)),

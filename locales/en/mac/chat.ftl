@@ -284,6 +284,10 @@ chat-messages-wait = { $count ->
 # The status lines under a message Notchling keeps until the session takes it.
 chat-outbox-queued = Queued
 chat-outbox-retry = Couldn't reach the session, trying again
+# The session's status could not be read yet (the Mac may be busy). Notchling keeps looking; nothing is wrong yet.
+chat-outbox-checking = Checking the session…
+# The session's status could not be read for a long while. The message stays queued and goes on when it can be read; the terminal shows the session itself.
+chat-outbox-unreadable = Can't read the session's status
 chat-outbox-dialog = Waiting for a dialog
 # The message was typed and the session asked you something because of it, such as /model asking before it switches.
 chat-outbox-answer = Needs your answer

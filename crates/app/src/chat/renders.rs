@@ -15,9 +15,11 @@ pub const VIEWS: [ViewSpec; 2] = [
     },
 ];
 
-pub const OUTBOX_STATES: [&str; 25] = [
+pub const OUTBOX_STATES: [&str; 27] = [
     "queued",
     "retry",
+    "checking",
+    "unreadable",
     "dialog",
     "answer",
     "busy_tasks",
@@ -101,6 +103,8 @@ pub fn outbox_preview(how: &str) -> Option<Vec<Bubble>> {
     Some(match how {
         "queued" => one("queued", None),
         "retry" => one("waiting", Some("retry")),
+        "checking" => one("waiting", Some("checking")),
+        "unreadable" => one("waiting", Some("unreadable")),
         "dialog" => one("waiting", Some("dialog")),
         "answer" => one("waiting", Some("answer")),
         "busy_tasks" => busy_row(

@@ -259,9 +259,9 @@ fn the_head_keeps_its_id_and_tells_the_app_how_many_messages_it_carries() {
         .expect("in Claude Code's queue, still its row");
     assert_eq!(carried.state, State::InQueue);
     assert_eq!(carried.text, "one\n\ntwo\n\nthree");
-    let wire = crate::outbox_rows::wire(&carried, 1, None);
+    let wire = crate::outbox_rows::wire(&carried, 1, None, None);
     assert_eq!(wire["joined"], json!(3), "{wire}");
-    let plain = crate::outbox_rows::wire(&r.send("job-idle", "later"), 2, None);
+    let plain = crate::outbox_rows::wire(&r.send("job-idle", "later"), 2, None, None);
     assert!(plain.get("joined").is_none());
 }
 

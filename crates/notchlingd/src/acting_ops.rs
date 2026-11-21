@@ -124,6 +124,8 @@ impl Launcher for NoLaunch {
     }
 }
 
+pub(crate) type StatusRead = Arc<dyn Fn(&Roots, &str) -> Option<String> + Send + Sync>;
+
 pub struct ActingOps {
     pub(crate) acting: Arc<Acting>,
     pub(crate) prompts: PromptStore,
@@ -150,6 +152,7 @@ pub struct ActingOps {
     pub(crate) reply_screen_file: Option<PathBuf>,
     pub(crate) attempts: crate::reply_attempts::Attempts,
     pub(crate) events: Option<Events>,
+    status: StatusRead,
 }
 
 impl ActingOps {
@@ -186,7 +189,18 @@ impl ActingOps {
             reply_screen_file: None,
             attempts: crate::reply_attempts::Attempts::default(),
             events: None,
+            status: Arc::new(|roots, job| fresh::job_status(roots, &Probes::from_proc(), job)),
         }
+    }
+
+    pub(crate) fn job_status(&self, job: &str) -> Option<String> {
+        (self.status)(&self.roots, job)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_status_reader(mut self, status: StatusRead) -> ActingOps {
+        self.status = status;
+        self
     }
 
     pub fn with_screen_file(mut self, file: PathBuf) -> ActingOps {
