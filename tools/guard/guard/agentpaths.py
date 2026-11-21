@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Set
 RULE = "GUARD-AGENT-PATH"
 GOLDEN = Path("crates/notchlingd/tests/golden/agent-paths.json")
 WIRE = Path("crates/local-api/src/wire.rs")
+COMMANDS = Path("crates/notchlingd/src/commands.rs")
 SPECS = Path("docs/superpowers/specs")
 FIRST_DATE = "2026-11-21"
 GROWING = ("planned", "userOnly", "internal")
@@ -24,21 +25,63 @@ CONSENTS = ("none", "request", "by_key_class", "own_free", "by_entry", "never")
 TIERS = ("agent", "app", "app_quiet", "approval")
 DATED = re.compile(r"^(\d{4}-\d{2}-\d{2})-.+\.md$")
 CODE = re.compile(r"`([^`\n]+)`")
-COMMAND = re.compile(r"notchling [a-z][a-z-]*(?: .*)?")
-OP = re.compile(r"[a-z][a-z0-9_]+(?:\.[a-z][a-z0-9_]*)+")
-FILES = frozenset({
-    "json", "rs", "md", "py", "toml", "ftl", "sh", "js", "ts", "yaml", "yml", "lock", "txt", "html",
-    "css", "swift", "dart", "plist", "sock", "log", "app", "png", "gif", "svg", "pdf", "csv",
-})
+FENCED = re.compile(r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```[ \t]*$", re.M | re.S)
+COMMAND = re.compile(r"\bnotchling [a-z][a-z-]*")
+OP = re.compile(r"(?<![\w.])[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+(?!\w)")
 NO_PATH = re.compile(r"^[ \t]*(?:[-*][ \t]+)?No agent path:[ \t]*(\w+)", re.M)
 CONST = re.compile(r"pub const\s+[A-Z][A-Z0-9_]*\s*:\s*&(?:'static\s+)?str\s*=\s*\"([^\"]*)\"\s*;")
+OPS_MOD = re.compile(r"pub(?:\([^)]*\))?\s+mod\s+ops\s*\{")
+RAW_STRING = re.compile(r'b?r(#*)"')
+CHAR_LITERAL = re.compile(r"'(?:\\[^'\n]*|[^\\'\n])'")
+ROW = re.compile(r'\brow\(\s*"([^"]+)"')
 
 
-def _module_body(text: str, header: str) -> Optional[str]:
-    start = text.find(header)
-    if start < 0:
+def _code(text: str) -> str:
+    out: List[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        raw = RAW_STRING.match(text, i) if c in "rb" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) else None
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if text.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif text.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+            out.append(" ")
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif raw:
+            close = '"' + raw.group(1)
+            j = text.find(close, raw.end())
+            j = n if j < 0 else j
+            body = text[raw.end():j].replace("\\", "\\\\").replace('"', '\\"')
+            out.append('"' + body + '"')
+            i = min(n, j + len(close))
+        elif c == "'" and CHAR_LITERAL.match(text, i):
+            i = CHAR_LITERAL.match(text, i).end()
+            out.append("''")
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _module_body(text: str, header: "re.Pattern[str]") -> Optional[str]:
+    found = header.search(text)
+    if not found:
         return None
-    depth, in_string, i = 1, False, start + len(header)
+    depth, in_string, i = 1, False, found.end()
     while i < len(text):
         c = text[i]
         if in_string:
@@ -53,14 +96,18 @@ def _module_body(text: str, header: str) -> Optional[str]:
         elif c == "}":
             depth -= 1
             if depth == 0:
-                return text[start + len(header):i]
+                return text[found.end():i]
         i += 1
     return None
 
 
 def wire_ops(text: str) -> List[str]:
-    body = _module_body(text, "pub mod ops {")
+    body = _module_body(_code(text), OPS_MOD)
     return CONST.findall(body) if body is not None else []
+
+
+def command_names(text: str) -> List[str]:
+    return ROW.findall(_code(text))
 
 
 def _is_object(value) -> bool:
@@ -144,7 +191,20 @@ def _shape_problems(data: Dict) -> List[str]:
     return problems
 
 
-def check_ops(wire_text: str, golden_text: Optional[str]) -> List[str]:
+def _command_problems(data: Dict, commands_text: str) -> List[str]:
+    rows = command_names(commands_text)
+    if not rows:
+        return [f"{RULE}: {COMMANDS} has no rows, so no command can be checked"]
+    problems = []
+    named = {row.get("command") for row in data["commands"]}
+    for name in sorted(str(n) for n in named - set(rows)):
+        problems.append(f"{RULE}: command {name} of {GOLDEN} is not a row of {COMMANDS}")
+    for name in sorted(set(rows) - named):
+        problems.append(f"{RULE}: command `{name}` of {COMMANDS} is not in {GOLDEN}")
+    return problems
+
+
+def check_ops(wire_text: str, golden_text: Optional[str], commands_text: Optional[str] = None) -> List[str]:
     try:
         data = parse(golden_text)
     except ValueError as e:
@@ -161,22 +221,17 @@ def check_ops(wire_text: str, golden_text: Optional[str]) -> List[str]:
     for op, places in sorted(where.items(), key=lambda item: str(item[0])):
         if len(places) > 1:
             problems.append(f"{RULE}: {op} is in {len(places)} places of {GOLDEN}: {', '.join(places)}")
+    if commands_text is not None:
+        problems += _command_problems(data, commands_text)
     return problems + _shape_problems(data)
 
 
-def _is_op(token: str) -> bool:
-    return bool(OP.fullmatch(token)) and token.rsplit(".", 1)[1] not in FILES
+def _names_command_and_op(section: str, known: Set[str]) -> bool:
+    code = "\n".join(CODE.findall(section) + FENCED.findall(section))
+    return bool(COMMAND.search(code)) and any(op in known for op in OP.findall(section))
 
 
-def _names_command_and_op(section: str) -> bool:
-    for line in section.splitlines():
-        spans = [s.strip() for s in CODE.findall(line)]
-        if any(COMMAND.fullmatch(s) for s in spans) and any(_is_op(s) for s in spans):
-            return True
-    return False
-
-
-def check_spec(rel: str, text: str) -> List[str]:
+def check_spec(rel: str, text: str, known: Set[str]) -> List[str]:
     where = SPECS / rel
     m = DATED.match(Path(rel).name)
     if not m:
@@ -193,26 +248,41 @@ def check_spec(rel: str, text: str) -> List[str]:
             return []
         return [f"{RULE}: {where} says 'No agent path:' without a reason from "
                 f"{', '.join(INTERNAL_WHYS)}"]
-    if _names_command_and_op(section):
+    if _names_command_and_op(section, known):
         return []
-    return [f"{RULE}: {where} '## Agent path' has no line or table row with both a `notchling` command and "
-            f"an op, and does not start a line with 'No agent path: <reason>'"]
+    return [f"{RULE}: {where} '## Agent path' does not name a `notchling` command in code together with an op "
+            f"of {WIRE} or a planned op of {GOLDEN}, and does not start a line with 'No agent path: <reason>'"]
+
+
+def _known_ops(wire_text: str, golden_text: Optional[str]) -> Set[str]:
+    known = set(wire_ops(wire_text))
+    try:
+        data = parse(golden_text)
+    except ValueError:
+        return known
+    return known | {e.get("op") for e in data["planned"] if _text(e.get("op"))}
 
 
 def check(repo: Path) -> List[str]:
     repo = Path(repo)
     golden = repo / GOLDEN
     wire = repo / WIRE
+    commands = repo / COMMANDS
     problems: List[str] = []
+    known: Set[str] = set()
+    golden_text = golden.read_text(encoding="utf-8") if golden.is_file() else None
     if not wire.is_file():
         problems.append(f"{RULE}: {WIRE} is missing")
+    elif not commands.is_file():
+        problems.append(f"{RULE}: {COMMANDS} is missing")
     else:
-        problems += check_ops(wire.read_text(encoding="utf-8"),
-                              golden.read_text(encoding="utf-8") if golden.is_file() else None)
+        wire_text = wire.read_text(encoding="utf-8")
+        problems += check_ops(wire_text, golden_text, commands.read_text(encoding="utf-8"))
+        known = _known_ops(wire_text, golden_text)
     specs = repo / SPECS
     if specs.is_dir():
         for path in sorted(specs.rglob("*.md")):
-            problems += check_spec(path.relative_to(specs).as_posix(), path.read_text(encoding="utf-8"))
+            problems += check_spec(path.relative_to(specs).as_posix(), path.read_text(encoding="utf-8"), known)
     return problems
 
 

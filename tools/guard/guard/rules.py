@@ -175,7 +175,7 @@ def _guard_agent_path() -> bool:
         write(root, {str(agentpaths.GOLDEN): grown})
         _git(root, "commit", "-q", "-am", "grow")
         grew = gate.agent_path_reasons(root, base, _git(root, "rev-parse", "HEAD"))
-    spec = agentpaths.check_spec("2026-11-22-x-design.md", "# x\n")
+    spec = agentpaths.check_spec("2026-11-22-x-design.md", "# x\n", set())
     return (len(problems) == 1 and "a.two" in problems[0] and problems[0].startswith(agentpaths.RULE)
             and any(r.startswith(agentpaths.RULE) for r in grew)
             and len(spec) == 1 and spec[0].startswith(agentpaths.RULE))

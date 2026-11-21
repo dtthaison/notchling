@@ -447,7 +447,7 @@ notchling capabilities [--json]                                 what this caller
 
 1. Every op in `wire.rs`'s `mod ops` is in `agent-paths.json` exactly once: as a command's op, or in `planned`, `userOnly` or `internal`, with the fields that list needs.
 2. `guard gate` sends a change where `planned`, `userOnly` or `internal` grew to the maintainer, as `GUARD-PROVIDER-GAPS` does: a new op arrives with its command, or the maintainer decides it is user-only or internal. The check fails when `wire.rs` has no `mod ops` constants, so an empty read never passes.
-3. Every file under `docs/superpowers/specs/` (subfolders too) is named `YYYY-MM-DD-name.md`, and one dated 2026-11-21 or later has an `## Agent path` section with a line or table row that names a `notchling` command and an op (a file name such as `settings.json` is not an op), or a line that starts "No agent path:" with a reason from the `INTERNAL` reasons.
+3. Every file under `docs/superpowers/specs/` (subfolders too) is named `YYYY-MM-DD-name.md`, and one dated 2026-11-21 or later has an `## Agent path` section that names a `notchling` command (in backticks or a fenced block) and an op that is in `wire.rs` or `planned` (a file name such as `settings.json` is not an op unless it is one of those), anywhere in the section, or a line that starts "No agent path:" with a reason from the `INTERNAL` reasons.
 
 **Files.**
 
