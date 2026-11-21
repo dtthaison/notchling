@@ -41,7 +41,7 @@ fn rig() -> (Root, Ops) {
     (Root(root), ops)
 }
 
-const READS: [&str; 24] = [
+const READS: [&str; 26] = [
     ops::SESSIONS_LIST,
     ops::SETTINGS_LIST,
     ops::SETTINGS_GET,
@@ -64,11 +64,13 @@ const READS: [&str; 24] = [
     ops::VAULT_FIND,
     ops::LOG_VERIFY,
     ops::DAEMON_CAPABILITIES,
+    ops::CONSENT_GET,
+    ops::CONSENT_MINE,
     COST_SUMMARY,
     COST_REPORT,
 ];
 
-const ACTS: [&str; 10] = [
+const ACTS: [&str; 11] = [
     ops::SETTINGS_SET,
     ops::MODELS_UPDATE,
     ops::CLUSTER_JOIN,
@@ -79,6 +81,7 @@ const ACTS: [&str; 10] = [
     ops::ASK_ANSWER,
     ops::VAULT_USE,
     ops::VAULT_REQUEST,
+    ops::CONSENT_CANCEL,
 ];
 
 const HOOKS: [&str; 4] = [
@@ -138,6 +141,7 @@ fn no_op_that_writes_runs_or_touches_the_vault_is_an_agent_read() {
         ops::ASK_ANSWER,
         ops::VAULT_USE,
         ops::VAULT_REQUEST,
+        ops::CONSENT_CANCEL,
     ] {
         let spec = handler.spec(op).expect(op);
         assert!(spec.records_agent_call(), "{op}");

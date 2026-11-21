@@ -639,7 +639,12 @@ fn ask_allowed_commits_with_answered_by() {
         .unwrap();
     assert_eq!(text(allowed, "answered_by").as_deref(), Some("phone"));
     assert_eq!(text(allowed, "class").as_deref(), Some("ask"));
-    assert_eq!(r.sink.commits(), 1);
+    let thens: Vec<String> = of(&r.sink, "agent.consent")
+        .iter()
+        .filter_map(|e| text(e, "then"))
+        .collect();
+    assert_eq!(thens, ["asked", "allowed", "applied"]);
+    assert_eq!(r.sink.commits(), 4, "three consent lines and the setting's own");
 }
 
 #[test]

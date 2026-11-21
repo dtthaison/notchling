@@ -2,9 +2,12 @@ use super::*;
 use crate::switches::VAULT;
 use notchling_engine::vault::list::VaultIndex;
 use notchling_engine::vault::KeychainError;
+use crate::consent_ops::ConsentOps;
+use crate::consent_testkit::{shell, verified};
+use notchling_engine::consent::ConsentStore;
 use notchling_events::{MemorySink, Salt};
 use notchling_local_api::ClientKind;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 
 const TOKEN: &str = "fake-token-value-0001";
@@ -63,16 +66,25 @@ pub(super) struct Setup {
     pub(super) item: FakeItem,
     pub(super) switch: Arc<SwitchFlag>,
     pub(super) sink: Arc<MemorySink>,
+    pub(super) consent: Arc<ConsentOps>,
+    pub(super) consent_sink: Arc<MemorySink>,
+    skew: Arc<AtomicI64>,
     dir: std::path::PathBuf,
 }
 
 impl Drop for Setup {
     fn drop(&mut self) {
+        self.consent.close();
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
 impl Setup {
+    pub(super) fn advance(&self, ms: i64) {
+        self.skew.fetch_add(ms, Ordering::SeqCst);
+        self.consent.tick();
+    }
+
     fn list_text(&self) -> String {
         notchling_engine::store::doc(&self.dir, notchling_engine::vault::list::INDEX_DOC)
             .unwrap()
@@ -118,7 +130,6 @@ pub(super) fn setup_full(
     let store = VaultStore::new(VaultIndex::in_data(&dir), Box::new(item.clone()));
     let timing = timing.unwrap_or(VaultTiming {
         approval_wait: Duration::from_secs(10),
-        request_wait: Duration::from_secs(10),
         slice: Duration::from_millis(10),
     });
     let sink = Arc::new(MemorySink::new());
@@ -126,18 +137,42 @@ pub(super) fn setup_full(
         .with_events(Events::fixed(sink.clone(), Salt([1; 32])))
         .with_timing(timing)
         .with_processes(Arc::new(super::pending_tests::FakeProcesses));
+    let inbox_for_consent = inbox.clone();
     if let Some(inbox) = inbox {
         ops = ops.with_inbox(inbox);
     }
+    let identity = sessions.clone();
     if let Some(sessions) = sessions {
         ops = ops.with_sessions(sessions);
     }
+    let skew = Arc::new(AtomicI64::new(0));
+    let clock = skew.clone();
+    let consent_sink = Arc::new(MemorySink::new());
+    let consent = ConsentOps::with_clock(
+        Arc::new(ConsentStore::in_memory_for_tests()),
+        room.clone(),
+        inbox_for_consent,
+        Some(Events::fixed(consent_sink.clone(), Salt([2; 32]))),
+        Arc::new(move || crate::acting_ops::now_ms() + clock.load(Ordering::SeqCst)),
+    );
+    consent.bind_identity(Arc::new(move |pid| {
+        match identity.as_ref().and_then(|find| find(pid)) {
+            Some(session) => verified(&session),
+            None => shell("Terminal"),
+        }
+    }));
+    consent.start();
+    let ops = Arc::new(ops);
+    ops.set_consent(&consent);
     Setup {
-        ops: Arc::new(ops),
+        ops,
         room,
         item,
         switch,
         sink,
+        consent,
+        consent_sink,
+        skew,
         dir,
     }
 }
@@ -213,6 +248,9 @@ fn while_off_every_op_says_so_and_nothing_is_read_or_written() {
     let args = json!({"names": ["gh"], "name": "gh", "query": "", "id": "x", "decision": "once",
                       "entry": {"name": "gh", "kind": "token"}, "value": {"secret": TOKEN}});
     for op in VAULT_OPS {
+        if op == ops::VAULT_REQUEST || op == ops::VAULT_REQUEST_CANCEL {
+            continue;
+        }
         for who in [app(), agent()] {
             let e = err(s.ops.call(&who, op, &args));
             assert_eq!(
@@ -503,24 +541,41 @@ fn the_app_leaving_or_the_switch_going_off_ends_the_wait() {
     assert!(s.ops.approvals.is_empty());
 }
 
+pub(super) fn ask(s: &Setup, args: Value) -> (Value, Value) {
+    let reply = s.ops.call(&agent(), ops::VAULT_REQUEST, &args).unwrap();
+    let event = s.room.pending(topics::VAULT_REQUEST_PENDING).unwrap_or(Value::Null);
+    (reply, event)
+}
+
+pub(super) fn until<T>(mut probe: impl FnMut() -> Option<T>) -> T {
+    for _ in 0..500 {
+        if let Some(found) = probe() {
+            return found;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("timed out");
+}
+
+pub(super) fn ended(s: &Setup, id: &str) -> Value {
+    let row = s
+        .consent
+        .wait_for(id, Duration::from_secs(5))
+        .expect("the request exists");
+    crate::consent_wire::view(&row)
+}
+
 #[test]
-fn a_request_opens_the_form_and_returns_what_the_user_saved() {
+fn a_request_is_saved_and_the_user_adds_the_secret_in_the_form() {
     let s = setup("request", true);
     seed(&s, false);
     let req = json!({"name": "gh", "url": "https://api.github-cdn.io", "note": "new\nnote",
                      "expires": "2027-03-04", "reason": "to push"});
-    let e = err(s.ops.call(&agent(), ops::VAULT_REQUEST, &req));
-    assert!(e.message.contains("isn't open"), "no app, no form");
-    s.room.follows.store(true, Ordering::SeqCst);
-    let ops = s.ops.clone();
-    let asked = req.clone();
-    let user = std::thread::spawn(move || ops.call(&agent(), ops::VAULT_REQUEST, &asked));
-    let event = loop {
-        if let Some(e) = s.room.pending(topics::VAULT_REQUEST_PENDING) {
-            break e;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
+    assert!(!s.room.can_answer(), "no app is open");
+    let (reply, event) = ask(&s, req.clone());
+    assert_eq!(reply["state"], "waiting");
+    assert_eq!(reply["request"]["kind"], "secret_request");
+    assert_eq!(reply["request"]["target"], "gh");
     assert_eq!(event["existing"], true);
     assert_eq!(event["entry"]["note"], "new\nnote");
     assert_eq!(event["entry"]["secretVar"], "GH_TOKEN");
@@ -531,6 +586,7 @@ fn a_request_opens_the_form_and_returns_what_the_user_saved() {
     );
     assert_eq!(event["request"]["reason"], "to push");
     let id = event["id"].as_str().unwrap().to_string();
+    assert_eq!(reply["request"]["id"], id.as_str());
     let e = err(s
         .ops
         .call(&agent(), ops::VAULT_REQUEST_CANCEL, &json!({"id": id})));
@@ -540,34 +596,69 @@ fn a_request_opens_the_form_and_returns_what_the_user_saved() {
         .call(
             &app(),
             ops::VAULT_SAVE,
-            &json!({"entry": event["entry"], "replacing": "gh", "request": id}),
+            &json!({"entry": event["entry"], "replacing": "gh", "consentId": id}),
         )
         .unwrap();
     assert_eq!(saved["answered"], true);
-    let reply = user.join().unwrap().unwrap();
-    assert_eq!(reply["entry"]["note"], "new\nnote");
+    let done = ended(&s, &id);
+    assert_eq!(done["state"], "applied");
+    assert_eq!(done["result"]["entry"]["note"], "new\nnote");
     assert!(
-        !reply.to_string().contains(TOKEN),
+        !done.to_string().contains(TOKEN),
         "a request never returns the value"
     );
+    let again = s
+        .ops
+        .call(
+            &app(),
+            ops::VAULT_SAVE,
+            &json!({"entry": event["entry"], "replacing": "gh", "consentId": id}),
+        )
+        .unwrap_err();
+    assert_eq!(again.code, ErrorCode::Forbidden, "a yes is used once");
 
-    let ops = s.ops.clone();
-    let user =
-        std::thread::spawn(move || ops.call(&agent(), ops::VAULT_REQUEST, &json!({"name": "npm"})));
-    let id = loop {
-        match s.room.pending(topics::VAULT_REQUEST_PENDING) {
-            Some(e) if e["entry"]["name"] == "npm" => break e["id"].clone(),
-            _ => std::thread::sleep(Duration::from_millis(5)),
-        }
-    };
-    s.ops
+    let (reply, _) = ask(&s, json!({"name": "npm"}));
+    let id = reply["request"]["id"].as_str().unwrap().to_string();
+    let denied = s
+        .ops
         .call(&app(), ops::VAULT_REQUEST_CANCEL, &json!({"id": id}))
         .unwrap();
-    let e = user.join().unwrap().unwrap_err();
-    assert_eq!(
-        (e.code, e.message.as_str()),
-        (ErrorCode::NeedsApproval, "The user cancelled.")
-    );
+    assert_eq!(denied["answered"], true);
+    assert_eq!(ended(&s, &id)["state"], "denied");
+}
+
+#[test]
+fn a_secret_request_never_turns_the_vault_on() {
+    let s = setup("request-off", false);
+    let (reply, event) = ask(&s, json!({"name": "npm", "reason": "to publish"}));
+    assert_eq!(reply["state"], "waiting");
+    assert!(!s.switch.is_on());
+    assert!(event.is_null(), "no form is announced while the Vault is off");
+    assert_eq!(*s.item.reads.lock().unwrap(), 0);
+    assert!(s.item.data.lock().unwrap().is_none());
+    let id = reply["request"]["id"].as_str().unwrap().to_string();
+    let e = err(s.ops.call(
+        &app(),
+        ops::VAULT_SAVE,
+        &json!({"entry": {"name": "npm", "kind": "token"}, "value": {"secret": "fake-npm-1"},
+                "consentId": id}),
+    ));
+    assert_eq!((e.code, e.message.as_str()), (ErrorCode::Forbidden, VAULT_OFF));
+    assert!(!s.switch.is_on());
+    s.switch.set(true);
+    let announced = s.room.pending(topics::VAULT_REQUEST_PENDING).unwrap();
+    assert_eq!(announced["id"], id.as_str(), "turning it on opens the form");
+    let saved = s
+        .ops
+        .call(
+            &app(),
+            ops::VAULT_SAVE,
+            &json!({"entry": announced["entry"], "value": {"secret": "fake-npm-1"},
+                    "consentId": id}),
+        )
+        .unwrap();
+    assert_eq!(saved["answered"], true);
+    assert_eq!(ended(&s, &id)["state"], "applied");
 }
 
 #[test]
@@ -585,6 +676,7 @@ fn a_request_checks_its_fields() {
         assert_eq!(e.code, ErrorCode::BadRequest, "{args}");
     }
     assert!(s.room.events.lock().unwrap().is_empty());
+    assert!(s.consent.store().open_rows().unwrap().is_empty());
 }
 
 #[test]

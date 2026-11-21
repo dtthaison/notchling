@@ -1,4 +1,4 @@
-use super::tests::{agent, app, pending_use, seed, setup, setup_with, Setup};
+use super::tests::{agent, app, ask, ended, pending_use, seed, setup, setup_with, until, Setup};
 use super::*;
 use crate::acting_ops_tests::FakeRoom as InboxRoom;
 use crate::event_assert::{of, results, text};
@@ -123,7 +123,6 @@ fn a_denial_is_pushed_with_who_denied() {
 fn an_unanswered_approval_expires() {
     let timing = VaultTiming {
         approval_wait: Duration::from_millis(60),
-        request_wait: Duration::from_millis(60),
         slice: Duration::from_millis(5),
     };
     let s = setup_with("ev-expired", true, None, Some(timing));
@@ -138,29 +137,18 @@ fn an_unanswered_approval_expires() {
 #[test]
 fn request_saved_commits() {
     let s = setup("ev-request", true);
-    s.room.follows.store(true, Ordering::SeqCst);
-    let ops = s.ops.clone();
-    let asker = std::thread::spawn(move || {
-        ops.call(
-            &agent(),
-            ops::VAULT_REQUEST,
-            &json!({"name": "npm", "reason": "to publish", "folder": "/w/app"}),
-        )
-    });
-    let event = loop {
-        if let Some(e) = s.room.pending(topics::VAULT_REQUEST_PENDING) {
-            break e;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
+    let (_, event) = ask(
+        &s,
+        json!({"name": "npm", "reason": "to publish", "folder": "/w/app"}),
+    );
     s.ops
         .call(
             &app(),
             ops::VAULT_SAVE,
-            &json!({"entry": event["entry"], "value": {"secret": "fake-npm-0003"}, "request": event["id"]}),
+            &json!({"entry": event["entry"], "value": {"secret": "fake-npm-0003"}, "consentId": event["id"]}),
         )
         .unwrap();
-    asker.join().unwrap().unwrap();
+    ended(&s, event["id"].as_str().unwrap());
     let asked = of(&s.sink, "vault.secret_requested");
     assert_eq!(asked.len(), 1);
     assert_eq!(text(&asked[0], "result").as_deref(), Some("saved"));
@@ -169,21 +157,13 @@ fn request_saved_commits() {
     assert_eq!(text(&asked[0], "folder").as_deref(), Some("/w/app"));
     assert_eq!(s.sink.commits(), 1);
     assert!(!format!("{:?}", s.sink.events()).contains("fake-npm-0003"));
+    assert!(!format!("{:?}", s.consent_sink.events()).contains("fake-npm-0003"));
 }
 
 #[test]
 fn a_cancelled_request_is_pushed() {
     let s = setup("ev-request-cancel", true);
-    s.room.follows.store(true, Ordering::SeqCst);
-    let ops = s.ops.clone();
-    let asker =
-        std::thread::spawn(move || ops.call(&agent(), ops::VAULT_REQUEST, &json!({"name": "npm"})));
-    let event = loop {
-        if let Some(e) = s.room.pending(topics::VAULT_REQUEST_PENDING) {
-            break e;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
+    let (_, event) = ask(&s, json!({"name": "npm"}));
     s.ops
         .call(
             &app(),
@@ -191,8 +171,20 @@ fn a_cancelled_request_is_pushed() {
             &json!({"id": event["id"]}),
         )
         .unwrap();
-    asker.join().unwrap().unwrap_err();
+    ended(&s, event["id"].as_str().unwrap());
+    until(|| Some(()).filter(|_| !results(&s.sink, "vault.secret_requested").is_empty()));
     assert_eq!(results(&s.sink, "vault.secret_requested"), ["cancelled"]);
+    assert_eq!(s.sink.commits(), 0);
+}
+
+#[test]
+fn an_unanswered_request_expires_and_is_pushed() {
+    let s = setup("ev-request-expired", true);
+    let (reply, _) = ask(&s, json!({"name": "npm", "consent": {"expiresInMs": 60_000}}));
+    let id = reply["request"]["id"].as_str().unwrap().to_string();
+    s.advance(61_000);
+    assert_eq!(ended(&s, &id)["state"], "expired");
+    assert_eq!(results(&s.sink, "vault.secret_requested"), ["expired"]);
     assert_eq!(s.sink.commits(), 0);
 }
 

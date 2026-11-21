@@ -35,7 +35,7 @@ fn rig(tag: &str) -> (Root, Wired, Ops) {
     (Root(root), wired, ops)
 }
 
-const OWN_QUIET: [&str; 12] = [
+const OWN_QUIET: [&str; 13] = [
     ops::ORGANIZATIONS_LIST,
     ops::ORGANIZATIONS_FOLDERS_PREVIEW,
     ops::CATALOG_ROLES,
@@ -48,9 +48,10 @@ const OWN_QUIET: [&str; 12] = [
     ops::GIT_BRANCH_LIST,
     ops::ACTIVITY_LIST,
     ops::CODEX_CHILDREN,
+    ops::CONSENT_LIST,
 ];
 
-const NEVER_QUIET: [&str; 136] = [
+const NEVER_QUIET: [&str; 141] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -187,6 +188,11 @@ const NEVER_QUIET: [&str; 136] = [
     ops::ASK_DISMISS,
     ops::ASK_LIST,
     ops::TAILSCALE_SWITCH,
+    ops::CONSENT_GET,
+    ops::CONSENT_MINE,
+    ops::CONSENT_CANCEL,
+    ops::CONSENT_ANSWER,
+    ops::CONSENT_OPENED,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 3] = ["limits.set_mode", "cost.summary", "cost.report"];

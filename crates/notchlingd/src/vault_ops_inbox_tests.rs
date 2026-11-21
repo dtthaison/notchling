@@ -1,5 +1,6 @@
-use super::tests::{agent, app, pending_use, seed, setup_with, Setup};
+use super::tests::{agent, app, ask, ended, pending_use, seed, setup_with, until, Setup};
 use super::*;
+use crate::event_assert::results;
 use crate::acting_ops_tests::FakeRoom as InboxRoom;
 use crate::inbox_ops::InboxOps;
 use crate::limits_ops_tests::TempDir;
@@ -25,10 +26,9 @@ fn rig(tag: &str, timing: Option<VaultTiming>) -> Rig {
     }
 }
 
-fn short(approval: u64, request: u64) -> Option<VaultTiming> {
+fn short(approval: u64) -> Option<VaultTiming> {
     Some(VaultTiming {
         approval_wait: Duration::from_millis(approval),
-        request_wait: Duration::from_millis(request),
         slice: Duration::from_millis(5),
     })
 }
@@ -60,32 +60,26 @@ impl Rig {
             .unwrap()
     }
 
-    fn start_request(&self) -> (std::thread::JoinHandle<Result<Value, ApiError>>, Value) {
-        self.s.room.follows.store(true, Ordering::SeqCst);
-        let ops = self.s.ops.clone();
-        let asker = std::thread::spawn(move || {
-            ops.call(
-                &agent(),
-                ops::VAULT_REQUEST,
-                &json!({"name": "npm", "reason": "to publish"}),
-            )
-        });
-        let event = loop {
-            if let Some(e) = self.s.room.pending(topics::VAULT_REQUEST_PENDING) {
-                break e;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        };
-        (asker, event)
+    fn start_request(&self) -> Value {
+        ask(&self.s, json!({"name": "npm", "reason": "to publish"})).1
+    }
+
+    fn closed_item(&self, id: &str) -> Value {
+        until(|| Some(self.item(id)).filter(|item| item["state"] != "open"))
+    }
+
+    fn request_item(&self, event: &Value) -> Value {
+        self.inbox.flush();
+        crate::consent_testkit::item_for(&self.inbox, event["id"].as_str().unwrap())
+    }
+
+    fn request_item_id(&self, event: &Value) -> String {
+        self.request_item(event)["id"].as_str().unwrap().to_string()
     }
 }
 
 fn approval_item_id(event: &Value) -> String {
     format!("vault-approval:{}", event["id"].as_str().unwrap())
-}
-
-fn request_item_id(event: &Value) -> String {
-    format!("vault-request:{}", event["id"].as_str().unwrap())
 }
 
 #[test]
@@ -177,7 +171,7 @@ fn window_answer_resolves_item() {
 
 #[test]
 fn approval_timeout_expires_the_item() {
-    let r = rig("inbox-timeout", short(120, 10_000));
+    let r = rig("inbox-timeout", short(120));
     seed(&r.s, true);
     let (user, event) = pending_use(&r.s);
     assert!(user.join().unwrap().is_err());
@@ -197,7 +191,7 @@ fn the_switch_going_off_withdraws_the_item() {
 }
 
 #[test]
-fn no_follower_still_refuses_at_once() {
+fn no_follower_refuses_a_use_at_once_but_a_request_is_saved() {
     let r = rig("inbox-nofollow", None);
     seed(&r.s, true);
     let e =
@@ -206,12 +200,12 @@ fn no_follower_still_refuses_at_once() {
             .unwrap_err();
     assert_eq!(e.code, ErrorCode::NeedsApproval);
     assert!(r.list().is_empty());
-    let e =
+    let reply =
         r.s.ops
             .call(&agent(), ops::VAULT_REQUEST, &json!({"name": "npm"}))
-            .unwrap_err();
-    assert_eq!(e.code, ErrorCode::Failed);
-    assert!(r.list().is_empty());
+            .unwrap();
+    assert_eq!(reply["state"], "waiting");
+    assert_eq!(r.list().len(), 1);
 }
 
 #[test]
@@ -231,18 +225,25 @@ fn each_approval_gets_its_own_item() {
 #[test]
 fn request_raises_an_item_the_app_opens() {
     let r = rig("inbox-request", None);
-    let (asker, event) = r.start_request();
-    let id = request_item_id(&event);
-    let item = r.item(&id);
+    let event = r.start_request();
+    let item = r.request_item(&event);
+    let id = item["id"].as_str().unwrap().to_string();
     assert_eq!(item["kind"], "secret_request");
-    assert_eq!(item["title"], "Add secret npm");
-    assert_eq!(item["detail"], "to publish");
-    assert_eq!(item["open"], json!({"vault_request": event["id"]}));
+    assert_eq!(item["title"], "A program asks you to add the secret npm");
+    assert_eq!(
+        item["detail"],
+        "Open the form on your Mac to add it. Its value never reaches the agent."
+    );
+    assert!(!item.to_string().contains("to publish"), "the reason stays off the item");
+    assert_eq!(
+        item["open"],
+        json!({"consent": event["id"], "vault_request": event["id"]})
+    );
     assert_eq!(
         item["actions"],
         json!([
-            {"id": "open", "label": "Open Form", "primary": true},
-            {"id": "cancel", "label": "Cancel", "primary": false},
+            {"id": "deny", "label": "Deny", "primary": false},
+            {"id": "open", "label": "Open on Mac", "primary": true},
         ])
     );
     r.s.ops
@@ -250,34 +251,39 @@ fn request_raises_an_item_the_app_opens() {
             &app(),
             ops::VAULT_SAVE,
             &json!({"entry": {"name": "npm", "kind": "token"}, "value": {"secret": "fake-npm-1"},
-                    "request": event["id"]}),
+                    "consentId": event["id"]}),
         )
         .unwrap();
-    assert!(asker.join().unwrap().is_ok());
-    let item = r.item(&id);
+    assert_eq!(ended(&r.s, event["id"].as_str().unwrap())["state"], "applied");
+    let item = r.closed_item(&id);
     assert_eq!(item["state"], "answered");
-    assert_eq!(item["answer"], "open");
+    assert_eq!(item["answer"], "allow");
 }
 
 #[test]
-fn request_cancel_from_inbox_cancels_request() {
+fn request_deny_from_inbox_denies_request() {
     let r = rig("inbox-cancel", None);
-    let (asker, event) = r.start_request();
-    let id = request_item_id(&event);
-    let got = r.answer(&id, "cancel");
+    let event = r.start_request();
+    let id = r.request_item_id(&event);
+    let got = r.answer(&id, "deny");
     assert_eq!(got["answered"], true);
-    let e = asker.join().unwrap().unwrap_err();
-    assert_eq!(e.code, ErrorCode::NeedsApproval);
-    assert_eq!(e.message, "The user cancelled.");
-    let item = r.item(&id);
+    let done = ended(&r.s, event["id"].as_str().unwrap());
+    assert_eq!(done["state"], "denied");
+    let item = r.closed_item(&id);
     assert_eq!(item["state"], "answered");
-    assert_eq!(item["answer"], "cancel");
+    assert_eq!(item["answer"], "deny");
+    until(|| Some(()).filter(|_| !results(&r.s.sink, "vault.secret_requested").is_empty()));
+    assert_eq!(
+        results(&r.s.sink, "vault.secret_requested"),
+        ["cancelled"]
+    );
 }
 
 #[test]
-fn request_cancel_from_the_form_reads_as_cancelled_by_the_mac() {
+fn request_cancel_from_the_form_reads_as_denied_by_the_mac() {
     let r = rig("inbox-cancel-window", None);
-    let (asker, event) = r.start_request();
+    let event = r.start_request();
+    let id = r.request_item_id(&event);
     r.s.ops
         .call(
             &app(),
@@ -285,11 +291,10 @@ fn request_cancel_from_the_form_reads_as_cancelled_by_the_mac() {
             &json!({"id": event["id"]}),
         )
         .unwrap();
-    let e = asker.join().unwrap().unwrap_err();
-    assert_eq!(e.message, "The user cancelled.");
-    let item = r.item(&request_item_id(&event));
+    assert_eq!(ended(&r.s, event["id"].as_str().unwrap())["state"], "denied");
+    let item = r.closed_item(&id);
     assert_eq!(item["state"], "answered");
-    assert_eq!(item["answer"], "cancel");
+    assert_eq!(item["answer"], "deny");
     assert_eq!(item["answered_by"], "mac");
 }
 
@@ -318,10 +323,15 @@ fn an_op_thread_that_unwinds_after_the_raise_withdraws_its_item() {
 
 #[test]
 fn request_timeout_expires_the_item() {
-    let r = rig("inbox-request-timeout", short(10_000, 120));
-    let (asker, event) = r.start_request();
-    assert!(asker.join().unwrap().is_err());
-    assert_eq!(r.item(&request_item_id(&event))["state"], "expired");
+    let r = rig("inbox-request-timeout", short(10_000));
+    let (reply, event) = ask(
+        &r.s,
+        json!({"name": "npm", "consent": {"expiresInMs": 60_000}}),
+    );
+    let id = r.request_item_id(&event);
+    r.s.advance(61_000);
+    assert_eq!(ended(&r.s, reply["request"]["id"].as_str().unwrap())["state"], "expired");
+    assert_eq!(r.item(&id)["state"], "expired");
 }
 
 #[test]
@@ -360,36 +370,37 @@ fn window_answer_first_wins_over_a_late_inbox_answer() {
 }
 
 #[test]
-fn request_saved_first_wins_over_a_late_inbox_cancel() {
+fn request_saved_first_wins_over_a_late_inbox_deny() {
     let r = rig("inbox-late-request", None);
-    let (asker, event) = r.start_request();
-    let id = request_item_id(&event);
+    let event = r.start_request();
+    let id = r.request_item_id(&event);
     r.s.ops
         .call(
             &app(),
             ops::VAULT_SAVE,
             &json!({"entry": {"name": "npm", "kind": "token"}, "value": {"secret": "fake-npm-1"},
-                    "request": event["id"]}),
+                    "consentId": event["id"]}),
         )
         .unwrap();
-    let late = r.answer(&id, "cancel");
+    ended(&r.s, event["id"].as_str().unwrap());
+    r.closed_item(&id);
+    let late = r.answer(&id, "deny");
     assert_eq!(late["answered"], false);
-    assert!(asker.join().unwrap().is_ok());
     let item = r.item(&id);
     assert_eq!(item["state"], "answered");
-    assert_eq!(item["answer"], "open");
+    assert_eq!(item["answer"], "allow");
 }
 
 #[test]
 fn opening_the_form_through_the_inbox_changes_nothing() {
     let r = rig("inbox-open", None);
-    let (asker, event) = r.start_request();
-    let id = request_item_id(&event);
+    let event = r.start_request();
+    let id = r.request_item_id(&event);
     let out = r.answer(&id, "open");
     assert_eq!(out["answered"], false);
     assert_eq!(r.item(&id)["state"], "open");
-    r.answer(&id, "cancel");
-    assert!(asker.join().unwrap().is_err());
+    r.answer(&id, "deny");
+    assert_eq!(ended(&r.s, event["id"].as_str().unwrap())["state"], "denied");
 }
 
 #[test]

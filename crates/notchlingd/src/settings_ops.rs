@@ -496,7 +496,8 @@ impl SettingsOps {
 
     fn opening(spec: &'static KeySpec, value: &Value, before: &Value, args: &Value) -> Opening {
         let (reason, expires_in_ms, key) = options(args);
-        let text = matches!(spec.kind_name(), "string" | "list" | "object" | "json");
+        let text = spec.allowed.is_empty()
+            && matches!(spec.kind_name(), "string" | "list" | "object" | "json");
         Opening {
             kind: SETTING,
             target: spec.name.to_string(),
