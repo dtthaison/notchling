@@ -551,7 +551,8 @@ impl AskOps {
 impl OpGroup for AskOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::ASK_OPEN | ops::ASK_WAIT | ops::ASK_MINE | ops::ASK_ANSWER => Some(OpSpec::AGENT),
+            ops::ASK_WAIT | ops::ASK_MINE => Some(OpSpec::AGENT_READ),
+            ops::ASK_OPEN | ops::ASK_ANSWER => Some(OpSpec::AGENT_ACTS),
             ops::ASK_DISMISS | ops::ASK_LIST => Some(OpSpec::APP),
             _ => None,
         }

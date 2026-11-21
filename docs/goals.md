@@ -49,6 +49,22 @@ An idea outside this list starts as a feature request. The maintainer decides.
 4. A mistake found after merge turns into a check, a test or a skill, so it can't land twice.
 5. Users get updates on their own, from Beta to Stable, and no release ever touches a signing key
    from code an agent wrote.
+6. Agents can use every feature, not only people. Notchling is infrastructure that helps agents work
+   well: whatever a person can do in the app, an agent can do with a `notchling` command and an
+   agent-tier op (with `--json`). That covers:
+   - changing a setting;
+   - adding or updating a Vault secret;
+   - adding a machine or an account;
+   - reading notifications and the Inbox;
+   - connecting the phone;
+   - running a command on one of your machines;
+   - starting, replying to or reloading a session.
+
+   Where the user must agree (accounts, secrets, switches, anything outward-facing), the agent asks
+   on an Inbox or Ask card and the user answers once. The answer carries the request's scope. The
+   guard rails stay: the agent never gets a way around the user's yes. But a feature with no agent
+   path, or one that only says "do this in the app", is unfinished. A design names the feature's
+   command, op and tier, and a test drives it the way an agent would.
 
 Goal 1 needs the agent setup (Phase 5) and goal 5 the release pipeline (Phase 6). The release pipeline is built and off until the maintainer turns it on, and the app has no updater yet ([automation.md](policies/automation.md#releases-so-far)); the agent setup is described in the same policy.
 

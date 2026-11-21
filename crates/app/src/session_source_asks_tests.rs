@@ -14,7 +14,7 @@ struct Daemon {
 impl Handler for Daemon {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            "sessions.list" => Some(OpSpec::AGENT),
+            "sessions.list" => Some(OpSpec::AGENT_READ),
             "ask.list" if self.asks => Some(OpSpec::APP),
             _ => None,
         }

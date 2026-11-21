@@ -216,7 +216,7 @@ fn acting_off_refuses_every_acting_op_before_anything_starts() {
 #[test]
 fn the_tiers() {
     let rig = rig(true);
-    assert_eq!(rig.ops.spec(SESSIONS), Some(OpSpec::AGENT));
+    assert_eq!(rig.ops.spec(SESSIONS), Some(OpSpec::AGENT_READ));
     for op in [
         STATE,
         CONVERSATION,
@@ -567,7 +567,7 @@ fn the_daemons_handler_routes_them_with_their_tiers() {
     use notchling_local_api::Handler;
     let rig = rig(false);
     let ops = Ops::new(Arc::new(Mutex::new(json!([])))).with_agy(rig.ops);
-    assert_eq!(ops.spec(SESSIONS), Some(OpSpec::AGENT));
+    assert_eq!(ops.spec(SESSIONS), Some(OpSpec::AGENT_READ));
     assert_eq!(ops.spec(SEND), Some(OpSpec::APP));
     assert!(ops.call(&app(), SESSIONS, &json!({})).is_ok());
     let off = ops.call(&app(), OPEN, &json!({"id": ROW})).unwrap_err();

@@ -31,6 +31,8 @@ pub const COMMIT_KINDS: &[&str] = &[
     "settings.agent",
     "session.reply",
     "session.control",
+    "agent.called",
+    "agent.named",
 ];
 
 const LISTS: [&[&KindSpec]; 10] = [

@@ -6,6 +6,8 @@ use crate::agy_phone::{LogReads, PhoneRead};
 use crate::agy_sidecar_ops::SidecarLink;
 use crate::agy_sink::{lock, now_secs, row_id, DaemonSink, Shared, Started};
 use crate::catalog_ops::CatalogService;
+use crate::identity::Launches;
+use crate::launch_spawn::AcpLaunches;
 use crate::layout::Layout;
 use crate::outbox_ops::{OutboxOps, SendArgs};
 use crate::outbox_runners::Delivery;
@@ -230,7 +232,7 @@ impl AgyOps {
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            SESSIONS => Some(OpSpec::AGENT),
+            SESSIONS => Some(OpSpec::AGENT_READ),
             op if READ_OPS.contains(&op) || ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }
@@ -737,6 +739,15 @@ fn session_json(id: &str, name: &str, folder: &str, modified: f64, working: bool
 
 impl AgyOps {
     pub fn for_daemon(layout: &Layout, acting: Arc<Acting>, room: Arc<dyn Room>) -> AgyOps {
+        AgyOps::for_daemon_with(layout, acting, room, &Launches::default())
+    }
+
+    pub fn for_daemon_with(
+        layout: &Layout,
+        acting: Arc<Acting>,
+        room: Arc<dyn Room>,
+        launches: &Launches,
+    ) -> AgyOps {
         let home = layout.home();
         let binary = if layout.fixture {
             let own = home.join(".local/bin/agy");
@@ -748,7 +759,11 @@ impl AgyOps {
         AgyOps::new(
             acting,
             room,
-            Arc::new(RealSpawner::new(&home)),
+            Arc::new(AcpLaunches::new(
+                Arc::new(RealSpawner::new(&home)),
+                launches.clone(),
+                crate::launch_spawn::Probe::system(),
+            )),
             AgySetup {
                 root: layout.antigravity_dir(),
                 copy_dir: layout.antigravity_copy_dir(),

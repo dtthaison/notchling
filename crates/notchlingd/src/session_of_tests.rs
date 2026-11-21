@@ -25,7 +25,7 @@ fn session_of_none_outside_a_session() {
 #[test]
 fn the_daemon_handler_resolves_a_session_through_acting() {
     let ops = crate::daemon_wiring::Ops::new(std::sync::Arc::new(std::sync::Mutex::new(json!([]))));
-    assert_eq!(ops.session_of(std::process::id()), None);
+    assert_eq!(ops.identity_of(std::process::id()).session, None);
     assert_eq!(ops.home(ops::SESSION_REPLY), OpHome::Kind);
     assert_eq!(home(ops::SESSION_REPLY), OpHome::Kind);
     assert!(ops.known_ops().contains(&ops::SESSION_REPLY));

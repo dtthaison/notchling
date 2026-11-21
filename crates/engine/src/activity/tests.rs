@@ -226,7 +226,8 @@ fn nothing_secret_leaves_in_a_row() {
     );
     let allowed = [
         "time_ms", "source", "kind", "op", "who", "result", "detail", "event", "group", "title",
-        "outcome", "refs", "op_id", "seq", "audit_n", "spooled",
+        "outcome", "refs", "op_id", "seq", "audit_n", "spooled", "by_agent", "tool", "verified",
+        "agent",
     ];
     for row in rows_of(&db, &query()) {
         for key in row.as_object().expect("object").keys() {

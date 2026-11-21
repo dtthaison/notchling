@@ -89,7 +89,7 @@ impl CostReportOps {
 
 impl OpGroup for CostReportOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        (op == COST_REPORT).then_some(OpSpec::AGENT)
+        (op == COST_REPORT).then_some(OpSpec::AGENT_READ)
     }
 
     fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {

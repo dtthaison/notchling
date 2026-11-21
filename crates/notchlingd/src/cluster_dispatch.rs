@@ -325,7 +325,7 @@ impl DispatchOps {
 impl OpGroup for DispatchOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::CLUSTER_DISPATCH => Some(OpSpec::AGENT),
+            ops::CLUSTER_DISPATCH => Some(OpSpec::AGENT_ACTS),
             ops::SHELL_STOP => Some(OpSpec::APP),
             _ => None,
         }

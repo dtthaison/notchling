@@ -17,6 +17,7 @@ fn filter_and_empty_texts_use_messages() {
     assert_eq!(
         labels,
         [
+            t::settings::ACTIVITY_KIND_AGENTS.get(),
             t::settings::ACTIVITY_KIND_REFUSED.get(),
             t::settings::ACTIVITY_KIND_FAILED.get(),
             t::settings::ACTIVITY_KIND_ACTED.get(),
@@ -28,6 +29,7 @@ fn filter_and_empty_texts_use_messages() {
     assert_eq!(
         labels,
         [
+            "Agents",
             "Refused",
             "Failed",
             "Acted",

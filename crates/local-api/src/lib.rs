@@ -20,6 +20,9 @@ mod server_audit_reason_tests;
 mod server_audit_tests;
 #[cfg(test)]
 mod server_events_tests;
+
+#[cfg(test)]
+mod agent_called_tests;
 #[cfg(test)]
 mod server_tests;
 #[cfg(test)]
@@ -27,7 +30,10 @@ pub(crate) mod testutil;
 
 pub use client::{server_trusted, Client, ClientError, ConnectOptions, CALL_TIMEOUT};
 pub use framing::MAX_LINE;
-pub use server::{Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle};
+pub use server::{
+    AgentCall, AgentIdentity, Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig,
+    ServerHandle,
+};
 pub use spawn::{ensure_daemon, ensure_daemon_with, spawn_allowed, SpawnOptions, Started};
 pub use tier::{Allowlist, APP_TIER_PATHS_ENV};
 pub use wire::{

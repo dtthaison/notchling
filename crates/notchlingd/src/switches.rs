@@ -222,7 +222,7 @@ impl OpGroup for SwitchOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SET_SWITCH => Some(OpSpec::APP),
-            ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT),
+            ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT_READ),
             _ => None,
         }
     }
@@ -320,7 +320,7 @@ mod tests {
         let ops = SwitchOps::new(switches.clone(), room.clone())
             .with_events(Events::fixed(sink.clone(), notchling_events::Salt([1; 32])));
         assert_eq!(ops.spec(ops::SETTINGS_SET_SWITCH), Some(OpSpec::APP));
-        assert_eq!(ops.spec(ops::SETTINGS_SWITCHES), Some(OpSpec::AGENT));
+        assert_eq!(ops.spec(ops::SETTINGS_SWITCHES), Some(OpSpec::AGENT_READ));
         let calls = Arc::new(AtomicUsize::new(0));
         let c = calls.clone();
         switches.accounts.subscribe(move |_| {

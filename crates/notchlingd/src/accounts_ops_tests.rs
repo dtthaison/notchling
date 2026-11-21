@@ -483,7 +483,10 @@ fn the_daemon_routes_the_groups_ops_and_keeps_their_topic_for_the_app() {
         .with_group(Arc::new(SwitchOps::new(switches.clone(), w.room.clone())))
         .with_group(Arc::new(w.ops));
     assert_eq!(daemon.spec(ops::SETTINGS_SET_SWITCH), Some(OpSpec::APP));
-    assert_eq!(daemon.spec(ops::SETTINGS_SWITCHES), Some(OpSpec::AGENT));
+    assert_eq!(
+        daemon.spec(ops::SETTINGS_SWITCHES),
+        Some(OpSpec::AGENT_READ)
+    );
     assert_eq!(daemon.spec(ops::LANES_SWITCH), Some(OpSpec::APP));
     assert_eq!(daemon.topics(), &["sessions", "settings", "accounts"]);
     assert_eq!(daemon.topic_tier("accounts"), Tier::App);

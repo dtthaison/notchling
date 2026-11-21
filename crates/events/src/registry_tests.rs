@@ -250,9 +250,9 @@ fn session_outbox_has_no_text_fields() {
 }
 
 #[test]
-fn fifty_nine_kinds() {
+fn sixty_one_kinds() {
     let kinds = all();
-    assert_eq!(kinds.len(), 59);
+    assert_eq!(kinds.len(), 61);
     let off: Vec<&str> = kinds
         .iter()
         .filter(|k| k.default == DefaultState::Off)
@@ -318,6 +318,8 @@ fn agents_read_their_own_only_where_the_plan_says() {
                     | "vault.secret_used"
                     | "vault.secret_requested"
                     | "settings.agent"
+                    | "agent.called"
+                    | "agent.named"
             );
         assert_eq!(k.agents_read == AgentsRead::Own, own, "{}", k.name);
     }

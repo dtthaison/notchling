@@ -319,7 +319,9 @@ impl AgySidecarOps {
         match op {
             ops::AGY_SIDECAR_STATUS => Some(OpSpec::APP),
             ops::AGY_SIDECAR_SETUP => Some(OpSpec::APP),
-            ops::AGY_SIDECAR_TAKE | ops::AGY_SIDECAR_REPORT | ops::AGY_HOOK => Some(OpSpec::AGENT),
+            ops::AGY_SIDECAR_TAKE | ops::AGY_SIDECAR_REPORT | ops::AGY_HOOK => {
+                Some(OpSpec::AGENT_HOOK)
+            }
             _ => None,
         }
     }

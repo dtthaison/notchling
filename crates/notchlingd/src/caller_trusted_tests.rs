@@ -63,15 +63,27 @@ fn a_session_file_naming_a_process_running_the_installed_claude_is_trusted() {
         find(&dir, Some(versions.to_str().unwrap()), &[]).as_deref(),
         Some("sess-a")
     );
+    let local = dir.join(".claude/local/claude");
+    assert_eq!(
+        find(&dir, Some(local.to_str().unwrap()), &[]).as_deref(),
+        Some("sess-a")
+    );
+    assert_eq!(
+        find(
+            &dir,
+            Some("/opt/homebrew/Caskroom/claude-code/2.1.0/claude"),
+            &[]
+        )
+        .as_deref(),
+        Some("sess-a")
+    );
     let bin = dir.join(".local/bin/claude");
     assert_eq!(
-        find(&dir, Some(bin.to_str().unwrap()), &[]).as_deref(),
-        Some("sess-a")
+        find(&dir, Some(bin.to_str().unwrap()), &[]),
+        None,
+        "a link the account can re-point is no install"
     );
-    assert_eq!(
-        find(&dir, Some("/usr/local/bin/claude"), &[]).as_deref(),
-        Some("sess-a")
-    );
+    assert_eq!(find(&dir, Some("/usr/local/bin/claude"), &[]), None);
     std::fs::remove_dir_all(&dir).ok();
 }
 

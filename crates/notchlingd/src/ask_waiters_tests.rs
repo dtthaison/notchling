@@ -21,7 +21,7 @@ fn answer_one(r: &crate::ask_testkit::Rig, id: &str) {
 #[test]
 fn wait_is_an_agent_op() {
     let r = rig();
-    assert_eq!(r.ops.spec(ops::ASK_WAIT), Some(OpSpec::AGENT));
+    assert_eq!(r.ops.spec(ops::ASK_WAIT), Some(OpSpec::AGENT_READ));
 }
 
 #[test]

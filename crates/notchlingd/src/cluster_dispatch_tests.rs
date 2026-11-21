@@ -539,7 +539,7 @@ fn shell_stop_with_an_id_of_this_node_stops_the_local_job() {
     );
     assert_eq!(
         ops.spec("cluster.dispatch"),
-        Some(notchling_local_api::OpSpec::AGENT)
+        Some(notchling_local_api::OpSpec::AGENT_ACTS)
     );
     assert_eq!(ops.spec("shell.run"), None);
     assert_eq!(ops.spec("delegate.run"), None);

@@ -6,6 +6,7 @@ pub mod acting;
 mod acting_events;
 pub mod acting_ops;
 pub mod activity_ops;
+pub mod agent_named;
 pub mod agy_app;
 pub mod agy_elsewhere;
 pub mod agy_hook_run;
@@ -140,12 +141,14 @@ pub mod hook_ops;
 pub mod hook_output;
 pub mod hook_pages;
 pub mod host_id;
+pub mod identity;
 mod inbox_events;
 pub mod inbox_mirrors;
 pub mod inbox_ops;
 pub mod install_ops;
 pub mod late_emit;
 pub mod late_reply;
+pub mod launch_spawn;
 pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
@@ -193,6 +196,7 @@ mod reply_outbox;
 mod reply_screen;
 mod screen_keep;
 pub mod service;
+mod sessions_args;
 pub mod settings_asks;
 pub mod settings_cli;
 pub mod settings_ops;
@@ -245,6 +249,8 @@ mod acting_permission_tests;
 mod acting_shell_output_tests;
 #[cfg(test)]
 mod activity_ops_tests;
+#[cfg(test)]
+mod agent_classes_tests;
 #[cfg(test)]
 mod agy_phone_tests;
 #[cfg(test)]

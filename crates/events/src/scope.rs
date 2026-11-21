@@ -2,6 +2,12 @@ use crate::envelope::Actor;
 use crate::field::Hex;
 use std::cell::{Cell, RefCell};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConsentNote {
+    Pending,
+    Used,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Scope {
     pub op_id: Option<Hex>,
@@ -11,6 +17,7 @@ pub struct Scope {
 thread_local! {
     static CURRENT: RefCell<Scope> = RefCell::new(Scope::default());
     static RECORDED: Cell<bool> = const { Cell::new(false) };
+    static CONSENT: RefCell<Option<(String, ConsentNote)>> = const { RefCell::new(None) };
 }
 
 pub struct ScopeGuard {
@@ -47,6 +54,14 @@ pub fn mark_recorded() {
 
 pub fn take_recorded() -> bool {
     RECORDED.with(|r| r.replace(false))
+}
+
+pub fn note_consent(id: &str, state: ConsentNote) {
+    CONSENT.with(|c| *c.borrow_mut() = Some((id.to_string(), state)));
+}
+
+pub fn take_consent() -> Option<(String, ConsentNote)> {
+    CONSENT.with(|c| c.borrow_mut().take())
 }
 
 impl Scope {

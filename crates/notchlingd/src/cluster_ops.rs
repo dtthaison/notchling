@@ -447,7 +447,8 @@ impl ClusterOps {
 impl OpGroup for ClusterOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::CLUSTER_STATUS | ops::CLUSTER_JOIN => Some(OpSpec::AGENT),
+            ops::CLUSTER_STATUS => Some(OpSpec::AGENT_READ),
+            ops::CLUSTER_JOIN => Some(OpSpec::AGENT_ACTS),
             ops::CLUSTER_JOIN_TOKEN
             | ops::CLUSTER_CREATE
             | ops::CLUSTER_MEMBER_SET

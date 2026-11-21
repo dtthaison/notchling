@@ -240,7 +240,7 @@ mod over_a_socket {
 
     impl Handler for Fake {
         fn spec(&self, op: &str) -> Option<OpSpec> {
-            (op == "sessions.list").then_some(OpSpec::AGENT)
+            (op == "sessions.list").then_some(OpSpec::AGENT_READ)
         }
 
         fn call(&self, _: &Caller, _: &str, _: &Value) -> Result<Value, ApiError> {
@@ -339,7 +339,7 @@ mod over_a_socket {
 
     impl Handler for ShellFake {
         fn spec(&self, op: &str) -> Option<OpSpec> {
-            (op == "sessions.list").then_some(OpSpec::AGENT)
+            (op == "sessions.list").then_some(OpSpec::AGENT_READ)
         }
 
         fn call(&self, _: &Caller, _: &str, args: &Value) -> Result<Value, ApiError> {
@@ -443,7 +443,7 @@ mod over_a_socket {
 
     impl Handler for CatalogFake {
         fn spec(&self, op: &str) -> Option<OpSpec> {
-            matches!(op, "sessions.list" | "catalog.get").then_some(OpSpec::AGENT)
+            matches!(op, "sessions.list" | "catalog.get").then_some(OpSpec::AGENT_READ)
         }
 
         fn call(&self, _: &Caller, op: &str, _: &Value) -> Result<Value, ApiError> {

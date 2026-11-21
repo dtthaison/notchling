@@ -29,45 +29,30 @@ impl CallerSession {
     }
 }
 
-pub fn claude_binaries(home: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    (
-        vec![
-            notchling_engine::control::launcher::claude_path(home),
-            home.join(".local").join("bin").join("claude"),
-            PathBuf::from("/usr/local/bin/claude"),
-            PathBuf::from("/opt/homebrew/bin/claude"),
-        ],
-        vec![
-            home.join(".local").join("share").join("claude"),
-            home.join(".claude").join("local"),
-        ],
-    )
+pub fn claude_install_folders(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".local").join("share").join("claude"),
+        home.join(".claude").join("local"),
+        PathBuf::from("/opt/homebrew/Caskroom/claude-code"),
+        PathBuf::from("/usr/local/Caskroom/claude-code"),
+    ]
 }
 
 pub fn is_claude_binary(procs: &dyn Processes, pid: u32, home: &Path) -> bool {
     let Some(exe) = procs.exe(pid).and_then(|e| procs.resolve(&e)) else {
         return false;
     };
-    let (files, folders) = claude_binaries(home);
-    files
+    claude_install_folders(home)
         .iter()
         .filter_map(|f| procs.resolve(f))
-        .any(|f| f == exe)
-        || folders
-            .iter()
-            .filter_map(|f| procs.resolve(f))
-            .any(|f| exe.starts_with(&f))
+        .any(|f| exe.starts_with(&f))
 }
 
 pub fn trusted_in(
     roots: Roots,
     procs: Arc<dyn Processes>,
 ) -> Arc<dyn Fn(u32) -> Option<String> + Send + Sync> {
-    let home = roots
-        .main_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
+    let home = PathBuf::from(notchling_engine::control::session::home_of(&roots));
     let finder = CallerSession::new(roots, procs.clone());
     Arc::new(move |pid| {
         finder
@@ -82,6 +67,15 @@ pub(crate) fn find_session(
     parent_of: &dyn Fn(u32) -> Option<u32>,
     pid: u32,
 ) -> Option<SessionHit> {
+    find_session_where(roots, parent_of, pid, &|_| true)
+}
+
+pub(crate) fn find_session_where(
+    roots: &Roots,
+    parent_of: &dyn Fn(u32) -> Option<u32>,
+    pid: u32,
+    accept: &dyn Fn(u32) -> bool,
+) -> Option<SessionHit> {
     let lanes = config_dirs(roots);
     let mut chain = Vec::new();
     let mut next = parent_of(pid);
@@ -92,7 +86,7 @@ pub(crate) fn find_session(
             let file = lane.dir.join("sessions").join(format!("{p}.json"));
             session_id_in(&file).map(|id| (id, lane.dir.clone()))
         });
-        if let Some((session_id, config_dir)) = found {
+        if let Some((session_id, config_dir)) = found.filter(|_| accept(p)) {
             return Some(SessionHit {
                 session_id,
                 claude_pid: p,

@@ -2,7 +2,8 @@ use crate::account_history::DbSwitches;
 use crate::accounts_ops::AccountsOps;
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
-use crate::activity_ops::ActivityOps;
+use crate::activity_ops::{self, ActivityOps};
+use crate::agent_named::AgentNames;
 use crate::agy_ops::AgyOps;
 use crate::agy_sidecar_ops::AgySidecarOps;
 use crate::ask_ops::AskOps;
@@ -23,6 +24,7 @@ use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{listed_folders, live_folders, GitOps};
+use crate::identity::{Identifier, Launches};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::late_emit::{Events, LateEmit, LateSalt};
@@ -40,6 +42,7 @@ use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::postmen_wiring::postmen_for;
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
+use crate::sessions_args::{every_tool, tagged, with_remote_kinds};
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::shell_jobs::ShellJobs;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
@@ -61,9 +64,11 @@ use notchling_engine::limits::renew::ClaudeRenewer;
 use notchling_engine::outbox::OutboxStore;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
+use notchling_events::kinds::choices::AgentTool;
 use notchling_events::{Emit, Salt};
 use notchling_local_api::{
-    ops, topics, ApiError, Caller, ClientKind, ErrorCode, Handler, OpHome, OpSpec, Tier,
+    ops, topics, AgentCall, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, Handler,
+    OpHome, OpSpec, Tier,
 };
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -87,6 +92,8 @@ pub struct Ops {
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
     first_wait: Duration,
+    identity: Option<Arc<Identifier>>,
+    names: Option<Arc<AgentNames>>,
 }
 
 impl Ops {
@@ -108,7 +115,15 @@ impl Ops {
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
+            identity: None,
+            names: None,
         }
+    }
+
+    pub fn with_identity(mut self, identity: Arc<Identifier>, names: Arc<AgentNames>) -> Ops {
+        self.identity = Some(identity);
+        self.names = Some(names);
+        self
     }
 
     pub fn with_acting(sessions: Arc<Mutex<Value>>, acting: Arc<ActingOps>) -> Ops {
@@ -205,46 +220,6 @@ impl Ops {
     }
 }
 
-fn every_tool(args: &Value) -> Result<bool, ApiError> {
-    match args.get("tools") {
-        None | Some(Value::Null) => Ok(false),
-        Some(Value::String(tools)) if tools == "claude" => Ok(false),
-        Some(Value::String(tools)) if tools == "all" => Ok(true),
-        Some(_) => Err(ApiError::bad_request(
-            "sessions.list takes {\"tools\": \"all\" | \"claude\"}",
-        )),
-    }
-}
-
-fn with_remote_kinds(args: &Value) -> Result<(bool, bool), ApiError> {
-    let usage = "sessions.list takes {\"remote\": \"shell\" | \"codex\" | [\"shell\", \"codex\"]}";
-    let kinds: Vec<&str> = match args.get("remote") {
-        None | Some(Value::Null) => return Ok((false, false)),
-        Some(Value::String(kind)) => vec![kind.as_str()],
-        Some(Value::Array(list)) => list
-            .iter()
-            .map(|k| k.as_str().ok_or_else(|| ApiError::bad_request(usage)))
-            .collect::<Result<_, _>>()?,
-        Some(_) => return Err(ApiError::bad_request(usage)),
-    };
-    if kinds.iter().any(|k| *k != "shell" && *k != "codex") {
-        return Err(ApiError::bad_request(usage));
-    }
-    Ok((kinds.contains(&"shell"), kinds.contains(&"codex")))
-}
-
-fn tagged(list: Value, tool: &str) -> Vec<Value> {
-    let Value::Array(rows) = list else {
-        return Vec::new();
-    };
-    rows.into_iter()
-        .map(|mut row| {
-            row["tool"] = Value::String(tool.to_string());
-            row
-        })
-        .collect()
-}
-
 impl Ops {
     fn sessions_list(&self, caller: &Caller, args: &Value) -> Result<(Value, bool), ApiError> {
         let every = every_tool(args)?;
@@ -312,8 +287,22 @@ impl Handler for Ops {
         quiet_ops::loud(op, args)
     }
 
-    fn session_of(&self, pid: u32) -> Option<String> {
-        self.acting.as_ref().and_then(|a| a.session_of(pid))
+    fn identity_of(&self, pid: u32) -> AgentIdentity {
+        if let Some(identity) = &self.identity {
+            return identity.identify(pid);
+        }
+        let mut who = AgentIdentity::shell();
+        who.session = self.acting.as_ref().and_then(|a| a.session_of(pid));
+        if who.session.is_some() {
+            who.tool = AgentTool::Claude;
+        }
+        who
+    }
+
+    fn agent_called(&self, call: &AgentCall) {
+        if let Some(names) = &self.names {
+            names.enqueue(call, now_ms());
+        }
     }
 
     fn home(&self, op: &str) -> OpHome {
@@ -326,7 +315,7 @@ impl Handler for Ops {
 
     fn spec(&self, op: &str) -> Option<OpSpec> {
         let spec = match op {
-            ops::SESSIONS_LIST => Some(OpSpec::AGENT),
+            ops::SESSIONS_LIST => Some(OpSpec::AGENT_READ),
             op => self
                 .pages
                 .as_ref()
@@ -482,6 +471,8 @@ pub struct Wired {
     pub awake: Arc<AwakeLoop>,
     pub events: Arc<LateEmit>,
     pub salt: LateSalt,
+    pub launches: Launches,
+    pub names: OnceLock<Arc<AgentNames>>,
     history: Arc<DbSwitches>,
     log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
     pub wake: Arc<WakeLoop>,
@@ -539,11 +530,13 @@ impl Wired {
             .with_reply_screen_file(layout.state_dir().join("reply-screen.txt"))
             .with_events(events.clone()),
         );
-        let codex = Arc::new(CodexOps::for_daemon(
+        let launches = Launches::default();
+        let codex = Arc::new(CodexOps::for_daemon_with(
             layout,
             acting_switch,
             room.clone(),
             &claude,
+            &launches,
         ));
         acting.attach_codex(codex.clone());
         let inbox = InboxOps::new(layout.data_dir.clone(), room.clone())
@@ -573,10 +566,11 @@ impl Wired {
         let worker = crate::ask_wiring::worker_in(node_slot.clone());
         let ask =
             crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox, worker);
-        let agy = Arc::new(AgyOps::for_daemon(
+        let agy = Arc::new(AgyOps::for_daemon_with(
             layout,
             acting.acting_switch(),
             room.clone(),
+            &launches,
         ));
         acting.attach_agy(agy.clone());
         let postmen = postmen_for(&outbox, &acting, layout, &codex, &agy);
@@ -839,6 +833,8 @@ impl Wired {
             awake,
             events: late,
             salt,
+            launches,
+            names: OnceLock::new(),
             history,
             log: OnceLock::new(),
             wake,
@@ -890,7 +886,16 @@ impl Wired {
                 .map(|v| v.is_array() || v.is_object() || v.is_null())
                 .unwrap_or(false)
         }));
-        let ops = Ops::with_acting(sessions, self.acting.clone())
+        let (identity, names) = crate::identity::for_daemon(
+            layout,
+            &sessions,
+            &self.salt,
+            &self.launches,
+            &self.names,
+            &self.events,
+        );
+        let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
+            .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
             .with_agy(self.agy.clone())
@@ -938,10 +943,7 @@ impl Wired {
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {
             Some((db, log)) => ops
-                .with_group(Arc::new(ActivityOps::new(
-                    db.clone(),
-                    Arc::new(|_, _| None),
-                )))
+                .with_group(Arc::new(activity_ops::for_log(db, &sessions, &self.salt)))
                 .with_group(log.clone()),
             None => ops.with_group(Arc::new(ActivityOps::for_daemon(layout))),
         }
@@ -966,6 +968,9 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        if let Some(names) = self.names.get() {
+            names.close();
+        }
         self.ask.close();
         self.outbox_notice.close();
         self.postmen.stop();

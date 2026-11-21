@@ -19,7 +19,7 @@ struct Recorder {
 impl Handler for Recorder {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            "x.agent" => Some(OpSpec::AGENT),
+            "x.agent" => Some(OpSpec::AGENT_READ),
             "x.app" => Some(OpSpec::APP),
             "x.approval" => Some(OpSpec::APPROVAL),
             _ => None,

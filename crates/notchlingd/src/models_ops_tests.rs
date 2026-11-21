@@ -151,7 +151,12 @@ fn skill_text(rig: &Rig, tool_dir: &str, name: &str) -> Option<String> {
 fn both_ops_are_agent_tier_and_a_bad_argument_is_refused() {
     let rig = rig("spec", true);
     for op in [ops::MODELS_CHECK, ops::MODELS_UPDATE] {
-        assert_eq!(rig.models.spec(op), Some(OpSpec::AGENT), "{op}");
+        let want = if op == ops::MODELS_CHECK {
+            OpSpec::AGENT_READ
+        } else {
+            OpSpec::AGENT_ACTS
+        };
+        assert_eq!(rig.models.spec(op), Some(want), "{op}");
         let e = rig
             .models
             .call(&app(), op, &json!({"skills": "yes"}))

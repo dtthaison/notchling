@@ -1,11 +1,12 @@
 use crate::framing::{encode_line, FrameError, LineReader};
 use crate::peer::{same_user, PeerInfo};
-use crate::server::{Caller, OpHome, Shared, Slot};
+use crate::server::{AgentCall, AgentIdentity, Caller, OpHome, OpSpec, Shared, Slot};
 use crate::transport::{self, Stream};
 use crate::wire::{
     err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
     Subscribe, Tier, API_VERSION,
 };
+use notchling_events::kinds::choices::AgentResult;
 use notchling_events::kinds::security::{PeerWhy, RefusedWhy};
 use notchling_events::scope::{self, Scope};
 use notchling_events::spec::Outcome;
@@ -65,7 +66,7 @@ pub(crate) fn serve(stream: Stream, shared: Arc<Shared>, slot: Slot) {
         reserved: slot.reserved,
         subscribed: false,
         last_request: Instant::now(),
-        agent_session: None,
+        identity: None,
     };
     let reader = match stream.try_clone() {
         Ok(read_half) => Some(LineReader::new(read_half)),
@@ -113,7 +114,7 @@ struct Session {
     reserved: bool,
     subscribed: bool,
     last_request: Instant,
-    agent_session: Option<String>,
+    identity: Option<AgentIdentity>,
 }
 
 impl Session {
@@ -274,7 +275,7 @@ impl Session {
         }
         if self.tier == Tier::Agent {
             let pid = self.at_hello.as_ref().map_or(self.at_accept.pid, |p| p.pid);
-            self.agent_session = self.shared.handler.session_of(pid);
+            self.identity = Some(self.shared.handler.identity_of(pid));
         }
         if self.tier == Tier::App {
             let attached = self.shared.presence.on_hello(
@@ -394,6 +395,18 @@ impl Session {
                 RefusedWhy::NeedsApproval,
                 None,
             );
+            if spec.records_agent_call() {
+                let who = self.who();
+                self.shared.agent_called(
+                    op,
+                    &who,
+                    AgentResult::Refused,
+                    Some(ErrorCode::NeedsApproval),
+                    None,
+                    Instant::now(),
+                );
+                self.name_the_agent(&who);
+            }
             return Err(ApiError::new(
                 ErrorCode::NeedsApproval,
                 "this needs approval in the Notchling app, and the app isn't attached",
@@ -406,19 +419,82 @@ impl Session {
             pid: transport::peer(&self.probe).ok().map(|p| p.pid),
         };
         let started = Instant::now();
-        let (result, more) = handler.call_with_extras(&caller, op, args);
+        let _ = scope::take_consent();
+        let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handler.call_with_extras(&caller, op, args)
+        }));
+        let (result, more) = match called {
+            Ok(done) => done,
+            Err(panic) => {
+                let _ = scope::take_consent();
+                let _ = scope::take_recorded();
+                if spec.records_agent_call() {
+                    let failed = Err(ApiError::new(ErrorCode::Failed, "the handler failed"));
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        self.record_agent_call(op, args, &failed, started)
+                    }));
+                }
+                std::panic::resume_unwind(panic);
+            }
+        };
         *extras = more;
+        if spec.records_agent_call() {
+            self.record_agent_call(op, args, &result, started);
+        }
         if !scope::take_recorded() {
             self.record_generic(op, args, &spec, &result, started);
         }
         result
     }
 
+    fn who(&self) -> AgentIdentity {
+        self.identity.clone().unwrap_or_else(AgentIdentity::shell)
+    }
+
+    fn name_the_agent(&self, who: &AgentIdentity) {
+        self.shared.handler.agent_called(&AgentCall {
+            scope: scope::current(),
+            identity: who.clone(),
+            pid: self
+                .at_hello
+                .as_ref()
+                .map_or(self.at_accept.pid, |p| p.pid)
+                .into(),
+        });
+    }
+
+    fn record_agent_call(
+        &self,
+        op: &str,
+        args: &Value,
+        result: &Result<Value, ApiError>,
+        started: Instant,
+    ) {
+        let who = self.who();
+        let note = scope::take_consent();
+        let consent = note.as_ref().map(|(id, _)| id.as_str());
+        let dry = args.get("dryRun").and_then(Value::as_bool) == Some(true);
+        let (outcome, code) = match result {
+            Ok(_) if dry => (AgentResult::DryRun, None),
+            Ok(_) if matches!(note, Some((_, scope::ConsentNote::Pending))) => {
+                (AgentResult::Pending, None)
+            }
+            Ok(_) => (AgentResult::Ok, None),
+            Err(e) if matches!(e.code, ErrorCode::Forbidden | ErrorCode::NeedsApproval) => {
+                (AgentResult::Refused, Some(e.code))
+            }
+            Err(e) => (AgentResult::Failed, Some(e.code)),
+        };
+        self.shared
+            .agent_called(op, &who, outcome, code, consent, started);
+        self.name_the_agent(&who);
+    }
+
     fn record_generic(
         &self,
         op: &str,
         args: &Value,
-        spec: &crate::server::OpSpec,
+        spec: &OpSpec,
         result: &Result<Value, ApiError>,
         started: Instant,
     ) {
@@ -465,7 +541,11 @@ impl Session {
             Tier::Agent => ActorTier::Agent,
         };
         let session = match self.tier {
-            Tier::Agent => self.agent_session.as_deref().map(Ref::new),
+            Tier::Agent => self
+                .identity
+                .as_ref()
+                .and_then(|who| who.session.as_deref())
+                .map(Ref::new),
             Tier::App => None,
         };
         Scope {

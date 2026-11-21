@@ -376,7 +376,7 @@ impl LimitsOps {
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             LIMITS_STATUS | LIMITS_SET_MODE | LIMITS_USAGE => Some(OpSpec::APP),
-            COST_SUMMARY => Some(OpSpec::AGENT),
+            COST_SUMMARY => Some(OpSpec::AGENT_READ),
             _ => None,
         }
     }

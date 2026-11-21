@@ -1,6 +1,10 @@
-use super::choices::{Answerer, AskMode, AskThen, AskerKind, DoneOrFailed, FailWhy, ToolName};
-use crate::field::{Count, Millis, Tokens, Tool, Version};
-use crate::field_ref::{Account, Device, Folder, Model, Page, Ref, Session};
+use super::choices::{
+    AgentResult, AgentTool, Answerer, AskMode, AskThen, AskerKind, DoneOrFailed, FailWhy, ToolName,
+};
+use crate::field::{Count, ErrorCode, Hex, Millis, Op, Tokens, Tool, Version};
+use crate::field_ref::{
+    Account, Agent, Consent, Device, Folder, Model, Organization, Page, Ref, Session,
+};
 use crate::spec::{AgentsRead, Durability, Group, Level, Lock, Proc};
 
 log_choice! {
@@ -386,6 +390,48 @@ kinds! {
         fields {
             tool: VersionedTool,
             version: Version,
+        }
+    }
+    AgentCalled = "agent.called", kv 1 {
+        title: "Agent Actions",
+        records: "An agent asked Notchling to change, run, send or ask for something: the tool, the session, whether Notchling vouches for it and how the call ended.",
+        why: "Shows everything an agent asked Notchling to do, and whether it was done, refused, failed or is waiting for you.",
+        default: On,
+        lock: Lock::Always("Every acting agent call is part of the audit trail."),
+        sinks: AUDIT | ACTIVITY,
+        durability: Durability::CommitFromAgent,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::Own,
+        keep_days: 0,
+        fields {
+            op: Op,
+            tool: AgentTool,
+            verified: bool,
+            result: AgentResult,
+            code: Option<ErrorCode>,
+            ms: Millis,
+            consent: Option<Ref<Consent>>,
+            organization: Option<Ref<Organization>>,
+            cmd_hash: Option<Hex>,
+            out_hash: Option<Hex>,
+        }
+    }
+    AgentNamed = "agent.named", kv 1 {
+        title: "Agent Labels",
+        records: "Which agent inside a session made a call, as its transcript names it. The label's text is never recorded.",
+        why: "Tells the main agent from a subagent in Activity. It is a label from the transcript, not proof.",
+        default: On,
+        lock: Lock::Always("Every acting agent call is part of the audit trail."),
+        sinks: AUDIT | ACTIVITY,
+        durability: Durability::CommitFromAgent,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::Own,
+        keep_days: 0,
+        fields {
+            asker: AskerKind,
+            agent: Option<Ref<Agent>>,
         }
     }
 }

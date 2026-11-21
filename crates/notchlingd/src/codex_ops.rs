@@ -1,6 +1,8 @@
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{bad, broad_folder, forbidden, text_arg, Room};
 use crate::codex_fence::CodexFence;
+use crate::identity::Launches;
+use crate::launch_spawn::CodexLaunches;
 use crate::layout::Layout;
 use crate::outbox_ops::OutboxOps;
 use notchling_engine::control::{Command, Launcher, RealLauncher};
@@ -97,6 +99,16 @@ impl CodexOps {
         room: Arc<dyn Room>,
         claude: &Path,
     ) -> CodexOps {
+        CodexOps::for_daemon_with(layout, acting, room, claude, &Launches::default())
+    }
+
+    pub fn for_daemon_with(
+        layout: &Layout,
+        acting: Arc<Acting>,
+        room: Arc<dyn Room>,
+        claude: &Path,
+        launches: &Launches,
+    ) -> CodexOps {
         let ops = CodexOps::new(
             acting,
             CodexSetup {
@@ -105,7 +117,11 @@ impl CodexOps {
                 data_dir: layout.data_dir.clone(),
                 fixture: layout.fixture,
             },
-            Arc::new(RealSpawner),
+            Arc::new(CodexLaunches::new(
+                Arc::new(RealSpawner),
+                launches.clone(),
+                crate::launch_spawn::Probe::system(),
+            )),
             Arc::new(RealLauncher::with_claude(claude.to_path_buf())),
             room,
         );

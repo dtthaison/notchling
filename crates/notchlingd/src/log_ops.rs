@@ -102,7 +102,7 @@ impl OpGroup for LogOps {
 
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::LOG_VERIFY => Some(OpSpec::AGENT),
+            ops::LOG_VERIFY => Some(OpSpec::AGENT_READ),
             ops::LOG_CHAIN_START | ops::LOG_AUDIT_DELETE => Some(OpSpec::APP),
             _ => None,
         }

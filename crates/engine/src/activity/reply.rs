@@ -3,6 +3,7 @@ use super::row::{ActivityRow, DbQuery};
 use notchling_events::registry;
 use notchling_events::spec::Group;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 
 pub const DEFAULT_LIMIT: usize = 200;
 pub const MAX_LIMIT: usize = 1000;
@@ -10,7 +11,8 @@ pub const MAX_BYTES: usize = 900 * 1024;
 const DETAIL_CHARS: usize = 200;
 const WIDE_FETCH: usize = 10_000;
 
-pub const KINDS: [&str; 6] = [
+pub const KINDS: [&str; 7] = [
+    "agents",
     "refused",
     "failed",
     "acted",
@@ -271,6 +273,7 @@ pub fn row_json(row: &ActivityRow, names: &dyn Fn(&str, &str) -> Option<String>)
         "refs": Value::Object(refs),
         "seq": row.seq,
         "spooled": row.spooled,
+        "by_agent": row.actor_tier.as_deref() == Some("agent"),
     });
     if let Some(detail) = detail_of(row, &f) {
         out["detail"] = json!(detail);
@@ -284,20 +287,111 @@ pub fn row_json(row: &ActivityRow, names: &dyn Fn(&str, &str) -> Option<String>)
     out
 }
 
+fn named_by_op(rows: &[ActivityRow]) -> HashMap<String, Value> {
+    rows.iter()
+        .filter(|row| row.kind == "agent.named")
+        .filter_map(|row| {
+            let f = row.fields();
+            Some((
+                row.op_id.clone()?,
+                json!({"as": text(&f, "asker")?, "id": text(&f, "agent")}),
+            ))
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Lookup {
+    Skipped,
+    Missed,
+    Found(String, Option<String>),
+}
+
+pub type LabelLookup<'a> = &'a dyn Fn(&ActivityRow) -> Lookup;
+
+pub const LAZY_MAX: usize = 25;
+
+fn add_agent(
+    out: &mut Value,
+    row: &ActivityRow,
+    named: &HashMap<String, Value>,
+    names: &dyn Fn(&str, &str) -> Option<String>,
+    lazy: LabelLookup<'_>,
+    budget: &mut usize,
+) {
+    let f = row.fields();
+    if let Some(tool) = text(&f, "tool") {
+        out["tool"] = json!(tool);
+    }
+    out["verified"] = json!(f.get("verified").and_then(Value::as_bool).unwrap_or(false));
+    let stored = row.op_id.as_ref().and_then(|id| named.get(id));
+    let settled = stored.is_some_and(|agent| agent["as"] != "unknown");
+    let found = if settled || *budget == 0 {
+        None
+    } else {
+        match lazy(row) {
+            Lookup::Skipped => None,
+            Lookup::Missed => {
+                *budget -= 1;
+                None
+            }
+            Lookup::Found(asker, id) => {
+                *budget -= 1;
+                Some(json!({"as": asker, "id": id}))
+            }
+        }
+    };
+    if let Some(agent) = found.as_ref().or(stored) {
+        out["agent"] = agent.clone();
+    }
+    if let Some(name) = row
+        .actor_session
+        .as_deref()
+        .and_then(|id| names("session", id))
+    {
+        out["session_name"] = json!(clean(&name, 60));
+    }
+}
+
 pub fn reply(
     rows: &[ActivityRow],
     q: &Query,
     names: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Value {
+    reply_with(rows, q, names, &|_| Lookup::Skipped)
+}
+
+pub fn reply_with(
+    rows: &[ActivityRow],
+    q: &Query,
+    names: &dyn Fn(&str, &str) -> Option<String>,
+    lazy: LabelLookup<'_>,
+) -> Value {
+    let named = named_by_op(rows);
     let mut picked: Vec<&ActivityRow> = rows
         .iter()
+        .filter(|row| row.kind != "agent.named")
         .filter(|row| {
-            q.kinds.is_empty() || q.kinds.iter().any(|k| k == six_kind(row, &row.fields()))
+            q.kinds.is_empty()
+                || q.kinds.iter().any(|k| match k.as_str() {
+                    "agents" => row.actor_tier.as_deref() == Some("agent"),
+                    k => k == six_kind(row, &row.fields()),
+                })
         })
         .collect();
     picked.sort_by_key(|row| std::cmp::Reverse((row.ts, row.seq)));
     picked.truncate(q.limit);
-    let mut shown: Vec<Value> = picked.iter().map(|row| row_json(row, names)).collect();
+    let mut budget = LAZY_MAX;
+    let mut shown: Vec<Value> = picked
+        .iter()
+        .map(|row| {
+            let mut out = row_json(row, names);
+            if row.kind == "agent.called" {
+                add_agent(&mut out, row, &named, names, lazy, &mut budget);
+            }
+            out
+        })
+        .collect();
     let mut truncated = false;
     loop {
         let size = serde_json::to_vec(&shown).map(|b| b.len()).unwrap_or(0);
@@ -310,8 +404,18 @@ pub fn reply(
 }
 
 pub fn list(db: &EventsDb, q: &Query, names: &dyn Fn(&str, &str) -> Option<String>) -> Value {
-    match db.list(&q.db_query()) {
-        Ok(rows) => reply(&rows, q, names),
-        Err(_) => json!({"rows": [], "truncated": false}),
-    }
+    list_with(db, q, names, &|_| Lookup::Skipped)
+}
+
+pub fn fetch(db: &EventsDb, q: &Query) -> Vec<ActivityRow> {
+    db.list(&q.db_query()).unwrap_or_default()
+}
+
+pub fn list_with(
+    db: &EventsDb,
+    q: &Query,
+    names: &dyn Fn(&str, &str) -> Option<String>,
+    lazy: LabelLookup<'_>,
+) -> Value {
+    reply_with(&fetch(db, q), q, names, lazy)
 }

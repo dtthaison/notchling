@@ -4,7 +4,8 @@ use crate::client::{Client, ClientError, ConnectOptions};
 use crate::hub::Hub;
 use crate::presence::Presence;
 use crate::server::{
-    Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle, Shared,
+    AgentIdentity, Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle,
+    Shared,
 };
 use crate::testutil::{field_text, summary, TempDir};
 use crate::tier::Allowlist;
@@ -27,7 +28,7 @@ impl Handler for Probe {
         match op {
             "app.do" | "app.kind" | "app.marks" | "app.refuses" => Some(OpSpec::APP),
             "app.quiet" => Some(OpSpec::APP_QUIET),
-            "agent.who" => Some(OpSpec::AGENT),
+            "agent.who" => Some(OpSpec::AGENT_READ),
             _ => None,
         }
     }
@@ -51,9 +52,11 @@ impl Handler for Probe {
         ]
     }
 
-    fn session_of(&self, _pid: u32) -> Option<String> {
+    fn identity_of(&self, _pid: u32) -> AgentIdentity {
         self.session_lookups.fetch_add(1, Ordering::SeqCst);
-        Some("sess-1".to_owned())
+        let mut who = AgentIdentity::shell();
+        who.session = Some("sess-1".to_owned());
+        who
     }
 
     fn call(&self, _caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {

@@ -65,3 +65,13 @@ fn run_carries_scope_to_another_thread() {
     .expect("thread");
     assert_eq!(seen, expected);
 }
+
+#[test]
+fn a_consent_note_is_taken_once_and_the_last_one_wins() {
+    use crate::scope::{note_consent, take_consent, ConsentNote};
+    assert!(take_consent().is_none());
+    note_consent("one", ConsentNote::Pending);
+    note_consent("two", ConsentNote::Used);
+    assert_eq!(take_consent(), Some(("two".to_string(), ConsentNote::Used)));
+    assert!(take_consent().is_none());
+}

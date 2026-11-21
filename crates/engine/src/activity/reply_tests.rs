@@ -1,4 +1,4 @@
-use super::{reply, six_kind, ActivityRow, Query, MAX_BYTES};
+use super::{reply, reply_with, six_kind, ActivityRow, Lookup, Query, LAZY_MAX, MAX_BYTES};
 use serde_json::{json, Value};
 
 fn row(seq: u64, ts: i64, kind: &str, grp: &str, outcome: &str, f: Value) -> ActivityRow {
@@ -200,4 +200,196 @@ fn reply_is_capped_at_900k() {
     assert!(!shown.is_empty() && shown.len() < 1_000);
     assert_eq!(shown[0]["time_ms"], 1_000 + 1_199);
     assert!(shown[0]["detail"].as_str().expect("detail").chars().count() <= 201);
+}
+
+fn agent_row(seq: u64, kind: &str, op_id: &str, f: Value) -> ActivityRow {
+    let mut r = row(seq, 1_000 + seq as i64, kind, "agents", "ok", f);
+    r.actor_tier = Some("agent".to_owned());
+    r.actor_exe = Some("notchling".to_owned());
+    r.op_id = Some(op_id.to_owned());
+    r
+}
+
+#[test]
+fn the_agents_filter_keeps_every_row_an_agent_made_whatever_its_kind() {
+    let called = agent_row(
+        1,
+        "agent.called",
+        "op-1",
+        json!({"op": "settings.set", "tool": "claude", "verified": true, "result": "ok"}),
+    );
+    let named = agent_row(
+        2,
+        "agent.named",
+        "op-1",
+        json!({"asker": "subagent", "agent": "a1"}),
+    );
+    let own = agent_row(3, "vault.secret_used", "op-2", json!({"secrets": ["X"]}));
+    let app = row(
+        4,
+        1_004,
+        "op.called",
+        "diagnostics",
+        "ok",
+        json!({"op": "x"}),
+    );
+    let rows = vec![called, named, own, app];
+    let q = Query::from_args(&json!({"kinds": ["agents"]})).expect("query");
+    let out = reply(&rows, &q, &no_names);
+    let shown = out["rows"].as_array().expect("rows");
+    assert_eq!(shown.len(), 2);
+    assert!(shown.iter().all(|r| r["by_agent"] == true));
+    let call = shown.iter().find(|r| r["event"] == "agent.called").unwrap();
+    assert_eq!(call["tool"], "claude");
+    assert_eq!(call["verified"], true);
+    assert_eq!(call["agent"]["as"], "subagent");
+    assert_eq!(call["agent"]["id"], "a1");
+    assert_eq!(call["op"], "settings.set");
+    let all = reply(&rows, &Query::plain(50), &no_names);
+    assert_eq!(all["rows"].as_array().unwrap().len(), 3);
+    assert!(all["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["event"] != "agent.named"));
+}
+
+#[test]
+fn a_call_with_no_label_yet_has_no_agent_entry() {
+    let called = agent_row(
+        1,
+        "agent.called",
+        "op-9",
+        json!({"op": "settings.set", "tool": "shell", "verified": false, "result": "refused"}),
+    );
+    let out = reply(&[called], &Query::plain(10), &no_names);
+    let first = &out["rows"][0];
+    assert!(first.get("agent").is_none());
+    assert_eq!(first["verified"], false);
+    assert_eq!(first["result"], "refused");
+}
+
+fn unnamed_call(seq: u64, op_id: &str) -> ActivityRow {
+    let mut called = agent_row(
+        seq,
+        "agent.called",
+        op_id,
+        json!({"op": "settings.set", "tool": "claude", "verified": true, "result": "ok"}),
+    );
+    called.actor_session = Some("sess-1".to_owned());
+    called
+}
+
+#[test]
+fn a_call_with_no_label_is_resolved_at_read_time() {
+    let rows = vec![unnamed_call(1, "op-1")];
+    let lazy = |row: &ActivityRow| {
+        assert_eq!(row.actor_session.as_deref(), Some("sess-1"));
+        Lookup::Found("subagent".to_owned(), Some("a1".to_owned()))
+    };
+    let out = reply_with(&rows, &Query::plain(10), &no_names, &lazy);
+    assert_eq!(out["rows"][0]["agent"]["as"], "subagent");
+    assert_eq!(out["rows"][0]["agent"]["id"], "a1");
+}
+
+#[test]
+fn an_unknown_label_gives_way_to_a_later_one_and_a_known_label_is_never_looked_up_again() {
+    let unknown = agent_row(
+        2,
+        "agent.named",
+        "op-1",
+        json!({"asker": "unknown", "agent": null}),
+    );
+    let main = agent_row(
+        4,
+        "agent.named",
+        "op-2",
+        json!({"asker": "main", "agent": null}),
+    );
+    let rows = vec![
+        unnamed_call(1, "op-1"),
+        unknown,
+        unnamed_call(3, "op-2"),
+        main,
+    ];
+    let asked = std::cell::Cell::new(0);
+    let lazy = |_: &ActivityRow| {
+        asked.set(asked.get() + 1);
+        Lookup::Found("subagent".to_owned(), Some("a2".to_owned()))
+    };
+    let out = reply_with(&rows, &Query::plain(10), &no_names, &lazy);
+    let shown = out["rows"].as_array().unwrap();
+    let by_op: Vec<(&str, &str)> = shown
+        .iter()
+        .map(|r| {
+            (
+                r["op_id"].as_str().unwrap(),
+                r["agent"]["as"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(by_op.contains(&("op-1", "subagent")));
+    assert!(by_op.contains(&("op-2", "main")));
+    assert_eq!(asked.get(), 1);
+}
+
+#[test]
+fn a_lookup_that_finds_nothing_leaves_the_stored_label() {
+    let unknown = agent_row(
+        2,
+        "agent.named",
+        "op-1",
+        json!({"asker": "unknown", "agent": null}),
+    );
+    let rows = vec![unnamed_call(1, "op-1"), unknown];
+    let out = reply_with(&rows, &Query::plain(10), &no_names, &|_| Lookup::Missed);
+    assert_eq!(out["rows"][0]["agent"]["as"], "unknown");
+}
+
+#[test]
+fn only_the_newest_rows_are_looked_up() {
+    let rows: Vec<ActivityRow> = (1..=60)
+        .map(|i| unnamed_call(i, &format!("op-{i}")))
+        .collect();
+    let asked = std::cell::Cell::new(0);
+    let lazy = |_: &ActivityRow| {
+        asked.set(asked.get() + 1);
+        Lookup::Missed
+    };
+    reply_with(&rows, &Query::plain(100), &no_names, &lazy);
+    assert_eq!(asked.get(), LAZY_MAX);
+}
+
+#[test]
+fn an_agent_row_carries_the_session_name_from_the_session_list() {
+    let rows = vec![unnamed_call(1, "op-1")];
+    let names = |kind: &str, id: &str| {
+        (kind == "session" && id == "sess-1").then(|| "Fix the parser".to_owned())
+    };
+    let out = reply(&rows, &Query::plain(10), &names);
+    assert_eq!(out["rows"][0]["session_name"], "Fix the parser");
+    let none = reply(&rows, &Query::plain(10), &no_names);
+    assert!(none["rows"][0].get("session_name").is_none());
+}
+
+#[test]
+fn rows_that_cannot_be_resolved_do_not_use_up_the_budget_of_the_ones_that_can() {
+    let rows: Vec<ActivityRow> = (1..=40)
+        .map(|i| unnamed_call(i, &format!("op-{i}")))
+        .collect();
+    let lazy = |row: &ActivityRow| {
+        if row.seq == 1 {
+            Lookup::Found("main".to_owned(), None)
+        } else {
+            Lookup::Skipped
+        }
+    };
+    let out = reply_with(&rows, &Query::plain(100), &no_names, &lazy);
+    let oldest = out["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["op_id"] == "op-1")
+        .unwrap();
+    assert_eq!(oldest["agent"]["as"], "main");
 }
