@@ -82,7 +82,7 @@ const READS: [&str; 38] = [
     COST_REPORT,
 ];
 
-const ACTS: [&str; 12] = [
+const ACTS: [&str; 14] = [
     ops::SETTINGS_SET,
     ops::MODELS_UPDATE,
     ops::CLUSTER_JOIN,
@@ -94,6 +94,8 @@ const ACTS: [&str; 12] = [
     ops::VAULT_USE,
     ops::VAULT_REQUEST,
     ops::CONSENT_CANCEL,
+    ops::SWITCH_REQUEST,
+    ops::SWITCH_OFF,
     ops::SHELLS_STOP,
 ];
 
@@ -155,6 +157,8 @@ fn no_op_that_writes_runs_or_touches_the_vault_is_an_agent_read() {
         ops::VAULT_USE,
         ops::VAULT_REQUEST,
         ops::CONSENT_CANCEL,
+        ops::SWITCH_REQUEST,
+        ops::SWITCH_OFF,
     ] {
         let spec = handler.spec(op).expect(op);
         assert!(spec.records_agent_call(), "{op}");

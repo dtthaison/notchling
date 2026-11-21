@@ -24,6 +24,8 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling settings list [--json]` | `settings.list` (agent) | none | 0 1 2 3 4 |
 | `notchling settings get <key> [--json]` | `settings.get` (agent) | none | 0 1 2 3 4 |
 | `notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]` | `settings.set` (agent, acts), `settings.asked` (agent, acts) | by_key_class | 0 1 2 3 4 5 6 7 124 |
+| `notchling switch on <acting|bridge|accounts|vault|install|cluster> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]` | `switch.request` (agent, acts) | request | 0 1 2 3 4 5 6 7 124 |
+| `notchling switch off <acting|bridge|accounts|vault|install|cluster> [--json]` | `switch.off` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling consent <id> [--wait] [--timeout <seconds>] [--json]` | `consent.get` (agent) | none | 0 1 2 3 4 5 6 124 |
 | `notchling consents [--json]` | `consent.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling watch [--topic <topic>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]` | `events.subscribe` (agent) | none | 0 1 2 3 4 124 |
@@ -70,9 +72,6 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `versions.check` | Check tool versions | 2 |
 | `catalog.get` | Read the model catalog | 2 |
 | `log.verify` | Verify the log chain | 2 |
-| `settings.set_acting` | Switch Act on Sessions on | 3 |
-| `bridge.set` | Switch the Phone Bridge on | 3 |
-| `settings.set_switch` | Switch a daemon switch on | 3 |
 | `session.new` | Start a session | 4 |
 | `folder.trust` | Trust a folder for a session | 4 |
 | `session.reply` | Reply to a session | 4 |
@@ -179,6 +178,9 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `agy.sidecar.status` | hook |
 | `agy.hook` | hook |
 | `vault.request.cancel` | app_ui |
+| `settings.set_acting` | app_ui |
+| `bridge.set` | app_ui |
+| `settings.set_switch` | app_ui |
 | `vault.pending` | app_ui |
 | `inbox.seen` | app_ui |
 | `bridge.status` | app_ui |

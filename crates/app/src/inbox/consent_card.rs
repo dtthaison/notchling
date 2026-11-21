@@ -5,6 +5,7 @@ use crate::chat::format::duration;
 
 pub const ALLOW_DELAY_MS: i64 = 1000;
 const SECRET_REQUEST: &str = "secret_request";
+const SWITCH: &str = "switch";
 const SESSION_CHARS: usize = 8;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -54,6 +55,7 @@ pub struct ConsentCard {
     pub allow: Allow,
     pub answerable: bool,
     pub app_applied: bool,
+    pub switch: Option<String>,
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -99,8 +101,50 @@ fn who(view: &Value) -> String {
     }
 }
 
+fn switch_words(name: &str) -> Option<(&'static str, &'static str)> {
+    Some(match name {
+        "acting" => (
+            t::consent::card_switch_acting(),
+            t::consent::card_switch_acting_unlocks(),
+        ),
+        "bridge" => (
+            t::consent::card_switch_bridge(),
+            t::consent::card_switch_bridge_unlocks(),
+        ),
+        "accounts" => (
+            t::consent::card_switch_accounts(),
+            t::consent::card_switch_accounts_unlocks(),
+        ),
+        "vault" => (
+            t::consent::card_switch_vault(),
+            t::consent::card_switch_vault_unlocks(),
+        ),
+        "install" => (
+            t::consent::card_switch_install(),
+            t::consent::card_switch_install_unlocks(),
+        ),
+        "cluster" => (
+            t::consent::card_switch_cluster(),
+            t::consent::card_switch_cluster_unlocks(),
+        ),
+        _ => return None,
+    })
+}
+
+fn switch_of(view: &Value) -> Option<String> {
+    if view.get("kind").and_then(Value::as_str) != Some(SWITCH) {
+        return None;
+    }
+    text(view, "target")
+        .filter(|name| switch_words(name).is_some())
+        .map(str::to_owned)
+}
+
 fn fact_line(line: &str, args: &Value) -> Option<String> {
     match line {
+        "consent-switch-on" => {
+            switch_words(text(args, "switch")?).map(|(title, _)| title.to_owned())
+        }
         "consent-setting-change" => {
             let title = text(args, "title").or_else(|| text(args, "key"))?;
             Some(t::consent::card_fact_setting(title))
@@ -144,6 +188,10 @@ fn facts(view: &Value) -> Vec<String> {
     if is_setting(view) && !is_text(view) && change.get("after").is_some() {
         out.push(t::consent::card_fact_before(&shown(change.get("before"))));
         out.push(t::consent::card_fact_after(&shown(change.get("after"))));
+    }
+    if let Some((_, unlocks)) = switch_of(view).as_deref().and_then(switch_words) {
+        out.push(unlocks.to_owned());
+        out.push(t::consent::card_switch_until_restart().to_owned());
     }
     out
 }
@@ -240,6 +288,7 @@ impl ConsentCard {
             allow,
             answerable: open && !ended,
             app_applied: view.get("appliedBy").and_then(Value::as_str) == Some("app"),
+            switch: switch_of(view),
         })
     }
 }

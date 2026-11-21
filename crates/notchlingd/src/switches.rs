@@ -26,6 +26,18 @@ pub const INSTALL_OFF: &str =
 pub const CLUSTER_OFF: &str =
     "the cluster is off: this Mac links to no other machine until the maintainer turns this on";
 
+pub fn cause_of(args: &Value) -> SwitchCause {
+    if args.get("restored").and_then(Value::as_bool) == Some(true) {
+        SwitchCause::RestoredAtLaunch
+    } else if args.get("consentId").is_some_and(Value::is_string)
+        || args.get("agentOff").and_then(Value::as_bool) == Some(true)
+    {
+        SwitchCause::AgentRequest
+    } else {
+        SwitchCause::User
+    }
+}
+
 type Listener = Arc<dyn Fn(bool) + Send + Sync>;
 type Listeners = Arc<Mutex<Vec<Listener>>>;
 type Change = (bool, SyncSender<()>);
@@ -199,10 +211,7 @@ impl SwitchOps {
         let flag = self.switches.get(name).ok_or_else(|| bad(usage))?;
         flag.set(on);
         if let Some(events) = &self.events {
-            let cause = match args.get("restored").and_then(Value::as_bool) {
-                Some(true) => SwitchCause::RestoredAtLaunch,
-                _ => SwitchCause::User,
-            };
+            let cause = crate::switches::cause_of(args);
             let switch = SwitchName::from_name(flag.name()).unwrap_or(SwitchName::Other);
             events.push(Event::new(
                 &SwitchChanged { switch, on, cause },

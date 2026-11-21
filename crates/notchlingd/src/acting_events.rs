@@ -10,7 +10,7 @@ use notchling_events::kinds::agents::{
     SessionControl, SessionReply,
 };
 use notchling_events::kinds::choices::{DoneOrFailed, FailWhy, SwitchName};
-use notchling_events::kinds::security::{SwitchCause, SwitchChanged};
+use notchling_events::kinds::security::SwitchChanged;
 use notchling_events::spec::Outcome;
 use notchling_events::{scope, Account, Device, Event, Folder, Ref, Session};
 use notchling_local_api::{ApiError, Caller, ErrorCode, Tier};
@@ -286,10 +286,7 @@ impl ActingOps {
 
     pub(crate) fn note_acting(&self, on: bool, args: &Value) {
         if let Some(events) = &self.events {
-            let cause = match args.get("restored").and_then(Value::as_bool) {
-                Some(true) => SwitchCause::RestoredAtLaunch,
-                _ => SwitchCause::User,
-            };
+            let cause = crate::switches::cause_of(args);
             events.push(Event::new(
                 &SwitchChanged {
                     switch: SwitchName::Acting,

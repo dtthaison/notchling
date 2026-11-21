@@ -230,6 +230,8 @@ pub mod snap_restore;
 mod snap_restore_fs;
 pub mod snap_run;
 pub mod snap_send;
+pub mod switch_asks;
+pub mod switch_cli;
 pub mod switches;
 pub mod tailscale_ops;
 mod turn_gate;
@@ -573,6 +575,7 @@ pub fn run(command: Command) -> i32 {
         Command::Secrets { args } => vault_cli::secrets(&args),
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
+        Command::Switch { args } => switch_cli::run(&args),
         Command::Settings { args } => settings_cli::run(&args),
         Command::Consent { args } => consent_cli::run(&args, false),
         Command::Consents { args } => consent_cli::run(&args, true),

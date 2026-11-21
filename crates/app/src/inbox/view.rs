@@ -206,19 +206,29 @@ impl InboxPanelView {
         cx.notify();
     }
 
-    fn consent_act(&mut self, id: String, allow: bool, app_applied: bool, cx: &mut Context<Self>) {
+    fn consent_act(
+        &mut self,
+        id: String,
+        allow: bool,
+        app_applied: bool,
+        switch: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         if !self.busy.insert(id.clone()) {
             return;
         }
         self.note = None;
         let feed = self.feed.clone();
         let sent = id.clone();
-        let open_form = allow && app_applied;
+        let open_form = allow && app_applied && switch.is_none();
+        let turn_on = switch.filter(|_| allow);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    if open_form {
+                    if let Some(switch) = &turn_on {
+                        feed.allow_switch(&sent, switch).map(|_| false)
+                    } else if open_form {
                         feed.consent_opened(&sent).map(|_| true)
                     } else {
                         feed.consent_answer(&sent, allow)
@@ -347,15 +357,16 @@ impl InboxPanelView {
         let mut allow = bar.allow;
         let mut deny = bar.deny;
         if card.allow.enabled() && !busy {
-            let (id, app_applied) = (card.id.clone(), card.app_applied);
+            let (id, app_applied, switch) =
+                (card.id.clone(), card.app_applied, card.switch.clone());
             allow = allow.on_click(cx.listener(move |this, _, _, cx| {
-                this.consent_act(id.clone(), true, app_applied, cx);
+                this.consent_act(id.clone(), true, app_applied, switch.clone(), cx);
             }));
         }
         if card.answerable && !busy {
             let (id, app_applied) = (card.id.clone(), card.app_applied);
             deny = deny.on_click(cx.listener(move |this, _, _, cx| {
-                this.consent_act(id.clone(), false, app_applied, cx);
+                this.consent_act(id.clone(), false, app_applied, None, cx);
             }));
         }
         div()
@@ -532,6 +543,8 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
     let consent = name.starts_with("inbox-consent");
     let fixture = match name {
         "inbox-consent" => consent_model(0),
+        "inbox-consent-switch-acting" => consent_model(2),
+        "inbox-consent-switch-vault" => consent_model(3),
         _ if consent => consent_model(1),
         _ => model(),
     };

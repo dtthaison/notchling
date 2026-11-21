@@ -68,6 +68,9 @@ pub enum Command {
     SecretRequest {
         args: Vec<String>,
     },
+    Switch {
+        args: Vec<String>,
+    },
     Settings {
         args: Vec<String>,
     },
@@ -226,6 +229,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "secret-request" => {
             return Ok(Command::SecretRequest {
+                args: args.collect(),
+            })
+        }
+        "switch" => {
+            return Ok(Command::Switch {
                 args: args.collect(),
             })
         }

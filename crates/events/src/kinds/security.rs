@@ -31,6 +31,7 @@ log_choice! {
         ClusterJoin = "cluster_join",
         ClusterRejoin = "cluster_rejoin",
         ClusterNode = "cluster_node",
+        AgentRequest = "agent_request",
     }
 }
 

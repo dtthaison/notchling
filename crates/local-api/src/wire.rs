@@ -198,6 +198,8 @@ pub mod ops {
     pub const CONSENT_LIST: &str = "consent.list";
     pub const CONSENT_ANSWER: &str = "consent.answer";
     pub const CONSENT_OPENED: &str = "consent.opened";
+    pub const SWITCH_REQUEST: &str = "switch.request";
+    pub const SWITCH_OFF: &str = "switch.off";
 
     pub const ORGANIZATIONS_LIST: &str = "organizations.list";
     pub const ORGANIZATIONS_CREATE: &str = "organizations.create";

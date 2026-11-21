@@ -1,5 +1,5 @@
 use notchling_engine::inbox::{ActionId, Item, Kind, State};
-use notchling_local_api::topics;
+use notchling_local_api::{ops, topics};
 use notchling_locale as t;
 use serde_json::{json, Value};
 
@@ -284,6 +284,20 @@ pub fn answer_args(id: &str, action: ActionId) -> Value {
 
 pub fn consent_answer_args(id: &str, allow: bool) -> Value {
     json!({"consentId": id, "decision": if allow { "allow" } else { "deny" }})
+}
+
+pub fn switch_apply(id: &str, switch: &str) -> (&'static str, Value) {
+    match switch {
+        "acting" => (
+            ops::SETTINGS_SET_ACTING,
+            json!({"on": true, "consentId": id}),
+        ),
+        "bridge" => (ops::BRIDGE_SET, json!({"on": true, "consentId": id})),
+        other => (
+            ops::SETTINGS_SET_SWITCH,
+            json!({"switch": other, "on": true, "consentId": id}),
+        ),
+    }
 }
 
 pub fn seen_args(ids: &[String]) -> Value {

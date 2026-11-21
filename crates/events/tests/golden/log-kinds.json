@@ -13,7 +13,7 @@
   {"name":"switch.changed","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"switch","type":"choice","optional":false,"list":false,"choices":["acting","bridge","accounts","vault","install","cluster","other"]},
     {"name":"on","type":"flag","optional":false,"list":false,"choices":[]},
-    {"name":"cause","type":"choice","optional":false,"list":false,"choices":["user","restored_at_launch","daemon_start","file_said_on_ignored","restore_failed","cluster_join","cluster_rejoin","cluster_node","other"]}
+    {"name":"cause","type":"choice","optional":false,"list":false,"choices":["user","restored_at_launch","daemon_start","file_said_on_ignored","restore_failed","cluster_join","cluster_rejoin","cluster_node","agent_request","other"]}
   ]},
   {"name":"daemon.started","kv":1,"group":"security","lock":"always","sinks":["audit","activity","diagnostics"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"daemon","type":"version","optional":false,"list":false,"choices":[]},

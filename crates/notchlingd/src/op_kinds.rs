@@ -188,6 +188,8 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::CONSENT_LIST, Home::Quiet),
     (ops::CONSENT_ANSWER, Home::Called),
     (ops::CONSENT_OPENED, Home::Called),
+    (ops::SWITCH_REQUEST, Home::Kind("agent.consent")),
+    (ops::SWITCH_OFF, Home::Kind("switch.changed")),
     (ops::ORGANIZATIONS_LIST, Home::Quiet),
     (ops::ORGANIZATIONS_CREATE, Home::Called),
     (ops::ORGANIZATIONS_RENAME, Home::Called),

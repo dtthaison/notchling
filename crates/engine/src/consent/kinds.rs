@@ -22,6 +22,7 @@ pub struct KindSpec {
 
 pub const SETTING: &str = "setting";
 pub const SECRET_REQUEST: &str = "secret_request";
+pub const SWITCH: &str = "switch";
 
 pub const KINDS: &[KindSpec] = &[
     KindSpec {
@@ -42,6 +43,17 @@ pub const KINDS: &[KindSpec] = &[
         applied_by: AppliedBy::App,
         result: Outcome::Stored,
         item: ItemKind::SecretRequest,
+        default_expiry_ms: DEFAULT_EXPIRY_MS,
+        max_expiry_ms: MAX_EXPIRY_MS,
+        parts: false,
+    },
+    KindSpec {
+        name: SWITCH,
+        title: "Turn a switch on",
+        answer_on: AnswerOn::Mac,
+        applied_by: AppliedBy::App,
+        result: Outcome::None,
+        item: ItemKind::Consent,
         default_expiry_ms: DEFAULT_EXPIRY_MS,
         max_expiry_ms: MAX_EXPIRY_MS,
         parts: false,

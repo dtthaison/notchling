@@ -1448,6 +1448,25 @@ The `notchling` commands (`shells_cli.rs`). Exit codes as the table in the desig
 | `notchling shells [--json]` | `shells.mine` | One line per shell: `id  status  running-time  stuck  command`. |
 | `notchling shells stop <id> [--json]` | `shells.stop` | Prints `Stopped <id>.` or `<id> had already ended.`; exits 1 with reason `some_left` when writers are left, and `--json` prints the error with the reply as `result` |
 
+## `switch_asks.rs`
+
+Switch requests ([design](superpowers/specs/2026-11-21-agents-first-design.md), Phase 3). An agent asks for one of the six switches to be turned on; the request is a `switch` consent request, answered on the Mac only (a phone may Deny, never Allow) and applied by the Mac's app. No tier turns a switch on through a request by itself: the daemon only opens and checks the request. When the user presses Allow, the app calls its own op with the request's id, `settings.set_acting {on: true, consentId}`, `bridge.set {on: true, consentId}` or `settings.set_switch {switch, on: true, consentId}`, and the daemon checks the id is waiting, for that same switch, unused and sent by the app that said hello, then uses it and runs the op in one step. The `switch.changed` event says cause `agent_request`. A yes lasts for this run: every switch is still off at every start, and a restart withdraws a yes that was `applying`. If the switch was turned on in the meantime, the yes is withdrawn, not applied.
+
+Turning a switch off needs no yes. `switch.off` turns it off, records `switch.changed` with cause `agent_request`, and raises an Inbox notice ("Claude Code turned off the cluster") with Turn On, which the Mac's app may press; a phone's Turn On is not taken.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `switch.request` | agent, acts | `{switch: "acting" \| "bridge" \| "accounts" \| "vault" \| "install" \| "cluster", on: true, dryRun?, consent?: {reason?, expiresInMs?, key?}}` | `{state: "waiting", request}`; a dry run replies `{dryRun: true, op, would: "ask", change, request, error: null}` |
+| `switch.off` | agent, acts | `{switch}` | `{switch, on: false, changed}`; `changed` is false when it was already off |
+
+Errors:
+
+- `bad_request` with the usage text for an unknown switch or `on` other than `true`; `bad_request` reason `already_on`, "It is already on.", for a switch that is on, on the request and on the app's use of it.
+- `forbidden` reason `app_only` when anything but the Notchling app sends `consentId`, an agent included, even with a valid id; `needs_consent` when the id is used, closed, or for another switch.
+- The rest as `consent_ops.rs` lists for the op that opens a request (limits, `key_reused`, `bad_value`).
+
+The `notchling` commands (`switch_cli.rs`): `notchling switch on <name>` with the common flags (`--reason`, `--wait` or `--no-wait`, `--timeout`, `--expires-in`, `--key`, `--dry-run`, `--json`) opens a request and waits for it, exiting by the request's state as `notchling consent` does; `notchling switch off <name> [--json]` exits 0 once the switch is off.
+
 ## `tailscale_ops.rs`
 
 The one op that changes which Tailscale network this Mac is on. It is app tier only: an agent or the `notchling` command line gets `forbidden`, and the group checks the caller's tier again itself. The app sends it only from the Switch Network button, after a confirm that says the other network drops. Nothing switches by itself.

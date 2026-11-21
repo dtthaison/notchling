@@ -6,7 +6,7 @@ use crate::views::ViewSpec;
 
 pub const NOW_MS: i64 = 1_794_096_000_000;
 
-pub const VIEWS: [ViewSpec; 5] = [
+pub const VIEWS: [ViewSpec; 7] = [
     ViewSpec {
         name: "inbox-panel",
         size: (WIDTH + 32.0, 460.0),
@@ -32,13 +32,26 @@ pub const VIEWS: [ViewSpec; 5] = [
         size: (WIDTH + 32.0, 600.0),
         about: "the Inbox panel with a secret request card while the Vault is off: Allow is off (made-up data)",
     },
+    ViewSpec {
+        name: "inbox-consent-switch-acting",
+        size: (WIDTH + 32.0, 600.0),
+        about: "the Inbox panel with a request to turn Act on Sessions on (made-up data)",
+    },
+    ViewSpec {
+        name: "inbox-consent-switch-vault",
+        size: (WIDTH + 32.0, 600.0),
+        about: "the Inbox panel with a request to turn the Vault on, and its warning (made-up data)",
+    },
 ];
 
 pub fn shown(name: &str) -> Option<bool> {
     match name {
-        "inbox-panel" | "inbox-consent" | "inbox-consent-secret" | "inbox-consent-vault-off" => {
-            Some(false)
-        }
+        "inbox-panel"
+        | "inbox-consent"
+        | "inbox-consent-secret"
+        | "inbox-consent-vault-off"
+        | "inbox-consent-switch-acting"
+        | "inbox-consent-switch-vault" => Some(false),
         "inbox-panel-done" => Some(true),
         _ => None,
     }
@@ -132,6 +145,22 @@ pub fn consent_model(which: usize) -> InboxModel {
             9 * 60_000,
             true,
         ),
+        raised(
+            "consent:c3:1",
+            "consent",
+            "Claude Code asks to turn on Act on Sessions",
+            "",
+            2 * 60_000,
+            false,
+        ),
+        raised(
+            "consent:c4:1",
+            "consent",
+            "Claude Code asks to turn on the Vault",
+            "",
+            60_000,
+            false,
+        ),
     ];
     let items = json!([all[which].clone()]);
     let requests = json!({"requests": [
@@ -155,6 +184,26 @@ pub fn consent_model(which: usize) -> InboxModel {
             "reason": "Needed to run the billing tests",
             "appliedBy": "app", "answerOn": "mac",
             "createdMs": NOW_MS - 9 * 60_000, "expiresMs": NOW_MS + 5 * 60_000 + 20_000
+        },
+        {
+            "id": "c3", "kind": "switch", "target": "acting", "state": "waiting",
+            "change": {"switch": "acting", "before": false, "after": true},
+            "facts": [{"line": "consent-switch-on", "args": {"switch": "acting"}}],
+            "tool": "claude", "verified": true, "session": "0b1c2d3e4f5a", "organization": "Personal",
+            "folder": "/Users/maker/work/notchling",
+            "reason": "I need to answer the permission prompt in the other session.",
+            "appliedBy": "app", "answerOn": "mac",
+            "createdMs": NOW_MS - 2 * 60_000, "expiresMs": NOW_MS + 13 * 60_000
+        },
+        {
+            "id": "c4", "kind": "switch", "target": "vault", "state": "waiting",
+            "change": {"switch": "vault", "before": false, "after": true},
+            "facts": [{"line": "consent-switch-on", "args": {"switch": "vault"}}],
+            "tool": "claude", "verified": true, "session": "0b1c2d3e4f5a", "organization": "Personal",
+            "folder": "/Users/maker/work/notchling",
+            "reason": "The deploy step reads the npm token.",
+            "appliedBy": "app", "answerOn": "mac",
+            "createdMs": NOW_MS - 60_000, "expiresMs": NOW_MS + 14 * 60_000
         }
     ]});
     let mut model = InboxModel::default();

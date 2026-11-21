@@ -5,7 +5,7 @@ pub mod rules;
 mod store;
 
 pub use inbox_item::{consent_of, detail_of, item, item_id, title_of, DETAIL_CHARS, TITLE_CHARS};
-pub use kinds::{spec, KindSpec, Outcome, KINDS, SECRET_REQUEST, SETTING};
+pub use kinds::{spec, KindSpec, Outcome, KINDS, SECRET_REQUEST, SETTING, SWITCH};
 pub use model::{
     bucket_of, clean_reason, new_id, AnswerOn, AppliedBy, Consent, New, Refusal, State,
     COOLDOWN_MS, DEFAULT_EXPIRY_MS, HOUR_MS, IDEM_MS, LONG_ALL, LONG_EXPIRY_MS, LONG_PER_SESSION,

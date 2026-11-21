@@ -9,7 +9,7 @@ use notchling_engine::bridge::live::LiveBackend;
 use notchling_engine::bridge::net::devices::Replica;
 use notchling_engine::bridge::net::{fetch, files, Bridge, BridgeConfig};
 use notchling_events::kinds::choices::SwitchName;
-use notchling_events::kinds::security::{SwitchCause, SwitchChanged};
+use notchling_events::kinds::security::SwitchChanged;
 use notchling_events::spec::Outcome;
 use notchling_events::{scope, Event};
 use notchling_local_api::{ops, topics, ApiError, OpSpec};
@@ -176,10 +176,7 @@ impl BridgeOps {
                 let status = self.bridge.set(on);
                 self.remember(&status);
                 if let Some(events) = &self.events {
-                    let cause = match args.get("restored").and_then(Value::as_bool) {
-                        Some(true) => SwitchCause::RestoredAtLaunch,
-                        _ => SwitchCause::User,
-                    };
+                    let cause = crate::switches::cause_of(args);
                     events.push(Event::new(
                         &SwitchChanged {
                             switch: SwitchName::Bridge,

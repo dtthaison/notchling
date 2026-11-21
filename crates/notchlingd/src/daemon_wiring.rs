@@ -96,6 +96,7 @@ pub struct Ops {
     first_wait: Duration,
     identity: Option<Arc<Identifier>>,
     names: Option<Arc<AgentNames>>,
+    switch_asks: Option<Arc<crate::switch_asks::SwitchAsks>>,
 }
 
 impl Ops {
@@ -120,6 +121,7 @@ impl Ops {
             first_wait: FIRST_LIST_WAIT,
             identity: None,
             names: None,
+            switch_asks: None,
         }
     }
 
@@ -135,6 +137,11 @@ impl Ops {
             ..Ops::new(sessions)
         }
         .with_topics()
+    }
+
+    pub fn with_switch_asks(mut self, asks: Arc<crate::switch_asks::SwitchAsks>) -> Ops {
+        self.switch_asks = Some(asks.clone());
+        self.with_group(asks)
     }
 
     pub fn with_bridge(mut self, bridge: Arc<BridgeOps>) -> Ops {
@@ -345,55 +352,14 @@ impl Handler for Ops {
         {
             return routed;
         }
-        if let Some(bridge) = self.bridge.as_ref().filter(|b| b.spec(op).is_some()) {
-            return bridge.call(op, args);
+        if let Some(asks) = self
+            .switch_asks
+            .as_ref()
+            .filter(|_| crate::switch_asks::cites(op, args))
+        {
+            return asks.apply(caller, op, args, &|a| self.dispatch(caller, op, a));
         }
-        if let Some(codex) = self.codex.as_ref().filter(|c| c.spec(op).is_some()) {
-            if op == ops::CODEX_SEND
-                && args.get("job").is_some_and(|j| !j.is_null())
-                && caller.client != ClientKind::Node
-            {
-                return Err(ApiError::bad_request(
-                    "job is set by the cluster, not by a caller",
-                ));
-            }
-            return codex.call(op, args);
-        }
-        if let Some(agy) = self.agy.as_ref().filter(|a| a.spec(op).is_some()) {
-            return agy.call(op, args);
-        }
-        if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
-            if op == ops::SEARCH_QUERY && caller.tier != Tier::App {
-                let Some((reads, org)) = self
-                    .reads
-                    .as_ref()
-                    .and_then(|r| r.search_org(caller).map(|org| (r, org)))
-                else {
-                    return Ok(crate::reads_ops::no_session_search(args));
-                };
-                let mut reply = pages.call(op, args)?;
-                crate::reads_ops::scope_search(&mut reply, Some(&org), args, &|f| {
-                    reads.folder_org(f)
-                });
-                return Ok(reply);
-            }
-            return pages.call(op, args);
-        }
-        if let Some(group) = self.group(op) {
-            return group.call(caller, op, args);
-        }
-        match (op, &self.acting) {
-            (ops::SESSIONS_LIST, _) => self.sessions_list(caller, args).map(|(list, _)| list),
-            (ops::PROMPTS_LIST, Some(acting)) => {
-                let local = acting.call(caller, op, args)?;
-                Ok(match &self.prompts {
-                    Some(prompts) => prompts.merge(local, caller),
-                    None => local,
-                })
-            }
-            (op, Some(acting)) => acting.call(caller, op, args),
-            (op, None) => Err(ApiError::internal(format!("{op} has no handler"))),
-        }
+        self.dispatch(caller, op, args)
     }
 
     fn topics(&self) -> &[&str] {
@@ -438,6 +404,7 @@ pub struct Wired {
     pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
     pub consent: Arc<ConsentOps>,
+    pub switch_asks: Arc<crate::switch_asks::SwitchAsks>,
     pub install: Arc<InstallOps>,
     pub models: Arc<ModelsOps>,
     pub sidecar: Arc<AgySidecarOps>,
@@ -701,6 +668,18 @@ impl Wired {
             inbox.clone(),
             events.clone(),
         );
+        let switch_asks = crate::switch_asks::SwitchAsks::new(
+            consent.clone(),
+            states.clone(),
+            crate::switch_asks::turn_for(
+                acting.clone(),
+                bridge.clone(),
+                Arc::new(
+                    SwitchOps::new(switches.clone(), room.clone()).with_events(events.clone()),
+                ),
+            ),
+            Some(inbox.clone()),
+        );
         vault.set_consent(&consent);
         let settings = Arc::new(
             SettingsOps::new(layout.data_dir.clone(), room.clone(), states)
@@ -809,6 +788,7 @@ impl Wired {
             outbox_notice,
             vault,
             consent,
+            switch_asks,
             install,
             models,
             sidecar,
@@ -887,6 +867,7 @@ impl Wired {
             .with_pages(Arc::new(
                 PagesOps::new(PagesSetup::from_layout(layout)).with_titles(self.agy.titles()),
             ))
+            .with_switch_asks(self.switch_asks.clone())
             .with_group(Arc::new(
                 SwitchOps::new(self.switches.clone(), self.acting.room.clone())
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
@@ -994,6 +975,9 @@ impl Wired {
         &self.switches.accounts
     }
 }
+
+#[path = "ops_dispatch.rs"]
+mod ops_dispatch;
 
 #[cfg(test)]
 #[path = "daemon_wiring_tests.rs"]

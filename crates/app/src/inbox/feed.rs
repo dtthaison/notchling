@@ -8,7 +8,9 @@ use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ConnectO
 use notchling_platform::notify::{system_notifier, Notifier, Unsupported};
 use serde_json::{json, Value};
 
-use super::model::{answer_args, consent_answer_args, consent_of, seen_args, InboxModel};
+use super::model::{
+    answer_args, consent_answer_args, consent_of, seen_args, switch_apply, InboxModel,
+};
 use super::system::{notify_new, remember, Detached};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -167,6 +169,11 @@ impl InboxFeed {
     pub fn consent_answer(&self, id: &str, allow: bool) -> Result<bool, String> {
         let reply = self.call(ops::CONSENT_ANSWER, consent_answer_args(id, allow))?;
         Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
+    }
+
+    pub fn allow_switch(&self, id: &str, switch: &str) -> Result<(), String> {
+        let (op, args) = switch_apply(id, switch);
+        self.call(op, args).map(|_| ())
     }
 
     pub fn consent_opened(&self, id: &str) -> Result<(), String> {

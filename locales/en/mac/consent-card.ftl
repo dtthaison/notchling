@@ -69,6 +69,35 @@ consent-card-ended = Ended. It can no longer be allowed.
 # Shown on a secret request while the Vault is off. Allow stays off until the Vault is on.
 consent-card-vault-off = The Vault is off. Turn it on in Settings first, then allow this.
 
+## Switch requests
+
+# What the request does: turn on Act on Sessions, the switch that lets Notchling act on agent sessions.
+consent-card-switch-acting = Turn on Act on Sessions
+# What turning on Act on Sessions unlocks, on the consent card.
+consent-card-switch-acting-unlocks = Notchling may answer, reply to and stop your sessions for agents.
+# What the request does: turn on the Phone Bridge.
+consent-card-switch-bridge = Turn on the Phone Bridge
+# What turning on the Phone Bridge unlocks, on the consent card.
+consent-card-switch-bridge-unlocks = Paired phones may see and answer your sessions.
+# What the request does: turn on Accounts, the switch that lets Notchling sign in and switch accounts.
+consent-card-switch-accounts = Turn on Accounts
+# What turning on Accounts unlocks, on the consent card.
+consent-card-switch-accounts-unlocks = Notchling may sign in and switch your accounts.
+# What the request does: turn on the Vault.
+consent-card-switch-vault = Turn on the Vault
+# What turning on the Vault unlocks, on the consent card. It is a warning.
+consent-card-switch-vault-unlocks = This opens every saved secret to the agents that may use them.
+# What the request does: turn on Install, the switch that lets Notchling install hooks and skills.
+consent-card-switch-install = Turn on Install
+# What turning on Install unlocks, on the consent card.
+consent-card-switch-install-unlocks = Notchling may install and remove its hooks and skills.
+# What the request does: turn on the cluster.
+consent-card-switch-cluster = Turn on the cluster
+# What turning on the cluster unlocks, on the consent card.
+consent-card-switch-cluster-unlocks = This Mac may link to your other machines.
+# Said on every switch request: the yes lasts until Notchling restarts.
+consent-card-switch-until-restart = It turns off again when Notchling restarts.
+
 ## The form that saves an allowed secret
 
 # Said on the Vault form when the request ran out of time before the secret was saved.

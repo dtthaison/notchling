@@ -1,9 +1,9 @@
 use crate::late_emit::Events;
-use notchling_engine::consent::{AnswerOn, Consent, SECRET_REQUEST, SETTING};
+use notchling_engine::consent::{AnswerOn, Consent, SECRET_REQUEST, SETTING, SWITCH};
 use notchling_events::field::{Count, Millis};
 use notchling_events::kinds::agents::AgentConsent;
 use notchling_events::kinds::choices::{
-    AgentTool, Answerer, ConsentAnswerOn, ConsentKind, ConsentThen,
+    AgentTool, Answerer, ConsentAnswerOn, ConsentKind, ConsentThen, SwitchName,
 };
 use notchling_events::kinds::settings::SettingKey;
 use notchling_events::spec::Outcome;
@@ -49,7 +49,8 @@ pub(crate) fn event_of(row: &Consent, then: ConsentThen, now_ms: i64) -> Event {
                 AnswerOn::Mac => ConsentAnswerOn::Mac,
                 AnswerOn::MacOrPhone => ConsentAnswerOn::MacOrPhone,
             },
-            switch: None,
+            switch: (row.kind == SWITCH)
+                .then(|| SwitchName::from_name(&row.target).unwrap_or(SwitchName::Other)),
             key,
             secret,
             session: None,

@@ -266,3 +266,72 @@ fn the_card_blocks_a_secret_only_while_the_vault_is_off_and_follows_it_back_on()
         "a setting never waits on the Vault"
     );
 }
+
+fn switch_request(name: &str) -> Value {
+    json!({
+        "id": "c3", "kind": "switch", "target": name, "state": "waiting",
+        "change": {"switch": name, "before": false, "after": true},
+        "facts": [{"line": "consent-switch-on", "args": {"switch": name}}],
+        "tool": "claude", "verified": true, "session": "0b1c2d3e4f5a",
+        "reason": "I need it for the next step",
+        "expiresMs": NOW + 14 * 60_000, "appliedBy": "app", "answerOn": "mac"
+    })
+}
+
+#[test]
+fn a_switch_request_says_what_it_unlocks_and_that_it_ends_at_restart() {
+    let card = ConsentCard::build(&switch_request("acting"), &env()).expect("card");
+    assert_eq!(card.switch.as_deref(), Some("acting"));
+    assert!(card.app_applied && card.allow.enabled());
+    assert_eq!(
+        card.facts,
+        vec![
+            t::consent::card_switch_acting().to_owned(),
+            t::consent::card_switch_acting_unlocks().to_owned(),
+            t::consent::card_switch_until_restart().to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn the_vault_card_warns_that_it_opens_every_saved_secret() {
+    let off = Env {
+        vault_on: false,
+        ..env()
+    };
+    let card = ConsentCard::build(&switch_request("vault"), &off).expect("card");
+    assert!(card.facts[1].contains("every saved secret"));
+    assert!(card.blocked.is_none());
+    assert!(card.allow.enabled());
+}
+
+#[test]
+fn an_unknown_switch_is_not_a_switch_card() {
+    let card = ConsentCard::build(&switch_request("everything"), &env()).expect("card");
+    assert!(card.switch.is_none());
+    assert!(card.facts.is_empty());
+}
+
+#[test]
+fn allow_calls_the_switchs_own_op_with_the_id() {
+    use crate::inbox::model::switch_apply;
+    use notchling_local_api::ops;
+    assert_eq!(
+        switch_apply("c3", "acting"),
+        (
+            ops::SETTINGS_SET_ACTING,
+            json!({"on": true, "consentId": "c3"})
+        )
+    );
+    assert_eq!(
+        switch_apply("c3", "bridge"),
+        (ops::BRIDGE_SET, json!({"on": true, "consentId": "c3"}))
+    );
+    assert_eq!(
+        switch_apply("c3", "vault"),
+        (
+            ops::SETTINGS_SET_SWITCH,
+            json!({"switch": "vault", "on": true, "consentId": "c3"})
+        )
+    );
+}
