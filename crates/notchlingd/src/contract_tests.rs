@@ -16,6 +16,18 @@ fn the_table_has_every_code_once_and_every_reason_maps_to_one() {
         assert!(exit_of_reason(reason).is_some(), "{reason}");
     }
     assert_eq!(exit_of_reason("nothing"), None);
+    for mistake in [
+        "usage",
+        "bad_value",
+        "unknown_topic",
+        "unknown_key",
+        "key_reused",
+        "unknown_tool",
+        "unknown_pool",
+        "ambiguous_pool",
+    ] {
+        assert_eq!(exit_of_reason(mistake), Some(BAD_REQUEST), "{mistake}");
+    }
     assert_eq!(name_of(EXPIRED), "expired");
     assert_eq!(name_of(99), "failed");
 }

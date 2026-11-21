@@ -115,7 +115,8 @@ pub fn name_of(exit: i32) -> &'static str {
 
 pub fn exit_of_reason(reason: &str) -> Option<i32> {
     Some(match reason {
-        "usage" | "bad_value" | "unknown_topic" | "unknown_key" | "key_reused" => BAD_REQUEST,
+        "usage" | "bad_value" | "unknown_topic" | "unknown_key" | "key_reused" | "unknown_tool"
+        | "unknown_pool" | "ambiguous_pool" => BAD_REQUEST,
         "not_running" | "untrusted_daemon" | "old_daemon" | "timeout" => NOT_RUNNING,
         "switch_off" | "app_only" | "no_app" | "not_yet" | "never" | "internal_op"
         | "other_session" | "other_organization" | "no_session" | "needs_consent" | "other" => {
@@ -125,8 +126,7 @@ pub fn exit_of_reason(reason: &str) -> Option<i32> {
         "denied" | "cancelled" => DENIED,
         "expired" => EXPIRED,
         "withdrawn" | "already_answered" | "some_left" | "stale" | "signed_out" | "credits_out"
-        | "limit_reached" | "pool_full" | "unknown_tool" | "unknown_pool" | "ambiguous_pool"
-        | "failed" | "internal" => FAILED,
+        | "limit_reached" | "pool_full" | "failed" | "internal" => FAILED,
         _ => return None,
     })
 }

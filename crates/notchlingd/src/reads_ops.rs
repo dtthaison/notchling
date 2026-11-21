@@ -1,3 +1,4 @@
+use crate::account_ids::AccountIds;
 use crate::inbox_ops::InboxOps;
 use crate::limits_ops::LimitsOps;
 use crate::op_group::OpGroup;
@@ -9,7 +10,6 @@ use notchling_engine::organizations::{Kind, Organizations, PERSONAL_ID};
 use notchling_engine::providers::ProviderId;
 use notchling_local_api::{bound_identity, ops, AgentIdentity, ApiError, Caller, OpSpec, Tier};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -30,6 +30,7 @@ pub struct ReadsOps {
     providers: Arc<ProvidersOps>,
     limits: Arc<LimitsOps>,
     quota_dir: PathBuf,
+    ids: AccountIds,
     now: Clock,
 }
 
@@ -41,20 +42,6 @@ pub fn mask_email(email: &str) -> String {
     let dom: String = domain.chars().take(1).collect();
     let tld = domain.rsplit_once('.').map_or("", |(_, t)| t);
     format!("{first}***@{dom}***.{tld}")
-}
-
-const ACCOUNT_ID_SALT: &[u8] = b"notchling.accounts.summary.v1";
-
-pub fn opaque_account_id(provider: &str, raw: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(ACCOUNT_ID_SALT);
-    hasher.update([0u8]);
-    hasher.update(provider.as_bytes());
-    hasher.update([0u8]);
-    hasher.update(raw.as_bytes());
-    let digest = hasher.finalize();
-    let hex: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
-    format!("acct-{hex}")
 }
 
 fn no_session(extra: Value) -> Value {
@@ -102,7 +89,7 @@ impl ReadsOps {
         inbox: Arc<InboxOps>,
         providers: Arc<ProvidersOps>,
         limits: Arc<LimitsOps>,
-        quota_dir: PathBuf,
+        daemon_dir: &Path,
         now: Clock,
     ) -> ReadsOps {
         ReadsOps {
@@ -112,7 +99,8 @@ impl ReadsOps {
             inbox,
             providers,
             limits,
-            quota_dir,
+            quota_dir: daemon_dir.join("accounts"),
+            ids: AccountIds::in_dir(daemon_dir),
             now,
         }
     }
@@ -182,20 +170,24 @@ impl ReadsOps {
                 .accounts
                 .iter()
                 .filter(|a| self.orgs.resolve(kind, &a.id).id == org)
-                .map(|a| {
-                    json!({
-                        "id": opaque_account_id(&provider, &a.id),
+                .filter_map(|a| {
+                    Some(json!({
+                        "id": self.opaque_account_id(&provider, &a.id)?,
                         "name": mask_email(&a.email),
                         "organization": org,
                         "active": state.active_id.as_deref() == Some(a.id.as_str()),
                         "plan": a.plan,
                         "needsLogin": a.needs_login,
-                    })
+                    }))
                 })
                 .collect();
             tools.insert(tool.to_string(), json!(rows));
         }
         json!({"organization": org, "tools": tools})
+    }
+
+    pub fn opaque_account_id(&self, provider: &str, raw: &str) -> Option<String> {
+        self.ids.id(provider, raw)
     }
 
     pub fn account_for_opaque(&self, caller: &Caller, tool: &str, opaque: &str) -> Option<String> {
@@ -212,7 +204,7 @@ impl ReadsOps {
                     .accounts
                     .iter()
                     .filter(|a| self.orgs.resolve(kind, &a.id).id == org)
-                    .find(|a| opaque_account_id(&provider, &a.id) == opaque)
+                    .find(|a| self.opaque_account_id(&provider, &a.id).as_deref() == Some(opaque))
                     .map(|a| a.id.clone())
             })
     }
@@ -368,14 +360,19 @@ fn pick_pool(tool: &Value, wanted: &str) -> Value {
         .iter()
         .filter(|p| named(p).is_some_and(|n| n.contains(&wanted)))
         .collect();
+    let names =
+        |list: &[&Value]| -> Vec<Value> { list.iter().map(|p| p["name"].clone()).collect() };
     match near.as_slice() {
         [one] => (*one).clone(),
         [] if pools.is_empty() => json!({
             "usable": tool["usable"].as_bool().unwrap_or(false),
             "reason": tool["reason"],
         }),
-        [] => json!({"usable": false, "reason": "unknown_pool"}),
-        _ => json!({"usable": false, "reason": "ambiguous_pool"}),
+        [] => {
+            let all: Vec<&Value> = pools.iter().collect();
+            json!({"usable": false, "reason": "unknown_pool", "pools": names(&all)})
+        }
+        _ => json!({"usable": false, "reason": "ambiguous_pool", "pools": names(&near)}),
     }
 }
 
@@ -405,7 +402,11 @@ impl OpGroup for ReadsOps {
                     reply["tool"] = if reply["reason"] == json!("no_session") {
                         json!({"usable": false, "reason": "no_session"})
                     } else if found.is_null() {
-                        json!({"usable": false, "reason": "unknown_tool"})
+                        let known: Vec<&String> = reply["tools"]
+                            .as_object()
+                            .map(|m| m.keys().collect())
+                            .unwrap_or_default();
+                        json!({"usable": false, "reason": "unknown_tool", "tools": known})
                     } else {
                         found
                     };

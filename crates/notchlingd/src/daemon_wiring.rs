@@ -930,7 +930,7 @@ impl Wired {
                 self.inbox.clone(),
                 self.providers.clone(),
                 self.limits.clone(),
-                layout.data_dir.join("daemon").join("accounts"),
+                &layout.data_dir.join("daemon"),
                 Arc::new(notchling_engine::transcript::util::now_secs),
             )))
             .with_group(Arc::new(AwakeOps::new(self.awake.clone())))

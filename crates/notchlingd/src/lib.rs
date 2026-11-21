@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 
 mod account_history;
+mod account_ids;
 mod accounts_late;
 pub mod accounts_ops;
 mod accounts_signin;

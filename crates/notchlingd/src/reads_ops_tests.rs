@@ -169,7 +169,7 @@ fn rig_seen(tag: &str, registry: ProviderRegistry, claude_at: Option<f64>) -> Ri
         inbox,
         providers,
         Arc::new(limits),
-        tmp.path("quota"),
+        &tmp.path("daemon"),
         Arc::new(|| NOW),
     );
     let (work_dir, other_dir) = (
@@ -320,6 +320,8 @@ fn accounts_and_limits_answer_for_a_verified_session() {
     assert!(reply["tool"].get("usable").is_some());
     let reply = read(&rig, ops::LIMITS_SUMMARY, json!({"tool": "nope"}));
     assert_eq!(reply["tool"]["reason"], json!("unknown_tool"));
+    let known = reply["tool"]["tools"].as_array().unwrap();
+    assert!(known.contains(&json!("codex")), "{known:?}");
 }
 
 const PLANTED_OF_WORK: [&str; 8] = [
@@ -555,7 +557,15 @@ fn a_pool_matches_by_exact_name_first_then_by_one_substring_and_never_by_two() {
     let two = json!({"pools": [{"name": "Gemini Flash"}, {"name": "Gemini Pro"}]});
     assert_eq!(pick_pool(&two, "gemini")["reason"], json!("ambiguous_pool"));
     assert_eq!(pick_pool(&two, "gemini")["usable"], json!(false));
+    assert_eq!(
+        pick_pool(&two, "gemini")["pools"],
+        json!(["Gemini Flash", "Gemini Pro"])
+    );
     assert_eq!(pick_pool(&pools, "nope")["reason"], json!("unknown_pool"));
+    assert_eq!(
+        pick_pool(&pools, "nope")["pools"],
+        json!(["Gemini Flash", "Gemini", "Claude and GPT"])
+    );
 }
 
 #[test]
@@ -618,8 +628,9 @@ fn account_ids_in_the_summary_are_opaque_stable_and_resolve_back() {
     let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
     assert_ne!(ids[0], ids[1]);
     assert_eq!(
-        ids[0],
-        opaque_account_id(ProviderId::CLAUDE_CODE, "acc-work")
+        Some(ids[0].to_string()),
+        rig.ops
+            .opaque_account_id(ProviderId::CLAUDE_CODE, "acc-work")
     );
     assert_eq!(rows[0]["active"], json!(true));
     let again = read(&rig, ops::ACCOUNTS_SUMMARY, json!({}));
@@ -634,6 +645,9 @@ fn account_ids_in_the_summary_are_opaque_stable_and_resolve_back() {
         rig.ops.account_for_opaque(&caller(), "claude", "acc-work"),
         None
     );
-    let far = opaque_account_id(ProviderId::CLAUDE_CODE, "acc-far");
+    let far = rig
+        .ops
+        .opaque_account_id(ProviderId::CLAUDE_CODE, "acc-far")
+        .unwrap();
     assert_eq!(rig.ops.account_for_opaque(&caller(), "claude", &far), None);
 }
