@@ -78,3 +78,103 @@ fn running_time_comes_from_the_start() {
     assert_eq!(running_secs(None, 900.0), None);
     assert_eq!(running_secs(Some(0.0), 900.0), None);
 }
+
+#[test]
+fn only_a_loop_that_keeps_going_while_the_match_exists_waits_for_itself() {
+    assert!(!matches_itself("pgrep -f my-dev-server || npm run dev"));
+    assert!(!matches_itself(
+        "pkill -f old; pgrep -f old || ./run-server"
+    ));
+    assert!(!matches_itself(
+        "until pgrep -f my-server; do sleep 1; done && npm test"
+    ));
+    assert!(!matches_itself(
+        "while ! pgrep -f my-server; do sleep 1; done && npm test"
+    ));
+    assert!(matches_itself(
+        "until ! pgrep -f my-server; do sleep 1; done && npm test"
+    ));
+    assert!(matches_itself("while pgrep -f my-server; do sleep 1; done"));
+    assert_eq!(
+        looks_stuck("pgrep -f my-dev-server || npm run dev", Some(5)),
+        None
+    );
+}
+
+#[test]
+fn a_pgrep_scoped_to_a_parent_pidfile_group_session_or_terminal_cannot_match_itself() {
+    for scoped in [
+        "while pgrep -P 123 -f worker; do sleep 1; done",
+        "while pgrep -F app.pid -f worker; do sleep 1; done",
+        "while pgrep -g 55 -f worker; do sleep 1; done",
+        "while pgrep -s 55 -f worker; do sleep 1; done",
+        "while pgrep -t ttys001 -f worker; do sleep 1; done",
+        "while pgrep -vf worker; do sleep 1; done",
+        "while pgrep --parent 123 --full worker; do sleep 1; done",
+        "while pgrep --pidfile=app.pid --full worker; do sleep 1; done",
+    ] {
+        assert!(!matches_itself(scoped), "{scoped}");
+    }
+    assert!(matches_itself(
+        "while pgrep --uid me --full worker; do sleep 1; done"
+    ));
+}
+
+#[test]
+fn a_pattern_built_by_the_shell_or_not_a_regex_is_not_called_itself() {
+    for built in [
+        "while pgrep -f $(cat pidfile); do sleep 1; done",
+        "while pgrep -f \"${PATTERN}\"; do sleep 1; done",
+        "while pgrep -f \"$PATTERN\"; do sleep 1; done",
+        "while pgrep -f `cat name`; do sleep 1; done",
+        "while pgrep -f 'a(b'; do sleep 1; done",
+        "while pgrep -f 'zzz$'; do sleep 1; done",
+    ] {
+        assert!(!matches_itself(built), "{built}");
+    }
+}
+
+#[test]
+fn an_escaped_quote_stays_inside_a_double_quoted_pattern() {
+    let command = r#"while pgrep -f "say \"hi\" now"; do sleep 1; done"#;
+    assert_eq!(pgrep_patterns(command), vec![r#"say "hi" now"#]);
+    assert!(!matches_itself(command));
+    let plain = r#"while pgrep -f "a\\b"; do sleep 1; done"#;
+    assert_eq!(pgrep_patterns(plain), vec![r"a\b"]);
+}
+
+#[test]
+fn an_empty_quoted_argument_does_not_end_the_parse() {
+    for command in [
+        r#"while pgrep -u "" -f worker; do sleep 1; done"#,
+        "while pgrep -u '' -f worker; do sleep 1; done",
+    ] {
+        assert_eq!(pgrep_patterns(command), vec!["worker"], "{command}");
+        assert!(matches_itself(command), "{command}");
+    }
+    assert_eq!(
+        pgrep_patterns("while pgrep -f ''; do sleep 1; done"),
+        vec![""]
+    );
+}
+
+#[test]
+fn a_loop_followed_by_a_real_command_is_not_a_long_wait() {
+    let then_run = "until ! pgrep postgres; do sleep 1; done && ./run-app";
+    assert!(!is_wait_loop(then_run));
+    assert_eq!(looks_stuck(then_run, Some(STUCK_AFTER_S + 1)), None);
+    assert!(is_wait_loop(
+        "while pgrep vite; do sleep 1; done && echo ready"
+    ));
+    assert!(is_wait_loop("while pgrep vite; do sleep 1; done; true"));
+    assert!(is_wait_loop("while pgrep vite; do sleep 1; done"));
+}
+
+#[test]
+fn a_shape_is_the_same_whether_computed_or_cached() {
+    let shape = shape_of(SELF_LOOP);
+    assert!(shape.itself && shape.wait_loop);
+    assert_eq!(shape_of(SELF_LOOP), shape);
+    assert_eq!(stuck_by(shape, Some(1)), Some(Stuck::Itself));
+    assert_eq!(stuck_by(Shape::default(), Some(99_999)), None);
+}

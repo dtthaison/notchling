@@ -5,10 +5,11 @@ mod common;
 use common::{audit, home, notchling, scratch, Daemon};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const SESSION: &str = "5e5510aa-0000-4000-8000-000000000001";
 const STUCK_COMMAND: &str = "while pgrep -f shells-e2e-stuck-marker >/dev/null; do sleep 1; done";
@@ -36,17 +37,6 @@ fn fake_shell(script: &str, output: &Path) -> Child {
         .unwrap()
 }
 
-fn gone(child: &mut Child) -> bool {
-    let until = Instant::now() + Duration::from_secs(8);
-    while Instant::now() < until {
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    false
-}
-
 #[test]
 fn shells_helper_runs_commands_as_the_session_process() {
     let Ok(bin) = std::env::var("NL_SHELLS_E2E_BIN") else {
@@ -56,6 +46,15 @@ fn shells_helper_runs_commands_as_the_session_process() {
     std::io::stdin().lock().read_line(&mut go).unwrap();
     let steps: Vec<Vec<String>> =
         serde_json::from_str(&std::env::var("NL_SHELLS_E2E_STEPS").unwrap()).unwrap();
+    let spawn: Vec<(String, String)> =
+        serde_json::from_str(&std::env::var("NL_SHELLS_E2E_SPAWN").unwrap()).unwrap();
+    let kids: Vec<Child> = spawn
+        .iter()
+        .map(|(script, output)| fake_shell(script, Path::new(output)))
+        .collect();
+    std::thread::sleep(Duration::from_millis(500));
+    let pids: Vec<u32> = kids.iter().map(Child::id).collect();
+    println!("PIDS {}", json!(pids));
     for step in steps {
         let out = Command::new(&bin)
             .args(&step)
@@ -70,7 +69,12 @@ fn shells_helper_runs_commands_as_the_session_process() {
     }
 }
 
-fn as_session(root: &Path, home: &Path, steps: &[&[&str]]) -> Vec<Value> {
+fn as_session(
+    root: &Path,
+    home: &Path,
+    spawn: &[(&str, &Path)],
+    steps: &[&[&str]],
+) -> (Vec<u32>, Vec<Value>) {
     let claude_dir = root.join(".local/share/claude/versions/1");
     std::fs::create_dir_all(&claude_dir).unwrap();
     let claude = claude_dir.join("claude");
@@ -84,6 +88,16 @@ fn as_session(root: &Path, home: &Path, steps: &[&[&str]]) -> Vec<Value> {
         ])
         .env("NL_SHELLS_E2E_BIN", env!("CARGO_BIN_EXE_notchling"))
         .env("NL_SHELLS_E2E_STEPS", serde_json::to_string(steps).unwrap())
+        .env(
+            "NL_SHELLS_E2E_SPAWN",
+            serde_json::to_string(
+                &spawn
+                    .iter()
+                    .map(|(script, output)| (*script, output.to_string_lossy()))
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap(),
+        )
         .env("NOTCHLING_DATA_ROOT", root)
         .env("HOME", home)
         .stdin(Stdio::piped())
@@ -100,14 +114,42 @@ fn as_session(root: &Path, home: &Path, steps: &[&[&str]]) -> Vec<Value> {
     .unwrap();
     writeln!(parent.stdin.take().unwrap(), "go").unwrap();
     let reader = BufReader::new(parent.stdout.take().unwrap());
-    let steps: Vec<Value> = reader
-        .lines()
-        .map_while(Result::ok)
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+    let pids: Vec<u32> = lines
+        .iter()
+        .find_map(|line| line.split_once("PIDS ").map(|(_, text)| text.to_owned()))
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    let steps: Vec<Value> = lines
+        .iter()
         .filter_map(|line| line.split_once("STEP ").map(|(_, text)| text.to_owned()))
         .filter_map(|text| serde_json::from_str::<Value>(&text).ok())
         .collect();
     let _ = parent.wait();
-    steps
+    (pids, steps)
+}
+
+struct Cleanup(std::path::PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn running(pid: u32) -> bool {
+    Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .map(|out| {
+            let stat = String::from_utf8_lossy(&out.stdout);
+            !stat.trim().is_empty() && !stat.trim().starts_with('Z')
+        })
+        .unwrap_or(false)
+}
+
+fn kill_pid(pid: u32) {
+    let _ = Command::new("kill").arg(pid.to_string()).output();
 }
 
 fn parsed(step: &Value) -> Value {
@@ -119,20 +161,29 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
     let dir = scratch("shells-e2e");
     let root = dir.0.join("root");
     let home = home(&dir.0);
-    let fake = dir.0.join("fake");
+    let uid = std::fs::metadata(&dir.0).unwrap().uid();
+    let project = std::env::temp_dir()
+        .join(format!("claude-{uid}"))
+        .join(format!("nl-shells-e2e-{}", std::process::id()));
+    let _cleanup = Cleanup(project.clone());
+    let fake = project.join(SESSION).join("tasks");
     std::fs::create_dir_all(&fake).unwrap();
-    let (stuck_out, watch_out) = (fake.join("bstuck.output"), fake.join("bwatch.output"));
+    let (stuck_out, watch_out, stranger_out) = (
+        fake.join("bstuck.output"),
+        fake.join("bwatch.output"),
+        fake.join("bstranger.output"),
+    );
     let projects = root.join("claude/projects/-work");
     std::fs::create_dir_all(&projects).unwrap();
     let long_ago = "2020-01-01T00:00:00.000Z";
     std::fs::write(
         projects.join(format!("{SESSION}.jsonl")),
         launch_lines(1, STUCK_COMMAND, "bstuck", &stuck_out, long_ago)
-            + &launch_lines(2, WATCH_COMMAND, "bwatch", &watch_out, long_ago),
+            + &launch_lines(2, WATCH_COMMAND, "bwatch", &watch_out, long_ago)
+            + &launch_lines(3, WATCH_COMMAND, "bstranger", &stranger_out, long_ago),
     )
     .unwrap();
-    let mut stuck = fake_shell(STUCK_PROCESS, &stuck_out);
-    let mut watch = fake_shell(WATCH_COMMAND, &watch_out);
+    let mut stranger = fake_shell(WATCH_COMMAND, &stranger_out);
     std::thread::sleep(Duration::from_millis(500));
     let _daemon = Daemon::start(&root, &home);
 
@@ -143,22 +194,26 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
     let (code, out, _) = notchling(&root, &home, &["shells", "stop", "bstuck", "--json"]);
     assert_eq!(code, 4, "{out}");
     assert!(
-        stuck.try_wait().unwrap().is_none(),
+        stranger.try_wait().unwrap().is_none(),
         "an unverified caller stops nothing"
     );
 
-    let steps = as_session(
+    let (pids, steps) = as_session(
         &root,
         &home,
+        &[(STUCK_PROCESS, &stuck_out), (WATCH_COMMAND, &watch_out)],
         &[
             &["shells", "--json"],
             &["shells", "stop", "bstuck", "--json"],
             &["shells", "stop", "bnope", "--json"],
             &["shells", "--json"],
             &["shells"],
+            &["shells", "stop", "bstranger", "--json"],
         ],
     );
-    assert_eq!(steps.len(), 5, "{steps:?}");
+    assert_eq!(steps.len(), 6, "{steps:?}");
+    assert_eq!(pids.len(), 2, "{pids:?}");
+    let (stuck_pid, watch_pid) = (pids[0], pids[1]);
 
     assert_eq!(steps[0]["code"], 0, "{:?}", steps[0]);
     let first = parsed(&steps[0]);
@@ -179,11 +234,11 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
     assert_eq!(steps[1]["code"], 0, "{:?}", steps[1]);
     assert_eq!(parsed(&steps[1])["stopped"], true);
     assert!(
-        gone(&mut stuck),
+        !running(stuck_pid),
         "the stuck loop and its process group ended"
     );
     assert!(
-        watch.try_wait().unwrap().is_none(),
+        running(watch_pid),
         "another shell of the session is left running"
     );
 
@@ -198,8 +253,15 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
     assert!(text.contains("bwatch  running"), "{text}");
     assert!(text.contains("bstuck  ended"), "{text}");
 
+    assert_eq!(steps[5]["code"], 0, "{:?}", steps[5]);
+    assert_eq!(parsed(&steps[5])["stopped"], false);
+    assert!(
+        stranger.try_wait().unwrap().is_none(),
+        "a process outside the session's Claude Code is never signalled"
+    );
+
     let acts: Vec<(String, String)> = audit::wait_until(&root, |all| {
-        all.iter().filter(|l| l["kind"] == "agent.called").count() >= 3
+        all.iter().filter(|l| l["kind"] == "agent.called").count() >= 4
     })
     .iter()
     .filter(|l| l["kind"] == "agent.called")
@@ -212,7 +274,7 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
     .collect();
     assert_eq!(
         acts.iter().filter(|(op, _)| op == "shells.stop").count(),
-        3,
+        4,
         "{acts:?}"
     );
     assert!(acts.contains(&("shells.stop".to_string(), "ok".to_string())));
@@ -221,6 +283,7 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
         "reads are not recorded"
     );
 
-    let _ = watch.kill();
-    let _ = watch.wait();
+    kill_pid(watch_pid);
+    let _ = stranger.kill();
+    let _ = stranger.wait();
 }

@@ -4,17 +4,20 @@ use notchling_engine::transcript::conversation;
 use notchling_engine::transcript::locate::find_transcript;
 use notchling_engine::transcript::model::{BackgroundShell, Conversation};
 use notchling_engine::transcript::shells::{self, ShellState};
-use notchling_engine::transcript::shells_stop::{self, Outcome, GRACE};
+use notchling_engine::transcript::shells_guard;
+use notchling_engine::transcript::shells_stop::{self, Outcome, Refusal, StopRequest, GRACE};
 use notchling_engine::transcript::shells_stuck;
 use notchling_local_api::{
     bound_identity, ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec,
 };
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub type Writers = Arc<dyn Fn(&str) -> Vec<i32> + Send + Sync>;
-pub type Stopper = Arc<dyn Fn(&str, Duration) -> Outcome + Send + Sync>;
+pub type Writers = Arc<dyn Fn(&[String]) -> HashMap<String, Vec<i32>> + Send + Sync>;
+pub type Stopper = Arc<dyn Fn(&StopRequest, Duration) -> Result<Outcome, Refusal> + Send + Sync>;
+pub type Owner = Arc<dyn Fn(&Caller, &str) -> Option<u32> + Send + Sync>;
 pub type Now = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type Who = Arc<dyn Fn(&Caller) -> AgentIdentity + Send + Sync>;
 
@@ -24,6 +27,7 @@ pub struct ShellsOps {
     stopper: Stopper,
     now: Now,
     who: Option<Who>,
+    owner: Owner,
 }
 
 fn clock() -> f64 {
@@ -41,19 +45,39 @@ fn forbidden_no_session() -> ApiError {
     .with_reason("no_session")
 }
 
+fn refused(refusal: Refusal) -> ApiError {
+    let words = match refusal {
+        Refusal::NotAShellOutput => "That isn't this shell's own output file.",
+        Refusal::OwnerUnknown => {
+            "Notchling can't tell which Claude Code process owns this session."
+        }
+    };
+    ApiError::new(ErrorCode::Forbidden, words).with_reason(refusal.reason())
+}
+
 fn not_here() -> ApiError {
     ApiError::bad_request("No shell with that id in this session.").with_reason("other_session")
 }
 
 impl ShellsOps {
     pub fn new(roots: Roots) -> ShellsOps {
+        let found = roots.clone();
         ShellsOps {
             roots,
-            writers: Arc::new(shells_stop::writers_of),
-            stopper: Arc::new(shells_stop::stop_output),
+            writers: Arc::new(shells_stop::writers_of_many),
+            stopper: Arc::new(shells_stop::stop_shell),
             now: Arc::new(clock),
             who: None,
+            owner: Arc::new(move |_, session| {
+                shells_stop::process_table()
+                    .and_then(|table| shells_guard::session_owner(&found, session, &table))
+            }),
         }
+    }
+
+    pub fn with_owner(mut self, owner: Owner) -> ShellsOps {
+        self.owner = owner;
+        self
     }
 
     pub fn with_seams(
@@ -94,8 +118,15 @@ impl ShellsOps {
             .map(|path| conversation::read(&path))
     }
 
-    fn row(&self, shell: &BackgroundShell, c: &Conversation) -> Value {
-        let state = shells::state(shell, &c.finished_agents, &|p| (self.writers)(p));
+    fn row(
+        &self,
+        shell: &BackgroundShell,
+        c: &Conversation,
+        writers: &HashMap<String, Vec<i32>>,
+    ) -> Value {
+        let state = shells::state(shell, &c.finished_agents, &|p| {
+            writers.get(p).cloned().unwrap_or_default()
+        });
         let (running, status) = match &state {
             ShellState::Running => (true, "running".to_string()),
             ShellState::Ended(how) => (false, how.clone()),
@@ -124,7 +155,25 @@ impl ShellsOps {
         let Some(c) = self.conversation_of(&session, folder.as_deref()) else {
             return Ok(json!({"shells": []}));
         };
-        let rows: Vec<Value> = c.shells.iter().rev().map(|s| self.row(s, &c)).collect();
+        let mut paths: Vec<String> = c
+            .shells
+            .iter()
+            .filter(|s| !c.finished_agents.contains_key(&s.id) && !s.output_path.is_empty())
+            .map(|s| s.output_path.clone())
+            .collect();
+        paths.sort();
+        paths.dedup();
+        let writers = if paths.is_empty() {
+            HashMap::new()
+        } else {
+            (self.writers)(&paths)
+        };
+        let rows: Vec<Value> = c
+            .shells
+            .iter()
+            .rev()
+            .map(|s| self.row(s, &c, &writers))
+            .collect();
         Ok(json!({"shells": rows}))
     }
 
@@ -142,7 +191,13 @@ impl ShellsOps {
         if c.finished_agents.contains_key(&shell.id) || shell.output_path.is_empty() {
             return Ok(json!({"id": id, "stopped": false, "state": "ended"}));
         }
-        let outcome = (self.stopper)(&shell.output_path, GRACE);
+        let request = StopRequest {
+            session: &session,
+            id: &shell.id,
+            path: &shell.output_path,
+            owner: (self.owner)(caller, &session),
+        };
+        let outcome = (self.stopper)(&request, GRACE).map_err(refused)?;
         if outcome.survivors > 0 {
             return Err(ApiError::new(
                 ErrorCode::Failed,

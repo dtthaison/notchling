@@ -856,6 +856,7 @@ impl Wired {
             &self.names,
             &self.events,
         );
+        let owner_of = identity.clone();
         let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
             .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
@@ -870,7 +871,13 @@ impl Wired {
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
             .with_group(Arc::new(capabilities_ops::CapabilitiesOps::wired(self)))
-            .with_group(Arc::new(crate::shells_ops::ShellsOps::new(layout.roots())))
+            .with_group(Arc::new(
+                crate::shells_ops::ShellsOps::new(layout.roots()).with_owner(Arc::new(
+                    move |caller, session| {
+                        caller.pid.and_then(|pid| owner_of.owner_pid(pid, session))
+                    },
+                )),
+            ))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())

@@ -65,6 +65,7 @@ pub fn shell_rows_with_fan(
                     running: status == Status::Working,
                     mark,
                     output_path: shell.output_path.clone(),
+                    shape: shells_stuck::shape_of(&shell.command),
                 }
             })
             .collect(),
@@ -101,7 +102,7 @@ pub fn stuck_of(row: &ShellRow, now_s: i64) -> Option<Stuck> {
         return None;
     }
     let running = shells_stuck::running_secs(row.started.map(|s| s as f64), now_s as f64);
-    shells_stuck::looks_stuck(&row.command, running)
+    shells_stuck::stuck_by(row.shape, running)
 }
 
 pub fn stuck_words(stuck: Stuck) -> String {

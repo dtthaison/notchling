@@ -1,4 +1,5 @@
 use notchling_engine::transcript::model::{BackgroundShell, Conversation, TaskStatus};
+use notchling_engine::transcript::shells_stuck;
 use notchling_kit::ui::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 use notchling_locale as t;
@@ -52,6 +53,7 @@ pub struct ShellRow {
     pub running: bool,
     pub mark: Mark,
     pub output_path: String,
+    pub shape: shells_stuck::Shape,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

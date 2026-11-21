@@ -523,7 +523,7 @@ fn stop_link(
     a: Appearance,
     chat: WeakEntity<ChatView>,
 ) -> Stateful<Div> {
-    let path = s.output_path.clone();
+    let (id, path) = (s.id.clone(), s.output_path.clone());
     div()
         .id(SharedString::from(format!("shell-stop-{index}")))
         .cursor_pointer()
@@ -532,7 +532,8 @@ fn stop_link(
                 .line_height(px(ROW_LINE)),
         )
         .on_click(move |_, _, cx| {
-            chat.update(cx, |this, cx| this.stop_shell(&path, cx)).ok();
+            chat.update(cx, |this, cx| this.stop_shell(&id, &path, cx))
+                .ok();
         })
 }
 

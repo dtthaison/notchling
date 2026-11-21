@@ -517,3 +517,42 @@ fn a_root_that_is_no_app_bundle_is_named_as_it_is_and_stays_unverified() {
         assert!(!who.verified && who.session.is_none());
     }
 }
+
+fn owner(home: &Home, table: Table, launches: Launches, pid: u32, session: &str) -> Option<u32> {
+    Identifier::new(
+        Roots::new(&home.0, &home.0.join("data")),
+        Arc::new(table),
+        Arc::new(Mutex::new(json!([]))),
+        salt(),
+        launches,
+    )
+    .with_own_exe(PathBuf::from("/Applications/Notchling.app/notchling"))
+    .owner_pid(pid, session)
+}
+
+#[test]
+fn the_owner_is_the_claude_process_of_the_callers_own_session() {
+    let h = home("owner", &[(800, "sess-a")]);
+    let exe = h.0.join(".local/share/claude/versions/2.1.0/claude");
+    let none = Launches::default;
+    assert_eq!(owner(&h, lineage(&exe), none(), 900, "sess-a"), Some(800));
+    assert_eq!(owner(&h, lineage(&exe), none(), 900, "sess-b"), None);
+    assert_eq!(
+        owner(&h, lineage(Path::new("/tmp/claude")), none(), 900, "sess-a"),
+        None
+    );
+}
+
+#[test]
+fn a_launched_sessions_owner_is_the_launched_process() {
+    let h = home("owner-launch", &[]);
+    let launches = Launches::default();
+    launches.register(700, 5_000, AgentTool::Claude, "sess-l");
+    let mut t = lineage(Path::new("/bin/zsh"));
+    t.starts.insert(700, 5_000);
+    assert_eq!(
+        owner(&h, t.clone(), launches.clone(), 900, "sess-l"),
+        Some(700)
+    );
+    assert_eq!(owner(&h, t, launches, 900, "sess-other"), None);
+}
