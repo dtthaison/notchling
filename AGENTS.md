@@ -4,6 +4,10 @@ Notchling is a macOS menu bar app that shows Claude Code, Codex and Antigravity 
 
 Claude Code loads this file in every session through `CLAUDE.md`, which holds only `@AGENTS.md` (no other `CLAUDE*.md`: `GUARD-CLAUDE-MD`). Keep it short and import nothing: details go in the files of the index below; read the one for your change first.
 
+## Agents first
+
+Notchling is infrastructure that helps agents work well, and people too. Every feature works for an agent as well as through the app: a `notchling` command and an agent-tier op, with `--json`. That covers changing a setting, adding or updating a Vault secret, adding a machine or an account, reading notifications and the Inbox, connecting the phone, running a command on a machine and starting a session. Where the user must say yes (accounts, secrets, anything outward-facing), the agent asks on an Inbox or Ask card and waits. It is never refused outright and never left without a way to ask. A feature without its agent path isn't done (docs/goals.md, goal 6).
+
 ## Build and test
 
 ```sh
