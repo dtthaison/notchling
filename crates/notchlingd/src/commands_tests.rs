@@ -188,6 +188,14 @@ fn every_row_lists_the_codes_its_failures_can_return() {
     }
 }
 
+#[test]
+fn the_commands_that_wait_can_run_out_of_time_and_say_so() {
+    for command in ["ask", "asks"] {
+        let row = COMMANDS.iter().find(|r| r.command == command).unwrap();
+        assert!(row.exits.contains(&124), "{command} can exit 124");
+    }
+}
+
 fn sorted(value: &Value) -> Value {
     match value {
         Value::Object(map) => {

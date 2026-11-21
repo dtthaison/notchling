@@ -29,7 +29,7 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling cluster join --token-stdin [--json]` | `cluster.join` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling cluster reach <addr> <port>` | none | none | 0 1 2 |
 | `notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>` | `ask.open` (agent, acts), `ask.wait` (agent) | none | 0 1 2 3 4 5 124 |
-| `notchling asks [--wait] [--json]` | `ask.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling asks [--wait] [--json]` | `ask.mine` (agent) | none | 0 1 2 3 4 124 |
 | `notchling answer <id> (--choice <n> | -- <text>) [--json]` | `ask.answer` (agent, acts) | own_free | 0 1 2 3 4 |
 | `notchling help [--json]` | none | none | 0 2 |
 | `notchling capabilities [--json] [--socket <path>]` | `daemon.capabilities` (agent) | none | 0 1 2 3 4 |

@@ -318,17 +318,21 @@ fn show_row(env: &mut Env, row: &Value) {
 }
 
 pub(crate) fn asks(link: &mut dyn AskLink, args: &AsksArgs, env: &mut Env) -> i32 {
-    let call = if args.wait {
-        json!({"waitMs": WAIT_MS_MAX})
+    let deadline = if args.wait {
+        env.delegate_deadline
+            .map(|delegate| delegate.saturating_sub(DEADLINE_MARGIN_MS))
     } else {
-        json!({})
+        None
     };
     let mut backoff = Backoff::new();
     let rows = loop {
         let reply = if args.wait {
-            persistent(link, env, &mut backoff, ops::ASK_MINE, &call, None)
+            let wait_ms =
+                remaining(env, deadline).map_or(WAIT_MS_MAX, |left| left.clamp(0, WAIT_MS_MAX));
+            let call = json!({"waitMs": wait_ms});
+            persistent(link, env, &mut backoff, ops::ASK_MINE, &call, deadline)
         } else {
-            match link.call(ops::ASK_MINE, &call, CALL_TIMEOUT) {
+            match link.call(ops::ASK_MINE, &json!({}), CALL_TIMEOUT) {
                 Ok(reply) => Ok(reply),
                 Err(LinkError::Down) => {
                     let failure = Failure::not_running().with_op(ops::ASK_MINE);

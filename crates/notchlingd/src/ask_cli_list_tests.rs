@@ -47,6 +47,47 @@ fn ask_arguments() {
 }
 
 #[test]
+fn asks_wait_stops_late_at_its_jobs_deadline_with_exit_124() {
+    for json in [false, true] {
+        let mut rig = Rig::new();
+        rig.delegate = Some(T0 + DEADLINE_MARGIN_MS + 1_500);
+        let mut link = Fake::new(
+            &rig.clock,
+            vec![
+                Err(LinkError::Down),
+                Err(LinkError::Down),
+                Err(LinkError::Down),
+                Ok(json!([row("q1", None, None)])),
+            ],
+        );
+        let mut flags = vec!["--wait"];
+        if json {
+            flags.push("--json");
+        }
+        let args = parse_asks(&words(&flags)).unwrap();
+        assert_eq!(rig.run(|env| asks(&mut link, &args, env)), 124, "{flags:?}");
+        let waits: Vec<i64> = link
+            .of("ask.mine")
+            .iter()
+            .map(|a| a["waitMs"].as_i64().unwrap())
+            .collect();
+        assert_eq!(waits.len(), 2, "{flags:?}");
+        assert_eq!(waits[0], 1_500, "the first wait is what is left of the job");
+        assert_eq!(*rig.sleeps.borrow(), [1_000, 500], "{flags:?}");
+        if json {
+            assert_eq!(rig.stderr(), "");
+            let v: Value = serde_json::from_str(rig.stdout().trim()).unwrap();
+            assert_eq!(v["error"]["exit"], 124);
+            assert_eq!(v["error"]["code"], "expired");
+            assert_eq!(v["error"]["op"], "ask.mine");
+        } else {
+            assert_eq!(rig.stdout(), "");
+            assert_eq!(rig.stderr(), "No answer in time. (expired)\n");
+        }
+    }
+}
+
+#[test]
 fn answer_arguments() {
     let a = parse_answer(&words(&["q1", "--choice", "2"])).unwrap();
     assert_eq!((a.id.as_str(), a.choice, a.text), ("q1", Some(2), None));

@@ -335,7 +335,7 @@ pub const COMMANDS: &[Row] = &[
         &[with_switch(read("ask.mine"), "acting")],
         "none",
         true,
-        READ_EXITS,
+        &[0, 1, 2, 3, 4, 124],
         "notchling-ask",
     ),
     row(

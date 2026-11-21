@@ -1,4 +1,5 @@
 use super::{args_of, check, run_remote};
+use crate::contract::{self, Failure};
 use notchling_local_api::{ops, ApiError, ClientError, ErrorCode};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -295,4 +296,41 @@ fn without_json_every_stop_ends_its_line_with_the_codes_name() {
         "{}",
         failed.err
     );
+}
+
+#[test]
+fn under_json_a_remote_reply_that_is_already_an_error_object_is_not_wrapped_again() {
+    let outcome = json!({"tool": "agy", "ok": false, "error": "boom"});
+    let failed = Failure::failed("The job failed.").to_value_with(outcome.clone());
+    let expired = Failure::new(contract::EXPIRED, "expired", "The job ran out of time.").to_value();
+    let usage = Failure::usage("--folder is needed").to_value();
+    for (exit, sent) in [(1, failed.clone()), (124, expired), (2, usage)] {
+        let reply = json!({
+            "job": "j-6", "state": "failed", "exit": exit, "out": format!("{sent}\n"), "err": "",
+        });
+        let got = run(&["agy", "--json", "--", "x"], "worker", Ok(reply));
+        assert_eq!(got.code, exit);
+        assert_eq!(got.err, "", "nothing on stderr under --json");
+        assert_eq!(only_json(&got.out), sent, "exit {exit} is passed through");
+    }
+    let reply = json!({
+        "job": "j-6", "state": "failed", "exit": 1, "out": format!("{failed}\n"), "err": "",
+    });
+    let got = run(&["agy", "--json", "--", "x"], "worker", Ok(reply));
+    assert_eq!(only_json(&got.out)["result"], outcome);
+}
+
+#[test]
+fn without_json_a_remote_failure_line_is_not_printed_twice() {
+    for (exit, err) in [
+        (1, "Agy failed.\nThe job failed. (failed)\n"),
+        (124, "The job ran out of time. (expired)\n"),
+        (2, "--folder is needed (bad_request)\n"),
+    ] {
+        let reply = json!({"job": "j-7", "state": "failed", "exit": exit, "out": "", "err": err});
+        let got = run(&["agy", "--", "x"], "worker", Ok(reply));
+        assert_eq!(got.code, exit);
+        assert_eq!(got.err, err, "exit {exit}");
+        assert_eq!(got.out, "");
+    }
 }

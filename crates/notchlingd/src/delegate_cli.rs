@@ -130,12 +130,40 @@ fn text_of(bytes: Vec<u8>) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+fn contract_object(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
+    };
+    value.get("error").is_some_and(|error| {
+        error.get("exit").is_some_and(Value::is_i64)
+            && error.get("code").is_some_and(Value::is_string)
+    })
+}
+
+fn names_the_code(err: &str, code: i32) -> bool {
+    err.trim_end()
+        .lines()
+        .next_back()
+        .is_some_and(|line| line.ends_with(&format!(" ({})", contract::name_of(code))))
+}
+
 pub fn conclude(
     code: i32,
     (out, err): (&str, &str),
     json: bool,
     (to_out, to_err): (&mut dyn Write, &mut dyn Write),
 ) -> i32 {
+    if code != contract::OK {
+        if json && contract_object(out) {
+            let _ = writeln!(to_out, "{}", out.trim());
+            return code;
+        }
+        if !json && names_the_code(err, code) {
+            let _ = write!(to_out, "{out}");
+            let _ = write!(to_err, "{err}");
+            return code;
+        }
+    }
     match code {
         contract::OK => {
             let _ = write!(to_out, "{out}");
@@ -175,6 +203,14 @@ pub fn conclude(
     }
 }
 
+fn listing_failure(args: &[String]) -> Failure {
+    if notchling_engine::delegate::role_models::wants_for(args) {
+        Failure::failed("No model is picked for that role.")
+    } else {
+        Failure::failed("The models couldn't be listed.")
+    }
+}
+
 fn listing(args: &[String], json: bool, deps: &notchling_engine::delegate::deps::Deps) -> i32 {
     let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
     let mut out = Vec::new();
@@ -191,8 +227,7 @@ fn listing(args: &[String], json: bool, deps: &notchling_engine::delegate::deps:
         }
         contract::BAD_REQUEST => Failure::usage(text).report(json),
         _ => {
-            let failure =
-                Failure::failed("No model is picked for that role.").with_human(text.clone());
+            let failure = listing_failure(&args).with_human(text.clone());
             if json {
                 let value = match serde_json::from_str::<Value>(&text) {
                     Ok(listing) => failure.to_value_with(listing),
@@ -225,6 +260,32 @@ mod tests {
             Some((PathBuf::from("/home/me"), PathBuf::from("/data/Notchling")))
         })
         .unwrap()
+    }
+
+    fn words(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_failed_role_lookup_says_no_model_is_picked() {
+        for args in [
+            words(&["--for", "review-final"]),
+            words(&["--for=review-final"]),
+        ] {
+            assert_eq!(
+                listing_failure(&args).message,
+                "No model is picked for that role."
+            );
+        }
+    }
+
+    #[test]
+    fn any_other_listing_failure_does_not_blame_a_role() {
+        for args in [words(&[]), words(&["codex"]), words(&["agy"])] {
+            let failure = listing_failure(&args);
+            assert_eq!(failure.exit, contract::FAILED);
+            assert_eq!(failure.message, "The models couldn't be listed.");
+        }
     }
 
     #[test]
