@@ -192,3 +192,53 @@ fn watch_rejects_an_unknown_topic_and_a_zero_count() {
         assert_eq!(out.status.code(), Some(2), "{args:?}");
     }
 }
+
+#[test]
+fn watch_rejects_an_empty_until_and_one_no_topic_can_reach() {
+    let dir = scratch("watch-until-usage");
+    let root = dir.0.as_path();
+    let empty: &[&str] = &["watch", "--until", ""];
+    let public: &[&str] = &["watch", "--topic", "settings.switch", "--until", "applied"];
+    for args in [empty, public] {
+        let out = notchling(root).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+    }
+}
+
+#[test]
+fn a_shell_that_waits_for_a_state_is_refused_instead_of_hanging() {
+    let dir = scratch("watch-until-shell");
+    let root = dir.0.as_path();
+    let _daemon = start_daemon(root);
+    let started = Instant::now();
+    let out = notchling(root)
+        .args(["watch", "--until", "applied", "--timeout", "6", "--json"])
+        .output()
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(out.status.code(), Some(4));
+    let error: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(error["error"]["reason"], "no_session", "{error}");
+}
+
+#[test]
+fn a_huge_timeout_is_no_timeout_and_never_a_panic() {
+    let dir = scratch("watch-huge-timeout");
+    let root = dir.0.as_path();
+    let _daemon = start_daemon(root);
+    let mut child = watch(
+        root,
+        &[
+            "--topic",
+            "settings.switch",
+            "--count",
+            "1",
+            "--timeout",
+            "18446744073709551615",
+        ],
+    );
+    assert_eq!(flip_until_exit(root, &mut child), 0);
+    let (out, err) = output_of(child);
+    assert!(err.is_empty(), "{err}");
+    assert_eq!(out.lines().count(), 1, "{out}");
+}

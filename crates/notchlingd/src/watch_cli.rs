@@ -47,7 +47,13 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     found.push(topic);
                 }
             }
-            "--until" => until = Some(value("--until")?).filter(|s| !s.is_empty()),
+            "--until" => {
+                let state = value("--until")?;
+                if state.is_empty() {
+                    return Err(format!("--until needs a state.\n{USAGE}"));
+                }
+                until = Some(state);
+            }
             "--count" => {
                 let n: u64 = value("--count")?
                     .parse()
@@ -68,6 +74,11 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         }
     }
     let explicit = !found.is_empty();
+    if until.is_some() && explicit && found.iter().all(|t| !t.starts_with(topics::MINE_PREFIX)) {
+        return Err(format!(
+            "--until needs mine.consents or mine.asks: settings events carry no state.\n{USAGE}"
+        ));
+    }
     let topics = if explicit {
         found
     } else {
@@ -129,7 +140,10 @@ fn subscribe(
     match client.subscribe(&list) {
         Ok(()) => Ok(client),
         Err(ClientError::Api(e))
-            if e.code == ErrorCode::Forbidden && !args.explicit && !public_only =>
+            if e.code == ErrorCode::Forbidden
+                && !args.explicit
+                && !public_only
+                && args.until.is_none() =>
         {
             Err((Failure::from_api(None, e), true))
         }
@@ -145,6 +159,40 @@ fn open(args: &Args) -> Result<notchling_local_api::Client, Failure> {
     }
 }
 
+pub fn deadline(now: Instant, timeout: Option<Duration>) -> Option<Instant> {
+    timeout.and_then(|t| now.checked_add(t))
+}
+
+fn retryable(failure: &Failure) -> bool {
+    contract::lost(failure) || failure.reason == "timeout"
+}
+
+pub fn reopen<T>(
+    mut open: impl FnMut() -> Result<T, Failure>,
+    end: Option<Instant>,
+    step: &mut usize,
+    pause: impl Fn(usize) -> Duration,
+) -> Result<Option<T>, Failure> {
+    let passed = || end.is_some_and(|e| Instant::now() >= e);
+    loop {
+        if passed() {
+            return Ok(None);
+        }
+        std::thread::sleep(pause(*step).min(end.map_or(Duration::MAX, |e| {
+            e.saturating_duration_since(Instant::now())
+        })));
+        *step += 1;
+        if passed() {
+            return Ok(None);
+        }
+        match open() {
+            Ok(fresh) => return Ok(Some(fresh)),
+            Err(failure) if retryable(&failure) => {}
+            Err(failure) => return Err(failure),
+        }
+    }
+}
+
 pub fn run(args: &[String]) -> i32 {
     let json = contract::wants_json(args);
     let parsed = match parse(args) {
@@ -155,7 +203,7 @@ pub fn run(args: &[String]) -> i32 {
         Ok(c) => c,
         Err(failure) => return failure.report(json),
     };
-    let end = parsed.timeout.map(|t| Instant::now() + t);
+    let end = deadline(Instant::now(), parsed.timeout);
     let mut seen: u64 = 0;
     let mut step = 0usize;
     let mut out = std::io::stdout();
@@ -183,19 +231,13 @@ pub fn run(args: &[String]) -> i32 {
                 }
             }
             Ok(None) => {}
-            Err(e) if contract::transient(&e) => loop {
-                if end.is_some_and(|e| Instant::now() >= e) {
-                    break;
+            Err(e) if contract::transient(&e) => {
+                match reopen(|| open(&parsed), end, &mut step, contract::pause) {
+                    Ok(Some(fresh)) => client = fresh,
+                    Ok(None) => {}
+                    Err(failure) => return failure.report(json),
                 }
-                std::thread::sleep(contract::pause(step).min(end.map_or(Duration::MAX, |e| {
-                    e.saturating_duration_since(Instant::now())
-                })));
-                step += 1;
-                if let Ok(fresh) = open(&parsed) {
-                    client = fresh;
-                    break;
-                }
-            },
+            }
             Err(e) => return Failure::from_client(Some("events.subscribe"), e).report(json),
         }
     }

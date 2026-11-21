@@ -446,6 +446,8 @@ mod log_ops_tests;
 #[cfg(test)]
 mod log_retention_tests;
 #[cfg(test)]
+mod mine_cli_tests;
+#[cfg(test)]
 mod models_ops_tests;
 #[cfg(test)]
 mod organizations_ops_tests;
@@ -513,6 +515,8 @@ mod versions_soak_tests;
 mod versions_update_tests;
 #[cfg(test)]
 mod wake_loop_tests;
+#[cfg(test)]
+mod watch_cli_tests;
 
 use cli::{Command, ServiceAction};
 use layout::Layout;

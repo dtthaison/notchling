@@ -314,6 +314,16 @@ impl Session {
             return Err(ApiError::bad_request("This topic is not available yet.")
                 .with_data(serde_json::json!({"reason": "not_yet", "phase": reserved})));
         }
+        let known = self.shared.handler.topics();
+        if let Some(bad) = subscribe
+            .topics
+            .iter()
+            .find(|t| !known.contains(&t.as_str()) && !topics::SCOPED.contains(&t.as_str()))
+        {
+            return Err(
+                ApiError::bad_request(format!("no topic named {bad}")).with_reason("unknown_topic")
+            );
+        }
         let owner = self
             .identity
             .as_ref()
@@ -332,14 +342,6 @@ impl Session {
                 "Only an agent inside a Notchling session can follow its own topics.",
             )
             .with_reason("no_session"));
-        }
-        let known = self.shared.handler.topics();
-        if let Some(bad) = subscribe
-            .topics
-            .iter()
-            .find(|t| !known.contains(&t.as_str()) && !topics::SCOPED.contains(&t.as_str()))
-        {
-            return Err(ApiError::bad_request(format!("no topic named {bad}")));
         }
         let app_only = subscribe
             .topics

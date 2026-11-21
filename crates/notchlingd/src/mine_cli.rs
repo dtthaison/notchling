@@ -76,7 +76,7 @@ pub fn parse(read: Read, args: &[String]) -> Result<Args, String> {
     Ok(out)
 }
 
-fn activity_args(args: &Args, kinds: &[&str]) -> Value {
+pub(crate) fn activity_args(args: &Args, kinds: &[&str]) -> Value {
     let mut out = Map::new();
     let mut names: Vec<Value> = args.kinds.iter().map(|k| json!(k)).collect();
     names.extend(kinds.iter().map(|k| json!(k)));
@@ -99,13 +99,26 @@ fn text_of(row: &Value, key: &str) -> String {
         .to_owned()
 }
 
-fn lines(read: Read, reply: &Value) -> Vec<String> {
-    let rows = reply["rows"].as_array().cloned().unwrap_or_default();
+fn activity_line(row: &Value) -> String {
+    format!(
+        "{}  {}  {}",
+        row["time_ms"],
+        text_of(row, "event"),
+        text_of(row, "result")
+    )
+}
+
+pub(crate) fn lines(read: Read, reply: &Value) -> Vec<String> {
     if reply["reason"] == json!("no_session") {
         return vec!["This command reads the calling session's own data; none here.".to_owned()];
     }
+    let rows = reply["rows"].as_array().cloned().unwrap_or_default();
+    let events = match read {
+        Read::Receipts => reply["events"].as_array().cloned().unwrap_or_default(),
+        _ => Vec::new(),
+    };
     let mut out: Vec<String> = Vec::new();
-    if rows.is_empty() {
+    if rows.is_empty() && events.is_empty() {
         out.push("Nothing.".to_owned());
     }
     for row in &rows {
@@ -122,12 +135,7 @@ fn lines(read: Read, reply: &Value) -> Vec<String> {
                 text_of(row, "state"),
                 text_of(row, "why")
             ),
-            Read::Activity => format!(
-                "{}  {}  {}",
-                row["time_ms"],
-                text_of(row, "event"),
-                text_of(row, "result")
-            ),
+            Read::Activity => activity_line(row),
             Read::Prompts => format!(
                 "{}  {}  {}",
                 text_of(row, "id"),
@@ -136,11 +144,14 @@ fn lines(read: Read, reply: &Value) -> Vec<String> {
             ),
         });
     }
-    if let Some(others) = reply.get("others") {
-        out.push(format!(
-            "Other sessions: {} messages in {} sessions.",
-            others["messages"], others["sessions"]
-        ));
+    out.extend(events.iter().map(activity_line));
+    if read == Read::Outbox {
+        if let Some(others) = reply.get("others") {
+            out.push(format!(
+                "Other sessions: {} messages in {} sessions.",
+                others["messages"], others["sessions"]
+            ));
+        }
     }
     out
 }

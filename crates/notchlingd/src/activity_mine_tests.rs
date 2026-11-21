@@ -81,6 +81,25 @@ fn a_verified_session_reads_only_its_own_events_of_the_own_kinds() {
 }
 
 #[test]
+fn since_keeps_only_the_events_after_it() {
+    let activity = rig();
+    let _who = bind_identity(Some(verified(OWN)));
+    let seqs = |reply: Value| -> Vec<u64> {
+        reply["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["seq"].as_u64().unwrap())
+            .collect()
+    };
+    assert_eq!(seqs(mine(&activity, json!({"since": 0}))), [2, 1]);
+    assert_eq!(seqs(mine(&activity, json!({"since": 5001}))), [2]);
+    assert!(seqs(mine(&activity, json!({"since": 5002}))).is_empty());
+    let bad = activity.call(&agent(), ops::ACTIVITY_MINE, &json!({"since": "soon"}));
+    assert!(bad.is_err());
+}
+
+#[test]
 fn a_filter_cannot_widen_the_read() {
     let activity = rig();
     let _who = bind_identity(Some(verified(OWN)));

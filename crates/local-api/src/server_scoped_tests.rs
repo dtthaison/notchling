@@ -5,6 +5,7 @@ use crate::server::{AgentIdentity, Caller, Handler, Limits, OpSpec, Server, Serv
 use crate::testutil::TempDir;
 use crate::tier::Allowlist;
 use crate::wire::{ApiError, ClientKind, ErrorCode};
+use notchling_events::{Emit, MemorySink};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -56,13 +57,20 @@ fn connect(socket: &std::path::Path) -> Client {
 }
 
 fn serve(tag: &str) -> (TempDir, std::path::PathBuf, crate::server::ServerHandle) {
+    serve_recorded(tag, None)
+}
+
+fn serve_recorded(
+    tag: &str,
+    sink: Option<Arc<MemorySink>>,
+) -> (TempDir, std::path::PathBuf, crate::server::ServerHandle) {
     let dir = TempDir::new(tag);
     let socket = dir.path().join("run/notchlingd.sock");
     let server = Server::bind(
         ServerConfig {
             socket: socket.clone(),
             allowlist: Allowlist::empty(),
-            events: None,
+            events: sink.map(|s| s as Arc<dyn Emit>),
             version: "9.9.9".into(),
             limits: Limits::default(),
         },
@@ -139,5 +147,45 @@ fn the_reserved_topics_say_which_phase_builds_them() {
             other => panic!("{other:?}"),
         }
     }
+    handle.shutdown();
+}
+
+#[test]
+fn an_unknown_topic_is_a_bad_request_before_any_permission_check_and_never_a_refusal() {
+    let sink = Arc::new(MemorySink::new());
+    let (_dir, socket, handle) = serve_recorded("srv-unknown-topic", Some(sink.clone()));
+    let _first = connect(&socket);
+    let _second = connect(&socket);
+    let mut unverified = connect(&socket);
+    for topic in ["mine.bogus", "bogus"] {
+        match unverified.subscribe(&[topic]) {
+            Err(ClientError::Api(e)) => {
+                assert_eq!(e.code, ErrorCode::BadRequest, "{topic}");
+                assert_eq!(e.data.as_ref().unwrap()["reason"], "unknown_topic");
+            }
+            other => panic!("{topic}: {other:?}"),
+        }
+    }
+    match unverified.subscribe(&["mine.consents", "mine.bogus"]) {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::BadRequest),
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        crate::testutil::summary(&sink)
+            .iter()
+            .all(|(name, _)| name != "api.refused"),
+        "{:?}",
+        crate::testutil::summary(&sink)
+    );
+    match unverified.subscribe(&["mine.consents"]) {
+        Err(ClientError::Api(e)) => {
+            assert_eq!(e.code, ErrorCode::Forbidden);
+            assert_eq!(e.data.as_ref().unwrap()["reason"], "no_session");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(crate::testutil::summary(&sink)
+        .iter()
+        .any(|(name, _)| name == "api.refused"));
     handle.shutdown();
 }
