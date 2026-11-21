@@ -3,6 +3,11 @@ use crate::sessions::testutil::TempDir;
 use crate::store;
 use serde_json::json;
 
+pub(super) fn app_applied(mut asked: New) -> New {
+    asked.applied_by = AppliedBy::App;
+    asked
+}
+
 pub(super) fn new(session: &str, target: &str) -> New {
     New {
         kind: SETTING.to_string(),
@@ -20,6 +25,7 @@ pub(super) fn new(session: &str, target: &str) -> New {
         pid: 7,
         pid_start: Some(70),
         idem_key: None,
+        request: json!({"op": "settings.set", "key": target, "value": "b"}),
         answer_on: AnswerOn::MacOrPhone,
         applied_by: AppliedBy::Daemon,
         expires_in_ms: DEFAULT_EXPIRY_MS,
@@ -84,7 +90,12 @@ fn an_answer_after_the_end_is_refused() {
 #[test]
 fn opening_the_sheet_moves_the_end_to_ten_minutes_out_once() {
     let store = ConsentStore::in_memory_for_tests();
-    let id = store.insert(&new("s1", "k1"), 0).unwrap().row().id.clone();
+    let id = store
+        .insert(&app_applied(new("s1", "k1")), 0)
+        .unwrap()
+        .row()
+        .id
+        .clone();
     let now = DEFAULT_EXPIRY_MS - 60_000;
     let row = store.open_sheet(&id, now).unwrap().unwrap();
     assert_eq!(row.state, State::Opened);
@@ -97,13 +108,19 @@ fn opening_the_sheet_moves_the_end_to_ten_minutes_out_once() {
 fn a_restart_keeps_waiting_returns_opened_to_waiting_and_withdraws_applying() {
     let store = ConsentStore::in_memory_for_tests();
     let waiting = store.insert(&new("s1", "a"), 1).unwrap().row().id.clone();
-    let opened = store.insert(&new("s1", "b"), 2).unwrap().row().id.clone();
+    let opened = store
+        .insert(&app_applied(new("s1", "b")), 2)
+        .unwrap()
+        .row()
+        .id
+        .clone();
     let applying = store.insert(&new("s1", "c"), 3).unwrap().row().id.clone();
     store.open_sheet(&opened, 4).unwrap();
     store
         .answer(&applying, State::Applying, "mac", None, 5)
         .unwrap();
-    let (live, withdrawn) = store.restart(10).unwrap();
+    let restarted = store.restart(10).unwrap();
+    let (live, withdrawn) = (restarted.waiting, restarted.withdrawn);
     let ids: Vec<&str> = live.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(ids, [waiting.as_str(), opened.as_str()]);
     assert!(live.iter().all(|r| r.state == State::Waiting));
@@ -124,7 +141,7 @@ fn the_same_key_returns_the_same_request_in_any_state_and_another_value_is_refus
     let again = store.insert(&asked, 3_000).unwrap();
     assert!(matches!(&again, Opened::Same(r) if r.id == id && r.state == State::Denied));
     let mut other = asked.clone();
-    other.change = json!({"key": "k1", "before": "a", "after": "z"});
+    other.request = json!({"op": "settings.set", "key": "k1", "value": "z"});
     assert_eq!(store.insert(&other, 3_000), Err(Refusal::KeyReused));
     let mut elsewhere = asked.clone();
     elsewhere.session = Some("s2".to_string());
@@ -179,5 +196,151 @@ fn a_database_from_before_the_table_gets_it_and_an_older_build_reads_the_newer_o
     assert_eq!(
         crate::store_class::table_class("consents"),
         Some(crate::store_class::Class::Node)
+    );
+}
+
+#[test]
+fn a_retry_after_the_change_was_applied_returns_the_original() {
+    let store = ConsentStore::in_memory_for_tests();
+    let mut asked = new("s1", "k1");
+    asked.idem_key = Some("key-1".to_string());
+    let id = store.insert(&asked, 1_000).unwrap().row().id.clone();
+    store
+        .answer(&id, State::Applying, "mac", None, 2_000)
+        .unwrap();
+    store.finish(&id, State::Applied, None, 3_000).unwrap();
+    let mut retry = asked.clone();
+    retry.change = json!({"key": "k1", "before": "b", "after": "b"});
+    let again = store.insert(&retry, 4_000).unwrap();
+    assert!(matches!(&again, Opened::Same(r) if r.id == id && r.state == State::Applied));
+}
+
+#[test]
+fn the_extension_is_used_once_even_across_a_restart() {
+    let store = ConsentStore::in_memory_for_tests();
+    let id = store
+        .insert(&app_applied(new("s1", "k1")), 0)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    let first = store.open_sheet(&id, 600_000).unwrap().unwrap();
+    assert_eq!(first.expires_ms, 600_000 + OPENED_MIN_MS);
+    assert!(first.extended);
+    store.restart(601_000).unwrap();
+    let back = store.get(&id).unwrap().unwrap();
+    assert_eq!((back.state, back.extended), (State::Waiting, true));
+    let again = store.open_sheet(&id, 800_000).unwrap().unwrap();
+    assert_eq!(again.state, State::Opened);
+    assert_eq!(again.expires_ms, first.expires_ms, "no second extension");
+}
+
+#[test]
+fn the_sheet_does_not_extend_a_daemon_applied_request() {
+    let store = ConsentStore::in_memory_for_tests();
+    let row = store.insert(&new("s1", "k1"), 0).unwrap().row().clone();
+    let after = store.open_sheet(&row.id, 60_000).unwrap().unwrap();
+    assert_eq!(
+        (after.state, after.expires_ms),
+        (State::Waiting, row.expires_ms)
+    );
+    assert!(!after.extended);
+}
+
+#[test]
+fn a_restart_expires_what_ended_while_the_daemon_was_down() {
+    let store = ConsentStore::in_memory_for_tests();
+    let late = store.insert(&new("s1", "a"), 0).unwrap().row().id.clone();
+    let live = store
+        .insert(&new("s1", "b"), DEFAULT_EXPIRY_MS)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    let restarted = store.restart(DEFAULT_EXPIRY_MS + 1).unwrap();
+    let ids: Vec<&str> = restarted.waiting.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, [live.as_str()]);
+    assert_eq!(restarted.expired.len(), 1);
+    assert_eq!(restarted.expired[0].id, late);
+    assert_eq!(restarted.expired[0].state, State::Expired);
+}
+
+#[test]
+fn a_late_finish_of_an_open_request_ends_it_as_expired() {
+    let store = ConsentStore::in_memory_for_tests();
+    let id = store.insert(&new("s1", "k1"), 0).unwrap().row().id.clone();
+    let done = store
+        .finish(&id, State::Applied, None, DEFAULT_EXPIRY_MS + 1)
+        .unwrap()
+        .unwrap();
+    assert_eq!(done.state, State::Expired);
+}
+
+#[test]
+fn no_randomness_refuses_and_saves_nothing() {
+    let store = ConsentStore::in_memory_for_tests();
+    let refused = store.insert_with(&new("s1", "k1"), 1, &|| None);
+    assert!(matches!(refused, Err(Refusal::Db(_))), "{refused:?}");
+    assert!(store.all().unwrap().is_empty());
+}
+
+#[test]
+fn an_unavailable_store_refuses_everything() {
+    let store = ConsentStore::unavailable();
+    assert!(matches!(
+        store.insert(&new("s1", "k1"), 1),
+        Err(Refusal::Db(_))
+    ));
+    assert!(store.get("c1").is_err());
+    assert!(store.all().is_err());
+}
+
+#[test]
+fn a_version_nine_database_opens_as_ten_and_keeps_every_row() {
+    let tmp = TempDir::new("consent-v9");
+    let dir = tmp.root().to_path_buf();
+    {
+        let db = rusqlite::Connection::open(store::db_path(&dir)).unwrap();
+        store::migrate(&db).unwrap();
+        db.execute_batch(
+            "DROP TABLE consents;
+             INSERT INTO meta (key, value) VALUES ('kept', 'yes');
+             INSERT INTO settings (key, value) VALUES ('theme', '\"dark\"');
+             INSERT INTO drafts (row_id, text, updated_ms) VALUES ('r1', 'draft', 5);
+             INSERT INTO docs (name, value) VALUES ('d1', '{}');
+             INSERT INTO inbox (id, value, updated_ms) VALUES ('i1', '{}', 6);
+             INSERT INTO outbox (id, session, tool, kind, text, via, state, queued_ms, updated_ms)
+                 VALUES ('o1', 's', 'claude', 'prompt', 'kept', 'chat', 'queued', 1, 1);
+             PRAGMA user_version = 9;",
+        )
+        .unwrap();
+    }
+    let consents = ConsentStore::open(&dir).unwrap();
+    let id = consents
+        .insert(&new("s1", "k1"), 1)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    drop(consents);
+    let db = store::open(&dir).unwrap();
+    let count = |table: &str| -> i64 {
+        db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    };
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 10);
+    for table in [
+        "meta", "settings", "drafts", "docs", "inbox", "outbox", "consents",
+    ] {
+        assert_eq!(count(table), 1, "{table}");
+    }
+    let reopened = ConsentStore::open(&dir).unwrap();
+    let row = reopened.get(&id).unwrap().unwrap();
+    assert_eq!(
+        (row.request["op"].as_str(), row.extended),
+        (Some("settings.set"), false)
     );
 }

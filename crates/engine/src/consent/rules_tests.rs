@@ -114,3 +114,67 @@ fn a_long_end_is_for_a_verified_session_one_at_a_time() {
     other.expires_in_ms = LONG_EXPIRY_MS;
     store.insert(&other, 1).unwrap();
 }
+
+fn stranger(root: &str, target: &str) -> New {
+    let mut asked = new("none", target);
+    asked.verified = false;
+    asked.session = None;
+    asked.root = Some(root.to_string());
+    asked.expires_in_ms = 60_000;
+    asked
+}
+
+#[test]
+fn unverified_callers_share_a_cap_so_a_fresh_root_each_time_gains_nothing() {
+    let store = ConsentStore::in_memory_for_tests();
+    for n in 0..UNVERIFIED_WAITING {
+        store
+            .insert(&stranger(&format!("cli:{n}"), &format!("k{n}")), 1_000)
+            .unwrap();
+    }
+    let after = busy(store.insert(&stranger("cli:fresh", "other"), 2_000));
+    assert!(after > 0);
+    store.insert(&new("s1", "from-a-session"), 2_000).unwrap();
+}
+
+#[test]
+fn unverified_callers_share_an_hourly_cap_across_roots() {
+    let store = ConsentStore::in_memory_for_tests();
+    for n in 0..UNVERIFIED_PER_HOUR {
+        let id = store
+            .insert(
+                &stranger(&format!("cli:{n}"), &format!("k{n}")),
+                1_000 + n as i64,
+            )
+            .unwrap()
+            .row()
+            .id
+            .clone();
+        store
+            .answer(&id, State::Applying, "mac", None, 1_500)
+            .unwrap();
+        store.finish(&id, State::Applied, None, 1_600).unwrap();
+    }
+    assert!(matches!(
+        store.insert(&stranger("cli:fresh", "other"), 2_000),
+        Err(Refusal::Busy { .. })
+    ));
+}
+
+#[test]
+fn a_deny_cools_the_same_ask_for_every_unverified_caller_and_for_a_session_that_forks_away() {
+    let store = ConsentStore::in_memory_for_tests();
+    let id = store
+        .insert(&new("s1", "k1"), 1_000)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    store
+        .answer(&id, State::Denied, "mac", None, 2_000)
+        .unwrap();
+    let after = busy(store.insert(&stranger("cli:forked", "k1"), 3_000));
+    assert!(after > 0 && after <= COOLDOWN_MS);
+    store.insert(&stranger("cli:forked", "k2"), 3_000).unwrap();
+    store.insert(&new("s2", "k1"), 3_000).unwrap();
+}

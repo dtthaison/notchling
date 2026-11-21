@@ -11,7 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 
 const COLUMNS: &str = "id, kind, target, change, facts, parts, parts_allowed, reason, session, \
     tool, verified, root, folder, organization, pid, pid_start, idem_key, state, answer_on, \
-    applied_by, created_ms, expires_ms, answered_ms, by, used_ms, used_op_id, result, closed_ms";
+    applied_by, created_ms, expires_ms, answered_ms, by, used_ms, used_op_id, result, closed_ms, \
+    request, extended";
 
 pub struct ConsentStore {
     db: Mutex<Connection>,
@@ -79,6 +80,8 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Consent> {
         used_op_id: r.get(25)?,
         result: json_opt(r, 26)?,
         closed_ms: r.get(27)?,
+        request: json_of(r, 28)?,
+        extended: r.get::<_, i64>(29)? != 0,
     })
 }
 
@@ -125,6 +128,13 @@ pub enum Taken {
     Gone,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Restart {
+    pub waiting: Vec<Consent>,
+    pub withdrawn: Vec<Consent>,
+    pub expired: Vec<Consent>,
+}
+
 impl ConsentStore {
     pub fn open(data_dir: &Path) -> Result<ConsentStore, String> {
         Ok(ConsentStore {
@@ -138,11 +148,25 @@ impl ConsentStore {
         ConsentStore { db: Mutex::new(db) }
     }
 
+    pub fn unavailable() -> ConsentStore {
+        let db = Connection::open_in_memory().expect("in-memory database");
+        ConsentStore { db: Mutex::new(db) }
+    }
+
     fn lock(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn insert(&self, new: &New, now: i64) -> Result<Opened, Refusal> {
+        self.insert_with(new, now, &new_id)
+    }
+
+    pub fn insert_with(
+        &self,
+        new: &New,
+        now: i64,
+        make_id: &dyn Fn() -> Option<String>,
+    ) -> Result<Opened, Refusal> {
         let db_error = |e: rusqlite::Error| Refusal::Db(e.to_string());
         let mut db = self.lock();
         let tx = db
@@ -159,7 +183,7 @@ impl ConsentStore {
             if let Some(first) = seen.into_iter().find(|r| r.bucket() == bucket) {
                 if first.kind == new.kind
                     && first.target == new.target
-                    && first.change == new.change
+                    && first.request == new.request
                 {
                     return Ok(Opened::Same(first));
                 }
@@ -173,13 +197,14 @@ impl ConsentStore {
         )
         .map_err(Refusal::Db)?;
         rules::check(new, now, &recent)?;
-        let id = new_id();
+        let id = make_id()
+            .ok_or_else(|| Refusal::Db("no randomness for a request id".to_string()))?;
         tx.execute(
             "INSERT INTO consents (id, kind, target, change, facts, parts, reason, session, tool,
                  verified, root, folder, organization, pid, pid_start, idem_key, state, answer_on,
-                 applied_by, created_ms, expires_ms)
+                 applied_by, created_ms, expires_ms, request)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                 'waiting', ?17, ?18, ?19, ?20)",
+                 'waiting', ?17, ?18, ?19, ?20, ?21)",
             params![
                 id,
                 new.kind,
@@ -201,6 +226,7 @@ impl ConsentStore {
                 new.applied_by.as_str(),
                 now,
                 now + new.expires_in_ms,
+                text_of(&new.request),
             ],
         )
         .map_err(db_error)?;
@@ -273,8 +299,9 @@ impl ConsentStore {
         let db = self.lock();
         db.execute(
             "UPDATE consents SET state = 'opened',
-                 expires_ms = MAX(expires_ms, ?2 + ?3)
-             WHERE id = ?1 AND state = 'waiting' AND expires_ms > ?2",
+                 expires_ms = CASE WHEN extended = 0 THEN MAX(expires_ms, ?2 + ?3) ELSE expires_ms END,
+                 extended = 1
+             WHERE id = ?1 AND state = 'waiting' AND expires_ms > ?2 AND applied_by = 'app'",
             params![id, now, OPENED_MIN_MS],
         )
         .map_err(db_err)?;
@@ -315,6 +342,14 @@ impl ConsentStore {
         let Some(from) = from else {
             return Ok(None);
         };
+        let to = if from.state.open()
+            && from.expires_ms <= now
+            && !matches!(to, State::Cancelled | State::Withdrawn | State::Expired)
+        {
+            State::Expired
+        } else {
+            to
+        };
         if !from.state.next(to) {
             return Ok(None);
         }
@@ -351,8 +386,19 @@ impl ConsentStore {
             .collect()
     }
 
-    pub fn restart(&self, now: i64) -> Result<(Vec<Consent>, Vec<Consent>), String> {
+    pub fn restart(&self, now: i64) -> Result<Restart, String> {
         let db = self.lock();
+        let late = select(
+            &db,
+            "WHERE state IN ('waiting', 'opened') AND expires_ms <= ?1",
+            &[&now],
+        )?;
+        db.execute(
+            "UPDATE consents SET state = 'expired', closed_ms = ?1, reason = NULL
+             WHERE state IN ('waiting', 'opened') AND expires_ms <= ?1",
+            [now],
+        )
+        .map_err(db_err)?;
         db.execute(
             "UPDATE consents SET state = 'waiting' WHERE state = 'opened'",
             [],
@@ -365,12 +411,19 @@ impl ConsentStore {
             [now],
         )
         .map_err(db_err)?;
-        let withdrawn = applying
-            .into_iter()
-            .map(|row| fetch(&db, &row.id).map(|r| r.unwrap_or(row)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let fresh = |rows: Vec<Consent>| {
+            rows.into_iter()
+                .map(|row| fetch(&db, &row.id).map(|r| r.unwrap_or(row)))
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let withdrawn = fresh(applying)?;
+        let expired = fresh(late)?;
         let waiting = select(&db, "WHERE state = 'waiting' ORDER BY n", &[])?;
-        Ok((waiting, withdrawn))
+        Ok(Restart {
+            waiting,
+            withdrawn,
+            expired,
+        })
     }
 
     #[cfg(test)]

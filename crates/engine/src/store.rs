@@ -196,6 +196,8 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              pid INTEGER NOT NULL,
              pid_start INTEGER,
              idem_key TEXT,
+             request TEXT NOT NULL DEFAULT 'null',
+             extended INTEGER NOT NULL DEFAULT 0,
              state TEXT NOT NULL,
              answer_on TEXT NOT NULL,
              applied_by TEXT NOT NULL,
@@ -232,6 +234,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("outbox", "awaited", "INTEGER NOT NULL DEFAULT 0"),
     ("outbox", "strike", "INTEGER NOT NULL DEFAULT 0"),
     ("outbox", "done_from", "INTEGER"),
+    ("consents", "request", "TEXT NOT NULL DEFAULT 'null'"),
+    ("consents", "extended", "INTEGER NOT NULL DEFAULT 0"),
 ];
 
 fn add_missing_columns(db: &Connection) -> Result<(), String> {
