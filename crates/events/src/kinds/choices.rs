@@ -166,3 +166,23 @@ log_choice! {
         Wait = "wait",
     }
 }
+
+log_choice! {
+    pub enum AgentTool {
+        Claude = "claude",
+        Codex = "codex",
+        Antigravity = "antigravity",
+        Shell = "shell",
+        Unknown = "unknown",
+    }
+}
+
+log_choice! {
+    pub enum AgentResult {
+        Ok = "ok",
+        Refused = "refused",
+        Failed = "failed",
+        Pending = "pending",
+        DryRun = "dry_run",
+    }
+}

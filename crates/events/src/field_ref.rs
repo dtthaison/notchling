@@ -34,6 +34,10 @@ ref_kinds! {
     Page = "page";
     Model = "model";
     Machine = "machine";
+    Agent = "agent";
+    Consent = "consent", ALWAYS_HASHED;
+    Organization = "organization";
+    Job = "job";
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

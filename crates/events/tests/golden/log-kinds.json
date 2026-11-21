@@ -196,6 +196,22 @@
     {"name":"tool","type":"choice","optional":false,"list":false,"choices":["claude","codex","agy","other"]},
     {"name":"version","type":"version","optional":false,"list":false,"choices":[]}
   ]},
+  {"name":"agent.called","kv":1,"group":"agents","lock":"always","sinks":["audit","activity"],"default":"on","durability":"commit_from_agent","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"op","type":"op","optional":false,"list":false,"choices":[]},
+    {"name":"tool","type":"choice","optional":false,"list":false,"choices":["claude","codex","antigravity","shell","unknown","other"]},
+    {"name":"verified","type":"flag","optional":false,"list":false,"choices":[]},
+    {"name":"result","type":"choice","optional":false,"list":false,"choices":["ok","refused","failed","pending","dry_run","other"]},
+    {"name":"code","type":"error_code","optional":true,"list":false,"choices":["bad_request","unknown_op","forbidden","needs_approval","internal","unimplemented","failed"]},
+    {"name":"ms","type":"millis","optional":false,"list":false,"choices":[]},
+    {"name":"consent","type":"ref:consent","optional":true,"list":false,"choices":[]},
+    {"name":"organization","type":"ref:organization","optional":true,"list":false,"choices":[]},
+    {"name":"cmd_hash","type":"hex","optional":true,"list":false,"choices":[]},
+    {"name":"out_hash","type":"hex","optional":true,"list":false,"choices":[]}
+  ]},
+  {"name":"agent.named","kv":1,"group":"agents","lock":"always","sinks":["audit","activity"],"default":"on","durability":"commit_from_agent","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"asker","type":"choice","optional":false,"list":false,"choices":["main","subagent","codex","antigravity","unknown","other"]},
+    {"name":"agent","type":"ref:agent","optional":true,"list":false,"choices":[]}
+  ]},
   {"name":"inbox.raised","kv":1,"group":"inbox","lock":"toggle","sinks":["activity"],"default":"on","durability":"push","emitters":["daemon"],"retired":false,"fields":[
     {"name":"item_kind","type":"choice","optional":false,"list":false,"choices":["secret_approval","secret_request","limit_notice","action_failed","notice","setting_change","log_warning","other"]},
     {"name":"item","type":"ref:item","optional":false,"list":false,"choices":[]},
