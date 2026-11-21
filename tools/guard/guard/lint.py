@@ -98,7 +98,7 @@ def _log_no_text(path: str, lines: List[str], repo: Path) -> Found:
 
 
 LOG_OUTPUT_FILES = tuple(f"crates/notchlingd/src/{n}.rs" for n in (
-    "clients", "pages_cli", "vault_cli", "delegate_cli", "settings_cli", "consent_cli", "models_cli", "shells_cli", "service", "lib", "main")) + (
+    "clients", "pages_cli", "vault_cli", "delegate_cli", "settings_cli", "consent_cli", "models_cli", "shells_cli", "switch_cli", "service", "lib", "main")) + (
     "crates/app/src/mac/render.rs", "crates/app/src/mac/bench.rs", "crates/app/src/chat/view/list_probe_run.rs")
 LOG_WRITER_EXCLUDE = EXCLUDE + ("crates/events/**", "**/*_tests.rs", "**/tests_*.rs", "**/tests.rs",
                                 "**/testutil.rs", "**/test_support.rs") + LOG_OUTPUT_FILES
