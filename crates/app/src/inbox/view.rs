@@ -14,7 +14,7 @@ use notchling_kit::ui::{
 use notchling_kit::{Appearance, Icon, IconSize, Ink, TypeRole};
 use serde_json::Value;
 
-use super::consent_card::{ConsentCard, Env};
+use super::consent_card::{vault_moved, ConsentCard, Env};
 use super::consent_view::{buttons, card_body};
 use super::feed::InboxFeed;
 use super::model::{is_local, target, Row, Target};
@@ -37,6 +37,7 @@ pub struct InboxPanelView {
     shown: HashMap<String, Instant>,
     fixed_shown_ms: Option<i64>,
     vault_on: Option<bool>,
+    vault_seen: Option<(u64, bool)>,
     cards_open: bool,
     allow_waiting: bool,
 }
@@ -54,6 +55,7 @@ impl InboxPanelView {
             shown: HashMap::new(),
             fixed_shown_ms: None,
             vault_on: None,
+            vault_seen: None,
             cards_open: false,
             allow_waiting: false,
         };
@@ -84,6 +86,7 @@ impl InboxPanelView {
             shown: HashMap::new(),
             fixed_shown_ms: Some(ALLOW_SETTLED_MS),
             vault_on: Some(true),
+            vault_seen: None,
             cards_open: false,
             allow_waiting: false,
         }
@@ -94,8 +97,25 @@ impl InboxPanelView {
         self
     }
 
+    fn follow_vault(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(feed) = cx.try_global::<crate::mac::shell::AppSwitchFeed>() else {
+            return false;
+        };
+        let now = (
+            feed.0.changes().vault,
+            feed.0.switches().is_on(crate::switches::Switch::Vault),
+        );
+        let moved = vault_moved(self.vault_seen, now);
+        self.vault_seen = Some(now);
+        if moved {
+            self.feed.refresh_consents();
+        }
+        moved
+    }
+
     fn poll(&mut self, ticks: u32, cx: &mut Context<Self>) {
-        let changed = self.feed.generation() != self.drawn;
+        let moved = self.follow_vault(cx);
+        let changed = moved || self.feed.generation() != self.drawn;
         let counting = self.cards_open && ticks.is_multiple_of(2);
         if changed || counting || self.allow_waiting || ticks.is_multiple_of(CLOCK_EVERY) {
             cx.notify();
@@ -208,7 +228,12 @@ impl InboxPanelView {
             this.update(cx, |view, cx| {
                 view.busy.remove(&id);
                 match result {
-                    Ok(_) if open_form => crate::mac::vault_prompts::raise(&id),
+                    Ok(_) if open_form => {
+                        if let Some(feed) = cx.try_global::<crate::mac::shell::AppSwitchFeed>() {
+                            feed.0.allow_request(&id);
+                        }
+                        crate::mac::vault_prompts::raise(&id);
+                    }
                     Ok(_) => {}
                     Err(e) => view.note = Some(e),
                 }

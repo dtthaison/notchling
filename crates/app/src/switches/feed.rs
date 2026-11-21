@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -92,6 +93,7 @@ struct State {
     changes: Changes,
     approvals: Vec<Value>,
     requests: Vec<Value>,
+    allowed: HashSet<String>,
     notices: Vec<Notice>,
     last_move: Option<Value>,
     settings: Vec<String>,
@@ -176,6 +178,7 @@ impl Shared {
                     if before.is_on(Switch::Vault) && !s.switches.is_on(Switch::Vault) {
                         s.approvals.clear();
                         s.requests.clear();
+                        s.allowed.clear();
                         s.changes.vault += 1;
                     }
                     if before.is_on(Switch::Accounts) != s.switches.is_on(Switch::Accounts) {
@@ -232,7 +235,12 @@ impl Shared {
             topics::VAULT_APPROVAL_PENDING => push_pending(&mut s.approvals, &event.data),
             topics::VAULT_APPROVAL_RESOLVED => remove_pending(&mut s.approvals, &event.data),
             topics::VAULT_REQUEST_PENDING => push_pending(&mut s.requests, &event.data),
-            topics::VAULT_REQUEST_RESOLVED => remove_pending(&mut s.requests, &event.data),
+            topics::VAULT_REQUEST_RESOLVED => {
+                remove_pending(&mut s.requests, &event.data);
+                if let Some(id) = event.data.get("id").and_then(Value::as_str) {
+                    s.allowed.remove(id);
+                }
+            }
             topics::VAULT_CHANGED => s.changes.vault += 1,
             topics::SETTINGS_CHANGED => {
                 let key = event.data.get("key").and_then(Value::as_str);
@@ -256,6 +264,7 @@ impl Shared {
         s.switches = Switches::detached();
         s.approvals.clear();
         s.requests.clear();
+        s.allowed.clear();
         s.changes.accounts += 1;
         s.changes.providers += 1;
         s.changes.limits += 1;
@@ -356,7 +365,24 @@ impl SwitchFeed {
     }
 
     pub fn requests(&self) -> Vec<Value> {
-        self.shared.state().requests.clone()
+        let s = self.shared.state();
+        s.requests
+            .iter()
+            .filter(|r| {
+                r.get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| s.allowed.contains(id))
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn allow_request(&self, id: &str) {
+        self.shared.state().allowed.insert(id.to_owned());
+    }
+
+    pub fn dismiss_request(&self, id: &str) {
+        self.shared.state().allowed.remove(id);
     }
 
     pub fn resolve(&self, id: &str) {
@@ -364,6 +390,7 @@ impl SwitchFeed {
         let data = json!({"id": id});
         remove_pending(&mut s.approvals, &data);
         remove_pending(&mut s.requests, &data);
+        s.allowed.remove(id);
     }
 
     pub fn last_move(&self) -> Option<Value> {

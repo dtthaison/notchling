@@ -51,7 +51,7 @@ impl Call {
         entry: &VaultEntry,
         value: Option<&VaultValue>,
         replacing: Option<&str>,
-        request: Option<&str>,
+        consent: Option<&str>,
     ) -> Call {
         let mut args = json!({ "entry": entry });
         if let Some(v) = value {
@@ -60,8 +60,8 @@ impl Call {
         if let Some(old) = replacing {
             args["replacing"] = json!(old);
         }
-        if let Some(id) = request {
-            args["request"] = json!(id);
+        if let Some(id) = consent {
+            args["consentId"] = json!(id);
         }
         Call::new(ops::VAULT_SAVE, args)
     }
@@ -77,8 +77,8 @@ impl Call {
         )
     }
 
-    pub fn request_cancel(id: &str) -> Call {
-        Call::new(ops::VAULT_REQUEST_CANCEL, json!({ "id": id }))
+    pub fn consent_get(id: &str) -> Call {
+        Call::new(ops::CONSENT_GET, json!({ "id": id }))
     }
 }
 
@@ -244,7 +244,8 @@ mod tests {
         assert_eq!(save.args["entry"]["secretVar"], "GITHUB_TOKEN");
         assert_eq!(save.args["value"]["secret"], "s3cret");
         assert_eq!(save.args["replacing"], "gh");
-        assert_eq!(save.args["request"], "r1");
+        assert_eq!(save.args["consentId"], "r1");
+        assert!(save.args.get("request").is_none());
         let keep = Call::save(&entry("github"), None, None, None);
         assert!(
             keep.args.get("value").is_none(),
@@ -256,7 +257,8 @@ mod tests {
             Call::approval_answer("ap-1", Decision::Always).args,
             json!({"id": "ap-1", "decision": "always"})
         );
-        assert_eq!(Call::request_cancel("r1").args, json!({"id": "r1"}));
+        assert_eq!(Call::consent_get("c1").op, "consent.get");
+        assert_eq!(Call::consent_get("c1").args, json!({"id": "c1"}));
         assert_eq!(Call::list().op, "vault.list");
         assert!(!format!("{value:?}").contains("s3cret"), "Debug hides it");
         let shown = format!("{save:?}");

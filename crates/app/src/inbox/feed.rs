@@ -20,6 +20,7 @@ struct Shared {
     notifier: Arc<dyn Notifier>,
     generation: AtomicU64,
     stop: AtomicBool,
+    refresh: AtomicBool,
 }
 
 impl Shared {
@@ -30,6 +31,7 @@ impl Shared {
             notifier,
             generation: AtomicU64::new(0),
             stop: AtomicBool::new(false),
+            refresh: AtomicBool::new(false),
         }
     }
 
@@ -143,6 +145,10 @@ impl InboxFeed {
         self.shared.generation.load(Ordering::SeqCst)
     }
 
+    pub fn refresh_consents(&self) {
+        self.shared.refresh.store(true, Ordering::SeqCst);
+    }
+
     pub fn unread(&self) -> usize {
         self.shared.model().unread()
     }
@@ -232,6 +238,9 @@ fn connect(config: &FeedConfig) -> Result<(Client, Option<Value>), ClientError> 
 
 fn follow(mut client: Client, shared: &Shared) {
     while !shared.stopped() {
+        if shared.refresh.swap(false, Ordering::SeqCst) {
+            refresh_consents(&mut client, shared);
+        }
         match client.next_event(Duration::from_millis(250)) {
             Ok(Some(event)) => {
                 shared.apply(&event);

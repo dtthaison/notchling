@@ -169,18 +169,14 @@ fn float_over_everything(window: &mut gpui::Window) {
     }
 }
 
-fn send_closed(cx: &mut App, id: String, approval: bool, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
+fn send_closed(cx: &mut App, id: String, feed: Arc<SwitchFeed>, vault: Arc<Vault>) {
     cx.spawn(async move |cx: &mut AsyncApp| {
         let switches = feed.switches();
         let sent = id.clone();
         let result = cx
             .background_executor()
             .spawn(async move {
-                if approval {
-                    vault.answer(&switches, &sent, Decision::Deny)
-                } else {
-                    vault.cancel_request(&switches, &sent)
-                }
+                vault.answer(&switches, &sent, Decision::Deny)
             })
             .await;
         match result {
@@ -222,7 +218,7 @@ fn sync(
             Err(_) => {
                 if waiting.contains(&id) {
                     next.closed.insert(id.clone());
-                    send_closed(cx, id, true, feed.clone(), vault.clone());
+                    send_closed(cx, id, feed.clone(), vault.clone());
                 }
             }
         }
@@ -235,7 +231,7 @@ fn sync(
             handle.update(cx, |_, w, _| w.remove_window()).ok();
         } else if waiting.contains(&id) {
             next.closed.insert(id.clone());
-            send_closed(cx, id, false, feed.clone(), vault.clone());
+            feed.dismiss_request(&id);
         }
     }
     for approval in approvals {

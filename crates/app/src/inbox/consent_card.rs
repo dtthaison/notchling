@@ -149,7 +149,6 @@ fn facts(view: &Value) -> Vec<String> {
 }
 
 fn details(view: &Value, env: &Env) -> Vec<Detail> {
-    let change = view.get("change").unwrap_or(&Value::Null);
     let mut out = vec![Detail {
         label: t::consent::card_label_who().to_owned(),
         value: who(view),
@@ -165,9 +164,7 @@ fn details(view: &Value, env: &Env) -> Vec<Detail> {
     add(t::consent::card_label_node(), env.node.clone());
     add(
         t::consent::card_label_folder(),
-        text(view, "folder")
-            .or_else(|| text(change, "folder"))
-            .map(str::to_owned),
+        text(view, "folder").map(str::to_owned),
     );
     add(
         t::consent::card_label_organization(),
@@ -197,6 +194,10 @@ fn new_value(view: &Value) -> Option<Untrusted> {
         note: None,
         text: shown(view.get("change").and_then(|c| c.get("after"))),
     })
+}
+
+pub fn vault_moved(seen: Option<(u64, bool)>, now: (u64, bool)) -> bool {
+    seen.is_some_and(|seen| seen != now)
 }
 
 fn seconds_left(left_ms: i64) -> f64 {

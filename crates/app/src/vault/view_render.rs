@@ -44,6 +44,12 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
                 .next()?;
             cx.new(|cx| VaultApprovalView::fixed(&approval, cx)).into()
         }
+        Shown::RequestRefused => cx
+            .new(|cx| {
+                VaultRequestView::fixed(renders::pending_request(), renders::TODAY, cx)
+                    .refused(super::consent_save::Refusal::Changed)
+            })
+            .into(),
         Shown::Request => cx
             .new(|cx| VaultRequestView::fixed(renders::pending_request(), renders::TODAY, cx))
             .into(),

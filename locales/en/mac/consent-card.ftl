@@ -68,3 +68,14 @@ consent-card-expires-in = Ends in { $time }
 consent-card-ended = Ended. It can no longer be allowed.
 # Shown on a secret request while the Vault is off. Allow stays off until the Vault is on.
 consent-card-vault-off = The Vault is off. Turn it on in Settings first, then allow this.
+
+## The form that saves an allowed secret
+
+# Said on the Vault form when the request ran out of time before the secret was saved.
+consent-card-form-expired = This request ended before you saved. Nothing was saved.
+# Said on the Vault form when the secret changed after the card was shown, so the yes no longer fits.
+consent-card-form-changed = This secret changed after you were asked. Nothing was saved. Deny the request and ask again.
+# Said on the Vault form when the Vault is off, so nothing can be saved.
+consent-card-form-vault-off = The Vault is off. Turn it on in Settings, then save again.
+# Said on the Vault form when the request was withdrawn or already answered, so nothing can be saved.
+consent-card-form-withdrawn = This request was withdrawn or already answered. Nothing was saved.

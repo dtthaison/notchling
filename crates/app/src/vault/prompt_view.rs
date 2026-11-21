@@ -9,6 +9,7 @@ use notchling_kit::ui::{hsla, icon, label, scrollable, window_appearance, KitSty
 use notchling_kit::{Icon, Ink, TypeRole};
 
 use super::approval::requested_by;
+use super::consent_save::{Failure, Flow};
 use super::form::{Enter, Form};
 use super::form_view::{form_body, form_footer, Editing, FormEditors, FormEvent};
 use super::presence::{Done, Presence};
@@ -29,6 +30,7 @@ pub struct VaultRequestView {
     form: Form,
     editors: FormEditors,
     busy: bool,
+    flow: Flow,
     done: bool,
     presence: Presence,
     visible: bool,
@@ -72,6 +74,7 @@ impl VaultRequestView {
             form,
             editors,
             busy: false,
+            flow: Flow::default(),
             done: false,
             presence,
             visible: !presence.embedded(),
@@ -98,6 +101,7 @@ impl VaultRequestView {
             form,
             editors,
             busy: false,
+            flow: Flow::default(),
             done: false,
             presence: Presence::Window,
             visible: true,
@@ -108,6 +112,12 @@ impl VaultRequestView {
             focus: cx.focus_handle(),
             fixed_today: Some(today),
         }
+    }
+
+    pub fn refused(mut self, refusal: super::consent_save::Refusal) -> Self {
+        self.flow.settle(Err(Failure::Refused(refusal)));
+        self.form.error = self.flow.line();
+        self
     }
 
     pub fn with_presence(mut self, presence: Presence) -> Self {
@@ -152,41 +162,8 @@ impl VaultRequestView {
         })
     }
 
-    fn finish(
-        &mut self,
-        job: impl FnOnce(&Vault, &crate::switches::Switches) -> Result<(), String> + Send + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        if self.busy || !self.vault.is_live() {
-            return;
-        }
-        self.busy = true;
-        let (vault, switches) = (self.vault.clone(), self.feed.switches());
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { job(&vault, &switches) })
-                .await;
-            this.update(cx, |view, cx| {
-                view.busy = false;
-                match result {
-                    Ok(()) => {
-                        view.done = true;
-                        view.feed.resolve(&view.id);
-                        cx.emit(Done);
-                    }
-                    Err(e) => view.form.error = Some(e),
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-        cx.notify();
-    }
-
     fn save(&mut self, cx: &mut Context<Self>) {
-        if !self.form.can_save() {
+        if !self.form.can_save() || self.busy || !self.vault.is_live() || !self.flow.can_save() {
             return;
         }
         let (entry, value, replacing) = match self.form.to_save() {
@@ -197,25 +174,53 @@ impl VaultRequestView {
                 return;
             }
         };
-        let request = self.id.clone();
+        if !self.flow.begin() {
+            return;
+        }
+        self.busy = true;
+        self.form.error = None;
+        let consent = self.id.clone();
         self.form.forget_value();
-        self.finish(
-            move |v, sw| {
-                v.save(
-                    sw,
-                    &entry,
-                    value.as_ref(),
-                    replacing.as_deref(),
-                    Some(&request),
-                )
-            },
-            cx,
-        );
+        let (vault, switches) = (self.vault.clone(), self.feed.switches());
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    vault.save_for_consent(
+                        &switches,
+                        &entry,
+                        value.as_ref(),
+                        replacing.as_deref(),
+                        &consent,
+                    )
+                })
+                .await;
+            this.update(cx, |view, cx| view.saved(result, cx)).ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn saved(&mut self, result: Result<(), Failure>, cx: &mut Context<Self>) {
+        self.busy = false;
+        self.flow.settle(result);
+        self.form.error = self.flow.line();
+        if self.flow.closes() {
+            self.done = true;
+            self.feed.resolve(&self.id);
+            cx.emit(Done);
+        }
+        cx.notify();
     }
 
     fn cancel(&mut self, cx: &mut Context<Self>) {
-        let id = self.id.clone();
-        self.finish(move |v, sw| v.cancel_request(sw, &id), cx);
+        if self.busy {
+            return;
+        }
+        self.done = true;
+        self.feed.dismiss_request(&self.id);
+        cx.emit(Done);
+        cx.notify();
     }
 
     fn event(&mut self, event: FormEvent, cx: &mut Context<Self>) {

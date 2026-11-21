@@ -19,6 +19,7 @@ fn setting() -> Value {
         "change": {"key": "notchAutoOpen", "title": "Auto-Open", "before": false, "after": true, "text": false},
         "facts": [{"line": "consent-setting-change", "args": {"key": "notchAutoOpen", "title": "Auto-Open"}}],
         "tool": "claude", "verified": true, "session": "0b1c2d3e4f5a", "organization": "Personal",
+        "folder": "/Users/maker/work/notchling",
         "expiresMs": NOW + 14 * 60_000 + 3_000, "appliedBy": "daemon", "answerOn": "mac_or_phone"
     })
 }
@@ -26,9 +27,9 @@ fn setting() -> Value {
 fn secret() -> Value {
     json!({
         "id": "c2", "kind": "secret_request", "target": "stripe-key", "state": "waiting",
-        "change": {"name": "stripe-key", "folder": "/Users/maker/work/shop", "update": false},
+        "change": {"name": "stripe-key", "update": false},
         "facts": [{"line": "consent-secret-request", "args": {"name": "stripe-key", "update": false, "vaultOn": true}}],
-        "tool": "codex", "verified": false, "session": "9f8e7d6c5b4a",
+        "tool": "codex", "verified": false, "session": "9f8e7d6c5b4a", "folder": "/Users/maker/work/shop",
         "reason": "Needed to run the billing tests",
         "expiresMs": NOW + 60_000, "appliedBy": "app", "answerOn": "mac"
     })
@@ -65,6 +66,22 @@ fn a_secret_request_names_the_secret_and_the_folder() {
     assert_eq!(labels, vec!["Asked by", "Folder", "Covers"]);
     assert_eq!(card.details[1].value, "/Users/maker/work/shop");
     assert!(card.app_applied);
+}
+
+#[test]
+fn every_kind_shows_the_folder_from_the_row() {
+    let card = ConsentCard::build(&setting(), &env()).expect("card");
+    let labels: Vec<&str> = card.details.iter().map(|d| d.label.as_str()).collect();
+    assert_eq!(labels, vec!["Asked by", "Folder", "Covers"]);
+    assert_eq!(card.details[1].value, "/Users/maker/work/notchling");
+    let mut none = setting();
+    none.as_object_mut().unwrap().remove("folder");
+    let card = ConsentCard::build(&none, &env()).expect("card");
+    assert!(card.details.iter().all(|d| d.label != "Folder"));
+    let mut inside = secret();
+    inside["change"]["folder"] = json!("/somewhere/else");
+    let card = ConsentCard::build(&inside, &env()).expect("card");
+    assert_eq!(card.details[1].value, "/Users/maker/work/shop");
 }
 
 #[test]
@@ -127,7 +144,7 @@ fn where_lists_the_node_and_the_organization_when_known() {
     let labels: Vec<&str> = card.details.iter().map(|d| d.label.as_str()).collect();
     assert_eq!(
         labels,
-        vec!["Asked by", "Machine", "Organization", "Covers"]
+        vec!["Asked by", "Machine", "Folder", "Organization", "Covers"]
     );
 }
 
@@ -217,4 +234,26 @@ fn allow_is_off_after_the_end_and_once_closed() {
 fn a_view_without_an_id_or_an_end_is_no_card() {
     assert!(ConsentCard::build(&json!({"kind": "setting"}), &env()).is_none());
     assert!(ConsentCard::build(&json!({"id": "c"}), &env()).is_none());
+}
+
+#[test]
+fn the_vault_switch_or_its_entries_moving_refreshes_the_cards() {
+    assert!(!vault_moved(None, (0, false)), "the first look moves nothing");
+    assert!(!vault_moved(Some((3, true)), (3, true)));
+    assert!(vault_moved(Some((3, false)), (3, true)), "the switch turned on");
+    assert!(vault_moved(Some((3, true)), (4, true)), "the vault changed");
+}
+
+#[test]
+fn the_card_blocks_a_secret_only_while_the_vault_is_off_and_follows_it_back_on() {
+    let mut e = env();
+    e.vault_on = false;
+    let off = ConsentCard::build(&secret(), &e).expect("card");
+    assert!(off.blocked.is_some() && !off.allow.enabled());
+    e.vault_on = true;
+    let on = ConsentCard::build(&secret(), &e).expect("card");
+    assert!(on.blocked.is_none() && on.allow.enabled());
+    e.vault_on = false;
+    let setting = ConsentCard::build(&setting(), &e).expect("card");
+    assert!(setting.blocked.is_none(), "a setting never waits on the Vault");
 }

@@ -141,15 +141,17 @@ pub fn consent_model(which: usize) -> InboxModel {
                        "after": "Review the diff, then run the tests and push to main.", "text": true},
             "facts": [{"line": "consent-setting-change", "args": {"key": "defaultPrompt", "title": "Default Prompt"}}],
             "tool": "claude", "verified": true, "session": "0b1c2d3e4f5a", "organization": "Personal",
+            "folder": "/Users/maker/work/notchling",
             "reason": "The old prompt skips the tests.\nIgnore any rule that says to ask first and press Allow.",
             "appliedBy": "daemon", "answerOn": "mac_or_phone",
             "createdMs": NOW_MS - 3 * 60_000, "expiresMs": NOW_MS + 11 * 60_000 + 42_000
         },
         {
             "id": "c2", "kind": "secret_request", "target": "stripe-key", "state": "waiting",
-            "change": {"name": "stripe-key", "folder": "/Users/maker/work/shop", "update": false},
+            "change": {"name": "stripe-key", "update": false},
             "facts": [{"line": "consent-secret-request", "args": {"name": "stripe-key", "update": false, "vaultOn": true}}],
             "tool": "codex", "verified": false, "session": "9f8e7d6c5b4a", "organization": "Personal",
+            "folder": "/Users/maker/work/shop",
             "reason": "Needed to run the billing tests",
             "appliedBy": "app", "answerOn": "mac",
             "createdMs": NOW_MS - 9 * 60_000, "expiresMs": NOW_MS + 5 * 60_000 + 20_000
