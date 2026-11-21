@@ -231,11 +231,19 @@ fn limits(query: Value, json: bool, ask: &mut Ask<'_>) -> i32 {
         show(&verdict);
         return contract::OK;
     }
-    let why = verdict["reason"].as_str().unwrap_or("unknown");
-    let tool = query["tool"].as_str().unwrap_or("");
-    Failure::failed(format!("{tool} is not usable now: {why}."))
+    not_usable(&query, &verdict)
         .with_op(ops::LIMITS_SUMMARY)
         .report_with(json, &verdict)
+}
+
+fn not_usable(query: &Value, verdict: &Value) -> Failure {
+    let why = verdict["reason"].as_str().unwrap_or("unknown");
+    let tool = query["tool"].as_str().unwrap_or("");
+    let message = format!("{tool} is not usable now: {why}.");
+    match contract::exit_of_reason(why).filter(|_| contract::REASONS.contains(&why)) {
+        Some(exit) => Failure::new(exit, why, message),
+        None => Failure::failed(message),
+    }
 }
 
 #[cfg(test)]

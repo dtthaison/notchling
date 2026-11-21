@@ -68,3 +68,29 @@ fn awake_on_forwards_the_socket_and_json_and_a_socket_named_on_is_not_the_word()
         words(&["set", "mode", "on"])
     );
 }
+
+#[test]
+fn a_tool_that_is_not_usable_fails_with_the_real_reason_and_its_exit_code() {
+    let query = json!({"tool": "codex"});
+    for (reason, exit) in [
+        ("credits_out", 1),
+        ("pool_full", 1),
+        ("signed_out", 1),
+        ("stale", 1),
+        ("limit_reached", 1),
+        ("unknown_tool", 1),
+        ("unknown_pool", 1),
+        ("ambiguous_pool", 1),
+        ("other_organization", 4),
+    ] {
+        let verdict = json!({"usable": false, "reason": reason});
+        let failure = not_usable(&query, &verdict);
+        assert_eq!(failure.reason, reason);
+        assert_eq!(failure.exit, exit, "{reason}");
+        assert!(failure.message.contains(reason), "{reason}");
+    }
+    let odd = not_usable(&query, &json!({"usable": false, "reason": "zzz"}));
+    assert_eq!((odd.reason.as_str(), odd.exit), ("failed", 1));
+    let none = not_usable(&query, &json!({"usable": false}));
+    assert_eq!((none.reason.as_str(), none.exit), ("failed", 1));
+}

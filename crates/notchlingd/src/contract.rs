@@ -88,6 +88,14 @@ pub const REASONS: &[&str] = &[
     "withdrawn",
     "already_answered",
     "some_left",
+    "stale",
+    "signed_out",
+    "credits_out",
+    "limit_reached",
+    "pool_full",
+    "unknown_tool",
+    "unknown_pool",
+    "ambiguous_pool",
     "failed",
     "internal",
     "other",
@@ -116,7 +124,9 @@ pub fn exit_of_reason(reason: &str) -> Option<i32> {
         "busy" => BUSY,
         "denied" | "cancelled" => DENIED,
         "expired" => EXPIRED,
-        "withdrawn" | "already_answered" | "some_left" | "failed" | "internal" => FAILED,
+        "withdrawn" | "already_answered" | "some_left" | "stale" | "signed_out" | "credits_out"
+        | "limit_reached" | "pool_full" | "unknown_tool" | "unknown_pool" | "ambiguous_pool"
+        | "failed" | "internal" => FAILED,
         _ => return None,
     })
 }
