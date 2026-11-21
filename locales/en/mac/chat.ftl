@@ -524,6 +524,8 @@ chat-shell-running-hours = Running { NUMBER($hours) } h { NUMBER($minutes) } min
 chat-shell-running-days = Running { NUMBER($days) } d { NUMBER($hours) } h
 # The button under a running shell command that ends the processes writing its output.
 chat-shell-stop = Stop
+# The hint under a running shell command after Stop could not end every process writing its output.
+chat-shell-left = Couldn't stop everything. Ask the agent, or end it in Terminal.
 # The hint under a running shell command that is probably waiting for nothing.
 chat-shell-stuck-itself = Looks stuck: it waits for a process that is itself
 chat-shell-stuck-loop = Looks stuck: a wait loop that has run over 30 min

@@ -126,6 +126,7 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
     );
     model.reveal = !view.selected_refused(Action::Files);
     for row in model.i.shells.iter_mut() {
+        row.left_behind = row.running && view.shell_probe_left(&row.output_path);
         if !row.running && view.shell_probe_stopped(&row.output_path) {
             let (status, word, mark) = shell_rows::ended_look("stopped");
             row.status = status;
@@ -508,6 +509,16 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                 select::detail_keyed(
                     format!("shell-{index}-stuck"),
                     &shell_rows::stuck_words(why),
+                    TypeRole::Meta,
+                    Ink::Needs,
+                    a,
+                )
+                .line_height(px(ROW_LINE))
+            }))
+            .children(s.left_behind.then(|| {
+                select::detail_keyed(
+                    format!("shell-{index}-left"),
+                    t::chat::shell_left(),
                     TypeRole::Meta,
                     Ink::Needs,
                     a,

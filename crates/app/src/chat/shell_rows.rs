@@ -65,6 +65,7 @@ pub fn shell_rows_with_fan(
                     running: status == Status::Working,
                     mark,
                     output_path: shell.output_path.clone(),
+                    left_behind: false,
                     shape: shells_stuck::shape_of(&shell.command),
                 }
             })

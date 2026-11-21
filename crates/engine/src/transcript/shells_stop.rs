@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 
 use super::shells::{lsof_args, parse_writers_by_name, NOT_WRITERS};
 use super::shells_guard;
+pub use super::shells_orphans::orphan_targets;
 
 pub const GRACE: Duration = Duration::from_secs(3);
 
-const DEPTH: usize = 256;
+pub(super) const DEPTH: usize = 256;
 
 const OTHER_TOOLS: [&str; 5] = ["notchling", "notchlingd", "codex", "agy", "antigravity"];
 
@@ -32,7 +33,7 @@ impl Proc {
         self.command.rsplit('/').next().unwrap_or(&self.command)
     }
 
-    fn protected(&self) -> bool {
+    pub(super) fn protected(&self) -> bool {
         NOT_WRITERS.contains(&self.name())
             || OTHER_TOOLS.contains(&self.name())
             || self.command.contains("/claude/")
@@ -163,7 +164,7 @@ fn group_is_ours(
         .then(|| members.iter().map(|p| p.pid).collect())
 }
 
-fn target_of(proc: &Proc) -> Target {
+pub(super) fn target_of(proc: &Proc) -> Target {
     Target {
         pid: proc.pid,
         started: proc.started.clone(),
@@ -227,35 +228,6 @@ fn names_of(path: &str) -> Vec<String> {
     names
 }
 
-pub fn orphan_targets(writers: &[i32], procs: &[Proc], scope: &Scope) -> Vec<Target> {
-    let by_pid: HashMap<i32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
-    let mut found: Vec<&Proc> = Vec::new();
-    for pid in writers {
-        let Some(proc) = by_pid.get(pid).copied() else {
-            continue;
-        };
-        if !proc.zombie && !found.iter().any(|f| f.pid == proc.pid) {
-            found.push(proc);
-        }
-    }
-    let roots: Vec<&Proc> = found
-        .iter()
-        .copied()
-        .filter(|p| !found.iter().any(|q| q.pid == p.ppid))
-        .collect();
-    let [root] = roots[..] else {
-        return Vec::new();
-    };
-    let clean = root.ppid == 1
-        && found
-            .iter()
-            .all(|p| p.pid > 1 && p.pid != scope.own_pid && p.pid != scope.owner && !p.protected());
-    if !clean {
-        return Vec::new();
-    }
-    found.iter().map(|p| target_of(p)).collect()
-}
-
 pub fn writers_of_many(paths: &[String]) -> HashMap<String, Vec<i32>> {
     let wanted: Vec<(String, Vec<String>)> = paths
         .iter()
@@ -301,11 +273,28 @@ pub fn process_table() -> Option<Vec<Proc>> {
     (out.status.success() && !procs.is_empty()).then_some(procs)
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub targets: usize,
     pub killed: usize,
     pub survivors: usize,
+    pub left: Vec<i32>,
+}
+
+impl Outcome {
+    pub fn stopped(&self) -> bool {
+        self.survivors == 0 && self.left.is_empty()
+    }
+}
+
+pub fn left_after(mut read: impl FnMut() -> Vec<i32>, waited: bool, until: Instant) -> Vec<i32> {
+    loop {
+        let left = read();
+        if left.is_empty() || !waited || Instant::now() >= until {
+            return left;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn here(table: &[Proc], target: &Target) -> bool {
@@ -382,6 +371,7 @@ pub fn execute(plan: &Plan, scope: &Scope, grace: Duration) -> Outcome {
             targets: all.len(),
             killed: 0,
             survivors: all.len(),
+            left: Vec::new(),
         };
     };
     let left = all.iter().filter(|t| here(&table, t)).count();
@@ -396,6 +386,7 @@ pub fn execute(plan: &Plan, scope: &Scope, grace: Duration) -> Outcome {
         targets: all.len(),
         killed: left,
         survivors,
+        left: Vec::new(),
     }
 }
 
@@ -468,7 +459,9 @@ pub fn stop_shell_in(
         own_pid,
         own_pgid,
     };
-    let writers = writers_of(&path.to_string_lossy());
+    let text = path.to_string_lossy();
+    let until = Instant::now() + grace;
+    let writers = writers_of(&text);
     if writers.is_empty() {
         return Ok(Outcome::default());
     }
@@ -477,19 +470,24 @@ pub fn stop_shell_in(
             targets: writers.len(),
             killed: 0,
             survivors: writers.len(),
+            left: writers,
         });
     };
-    let mut found = plan(&writers, &table, &scope);
-    if request.orphans {
-        let taken = found.every_pid();
-        let rest: Vec<i32> = writers
-            .iter()
-            .copied()
-            .filter(|pid| !taken.contains(pid))
-            .collect();
-        found.pids.extend(orphan_targets(&rest, &table, &scope));
+    let found = stop_plan(&writers, &table, &scope, request.orphans);
+    let outcome = execute(&found, &scope, grace);
+    let left = left_after(|| writers_of(&text), !found.is_empty(), until);
+    Ok(Outcome { left, ..outcome })
+}
+
+pub fn stop_plan(writers: &[i32], procs: &[Proc], scope: &Scope, orphans: bool) -> Plan {
+    let owner_alive = scope.owner > 1 && procs.iter().any(|p| p.pid == scope.owner && !p.zombie);
+    if owner_alive || !orphans {
+        return plan(writers, procs, scope);
     }
-    Ok(execute(&found, &scope, grace))
+    Plan {
+        groups: Vec::new(),
+        pids: orphan_targets(writers, procs, scope),
+    }
 }
 
 #[cfg(test)]
