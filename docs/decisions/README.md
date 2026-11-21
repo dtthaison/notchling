@@ -45,7 +45,7 @@ Most of them come from the design, [revision 2](https://github.com/dtthaison/not
 | [XXXX](XXXX-outbox.md) | The Outbox: messages to a session saved first, one postman per session, delivered like the terminal, never twice | Proposed |
 | [XXXX](XXXX-cluster-secrets-and-logins.md) | Cluster secrets and Worker logins: one vault on the vault node, grants as private files, nothing renewed | Proposed |
 | [XXXX](XXXX-ssh-join.md) | Add Machine over SSH: machines added from the Cluster sheet run only the headless daemon as a service and join through an app-tier invite bound to one node id | Accepted |
-| [XXXX](XXXX-agents-first.md) | Agents first: an agent path for every feature, the user's yes by a consent request the app applies, a switch requested but turned on only by the app, every acting agent call recorded; amends 0007 and 0020 | Proposed |
+| [XXXX](XXXX-agents-first.md) | Agents first: an agent path for every feature, the user's yes by a consent request the app applies, a switch requested but turned on only by the app, every acting agent call recorded; amends 0007 and 0020 | Accepted |
 
 0001 was written before records had a Status section. Its status is Accepted.
 
