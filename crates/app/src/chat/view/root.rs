@@ -96,6 +96,7 @@ impl Render for ChatView {
                 a,
                 cx,
             );
+        super::select::keep_only(self.page.is_open(), self.details_visible());
         let terminal_expanded =
             self.terminal.shown() && self.terminal.expanded && !self.page.is_open();
         let column = div()

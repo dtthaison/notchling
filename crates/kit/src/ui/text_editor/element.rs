@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use gpui::{
     fill, point, px, relative, size, App, AvailableSpace, Bounds, ContentMask, CursorStyle,
     DispatchPhase, Element, ElementId, ElementInputHandler, Entity, Font, GlobalElementId, Hitbox,
@@ -37,7 +39,7 @@ pub struct Layout {
 pub const MASK_DOT: &str = "\u{2022}";
 
 pub fn mask_starts(text: &str) -> Vec<usize> {
-    text.char_indices()
+    text.grapheme_indices(true)
         .map(|(i, _)| i)
         .chain(std::iter::once(text.len()))
         .collect()
@@ -568,6 +570,28 @@ mod tests {
         assert_eq!(shown, vec![0, 3, 6, 9, 12]);
         let hidden: Vec<usize> = [0, 3, 6, 9, 12, 99].iter().map(|&i| l.hide(i)).collect();
         assert_eq!(hidden, vec![0, 1, 3, 6, 7, 7]);
+    }
+
+    #[test]
+    fn a_masked_layout_shows_one_dot_for_each_grapheme() {
+        let text = "e\u{301}x\u{1f44d}\u{1f3fd}\u{1f1fa}\u{1f1f8}y";
+        let starts = mask_starts(text);
+        assert_eq!(starts, vec![0, 3, 4, 12, 20, 21]);
+        let mut l = layout(&[(0, 0, 21)]);
+        l.mask = Some(starts.clone());
+        let hidden: Vec<usize> = (0..=5).map(|dot| l.hide(dot * MASK_DOT.len())).collect();
+        assert_eq!(hidden, starts);
+        for start in &starts {
+            assert!(text.is_char_boundary(*start));
+            assert_eq!(l.hide(l.show(*start)), *start);
+        }
+        assert_eq!(l.show(starts[2]), 2 * MASK_DOT.len());
+    }
+
+    #[test]
+    fn a_masked_text_without_marks_has_a_dot_for_each_character() {
+        assert_eq!(mask_starts(""), vec![0]);
+        assert_eq!(mask_starts("abc"), vec![0, 1, 2, 3]);
     }
 
     #[test]

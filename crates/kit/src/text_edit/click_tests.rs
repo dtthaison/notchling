@@ -155,3 +155,52 @@ fn shift_with_the_arrow_keys_grows_and_shrinks_the_selection() {
     e.move_left(Unit::Line, true);
     assert_eq!(selected(&e), "hello world");
 }
+
+#[test]
+fn shift_click_then_drag_keeps_the_caret_the_extension_started_from() {
+    let mut e = TextEdit::new("hello world, hello");
+    e.move_to(2);
+    let press = e.press_at(8, 1, true);
+    assert_eq!(e.selection(), 2..8);
+    assert_eq!(press.anchor, 2..2);
+    e.drag_to(&press, 10);
+    assert_eq!(e.selection(), 2..10);
+    e.drag_to(&press, 0);
+    assert_eq!(e.selection(), 0..2);
+    e.drag_to(&press, 2);
+    assert_eq!(e.selection(), 2..2);
+}
+
+#[test]
+fn shift_click_keeps_the_far_end_of_a_reversed_selection() {
+    let mut e = TextEdit::new("hello world");
+    e.set_selection(9, 4);
+    let press = e.press_at(1, 1, true);
+    assert_eq!(e.selection(), 1..9);
+    assert_eq!(press.anchor, 9..9);
+}
+
+#[test]
+fn a_masked_double_or_triple_click_takes_the_whole_text_and_a_drag_keeps_it() {
+    let mut e = TextEdit::new("pass word-1 two");
+    for clicks in [2, 3, 5] {
+        e.move_to(0);
+        let press = e.press_at_masked(7, clicks, false);
+        assert_eq!(selected(&e), "pass word-1 two");
+        assert_eq!(press.by, Unit::Document);
+        e.drag_to(&press, 3);
+        assert_eq!(selected(&e), "pass word-1 two");
+        e.drag_to(&press, 12);
+        assert_eq!(selected(&e), "pass word-1 two");
+    }
+}
+
+#[test]
+fn a_masked_single_click_is_an_ordinary_click() {
+    let mut e = TextEdit::new("secret");
+    let press = e.press_at_masked(3, 1, false);
+    assert_eq!(e.selection(), 3..3);
+    assert_eq!(press.by, Unit::Grapheme);
+    e.press_at_masked(5, 1, true);
+    assert_eq!(e.selection(), 3..5);
+}

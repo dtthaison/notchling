@@ -67,8 +67,16 @@ impl TextEdit {
             .marked
             .as_ref()
             .map(|m| self.text[m.clone()].to_owned());
+        let history_off = self.history.is_off();
         *self = TextEdit::new(text);
         self.stale_composition = stale;
+        if history_off {
+            self.history.stop();
+        }
+    }
+
+    pub fn stop_history(&mut self) {
+        self.history.stop();
     }
 
     pub fn caret(&self) -> usize {
@@ -166,6 +174,14 @@ impl TextEdit {
         self.go(target, extend);
     }
 
+    pub fn move_to_edge(&mut self, end: bool, extend: bool) {
+        if end {
+            self.move_right(Unit::Document, extend);
+        } else {
+            self.move_left(Unit::Document, extend);
+        }
+    }
+
     fn go(&mut self, target: usize, extend: bool) {
         if extend {
             self.select_to(target);
@@ -176,7 +192,9 @@ impl TextEdit {
 
     fn splice(&mut self, range: Range<usize>, text: &str, group: Option<Group>) {
         self.stale_composition = None;
-        self.history.record(self.state(), group);
+        if !self.history.is_off() {
+            self.history.record(self.state(), group);
+        }
         self.text.replace_range(range.clone(), text);
         let after = range.start + text.len();
         self.anchor = after;

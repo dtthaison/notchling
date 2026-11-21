@@ -1,10 +1,16 @@
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use gpui::{div, prelude::*, px, Context, Div, SharedString, Stateful};
+use gpui::{
+    div, prelude::*, px, Context, Div, Entity, SharedString, Stateful, Subscription, Window,
+};
 use notchling_engine::vault::entry::{Field as Changed, Kind};
 use notchling_kit::metric::{RADIUS_MD, SIDE_PADDING};
 use notchling_kit::part::{ButtonKind, PartState};
-use notchling_kit::ui::{button, field, hsla, icon, label, KitStyled, MONO_FONT};
+use notchling_kit::ui::{
+    button, editor_field, hsla, icon, label, KitStyled, TextEditor, TextEditorEvent, MONO_FONT,
+};
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 
 use super::form::{Field, Form, Mode};
@@ -15,6 +21,8 @@ use crate::mac::gate;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FormEvent {
     Focus(Field),
+    Edited(Field),
+    Enter(Field),
     Kind(Kind),
     ToggleAsk,
     ToggleAdvanced,
@@ -25,34 +33,111 @@ pub enum FormEvent {
     Cancel,
 }
 
-pub fn clipboard_key<V: 'static>(
-    form: &mut Form,
-    k: &gpui::Keystroke,
-    cx: &mut Context<V>,
-) -> bool {
-    if !k.modifiers.platform || k.modifiers.control || k.modifiers.alt {
-        return false;
+const ALL_FIELDS: [Field; 9] = [
+    Field::Name,
+    Field::Url,
+    Field::Username,
+    Field::Secret,
+    Field::Note,
+    Field::HowTo,
+    Field::Expires,
+    Field::UserVar,
+    Field::SecretVar,
+];
+
+fn placeholder(form: &Form, field: Field) -> &str {
+    match field {
+        Field::Name => "github",
+        Field::Url => "https://api.github.com",
+        Field::Secret => form.secret_placeholder(),
+        Field::Note => NOTE_PLACEHOLDER,
+        Field::HowTo => HOW_TO_PLACEHOLDER,
+        Field::Expires => "YYYY-MM-DD",
+        Field::Username | Field::UserVar | Field::SecretVar => "",
     }
-    match k.key.as_str() {
-        "v" => {
-            if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                form.paste(&text);
-            }
+}
+
+pub struct FormEditors {
+    map: HashMap<Field, (Entity<TextEditor>, Subscription)>,
+    want: Cell<Option<Field>>,
+}
+
+impl FormEditors {
+    pub fn new<V: 'static>(
+        form: &Form,
+        cx: &mut Context<V>,
+        on: Handler<V, FormEvent>,
+    ) -> FormEditors {
+        let mut map = HashMap::new();
+        for field in ALL_FIELDS {
+            let editor = cx.new(|cx| {
+                let editor = TextEditor::new(placeholder(form, field), 10, cx);
+                let editor = if field.multiline() {
+                    editor
+                } else {
+                    editor.single_line()
+                };
+                if field == Field::Secret {
+                    editor.masked()
+                } else {
+                    editor
+                }
+            });
+            editor.update(cx, |editor, cx| editor.set_text(form.text(field), cx));
+            let on = on.clone();
+            let events = cx.subscribe(&editor, move |this, _, event: &TextEditorEvent, cx| {
+                let event = match event {
+                    TextEditorEvent::Changed => FormEvent::Edited(field),
+                    TextEditorEvent::Submit => FormEvent::Enter(field),
+                };
+                on(this, event, cx)
+            });
+            map.insert(field, (editor, events));
         }
-        "c" => {
-            if let Some(text) = form.copy() {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-            }
+        FormEditors {
+            map,
+            want: Cell::new(None),
         }
-        "x" => {
-            if let Some(text) = form.cut() {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-            }
-        }
-        "a" => {}
-        _ => return false,
     }
-    true
+
+    pub fn editor(&self, field: Field) -> &Entity<TextEditor> {
+        &self.map[&field].0
+    }
+
+    pub fn pull(&self, form: &mut Form, field: Field, cx: &gpui::App) -> bool {
+        let text = self.editor(field).read(cx).text().to_owned();
+        form.set_text(field, &text)
+    }
+
+    pub fn push<V: 'static>(&self, form: &Form, cx: &mut Context<V>) {
+        for field in ALL_FIELDS {
+            let editor = self.editor(field);
+            if editor.read(cx).text() != form.text(field) {
+                editor.update(cx, |editor, cx| editor.set_text(form.text(field), cx));
+            }
+        }
+    }
+
+    pub fn focused(&self, window: &Window, cx: &gpui::App) -> Option<Field> {
+        ALL_FIELDS
+            .into_iter()
+            .find(|f| self.editor(*f).read(cx).is_focused(window))
+    }
+
+    pub fn want(&self, field: Field) {
+        self.want.set(Some(field));
+    }
+
+    pub fn apply_want(&self, window: &mut Window, cx: &gpui::App) {
+        if let Some(field) = self.want.take() {
+            self.editor(field).read(cx).focus(window);
+        }
+    }
+
+    pub fn insert_newline<V: 'static>(&self, field: Field, cx: &mut Context<V>) {
+        self.editor(field)
+            .update(cx, |editor, cx| editor.insert("\n", cx));
+    }
 }
 
 pub const FOOTER: &str =
@@ -88,22 +173,24 @@ fn row(title: &str, body: impl IntoElement, a: Appearance) -> Div {
         )
 }
 
+#[derive(Clone, Copy)]
+pub struct Editing<'a> {
+    pub editors: &'a FormEditors,
+    pub window: &'a Window,
+}
+
 fn text_field<V: 'static>(
     form: &Form,
+    ed: Editing,
     which: Field,
-    placeholder: &str,
     a: Appearance,
     cx: &mut Context<V>,
     on: &Handler<V, FormEvent>,
 ) -> Stateful<Div> {
-    let text = if which == Field::Secret {
-        form.secret_mask()
-    } else {
-        form.text(which).to_owned()
-    };
-    let focused = form.keyboard && form.focus == which;
+    let focused = ed.editors.editor(which).read(cx).is_focused(ed.window)
+        || (form.keyboard && form.focus == which);
     let handler = on.clone();
-    let mut element = field(&text, placeholder, focused, a).w_full();
+    let mut element = editor_field(ed.editors.editor(which), focused, a).w_full();
     if which.multiline() {
         element = element.min_h(px(64.0)).items_start().py(px(6.0));
     }
@@ -194,6 +281,7 @@ fn help_box<V: 'static>(
 
 fn expiry_row<V: 'static>(
     form: &Form,
+    ed: Editing,
     today: i64,
     a: Appearance,
     cx: &mut Context<V>,
@@ -248,7 +336,7 @@ fn expiry_row<V: 'static>(
         if !form.no_expiry {
             let shown = expiry_label(&form.expires, today);
             body = body
-                .child(text_field(form, Field::Expires, "YYYY-MM-DD", a, cx, on))
+                .child(text_field(form, ed, Field::Expires, a, cx, on))
                 .child(label(
                     &shown.text,
                     TypeRole::Meta,
@@ -276,6 +364,7 @@ fn expiry_row<V: 'static>(
 
 pub fn form_body<V: 'static>(
     form: &Form,
+    ed: Editing,
     today: i64,
     a: Appearance,
     cx: &mut Context<V>,
@@ -310,21 +399,14 @@ pub fn form_body<V: 'static>(
     }
     body = body.child(row(
         "Name",
-        text_field(form, Field::Name, "github", a, cx, &on),
+        text_field(form, ed, Field::Name, a, cx, &on),
         a,
     ));
     let mut url = div()
         .flex()
         .flex_col()
         .gap(px(4.0))
-        .child(text_field(
-            form,
-            Field::Url,
-            "https://api.github.com",
-            a,
-            cx,
-            &on,
-        ))
+        .child(text_field(form, ed, Field::Url, a, cx, &on))
         .children(marker(form, Changed::Url, a));
     if let Some(warning) = form.host_warning() {
         url = url.child(label(&warning, TypeRole::Meta, Ink::Needs, a));
@@ -371,7 +453,7 @@ pub fn form_body<V: 'static>(
     if form.is_login() {
         body = body.child(row(
             "Username",
-            text_field(form, Field::Username, "", a, cx, &on),
+            text_field(form, ed, Field::Username, a, cx, &on),
             a,
         ));
     }
@@ -382,7 +464,7 @@ pub fn form_body<V: 'static>(
     let secret_title = if form.is_login() { "Password" } else { "Token" };
     body = body.child(row(
         secret_title,
-        text_field(form, Field::Secret, form.secret_placeholder(), a, cx, &on),
+        text_field(form, ed, Field::Secret, a, cx, &on),
         a,
     ));
     if form.mode != Mode::Renew && has_how_to && !form.editing_how_to {
@@ -394,7 +476,7 @@ pub fn form_body<V: 'static>(
             .flex()
             .flex_col()
             .gap(px(4.0))
-            .child(text_field(form, Field::Note, NOTE_PLACEHOLDER, a, cx, &on))
+            .child(text_field(form, ed, Field::Note, a, cx, &on))
             .children(marker(form, Changed::Note, a)),
         a,
     ));
@@ -405,19 +487,12 @@ pub fn form_body<V: 'static>(
                 .flex()
                 .flex_col()
                 .gap(px(4.0))
-                .child(text_field(
-                    form,
-                    Field::HowTo,
-                    HOW_TO_PLACEHOLDER,
-                    a,
-                    cx,
-                    &on,
-                ))
+                .child(text_field(form, ed, Field::HowTo, a, cx, &on))
                 .children(marker(form, Changed::HowTo, a)),
             a,
         ));
     }
-    body = body.child(expiry_row(form, today, a, cx, &on));
+    body = body.child(expiry_row(form, ed, today, a, cx, &on));
     body = body.child(row(
         "",
         checkbox(
@@ -464,13 +539,13 @@ pub fn form_body<V: 'static>(
         if form.is_login() {
             body = body.child(row(
                 "Username var",
-                text_field(form, Field::UserVar, "", a, cx, &on),
+                text_field(form, ed, Field::UserVar, a, cx, &on),
                 a,
             ));
         }
         body = body.child(row(
             "Secret var",
-            text_field(form, Field::SecretVar, "", a, cx, &on),
+            text_field(form, ed, Field::SecretVar, a, cx, &on),
             a,
         ));
     }

@@ -15,8 +15,8 @@ use notchling_kit::ui::{button, label, scrollable, window_appearance, KitPart, K
 use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use notchling_locale as t;
 
-use super::form::{Form, Typed};
-use super::form_view::{form_body, form_footer, FormEvent};
+use super::form::{Enter, Form};
+use super::form_view::{form_body, form_footer, Editing, FormEditors, FormEvent};
 use super::list::{list, remove_alert, List, TITLE};
 use super::store::Vault;
 use super::view_list::notice;
@@ -42,6 +42,7 @@ pub struct VaultSheetView {
     pin: Option<Target>,
     seen_target: Target,
     form: Option<Form>,
+    editors: Option<FormEditors>,
     pub(super) removing: Option<String>,
     busy: bool,
     note: Option<String>,
@@ -75,6 +76,7 @@ impl VaultSheetView {
             pin: None,
             seen_target: Target::Local,
             form: None,
+            editors: None,
             removing: None,
             busy: false,
             note: None,
@@ -118,6 +120,11 @@ impl VaultSheetView {
         today: i64,
         cx: &mut Context<Self>,
     ) -> Self {
+        let form = form.map(|mut f| {
+            f.keyboard = true;
+            f
+        });
+        let editors = form.as_ref().map(|f| Self::editors_for(f, cx));
         VaultSheetView {
             seen_vault: 0,
             fixed: Some((today, feed.switches())),
@@ -128,11 +135,25 @@ impl VaultSheetView {
             pin: None,
             seen_target: Target::Local,
             form,
+            editors,
             removing: None,
             busy: false,
             note: None,
             focus: cx.focus_handle(),
         }
+    }
+
+    fn editors_for(form: &Form, cx: &mut Context<Self>) -> FormEditors {
+        FormEditors::new(
+            form,
+            cx,
+            Rc::new(|this: &mut Self, event, cx| this.pending_form_event(event, cx)),
+        )
+    }
+
+    fn set_form(&mut self, form: Option<Form>, cx: &mut Context<Self>) {
+        self.editors = form.as_ref().map(|f| Self::editors_for(f, cx));
+        self.form = form;
     }
 
     fn remote(&self) -> Option<VaultNode> {
@@ -188,7 +209,7 @@ impl VaultSheetView {
         }
         self.remote_tab = remote;
         self.pin = None;
-        self.form = None;
+        self.set_form(None, cx);
         self.removing = None;
         self.note = None;
         self.refresh(cx);
@@ -270,7 +291,11 @@ impl VaultSheetView {
 
     pub fn open_form(&mut self, form: Form, window: &mut Window, cx: &mut Context<Self>) {
         self.pin = Some(self.target());
-        self.form = Some(form);
+        let focus = form.focus;
+        self.set_form(Some(form), cx);
+        if let Some(editors) = self.editors.as_ref() {
+            editors.want(focus);
+        }
         self.note = None;
         window.focus(&self.focus);
         cx.notify();
@@ -329,8 +354,8 @@ impl VaultSheetView {
                     (replacing.as_deref(), request.as_deref()),
                 )
             },
-            |view, result, _| match result {
-                Ok(()) => view.form = None,
+            |view, result, cx| match result {
+                Ok(()) => view.set_form(None, cx),
                 Err(e) => {
                     if let Some(form) = view.form.as_mut() {
                         form.error = Some(e);
@@ -341,10 +366,11 @@ impl VaultSheetView {
         );
     }
 
-    fn key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
         let k = &event.keystroke;
         if k.key == "escape" {
-            if self.form.take().is_some() {
+            if self.form.is_some() {
+                self.set_form(None, cx);
                 cx.notify();
             } else {
                 cx.emit(Dismiss);
@@ -352,22 +378,22 @@ impl VaultSheetView {
             cx.stop_propagation();
             return;
         }
-        let Some(form) = self.form.as_mut() else {
-            return;
-        };
-        if super::form_view::clipboard_key(form, k, cx) {
+        if k.key == "tab" && !k.modifiers.platform && !k.modifiers.control && !k.modifiers.alt {
+            let (Some(form), Some(editors)) = (self.form.as_mut(), self.editors.as_ref()) else {
+                return;
+            };
+            if let Some(field) = editors.focused(window, cx) {
+                form.focus = field;
+            }
+            if k.modifiers.shift {
+                form.focus_previous();
+            } else {
+                form.focus_next();
+            }
+            editors.want(form.focus);
             cx.stop_propagation();
             cx.notify();
-            return;
         }
-        let modified = k.modifiers.platform || k.modifiers.control;
-        match form.key(&k.key, k.key_char.as_deref(), modified) {
-            Typed::Submit => self.save(cx),
-            Typed::Changed => {}
-            Typed::Ignored => return,
-        }
-        cx.stop_propagation();
-        cx.notify();
     }
 
     fn list_body(&self, l: &List, a: Appearance, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -438,45 +464,58 @@ impl Render for VaultSheetView {
             let on: Handler<Self, bool> = Rc::new(|this, remote, cx| this.show_tab(remote, cx));
             tabs = Some(vault_tabs(known.as_deref(), self.remote_tab, a, cx, on));
         }
-        let (title, body, footer): (&str, AnyElement, Option<Div>) = match &self.form {
-            Some(form) => {
-                let on: Handler<Self, FormEvent> =
-                    Rc::new(|this, event, cx| this.pending_form_event(event, cx));
-                let footer_on = on.clone();
-                (
-                    form.title(),
-                    scrollable(form_body(form, today, a, cx, on)).into_any_element(),
-                    Some(form_footer(
-                        form,
-                        self.busy,
-                        switches.message(Switch::Vault),
-                        a,
-                        cx,
-                        footer_on,
-                    )),
-                )
-            }
-            None if unreachable || remote.as_ref().is_some_and(|n| !n.online) => {
-                let text = match &remote {
-                    Some(node) => t::cluster::vault_offline(&node.name),
-                    None => t::cluster::vault_unreachable().to_owned(),
-                };
-                (TITLE, notice(&text, Ink::Needs, a), None)
-            }
-            None if remote.is_some() && !snapshot.attached => (
-                TITLE,
-                notice(t::cluster::secrets_reading(), Ink::TextMuted, a),
-                None,
-            ),
-            None => {
-                let l = list(&snapshot.entries, &switches, today, snapshot.error.clone());
-                (
+        if let (Some(form), Some(editors)) = (self.form.as_ref(), self.editors.as_ref()) {
+            editors.apply_want(window, cx);
+            editors.push(form, cx);
+        }
+        let (title, body, footer): (&str, AnyElement, Option<Div>) =
+            match (&self.form, &self.editors) {
+                (Some(form), Some(editors)) => {
+                    let on: Handler<Self, FormEvent> =
+                        Rc::new(|this, event, cx| this.pending_form_event(event, cx));
+                    let footer_on = on.clone();
+                    (
+                        form.title(),
+                        scrollable(form_body(
+                            form,
+                            Editing { editors, window },
+                            today,
+                            a,
+                            cx,
+                            on,
+                        ))
+                        .into_any_element(),
+                        Some(form_footer(
+                            form,
+                            self.busy,
+                            switches.message(Switch::Vault),
+                            a,
+                            cx,
+                            footer_on,
+                        )),
+                    )
+                }
+                (None, _) if unreachable || remote.as_ref().is_some_and(|n| !n.online) => {
+                    let text = match &remote {
+                        Some(node) => t::cluster::vault_offline(&node.name),
+                        None => t::cluster::vault_unreachable().to_owned(),
+                    };
+                    (TITLE, notice(&text, Ink::Needs, a), None)
+                }
+                (None, _) if remote.is_some() && !snapshot.attached => (
                     TITLE,
-                    scrollable(self.list_body(&l, a, cx)).into_any_element(),
+                    notice(t::cluster::secrets_reading(), Ink::TextMuted, a),
                     None,
-                )
-            }
-        };
+                ),
+                _ => {
+                    let l = list(&snapshot.entries, &switches, today, snapshot.error.clone());
+                    (
+                        TITLE,
+                        scrollable(self.list_body(&l, a, cx)).into_any_element(),
+                        None,
+                    )
+                }
+            };
         let l = list(&snapshot.entries, &switches, today, None);
         let mut end: Vec<AnyElement> = Vec::new();
         if self.form.is_none() {
@@ -526,7 +565,9 @@ impl Render for VaultSheetView {
         let mut sheet = div()
             .id("vault-sheet")
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
+            .on_key_down(
+                cx.listener(|this, event: &KeyDownEvent, window, cx| this.key(event, window, cx)),
+            )
             .relative()
             .size_full()
             .flex()
@@ -564,14 +605,33 @@ impl VaultSheetView {
         match event {
             FormEvent::Save => self.save(cx),
             FormEvent::Cancel => {
-                self.form = None;
+                self.set_form(None, cx);
                 cx.notify();
             }
             FormEvent::Focus(field) => {
                 if let Some(form) = self.form.as_mut() {
                     form.focus = field;
                 }
+                if let Some(editors) = self.editors.as_ref() {
+                    editors.want(field);
+                }
                 cx.notify();
+            }
+            FormEvent::Edited(field) => {
+                if let (Some(form), Some(editors)) = (self.form.as_mut(), self.editors.as_ref()) {
+                    if editors.pull(form, field, cx) {
+                        form.focus = field;
+                        cx.notify();
+                    }
+                }
+            }
+            FormEvent::Enter(field) => {
+                let enter = self.form.as_ref().map(|f| f.enter(field));
+                match (enter, self.editors.as_ref()) {
+                    (Some(Enter::Newline), Some(editors)) => editors.insert_newline(field, cx),
+                    (Some(Enter::Save), _) => self.save(cx),
+                    _ => {}
+                }
             }
             other => {
                 let today = self.today();

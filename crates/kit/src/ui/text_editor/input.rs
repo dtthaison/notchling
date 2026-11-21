@@ -30,9 +30,13 @@ impl TextEditor {
             return;
         };
         self.focus(window);
-        let press = self
-            .edit
-            .press_at(index, event.click_count, event.modifiers.shift);
+        let press = if self.masked {
+            self.edit
+                .press_at_masked(index, event.click_count, event.modifiers.shift)
+        } else {
+            self.edit
+                .press_at(index, event.click_count, event.modifiers.shift)
+        };
         self.drag = Some(press);
         self.goal_x = None;
         self.touched(false, cx);

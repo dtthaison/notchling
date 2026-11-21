@@ -408,3 +408,68 @@ fn a_commit_that_lands_after_the_box_was_cleared_is_dropped() {
         "the commit replaces the live composition, as always"
     );
 }
+
+#[test]
+fn an_edit_without_history_never_keeps_a_step_and_stays_so_after_set_text() {
+    let mut e = edit("");
+    e.stop_history();
+    e.insert("pw1");
+    e.paste("-two");
+    e.delete_backward(Unit::Grapheme);
+    assert_eq!(e.text(), "pw1-tw");
+    assert!(!e.undo());
+    assert!(!e.redo());
+    e.set_text("fresh");
+    e.insert("x");
+    e.select_all();
+    assert_eq!(e.cut().as_deref(), Some("freshx"));
+    assert!(!e.undo());
+    assert!(e.is_empty());
+}
+
+#[test]
+fn stopping_history_forgets_what_was_recorded_before() {
+    let mut e = edit("");
+    e.insert("old secret");
+    e.paste(" more");
+    e.stop_history();
+    assert!(!e.undo());
+    assert_eq!(e.text(), "old secret more");
+}
+
+#[test]
+fn a_move_to_an_edge_takes_the_start_or_the_end_and_extends_from_the_anchor() {
+    let mut e = edit("one two three");
+    e.move_to(4);
+    e.move_to_edge(true, false);
+    assert_eq!(e.selection(), 13..13);
+    e.move_to_edge(false, false);
+    assert_eq!(e.selection(), 0..0);
+    e.move_to(4);
+    e.move_to_edge(true, true);
+    assert_eq!(e.selection(), 4..13);
+    e.move_to_edge(false, true);
+    assert_eq!(e.selection(), 0..4);
+}
+
+#[test]
+fn a_history_that_is_off_records_nothing_even_when_asked_directly() {
+    use super::history::{Group, History, State};
+    let state = |text: &str| State {
+        text: text.to_owned(),
+        anchor: 0,
+        head: 0,
+    };
+    let mut history = History::default();
+    history.stop();
+    history.record(state("secret"), Some(Group::Typing));
+    history.record(state("secret two"), None);
+    assert!(history.undo(state("now")).is_none());
+    assert!(history.redo(state("now")).is_none());
+    let mut on = History::default();
+    on.record(state("kept"), None);
+    assert_eq!(
+        on.undo(state("now")).map(|s| s.text).as_deref(),
+        Some("kept")
+    );
+}

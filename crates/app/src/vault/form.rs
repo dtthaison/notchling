@@ -30,7 +30,7 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Field {
     Name,
     Url,
@@ -119,7 +119,7 @@ impl Form {
             custom_vars: false,
             advanced: false,
             focus: Field::Name,
-            keyboard: true,
+            keyboard: false,
             changes: PrefillChanges::default(),
             host_confirmed: false,
             error: None,
@@ -146,7 +146,7 @@ impl Form {
             secret_var: entry.secret_var.clone(),
             custom_vars: custom,
             focus: Field::Secret,
-            keyboard: true,
+            keyboard: false,
             ..Form::add()
         }
     }
@@ -261,41 +261,23 @@ impl Form {
         }
     }
 
-    pub fn secret_mask(&self) -> String {
-        "•".repeat(self.secret.chars().count())
+    pub fn enter(&self, field: Field) -> Enter {
+        if field.multiline() {
+            Enter::Newline
+        } else if self.mode == Mode::Request {
+            Enter::Ignore
+        } else {
+            Enter::Save
+        }
     }
 
-    pub fn key(&mut self, key: &str, key_char: Option<&str>, modified: bool) -> Typed {
-        let field = self.focus;
-        match key {
-            "tab" => {
-                self.focus_next();
-                Typed::Changed
-            }
-            "enter" if field.multiline() => {
-                self.text_mut(field).push('\n');
-                Typed::Changed
-            }
-            "enter" if self.mode == Mode::Request => Typed::Ignored,
-            "enter" => Typed::Submit,
-            "backspace" => {
-                if self.text_mut(field).pop().is_some() {
-                    self.after_typing(field);
-                    Typed::Changed
-                } else {
-                    Typed::Ignored
-                }
-            }
-            _ if modified => Typed::Ignored,
-            _ => match key_char {
-                Some(c) if !c.is_empty() && !c.chars().any(char::is_control) => {
-                    self.text_mut(field).push_str(c);
-                    self.after_typing(field);
-                    Typed::Changed
-                }
-                _ => Typed::Ignored,
-            },
+    pub fn set_text(&mut self, field: Field, text: &str) -> bool {
+        if self.text(field) == text {
+            return false;
         }
+        text.clone_into(self.text_mut(field));
+        self.after_typing(field);
+        true
     }
 
     fn after_typing(&mut self, field: Field) {
@@ -317,6 +299,12 @@ impl Form {
         let fields = self.fields();
         let at = fields.iter().position(|f| *f == self.focus).unwrap_or(0);
         self.focus = fields[(at + 1) % fields.len()];
+    }
+
+    pub fn focus_previous(&mut self) {
+        let fields = self.fields();
+        let at = fields.iter().position(|f| *f == self.focus).unwrap_or(0);
+        self.focus = fields[(at + fields.len() - 1) % fields.len()];
     }
 
     pub fn set_kind(&mut self, kind: Kind) {
@@ -462,37 +450,6 @@ impl Form {
         Ok((entry, value, replacing))
     }
 
-    pub fn paste(&mut self, text: &str) -> Typed {
-        let field = self.focus;
-        let clean: String = text
-            .chars()
-            .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-            .collect();
-        let clean = if field.multiline() {
-            clean
-        } else {
-            clean.trim_end_matches('\n').replace('\n', " ")
-        };
-        if clean.is_empty() {
-            return Typed::Ignored;
-        }
-        self.text_mut(field).push_str(&clean);
-        self.after_typing(field);
-        Typed::Changed
-    }
-
-    pub fn copy(&self) -> Option<String> {
-        (self.focus != Field::Secret).then(|| self.text(self.focus).to_owned())
-    }
-
-    pub fn cut(&mut self) -> Option<String> {
-        let text = self.copy()?;
-        let field = self.focus;
-        self.text_mut(field).clear();
-        self.after_typing(field);
-        Some(text)
-    }
-
     pub fn confirm_host(&mut self) {
         self.host_confirmed = !self.host_confirmed;
         self.error = None;
@@ -509,10 +466,10 @@ impl Form {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Typed {
-    Changed,
-    Submit,
-    Ignored,
+pub enum Enter {
+    Newline,
+    Save,
+    Ignore,
 }
 
 #[cfg(test)]

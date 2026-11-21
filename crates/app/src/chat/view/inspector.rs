@@ -172,11 +172,14 @@ impl RenderOnce for Panel {
             if let Some((shown, full)) = &self.folder {
                 rows.push(folder_row(shown, full, self.reveal, a));
             }
-            rows.extend(
-                i.facts
-                    .iter()
-                    .map(|(name, value)| fact_row(fact_icon(name), &fact_text(name, value), a)),
-            );
+            rows.extend(i.facts.iter().enumerate().map(|(n, (name, value))| {
+                fact_row(
+                    format!("fact-{n}"),
+                    fact_icon(name),
+                    &fact_text(name, value),
+                    a,
+                )
+            }));
             if rows.is_empty() {
                 empty(t::chat::details_nothing_read(), a)
             } else {
@@ -338,10 +341,10 @@ fn mark_box(mark: Mark, key: &str, a: Appearance) -> Div {
     }
 }
 
-pub(super) fn fact_row(shape: Icon, text: &str, a: Appearance) -> Div {
+pub(super) fn fact_row(key: String, shape: Icon, text: &str, a: Appearance) -> Div {
     fact_with(
         shape,
-        select::detail_text(text, TypeRole::Meta, Ink::Text, a),
+        select::detail_keyed(key, text, TypeRole::Meta, Ink::Text, a),
         a,
     )
 }
@@ -372,7 +375,7 @@ fn fact_with(shape: Icon, body: Div, a: Appearance) -> Div {
 fn folder_row(shown: &str, full: &str, reveal: bool, a: Appearance) -> Div {
     let full = full.to_owned();
     if !reveal {
-        return div().child(fact_row(Icon::Folder, shown, a));
+        return div().child(fact_row("fact-folder".to_owned(), Icon::Folder, shown, a));
     }
     let row = fact_with(Icon::Folder, label(shown, TypeRole::Meta, Ink::Text, a), a);
     div().child(
@@ -413,19 +416,34 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
         .items_start()
         .gap(px(6.0))
         .child(mark_box(mark, &format!("task-{index}"), a))
-        .child(div().flex_1().min_w(px(0.0)).child(
-            select::detail_text(&task.subject, TypeRole::Meta, ink, a).line_height(px(ROW_LINE)),
-        ))
+        .child(
+            div().flex_1().min_w(px(0.0)).child(
+                select::detail_keyed(
+                    format!("task-{index}-subject"),
+                    &task.subject,
+                    TypeRole::Meta,
+                    ink,
+                    a,
+                )
+                .line_height(px(ROW_LINE)),
+            ),
+        )
 }
 
 fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Div {
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
         text = text.child(
-            select::detail_text(&s.title, TypeRole::Meta, Ink::Text, a)
-                .line_height(px(ROW_LINE))
-                .w_full()
-                .elide(),
+            select::detail_keyed(
+                format!("shell-{index}-title"),
+                &s.title,
+                TypeRole::Meta,
+                Ink::Text,
+                a,
+            )
+            .line_height(px(ROW_LINE))
+            .w_full()
+            .elide(),
         );
     }
     div()
@@ -435,11 +453,17 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
         .child(mark_box(s.mark, &format!("shell-{index}"), a))
         .child(
             text.child(
-                select::detail_text(&s.command, TypeRole::Mono, Ink::TextMuted, a)
-                    .line_height(px(ROW_LINE))
-                    .w_full()
-                    .elide()
-                    .line_clamp(2),
+                select::detail_keyed(
+                    format!("shell-{index}-command"),
+                    &s.command,
+                    TypeRole::Mono,
+                    Ink::TextMuted,
+                    a,
+                )
+                .line_height(px(ROW_LINE))
+                .w_full()
+                .elide()
+                .line_clamp(2),
             )
             .child(
                 div()
@@ -447,8 +471,14 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                     .items_center()
                     .gap(px(8.0))
                     .child(
-                        select::detail_text(&s.status_word, TypeRole::Meta, Ink::TextFaint, a)
-                            .line_height(px(ROW_LINE)),
+                        select::detail_keyed(
+                            format!("shell-{index}-status"),
+                            &s.status_word,
+                            TypeRole::Meta,
+                            Ink::TextFaint,
+                            a,
+                        )
+                        .line_height(px(ROW_LINE)),
                     )
                     .children(
                         (!s.output_path.is_empty()).then(|| output_link(index, s, a, chat.clone())),

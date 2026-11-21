@@ -15,8 +15,9 @@ fn saved() -> VaultEntry {
 
 fn type_text(form: &mut Form, text: &str) {
     for c in text.chars() {
-        let s = c.to_string();
-        form.key(&s, Some(&s), false);
+        let field = form.focus;
+        let typed = format!("{}{c}", form.text(field));
+        form.set_text(field, &typed);
     }
 }
 
@@ -44,24 +45,28 @@ fn a_new_form_types_its_name_and_the_variables_follow() {
             Field::HowTo
         ]
     );
-    f.key("tab", None, false);
+    f.focus_next();
+    assert_eq!(f.focus, Field::Url);
+    f.focus_previous();
+    assert_eq!(f.focus, Field::Name);
+    f.focus_previous();
+    assert_eq!(f.focus, Field::HowTo);
+    f.focus_next();
+    f.focus_next();
     assert_eq!(f.focus, Field::Url);
     type_text(&mut f, "https://x.example");
     assert_eq!(
         f.vars_summary(),
         "$MY_API_USERNAME $MY_API_PASSWORD $MY_API_URL"
     );
-    f.focus = Field::Note;
-    assert_eq!(f.key("enter", Some("\r"), false), Typed::Changed);
-    assert_eq!(f.note, "\n");
+    assert_eq!(f.enter(Field::Note), Enter::Newline);
+    assert_eq!(f.enter(Field::HowTo), Enter::Newline);
+    assert_eq!(f.enter(Field::Secret), Enter::Save);
+    assert_eq!(f.enter(Field::Url), Enter::Save);
     f.focus = Field::Secret;
-    assert_eq!(f.key("enter", Some("\r"), false), Typed::Submit);
-    assert_eq!(f.key("v", Some("v"), true), Typed::Ignored, "⌘V");
-    assert_eq!(f.key("escape", Some("\u{1b}"), false), Typed::Ignored);
     assert!(!f.can_save(), "a login needs a value");
     type_text(&mut f, "s3cret");
     assert!(f.can_save());
-    assert_eq!(f.secret_mask(), "••••••");
     assert!(!format!("{f:?}").contains("s3cret"));
     f.advanced = true;
     f.focus = Field::SecretVar;
@@ -202,10 +207,9 @@ fn an_agents_request_shows_its_reason_and_marks_what_it_changed() {
     f.confirm_host();
     assert!(f.can_save(), "an existing entry keeps its value");
     assert_eq!(f.blocker(), None);
-    f.focus = Field::Url;
-    assert_eq!(f.key("enter", Some("\r"), false), Typed::Ignored);
-    f.focus = Field::Secret;
-    assert_eq!(f.key("enter", Some("\r"), false), Typed::Ignored);
+    assert_eq!(f.enter(Field::Url), Enter::Ignore);
+    assert_eq!(f.enter(Field::Secret), Enter::Ignore);
+    assert_eq!(f.enter(Field::Note), Enter::Newline);
     let fresh = PendingRequest {
         existing: false,
         entry: VaultEntry::new("npm", Kind::Token),
@@ -220,28 +224,28 @@ fn an_agents_request_shows_its_reason_and_marks_what_it_changed() {
 }
 
 #[test]
-fn paste_copy_and_cut_work_in_the_fields_but_the_value_is_never_copied() {
+fn an_edited_field_updates_the_form_once_and_the_variables_follow_a_name() {
     let mut f = Form::add();
-    assert_eq!(f.paste("my-api\n"), Typed::Changed);
-    assert_eq!(f.name, "my-api", "a single-line field drops the line break");
+    assert!(f.set_text(Field::Name, "my-api"));
+    assert_eq!(f.name, "my-api");
     assert_eq!(
         f.secret_var, "MY_API_TOKEN",
-        "the variables follow a pasted name"
+        "the variables follow the name"
     );
-    assert_eq!(f.copy(), Some("my-api".to_owned()));
-    assert_eq!(f.cut(), Some("my-api".to_owned()));
-    assert_eq!(f.name, "");
-    f.focus = Field::Note;
-    f.paste("line one\nline two");
-    assert_eq!(f.note, "line one\nline two", "a multi-line field keeps it");
-    f.focus = Field::Secret;
-    assert_eq!(f.paste("ghp_abc\r\n"), Typed::Changed);
-    assert_eq!(f.secret, "ghp_abc", "the value's trailing line break goes");
-    assert_eq!(f.copy(), None, "the value is never copied");
-    assert_eq!(f.cut(), None, "nor cut");
+    assert!(
+        !f.set_text(Field::Name, "my-api"),
+        "the same text is no edit"
+    );
+    f.error = Some("old".into());
+    assert!(!f.set_text(Field::Name, "my-api"));
+    assert_eq!(f.error.as_deref(), Some("old"), "no edit leaves the error");
+    assert!(f.set_text(Field::Note, "line one\nline two"));
+    assert_eq!(f.error, None, "an edit clears the error");
+    assert!(f.set_text(Field::SecretVar, "MINE"));
+    assert!(f.custom_vars, "an edited variable stops following the name");
+    f.set_text(Field::Name, "other");
+    assert_eq!(f.secret_var, "MINE");
+    assert!(f.set_text(Field::Secret, "ghp_abc"));
     assert_eq!(f.secret, "ghp_abc");
-    assert_eq!(f.paste(""), Typed::Ignored);
-    f.focus = Field::Url;
-    f.paste("https://x\u{7}.example");
-    assert_eq!(f.url, "https://x.example");
+    assert!(!format!("{f:?}").contains("ghp_abc"));
 }

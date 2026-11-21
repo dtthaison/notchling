@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use gpui::{
     canvas, div, fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Div,
-    Element, ElementId, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior,
+    Element, ElementId, EntityId, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior,
     InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Point, Styled, StyledText, TextLayout, WeakEntity, Window,
 };
@@ -37,6 +37,7 @@ struct State {
     focus: Option<Spot>,
     unit: Unit,
     dragging: bool,
+    view: Option<EntityId>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +62,25 @@ fn state<R>(scope: Scope, f: impl FnOnce(&RefCell<State>) -> R) -> R {
     STATES.with(|all| f(&all[scope as usize]))
 }
 
+fn other(scope: Scope) -> Scope {
+    match scope {
+        Scope::File => Scope::Details,
+        Scope::Details => Scope::File,
+    }
+}
+
+fn take_over(scope: Scope) -> Option<EntityId> {
+    state(other(scope), |s| s.borrow_mut().release())
+}
+
 impl State {
+    fn release(&mut self) -> Option<EntityId> {
+        let had = self.anchor.take().is_some();
+        self.focus = None;
+        self.dragging = false;
+        had.then_some(self.view).flatten()
+    }
+
     fn order(&self, spot: &Spot) -> Option<At> {
         let order = *self.at.get(&spot.key)?;
         Some(At {
@@ -176,6 +195,14 @@ pub fn copied_in(scope: Scope) -> Option<String> {
     })
 }
 
+pub fn keep_only(file: bool, details: bool) {
+    for (scope, mounted) in [(Scope::File, file), (Scope::Details, details)] {
+        if !mounted {
+            state(scope, |s| *s.borrow_mut() = State::default());
+        }
+    }
+}
+
 pub fn clear() {
     for scope in [Scope::File, Scope::Details] {
         state(scope, |s| {
@@ -203,6 +230,7 @@ pub fn listener_in(scope: Scope, chat: WeakEntity<ChatView>) -> impl IntoElement
         },
         move |_, _, window, cx| {
             let view = window.current_view();
+            state(scope, |s| s.borrow_mut().view = Some(view));
             if scope == Scope::Details {
                 preview_select(scope, cx, view);
             }
@@ -252,6 +280,9 @@ pub fn listener_in(scope: Scope, chat: WeakEntity<ChatView>) -> impl IntoElement
                     let Some(spot) = s.spot_at(event.position).filter(|p| p.key == key) else {
                         return;
                     };
+                    if let Some(left) = take_over(scope) {
+                        cx.notify(left);
+                    }
                     let note = s.note(&key).map(|n| n.text.clone()).unwrap_or_default();
                     let (unit, range) = match event.click_count {
                         1 => (Unit::Char, spot.index..spot.index),
@@ -332,11 +363,6 @@ pub fn selectable_in(
         a,
         links: Vec::new(),
     }
-}
-
-pub fn detail_text(text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
-    let shown = role.display(text);
-    detail_marked(shown.to_string(), text, role, ink, Vec::new(), a)
 }
 
 pub fn detail_keyed(key: String, text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
@@ -557,6 +583,84 @@ mod tests {
             layout: TextLayout::default(),
             links: Vec::new(),
         }
+    }
+
+    fn selected_note(scope: Scope, key: &str, text: &str) {
+        state(scope, |s| {
+            let mut s = s.borrow_mut();
+            *s = State::default();
+            s.note_drawn(note(key, text));
+            s.anchor = Some(Spot {
+                key: key.to_owned(),
+                index: 0,
+            });
+            s.focus = Some(Spot {
+                key: key.to_owned(),
+                index: text.len(),
+            });
+        });
+    }
+
+    #[test]
+    fn a_selection_started_in_one_scope_ends_the_other_and_copy_follows_it() {
+        selected_note(Scope::File, "file-line", "from the file");
+        selected_note(Scope::Details, "fact-0", "from the details");
+        assert_eq!(copied().as_deref(), Some("from the file"));
+        take_over(Scope::Details);
+        assert_eq!(copied().as_deref(), Some("from the details"));
+        assert!(!selected_in(Scope::File));
+        assert!(selected_in(Scope::Details));
+        take_over(Scope::File);
+        assert_eq!(copied(), None);
+        assert!(!selected_in(Scope::Details));
+    }
+
+    #[test]
+    fn a_scope_that_is_not_mounted_loses_its_selection_notes_and_copy() {
+        selected_note(Scope::File, "file-line", "from the file");
+        selected_note(Scope::Details, "fact-0", "from the details");
+        keep_only(true, true);
+        assert_eq!(copied().as_deref(), Some("from the file"));
+        keep_only(false, true);
+        assert!(!selected_in(Scope::File));
+        assert_eq!(copied().as_deref(), Some("from the details"));
+        state(Scope::File, |s| {
+            let s = s.borrow();
+            assert!(s.notes.is_empty() && s.at.is_empty() && s.hits.is_empty());
+            assert!(s.anchor.is_none() && s.focus.is_none() && !s.dragging);
+        });
+        keep_only(false, false);
+        assert!(!selected_in(Scope::Details));
+        assert_eq!(copied(), None);
+        state(Scope::Details, |s| assert!(s.borrow().notes.is_empty()));
+    }
+
+    #[test]
+    fn a_scope_that_is_mounted_keeps_everything_it_had() {
+        selected_note(Scope::Details, "fact-0", "from the details");
+        state(Scope::Details, |s| s.borrow_mut().dragging = true);
+        keep_only(false, true);
+        assert!(selected_in(Scope::Details));
+        state(Scope::Details, |s| {
+            let s = s.borrow();
+            assert_eq!(s.notes.len(), 1);
+            assert!(s.dragging);
+        });
+    }
+
+    #[test]
+    fn a_scope_that_ends_reports_the_view_to_repaint_only_when_it_held_a_selection() {
+        let mut s = State {
+            view: Some(EntityId::from(7u64)),
+            ..State::default()
+        };
+        assert_eq!(s.release(), None);
+        s.anchor = Some(Spot {
+            key: "a".into(),
+            index: 0,
+        });
+        assert_eq!(s.release(), Some(EntityId::from(7u64)));
+        assert!(s.anchor.is_none() && s.focus.is_none() && !s.dragging);
     }
 
     #[test]

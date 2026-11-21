@@ -34,6 +34,13 @@ impl Editors {
             .retain(|key, _| matches!(key, Key::Note(_)));
     }
 
+    pub(super) fn retain_notes(&self, mut live: impl FnMut(&str) -> bool) {
+        self.map.borrow_mut().retain(|key, _| match key {
+            Key::Note(id) => live(id),
+            _ => true,
+        });
+    }
+
     pub(super) fn forget_note(&self, id: &str) {
         self.map.borrow_mut().remove(&Key::Note(id.to_owned()));
     }
@@ -148,7 +155,7 @@ impl MachinesView {
         cx.notify();
     }
 
-    pub(super) fn tab_sheet(&mut self, window: &Window, cx: &gpui::App) -> bool {
+    pub(super) fn tab_sheet(&mut self, window: &Window, back: bool, cx: &gpui::App) -> bool {
         let at = self.editors.focused(window, cx);
         let next = match self.model.sheet_mut() {
             Some(Sheet::Add(form)) => {
@@ -156,14 +163,23 @@ impl MachinesView {
                     Some(Key::Add(field)) => Some(field),
                     _ => None,
                 };
-                Some(Key::Add(form.tab_from(from)))
+                Some(Key::Add(if back {
+                    form.tab_back_from(from)
+                } else {
+                    form.tab_from(from)
+                }))
             }
             Some(Sheet::Job(form)) => {
                 let from = match at {
                     Some(Key::Job(field)) => Some(field),
                     _ => None,
                 };
-                form.tab_from(from).map(Key::Job)
+                if back {
+                    form.tab_back_from(from)
+                } else {
+                    form.tab_from(from)
+                }
+                .map(Key::Job)
             }
             _ => None,
         };
