@@ -90,6 +90,14 @@ fn said_no(message: &str) -> ApiError {
     ApiError::new(ErrorCode::NeedsApproval, message)
 }
 
+fn drifted() -> ApiError {
+    ApiError::new(
+        ErrorCode::Forbidden,
+        "That request no longer matches what you were shown.",
+    )
+    .with_reason("needs_consent")
+}
+
 impl VaultOps {
     pub fn new(switch: Arc<SwitchFlag>, store: VaultStore, room: Arc<dyn Room>) -> VaultOps {
         let ops = VaultOps {
@@ -423,12 +431,27 @@ impl VaultOps {
             )),
             _ => None,
         };
-        if let Some((consent, row)) = &used {
-            if let Err(e) = self.holds(row, replacing.as_deref()) {
-                consent.withdraw_use(row);
-                return Err(e);
+        let shown = match &used {
+            Some((consent, row)) => match self.holds(row, replacing.as_deref()) {
+                Ok(shown) => Some(shown),
+                Err(e) => {
+                    consent.withdraw_use(row);
+                    return Err(e);
+                }
+            },
+            None => None,
+        };
+        let still = |current: Option<&VaultEntry>| match (&used, &shown) {
+            (Some((consent, row)), Some((existing, revision))) => {
+                consent.now() < row.expires_ms
+                    && match (existing, current) {
+                        (false, None) => true,
+                        (true, Some(now)) => revision.as_ref().is_none_or(|r| *r == now.updated),
+                        _ => false,
+                    }
             }
-        }
+            _ => true,
+        };
         let ended = |outcome: Result<Value, String>| {
             if let Some((consent, row)) = &used {
                 consent.finish_use(row, outcome);
@@ -449,8 +472,17 @@ impl VaultOps {
             },
             None => None,
         };
-        let saved = match self.store.save(&entry, value, old.as_ref(), &now_iso()) {
+        let saved = match self
+            .store
+            .save_checked(&entry, value, old.as_ref(), &now_iso(), &still)
+        {
             Ok(saved) => saved,
+            Err(notchling_engine::vault::VaultError::Changed) => {
+                if let Some((consent, row)) = &used {
+                    consent.withdraw_use(row);
+                }
+                return Err(drifted());
+            }
             Err(e) => {
                 ended(Err(e.to_string()));
                 return Err(failed(e.to_string()));
@@ -471,28 +503,27 @@ impl VaultOps {
         &self,
         row: &notchling_engine::consent::Consent,
         replacing: Option<&str>,
-    ) -> Result<(), ApiError> {
-        let drifted = || {
-            ApiError::new(
-                ErrorCode::Forbidden,
-                "That request no longer matches what you were shown.",
-            )
-            .with_reason("needs_consent")
-        };
+    ) -> Result<(bool, Option<String>), ApiError> {
         if replacing.is_some_and(|name| name != row.target) {
             return Err(drifted());
         }
         let Some(existing) = row.change.get("existing").and_then(Value::as_bool) else {
-            return Ok(());
+            return Err(drifted());
         };
         let current = self
             .store
             .entry(&row.target)
             .map_err(|e| failed(e.to_string()))?;
-        let revision = row.change.get("revision").and_then(Value::as_str);
+        let revision = row
+            .change
+            .get("revision")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         match (existing, current) {
-            (false, None) => Ok(()),
-            (true, Some(now)) if revision.is_none_or(|r| r == now.updated) => Ok(()),
+            (false, None) => Ok((existing, revision)),
+            (true, Some(now)) if revision.as_ref().is_none_or(|r| *r == now.updated) => {
+                Ok((existing, revision))
+            }
             _ => Err(drifted()),
         }
     }
@@ -562,6 +593,9 @@ mod pending_tests;
 #[cfg(test)]
 #[path = "vault_release_tests.rs"]
 mod release_tests;
+#[cfg(test)]
+#[path = "vault_ops_snapshot_tests.rs"]
+mod snapshot_tests;
 #[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;

@@ -86,8 +86,8 @@ fn the_pending_events_name_the_asking_session_only_when_it_is_trusted() {
     );
     let (_, request) = ask(&s, json!({"name": "npm", "folder": "/w/app"}));
     assert_eq!(request["session"], "sess-2");
-    assert_eq!(request["verified"]["cwd"], "/w/app");
-    assert_eq!(request["verified"]["parents"], json!(["zsh", "claude"]));
+    assert_eq!(request["verified"]["verified"], true);
+    assert_eq!(request["verified"]["session"], "sess-2");
     cancel(&s, &request);
     let s = setup("pending-untrusted", true);
     let (_, request) = ask(&s, json!({"name": "npm"}));

@@ -69,7 +69,7 @@ pub(super) struct Setup {
     pub(super) consent: Arc<ConsentOps>,
     pub(super) consent_sink: Arc<MemorySink>,
     skew: Arc<AtomicI64>,
-    dir: std::path::PathBuf,
+    pub(super) dir: std::path::PathBuf,
 }
 
 impl Drop for Setup {

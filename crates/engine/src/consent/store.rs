@@ -325,6 +325,19 @@ impl ConsentStore {
         fetch(&db, id)
     }
 
+    pub fn resolve_change(&self, id: &str, change: &Value) -> Result<Option<Consent>, String> {
+        let db = self.lock();
+        db.execute(
+            "UPDATE consents SET change = ?2
+             WHERE id = ?1 AND state IN ('waiting', 'opened')
+                 AND json_type(change, '$.existing') IS NOT 'true'
+                 AND json_type(change, '$.existing') IS NOT 'false'",
+            params![id, text_of(change)],
+        )
+        .map_err(db_err)?;
+        fetch(&db, id)
+    }
+
     pub fn used(
         &self,
         id: &str,
