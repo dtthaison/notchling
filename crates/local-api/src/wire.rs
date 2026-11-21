@@ -7,6 +7,7 @@ pub const API_VERSION: u32 = 1;
 pub mod ops {
     pub const HELLO: &str = "hello";
     pub const DAEMON_STATUS: &str = "daemon.status";
+    pub const DAEMON_CAPABILITIES: &str = "daemon.capabilities";
     pub const SESSIONS_LIST: &str = "sessions.list";
     pub const EVENTS_SUBSCRIBE: &str = "events.subscribe";
 
@@ -316,6 +317,26 @@ impl ApiError {
 
     pub fn with_data(mut self, data: Value) -> ApiError {
         self.data = Some(data);
+        self
+    }
+
+    pub fn with_reason(mut self, reason: &str) -> ApiError {
+        let mut data = match self.data.take() {
+            Some(Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+        data.insert("reason".into(), Value::String(reason.to_string()));
+        self.data = Some(Value::Object(data));
+        self
+    }
+
+    pub fn with_field(mut self, name: &str, value: Value) -> ApiError {
+        let mut data = match self.data.take() {
+            Some(Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+        data.insert(name.into(), value);
+        self.data = Some(Value::Object(data));
         self
     }
 

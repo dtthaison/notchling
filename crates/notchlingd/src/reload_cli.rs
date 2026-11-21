@@ -1,5 +1,5 @@
-use crate::layout::Layout;
-use notchling_local_api::{ops, Client, ClientError, ClientKind, CALL_TIMEOUT};
+use crate::contract::{self, Failure};
+use notchling_local_api::{ops, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -7,9 +7,7 @@ use std::path::PathBuf;
 pub const USAGE: &str =
     "Usage: notchling session reload <id|self> [--after-turn] [--json] [--socket <path>]";
 
-pub const DONE: i32 = 0;
-pub const REFUSED: i32 = 1;
-pub const TROUBLE: i32 = 2;
+pub const DONE: i32 = contract::OK;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
@@ -48,19 +46,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     }
 }
 
-fn connect(socket: Option<&std::path::Path>) -> Result<Client, ClientError> {
-    let layout = Layout::from_env(socket).ok_or(ClientError::Unsupported)?;
-    Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION"))
-}
-
-fn message_of(e: ClientError) -> (i32, String) {
-    match e {
-        ClientError::Api(api) => (REFUSED, api.message),
-        ClientError::Timeout => (TROUBLE, "Notchling didn't answer.".to_string()),
-        other => (TROUBLE, format!("notchling: {other}")),
-    }
-}
-
 pub fn sentence(reply: &Value) -> String {
     let phase = reply
         .pointer("/task/phase")
@@ -87,30 +72,25 @@ pub fn sentence(reply: &Value) -> String {
 }
 
 pub fn run_with(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = match parse(args) {
         Ok(parsed) => parsed,
-        Err(message) => {
-            let _ = writeln!(err, "{message}");
-            return TROUBLE;
-        }
+        Err(message) => return Failure::usage(message).emit(json, out, err),
     };
-    let reply = connect(parsed.socket.as_deref()).and_then(|mut client| {
+    let reply = contract::connect(parsed.socket.as_deref()).and_then(|mut client| {
         client.set_timeout(CALL_TIMEOUT);
-        client.call(
+        contract::call(
+            &mut client,
             ops::SESSION_RELOAD,
             json!({"id": parsed.id, "afterTurn": parsed.after_turn}),
         )
     });
     let reply = match reply {
         Ok(reply) => reply,
-        Err(e) => {
-            let (code, message) = message_of(e);
-            let _ = writeln!(err, "{message}");
-            return code;
-        }
+        Err(failure) => return failure.emit(json, out, err),
     };
     let shown = if parsed.json {
-        serde_json::to_string_pretty(&reply).unwrap_or_else(|_| reply.to_string())
+        contract::pretty(&reply)
     } else {
         sentence(&reply)
     };

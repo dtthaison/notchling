@@ -86,9 +86,13 @@ impl VaultOps {
                         State::Expired => SecretResult::Expired,
                         _ => SecretResult::Cancelled,
                     };
-                    let mut error = said_no("The user didn't allow it.");
+                    let mut error = said_no("The user didn't allow it.").with_reason(match why {
+                        SecretResult::Denied => "denied",
+                        SecretResult::Expired => "expired",
+                        _ => "cancelled",
+                    });
                     if why == SecretResult::Denied {
-                        error = error.with_data(json!({ DENIED: true }));
+                        error = error.with_field(DENIED, json!(true));
                     }
                     return Err((error, why));
                 }

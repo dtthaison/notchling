@@ -1,5 +1,5 @@
 use super::*;
-use notchling_local_api::ApiError;
+use notchling_local_api::{ApiError, ErrorCode};
 
 fn words(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
@@ -102,20 +102,28 @@ fn an_empty_plan_says_so_and_check_and_undo_list_their_rows() {
 #[test]
 fn applying_as_a_non_app_says_who_applies() {
     let api = |code, text: &str| ClientError::Api(ApiError::new(code, text));
-    assert!(message_of(
+    let applying = failure_of(
         api(ErrorCode::Forbidden, "only the Notchling app may do this"),
-        true
-    )
-    .contains("Settings, Cost Profile"));
-    assert_eq!(
-        message_of(
-            api(ErrorCode::Forbidden, "only the Notchling app may do this"),
-            false
-        ),
-        "only the Notchling app may do this"
+        ops::COST_SETUP_APPLY,
+        true,
     );
-    assert_eq!(code_of(&api(ErrorCode::Forbidden, "x")), REFUSED);
-    assert_eq!(code_of(&ClientError::Timeout), TROUBLE);
-    assert!(message_of(ClientError::Unsupported, false).contains("isn't running"));
-    assert!(message_of(api(ErrorCode::UnknownOp, "x"), false).contains("no cost command yet"));
+    assert!(applying.line().contains("Settings, Cost Profile"));
+    assert_eq!(applying.exit, 4);
+    let reading = failure_of(
+        api(ErrorCode::Forbidden, "only the Notchling app may do this"),
+        ops::COST_SETUP_PLAN,
+        false,
+    );
+    assert_eq!(
+        reading.line(),
+        "only the Notchling app may do this (refused)"
+    );
+    assert_eq!(
+        failure_of(ClientError::Timeout, ops::COST_SETUP_PLAN, false).exit,
+        3
+    );
+    assert_eq!(
+        failure_of(api(ErrorCode::UnknownOp, "x"), ops::COST_SETUP_PLAN, false).reason,
+        "old_daemon"
+    );
 }

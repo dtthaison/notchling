@@ -110,15 +110,16 @@ fn with_the_switch_off_every_vault_path_says_so() {
         other => panic!("{other:?}"),
     }
 
+    let off = |tail: &str| format!("{OFF} ({tail})");
     let (code, _, err) = run(&root, &["secrets", "github"]);
-    assert_eq!((code, err.trim()), (2, OFF));
+    assert_eq!((code, err.trim()), (4, off("refused").as_str()));
     let marker = dir.0.join("ran");
     let command = format!("touch '{}'", marker.display());
     let (code, _, err) = run(&root, &["secret", "gh", "--", &command]);
-    assert_eq!((code, err.trim()), (2, OFF));
+    assert_eq!((code, err.trim()), (125, off("stopped").as_str()));
     assert!(!marker.exists(), "the command never ran");
     let (code, _, err) = run(&root, &["secret-request", "gh", "--kind", "token"]);
-    assert_eq!((code, err.trim()), (2, OFF));
+    assert_eq!((code, err.trim()), (4, off("refused").as_str()));
 
     assert!(!root.join("notchling/daemon/vault.json").exists());
     assert!(!root.join("notchling/vault.json").exists());
@@ -149,10 +150,11 @@ fn with_no_daemon_the_commands_say_notchling_isnt_running() {
     let root = dir.0.join("root");
     std::fs::create_dir_all(&root).unwrap();
     let (code, _, err) = run(&root, &["secrets"]);
-    assert_eq!(code, 2);
+    assert_eq!(code, 3);
     assert!(err.contains("Notchling isn't running"), "{err}");
+    assert!(err.trim_end().ends_with("(not_running)"), "{err}");
     let (code, _, err) = run(&root, &["secret", "gh"]);
-    assert_eq!(code, 2);
+    assert_eq!(code, 125);
     assert!(err.starts_with("Usage: notchling secret <name>"), "{err}");
     let (code, _, err) = run(&root, &["secret-request", "gh", "--expires", "soon"]);
     assert_eq!(code, 2);

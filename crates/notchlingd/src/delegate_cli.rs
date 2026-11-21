@@ -1,9 +1,12 @@
+use crate::contract::{self, Failure};
 use crate::layout::Layout;
 use notchling_engine::delegate::command::{self, Context, RecordTo};
 use notchling_engine::delegate::options::DEPTH_VARIABLE;
 use notchling_engine::delegate::real::{self, Folders};
 use notchling_engine::delegate::record;
 use notchling_engine::settings::Settings;
+use serde_json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -60,11 +63,10 @@ pub fn folders(
     }
 }
 
-fn setup() -> Option<(Layout, Folders)> {
+fn setup(json: bool) -> Option<(Layout, Folders)> {
     let Some(layout) = Layout::from_env(None) else {
-        eprintln!(
-            "notchling: no home folder in the environment, so nothing to find the tools from"
-        );
+        Failure::failed("No home folder in the environment, so nothing to find the tools from.")
+            .report(json);
         return None;
     };
     let real_home = notchling_platform::paths::home().unwrap_or_else(|| layout.home());
@@ -82,12 +84,12 @@ pub fn run(args: &[String]) -> i32 {
     if let Some(code) = crate::cluster_dispatch_delegate::run_machine(args) {
         return code;
     }
-    let Some((layout, folders)) = setup() else {
-        return 2;
+    let json = contract::wants_json(args);
+    let Some((layout, folders)) = setup(json) else {
+        return contract::FAILED;
     };
     let Ok(cwd) = std::env::current_dir() else {
-        eprintln!("notchling: can't tell which folder this runs in");
-        return 2;
+        return Failure::failed("Can't tell which folder this runs in.").report(json);
     };
     let raw_depth = std::env::var(DEPTH_VARIABLE).ok();
     if let Ok(deeper) = notchling_engine::delegate::options::enter_depth(raw_depth.as_deref()) {
@@ -114,26 +116,138 @@ pub fn run(args: &[String]) -> i32 {
             pid: std::process::id(),
         }),
     };
-    command::run(
-        args,
-        &ctx,
-        deps,
-        &mut std::io::stdout(),
-        &mut std::io::stderr(),
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = command::run(args, &ctx, deps, &mut out, &mut err);
+    conclude(
+        code,
+        (&text_of(out), &text_of(err)),
+        json,
+        (&mut std::io::stdout(), &mut std::io::stderr()),
     )
 }
 
-pub fn models(args: &[String]) -> i32 {
-    let Some((_, folders)) = setup() else {
-        return 2;
+fn text_of(bytes: Vec<u8>) -> String {
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn contract_object(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
     };
-    let json = args.iter().any(|a| a == "--json");
-    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
-    let deps = real::deps(&folders, Arc::new(AtomicBool::new(false)));
-    if json {
-        return command::models_listing_json(&args, &deps, &mut std::io::stdout());
+    value.get("error").is_some_and(|error| {
+        error.get("exit").is_some_and(Value::is_i64)
+            && error.get("code").is_some_and(Value::is_string)
+    })
+}
+
+fn names_the_code(err: &str, code: i32) -> bool {
+    err.trim_end()
+        .lines()
+        .next_back()
+        .is_some_and(|line| line.ends_with(&format!(" ({})", contract::name_of(code))))
+}
+
+pub fn conclude(
+    code: i32,
+    (out, err): (&str, &str),
+    json: bool,
+    (to_out, to_err): (&mut dyn Write, &mut dyn Write),
+) -> i32 {
+    if code != contract::OK {
+        if json && contract_object(out) {
+            let _ = writeln!(to_out, "{}", out.trim());
+            return code;
+        }
+        if !json && names_the_code(err, code) {
+            let _ = write!(to_out, "{out}");
+            let _ = write!(to_err, "{err}");
+            return code;
+        }
     }
-    command::models_listing(&args, &deps, &mut std::io::stdout())
+    match code {
+        contract::OK => {
+            let _ = write!(to_out, "{out}");
+            if !json {
+                let _ = write!(to_err, "{err}");
+            }
+            code
+        }
+        contract::BAD_REQUEST => {
+            let human = [err, out]
+                .iter()
+                .map(|text| text.trim())
+                .find(|text| !text.is_empty())
+                .unwrap_or_default();
+            Failure::usage(human).emit(json, to_out, to_err)
+        }
+        contract::FAILED | contract::EXPIRED => {
+            let failure = if code == contract::EXPIRED {
+                Failure::new(contract::EXPIRED, "expired", "The job ran out of time.")
+            } else {
+                Failure::failed("The job failed.")
+            };
+            if json {
+                let value = match serde_json::from_str::<Value>(out.trim()) {
+                    Ok(outcome) => failure.to_value_with(outcome),
+                    Err(_) => failure.to_value(),
+                };
+                let _ = writeln!(to_out, "{value}");
+                return code;
+            }
+            let _ = write!(to_out, "{out}");
+            let _ = write!(to_err, "{err}");
+            failure.emit(false, to_out, to_err)
+        }
+        _ => Failure::failed("The job ended in a way Notchling doesn't know.")
+            .emit(json, to_out, to_err),
+    }
+}
+
+fn listing_failure(args: &[String]) -> Failure {
+    if notchling_engine::delegate::role_models::wants_for(args) {
+        Failure::failed("No model is picked for that role.")
+    } else {
+        Failure::failed("The models couldn't be listed.")
+    }
+}
+
+fn listing(args: &[String], json: bool, deps: &notchling_engine::delegate::deps::Deps) -> i32 {
+    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
+    let mut out = Vec::new();
+    let code = if json {
+        command::models_listing_json(&args, deps, &mut out)
+    } else {
+        command::models_listing(&args, deps, &mut out)
+    };
+    let text = String::from_utf8_lossy(&out).trim().to_string();
+    match code {
+        contract::OK => {
+            println!("{text}");
+            code
+        }
+        contract::BAD_REQUEST => Failure::usage(text).report(json),
+        _ => {
+            let failure = listing_failure(&args).with_human(text.clone());
+            if json {
+                let value = match serde_json::from_str::<Value>(&text) {
+                    Ok(listing) => failure.to_value_with(listing),
+                    Err(_) => failure.to_value(),
+                };
+                println!("{value}");
+                return failure.exit;
+            }
+            failure.report(false)
+        }
+    }
+}
+
+pub fn models(args: &[String]) -> i32 {
+    let json = contract::wants_json(args);
+    let Some((_, folders)) = setup(json) else {
+        return contract::FAILED;
+    };
+    let deps = real::deps(&folders, Arc::new(AtomicBool::new(false)));
+    listing(args, json, &deps)
 }
 
 #[cfg(test)]
@@ -146,6 +260,32 @@ mod tests {
             Some((PathBuf::from("/home/me"), PathBuf::from("/data/Notchling")))
         })
         .unwrap()
+    }
+
+    fn words(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_failed_role_lookup_says_no_model_is_picked() {
+        for args in [
+            words(&["--for", "review-final"]),
+            words(&["--for=review-final"]),
+        ] {
+            assert_eq!(
+                listing_failure(&args).message,
+                "No model is picked for that role."
+            );
+        }
+    }
+
+    #[test]
+    fn any_other_listing_failure_does_not_blame_a_role() {
+        for args in [words(&[]), words(&["codex"]), words(&["agy"])] {
+            let failure = listing_failure(&args);
+            assert_eq!(failure.exit, contract::FAILED);
+            assert_eq!(failure.message, "The models couldn't be listed.");
+        }
     }
 
     #[test]

@@ -40,7 +40,7 @@ impl AskOps {
     pub(crate) fn mine_op(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let pid = caller.pid.filter(|pid| *pid > 0);
         let Some(hit) = pid.and_then(|pid| self.session_of(pid)) else {
-            return Err(forbidden(NO_SESSION));
+            return Err(forbidden(NO_SESSION).with_reason("no_session"));
         };
         let until = Instant::now() + waited(args);
         let here = self.waiters.enter(ANY);

@@ -273,6 +273,21 @@ under the data folder (`AgentConsole`) until the app's `bridge.set {"on": true}`
 its own bridge it holds both ports, so turning this one on then fails with a busy port and says
 so (decision 0011: one owner).
 
+## `capabilities_ops.rs`
+
+`daemon.capabilities`: agent tier, read only, not switched, `Quiet` in `op_kinds.rs` (an agent calls it freely and it is not an acting call). `notchling capabilities [--json]` prints it. Args `{}`.
+
+Reply: `{api, daemon, caller: {tier, tool, verified, session?}, app: {attached, followsInbox}, switches: {acting, bridge, accounts, vault, install, cluster}, ops: [{op, now, switch?, phase?}]}`.
+
+- `caller.tool` is `claude` for a verified session, `shell` for any other agent-tier caller and `app` for the app. `session` is only there when verified. `folder` and `organization` come with the identity work of the call record (step 1) and are left out until then; the reply never holds a secret, an email, an account name or Inbox text.
+- `ops` lists every op of `commands.rs` (the registry) once. `now` is `open`, `needs_consent`, `needs_switch` (with `switch`), `app_only`, `not_yet` (with `phase`), `never` or `internal`, for this caller at this moment; the app sees every op `open`. The consent counters (`consent`) are left out until the consent request exists (step 2).
+
+### `data.reason`
+
+An error's `data` carries `reason`, one of a closed list the command line turns into an exit code (`contract.rs`, `REASONS`): `usage`, `bad_value`, `unknown_key`, `key_reused`, `not_running`, `untrusted_daemon`, `old_daemon`, `timeout`, `switch_off`, `app_only`, `no_app`, `not_yet`, `never`, `internal_op`, `other_session`, `other_organization`, `no_session`, `needs_consent`, `busy`, `denied`, `cancelled`, `expired`, `withdrawn`, `already_answered`, `failed`, `internal`, `other`. The daemon sends the ones it knows (`switch_off` with `switch`, `no_app`, `never` with `never: true`, `unknown_key`, `bad_value`, `busy`, `already_answered`); the command adds `usage`, `not_running`, `untrusted_daemon`, `old_daemon` and `timeout`. An error with no `reason` is read by its `code`: `bad_request` is `bad_value`, `forbidden` is `other`, `needs_approval` is `no_app`, `failed` is `failed`. The field is additive.
+
+A refusal by tier of an app-tier op from an agent is `forbidden` with the registry's answer (`Handler::agent_path`): `app_only` for the app's own views, `not_yet` with `phase` and `ask` for an op whose agent path comes in a later phase, `never` with `never: true` for a user-only op, `internal_op` for the hook and node ops. `crates/notchlingd/tests/golden/agent-paths.json` and `docs/agent-paths.md` list every op's place; `GUARD-AGENT-PATH` checks them.
+
 ## `catalog_ops.rs`
 
 The model catalog in the daemon (decision 0016, phase 1): one [`CatalogService`] owns the

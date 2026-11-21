@@ -601,6 +601,39 @@ fn an_agent_naming_another_session_is_refused_even_with_its_own_resolved() {
     assert_eq!(fake.0.lock().unwrap().restarts, 0);
 }
 
+fn reason_of(error: &notchling_local_api::ApiError) -> Option<&str> {
+    error
+        .data
+        .as_ref()
+        .and_then(|d| d.get("reason"))
+        .and_then(Value::as_str)
+}
+
+#[test]
+fn a_refused_reload_says_why() {
+    let fake = Fake::default();
+    let (d, s) = faked("why", &fake, true);
+    let lost = s
+        .ops
+        .call(
+            &agent_tier(None),
+            ops::SESSION_RELOAD,
+            &json!({"id": "self"}),
+        )
+        .unwrap_err();
+    assert_eq!(reason_of(&lost), Some("no_session"));
+    inside(&s, &d, "job-a");
+    let other = s
+        .ops
+        .call(
+            &caller(ClientKind::Cli),
+            ops::SESSION_RELOAD,
+            &json!({"id": "job-idle", "afterTurn": false}),
+        )
+        .unwrap_err();
+    assert_eq!(reason_of(&other), Some("other_session"));
+}
+
 #[test]
 fn the_app_may_reload_any_session_it_lists() {
     let fake = Fake::default();

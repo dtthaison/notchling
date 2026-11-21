@@ -1,4 +1,4 @@
-use crate::acting_ops::{bad, forbidden, Room};
+use crate::acting_ops::{bad, switch_off, Room};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_events::kinds::choices::SwitchName;
@@ -82,7 +82,7 @@ impl SwitchFlag {
     }
 
     pub fn refusal(&self) -> ApiError {
-        forbidden(self.off_message)
+        switch_off(self.name, self.off_message)
     }
 
     pub fn check(&self) -> Result<(), ApiError> {

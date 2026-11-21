@@ -1,5 +1,5 @@
 use crate::cost_ops::CostSetup;
-use crate::cost_report_cli::{code_of, parse, request, shown, Args, DONE, REFUSED, TROUBLE};
+use crate::cost_report_cli::{parse, request, shown, Args, DONE};
 use crate::cost_report_ops::{CostReportOps, COST_REPORT};
 use crate::cost_report_text::render;
 use crate::op_group::OpGroup;
@@ -316,10 +316,11 @@ fn the_command_line_parses_report_and_its_flags() {
 
 #[test]
 fn errors_map_to_exit_codes() {
-    let api = |code| ClientError::Api(ApiError::new(code, "no"));
-    assert_eq!(code_of(&api(ErrorCode::BadRequest)), REFUSED);
-    assert_eq!(code_of(&api(ErrorCode::Failed)), REFUSED);
-    assert_eq!(code_of(&api(ErrorCode::UnknownOp)), TROUBLE);
-    assert_eq!(code_of(&ClientError::Timeout), TROUBLE);
+    use crate::contract::Failure;
+    let api = |code| Failure::from_client(None, ClientError::Api(ApiError::new(code, "no")));
+    assert_eq!(api(ErrorCode::BadRequest).exit, 2);
+    assert_eq!(api(ErrorCode::Failed).exit, 1);
+    assert_eq!(api(ErrorCode::UnknownOp).exit, 3);
+    assert_eq!(Failure::from_client(None, ClientError::Timeout).exit, 3);
     assert_eq!(DONE, 0);
 }

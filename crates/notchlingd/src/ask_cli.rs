@@ -1,5 +1,6 @@
+use crate::contract::{self, Failure};
 use notchling_engine::ask::{DEADLINE_MARGIN_MS, WAIT_DEFAULT_S, WAIT_MS_MAX};
-use notchling_local_api::{ops, ApiError, ErrorCode};
+use notchling_local_api::{ops, ApiError};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::time::Duration;
@@ -9,7 +10,6 @@ pub(crate) use crate::ask_cli_args::{
 };
 pub use crate::ask_cli_run::{run_answer, run_ask, run_asks};
 
-const NOT_RUNNING: &str = "Notchling isn't running. Ask the user to open it, then try again.";
 const DISMISSED: &str = "No answer: the question was dismissed.";
 const IN_TIME: &str = "No answer in time.";
 const NO_LONGER: &str = "The question is no longer waiting.";
@@ -113,11 +113,18 @@ fn persistent(
     }
 }
 
-fn refusal_exit(e: &ApiError) -> i32 {
-    match e.code {
-        ErrorCode::Forbidden | ErrorCode::BadRequest | ErrorCode::Failed => 3,
-        _ => 1,
-    }
+fn stop(env: &mut Env, json: bool, failure: Failure) -> i32 {
+    failure.emit(json, env.out, env.err)
+}
+
+fn expired() -> Failure {
+    Failure::new(contract::EXPIRED, "expired", IN_TIME)
+}
+
+fn late(id: &str) -> Failure {
+    let mut failure = expired().with_op(ops::ASK_WAIT);
+    failure.request = Some(record(id, "expired", &Value::Null));
+    failure
 }
 
 fn deadline_for(args: &AskArgs, env: &Env) -> Option<i64> {
@@ -152,7 +159,12 @@ fn open_args(args: &AskArgs, env: &Env, deadline: Option<i64>) -> Value {
     out
 }
 
-fn open_question(link: &mut dyn AskLink, env: &mut Env, args: &Value) -> Result<String, i32> {
+fn open_question(
+    link: &mut dyn AskLink,
+    env: &mut Env,
+    args: &Value,
+    json: bool,
+) -> Result<String, i32> {
     let started = (env.now)();
     let mut backoff = Backoff::new();
     loop {
@@ -160,25 +172,28 @@ fn open_question(link: &mut dyn AskLink, env: &mut Env, args: &Value) -> Result<
             Ok(reply) => {
                 return match reply.get("id").and_then(Value::as_str) {
                     Some(id) => Ok(id.to_string()),
-                    None => {
-                        say(env.err, "Notchling didn't answer.");
-                        Err(1)
-                    }
+                    None => Err(stop(
+                        env,
+                        json,
+                        Failure::failed("Notchling didn't answer.").with_op(ops::ASK_OPEN),
+                    )),
                 }
             }
             Err(LinkError::Api(e)) => {
-                say(env.err, &e.message);
-                return Err(refusal_exit(&e));
+                let failure = Failure::from_api(Some(ops::ASK_OPEN), e);
+                return Err(stop(env, json, failure));
             }
             Err(LinkError::Fatal(message)) => {
-                say(env.err, &message);
-                return Err(1);
+                return Err(stop(env, json, Failure::failed(message)));
             }
             Err(LinkError::Down) => {
                 let left = OPEN_RETRY_MS - ((env.now)() - started);
                 if left <= 0 {
-                    say(env.err, NOT_RUNNING);
-                    return Err(3);
+                    return Err(stop(
+                        env,
+                        json,
+                        Failure::not_running().with_op(ops::ASK_OPEN),
+                    ));
                 }
                 (env.sleep)(backoff.next_ms().min(left as u64));
             }
@@ -206,50 +221,43 @@ fn record(id: &str, state: &str, reply: &Value) -> Value {
 }
 
 fn finish(env: &mut Env, args: &AskArgs, id: &str, state: &str, reply: &Value) -> i32 {
-    if args.json {
-        say(env.out, &record(id, state, reply).to_string());
-    }
-    match state {
+    let recorded = record(id, state, reply);
+    let failure = match state {
         "answered" => {
-            if !args.json {
+            if args.json {
+                say(env.out, &recorded.to_string());
+            } else {
                 let text = reply.get("answer").and_then(Value::as_str).unwrap_or("");
                 say(env.out, &format!("Answer: {text}"));
                 if let Some(line) = from_line(reply.get("by").and_then(Value::as_str)) {
                     say(env.out, line);
                 }
             }
-            0
+            return contract::OK;
         }
-        "dismissed" => {
-            say(env.err, DISMISSED);
-            2
-        }
-        "expired" => {
-            say(env.err, IN_TIME);
-            124
-        }
-        _ => {
-            say(env.err, NO_LONGER);
-            1
-        }
-    }
+        "dismissed" => Failure::new(contract::DENIED, "denied", DISMISSED),
+        "expired" => expired(),
+        _ => Failure::new(contract::FAILED, "withdrawn", NO_LONGER),
+    };
+    let mut failure = failure.with_op(ops::ASK_WAIT);
+    failure.request = Some(recorded);
+    stop(env, args.json, failure)
 }
 
 pub(crate) fn ask(link: &mut dyn AskLink, args: &AskArgs, env: &mut Env) -> i32 {
     let deadline = deadline_for(args, env);
     let opening = open_args(args, env, deadline);
-    let id = match open_question(link, env, &opening) {
+    let id = match open_question(link, env, &opening, args.json) {
         Ok(id) => id,
         Err(code) => return code,
     };
-    say(env.err, &format!("Asked ({id}). Waiting for the answer."));
+    if !args.json {
+        say(env.err, &format!("Asked ({id}). Waiting for the answer."));
+    }
     let mut backoff = Backoff::new();
     loop {
         let wait_ms = match remaining(env, deadline) {
-            Some(left) if left <= 0 => {
-                say(env.err, IN_TIME);
-                return 124;
-            }
+            Some(left) if left <= 0 => return stop(env, args.json, late(&id)),
             Some(left) => left.min(WAIT_MS_MAX),
             None => WAIT_MS_MAX,
         };
@@ -259,17 +267,17 @@ pub(crate) fn ask(link: &mut dyn AskLink, args: &AskArgs, env: &mut Env) -> i32 
                 Some("open") | None => {}
                 Some(state) => return finish(env, args, &id, state, &reply),
             },
-            Err(Stop::Late) => {
-                say(env.err, IN_TIME);
-                return 124;
+            Err(Stop::Late) => return stop(env, args.json, late(&id)),
+            Err(Stop::Api(e)) if e.code == notchling_local_api::ErrorCode::BadRequest => {
+                let failure = Failure::new(contract::FAILED, "withdrawn", NO_LONGER);
+                return stop(env, args.json, failure.with_op(ops::ASK_WAIT));
             }
             Err(Stop::Api(e)) => {
-                say(env.err, &e.message);
-                return 1;
+                let failure = Failure::from_api(Some(ops::ASK_WAIT), e);
+                return stop(env, args.json, failure);
             }
             Err(Stop::Fatal(message)) => {
-                say(env.err, &message);
-                return 1;
+                return stop(env, args.json, Failure::failed(message));
             }
         }
     }
@@ -310,21 +318,25 @@ fn show_row(env: &mut Env, row: &Value) {
 }
 
 pub(crate) fn asks(link: &mut dyn AskLink, args: &AsksArgs, env: &mut Env) -> i32 {
-    let call = if args.wait {
-        json!({"waitMs": WAIT_MS_MAX})
+    let deadline = if args.wait {
+        env.delegate_deadline
+            .map(|delegate| delegate.saturating_sub(DEADLINE_MARGIN_MS))
     } else {
-        json!({})
+        None
     };
     let mut backoff = Backoff::new();
     let rows = loop {
         let reply = if args.wait {
-            persistent(link, env, &mut backoff, ops::ASK_MINE, &call, None)
+            let wait_ms =
+                remaining(env, deadline).map_or(WAIT_MS_MAX, |left| left.clamp(0, WAIT_MS_MAX));
+            let call = json!({"waitMs": wait_ms});
+            persistent(link, env, &mut backoff, ops::ASK_MINE, &call, deadline)
         } else {
-            match link.call(ops::ASK_MINE, &call, CALL_TIMEOUT) {
+            match link.call(ops::ASK_MINE, &json!({}), CALL_TIMEOUT) {
                 Ok(reply) => Ok(reply),
                 Err(LinkError::Down) => {
-                    say(env.err, NOT_RUNNING);
-                    return 3;
+                    let failure = Failure::not_running().with_op(ops::ASK_MINE);
+                    return stop(env, args.json, failure);
                 }
                 Err(LinkError::Api(e)) => Err(Stop::Api(e)),
                 Err(LinkError::Fatal(message)) => Err(Stop::Fatal(message)),
@@ -334,18 +346,19 @@ pub(crate) fn asks(link: &mut dyn AskLink, args: &AsksArgs, env: &mut Env) -> i3
             Ok(Value::Array(rows)) if rows.is_empty() && args.wait => {}
             Ok(Value::Array(rows)) => break rows,
             Ok(_) => {
-                say(env.err, "Notchling didn't answer.");
-                return 1;
+                let failure = Failure::failed("Notchling didn't answer.").with_op(ops::ASK_MINE);
+                return stop(env, args.json, failure);
             }
             Err(Stop::Api(e)) => {
-                say(env.err, &e.message);
-                return refusal_exit(&e);
+                let failure = Failure::from_api(Some(ops::ASK_MINE), e);
+                return stop(env, args.json, failure);
             }
             Err(Stop::Fatal(message)) => {
-                say(env.err, &message);
-                return 1;
+                return stop(env, args.json, Failure::failed(message));
             }
-            Err(Stop::Late) => return 1,
+            Err(Stop::Late) => {
+                return stop(env, args.json, expired().with_op(ops::ASK_MINE));
+            }
         }
     };
     if args.json {
@@ -379,8 +392,12 @@ pub(crate) fn answer(link: &mut dyn AskLink, args: &AnswerArgs, env: &mut Env) -
     }
     match link.call(ops::ASK_ANSWER, &call, CALL_TIMEOUT) {
         Ok(reply) if reply.get("answered") == Some(&json!(true)) => {
-            say(env.out, "Answered.");
-            0
+            if args.json {
+                say(env.out, &json!({"answered": true}).to_string());
+            } else {
+                say(env.out, "Answered.");
+            }
+            contract::OK
         }
         Ok(reply) => {
             let line = match reply.get("by").and_then(Value::as_str) {
@@ -393,21 +410,21 @@ pub(crate) fn answer(link: &mut dyn AskLink, args: &AnswerArgs, env: &mut Env) -
                     format!("Already {state}.")
                 }
             };
-            say(env.out, &line);
-            2
+            let failure = Failure::new(contract::FAILED, "already_answered", NO_LONGER)
+                .with_op(ops::ASK_ANSWER)
+                .with_human(line);
+            stop(env, args.json, failure)
         }
-        Err(LinkError::Down) => {
-            say(env.err, NOT_RUNNING);
-            3
-        }
+        Err(LinkError::Down) => stop(
+            env,
+            args.json,
+            Failure::not_running().with_op(ops::ASK_ANSWER),
+        ),
         Err(LinkError::Api(e)) => {
-            say(env.err, &e.message);
-            refusal_exit(&e)
+            let failure = Failure::from_api(Some(ops::ASK_ANSWER), e);
+            stop(env, args.json, failure)
         }
-        Err(LinkError::Fatal(message)) => {
-            say(env.err, &message);
-            1
-        }
+        Err(LinkError::Fatal(message)) => stop(env, args.json, Failure::failed(message)),
     }
 }
 

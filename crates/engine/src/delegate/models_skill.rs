@@ -34,7 +34,7 @@ The report lists, per tool, the models that are new or gone, the efforts a model
 - Report what the command printed. Don't change role picks, the override file or any price yourself: role picks are the maintainer's decision, so present the suggestions and stop. `'{binary}' delegate-models --for <role>` shows what each role would use now.
 - Never make up a price. A model without a price is counted at $0 until a price is added to the override file, and the report says how.
 - The Notchling app rewrites the skills (Settings > Skills & Models > Refresh Models). From the command line `update` leaves them alone and the report says "skills not rewritten (needs the app)"; the app also skips skills it didn't write and does nothing while the Install Hooks and Skills switch is off.
-- Exit code 0 when the report was made, 1 when the daemon refused or failed, 2 when Notchling isn't running or the command was wrong.
+- Exit code 0 when the report was made, 1 when the daemon failed, 4 when it refused, 3 when Notchling isn't running, 2 when the command was wrong.
 {tool_note}"#;
 
 fn tool_note(tool: SkillTool) -> &'static str {

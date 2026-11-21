@@ -1,5 +1,5 @@
-use crate::layout::Layout;
-use notchling_local_api::{ops, Client, ClientError, ClientKind, ErrorCode};
+use crate::contract::{self, Failure};
+use notchling_local_api::{ops, ClientError};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -7,9 +7,7 @@ use std::time::Duration;
 
 pub const USAGE: &str = "Usage: notchling cost setup [--apply] [--consent <a,b>] [--wait] [--json]\n       notchling cost check [--json]\n       notchling cost undo <claude|codex|agy> [--json]";
 
-pub const DONE: i32 = 0;
-pub const REFUSED: i32 = 1;
-pub const TROUBLE: i32 = 2;
+pub const DONE: i32 = contract::OK;
 pub const WAIT: Duration = Duration::from_secs(150);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,31 +90,12 @@ pub fn request(args: &Args) -> (&'static str, Value) {
     }
 }
 
-pub fn code_of(e: &ClientError) -> i32 {
-    match e {
-        ClientError::Api(api) => match api.code {
-            ErrorCode::BadRequest | ErrorCode::Forbidden | ErrorCode::Failed => REFUSED,
-            _ => TROUBLE,
-        },
-        _ => TROUBLE,
+pub fn failure_of(e: ClientError, op: &str, applying: bool) -> Failure {
+    let failure = Failure::from_client(Some(op), e);
+    if applying && failure.exit == contract::REFUSED {
+        return failure.with_human("Only the Notchling app writes these files. Ask the user to open Settings, Cost Profile, and press Set Up.");
     }
-}
-
-pub fn message_of(e: ClientError, applying: bool) -> String {
-    match e {
-        ClientError::NotRunning(_) | ClientError::Unsupported => {
-            "Notchling isn't running. Ask the user to open it, then try again.".into()
-        }
-        ClientError::Api(api) if api.code == ErrorCode::UnknownOp => {
-            "This Notchling has no cost command yet. Ask the user to update it.".into()
-        }
-        ClientError::Api(api) if api.code == ErrorCode::Forbidden && applying => {
-            "Only the Notchling app writes these files. Ask the user to open Settings, Cost Profile, and press Set Up.".into()
-        }
-        ClientError::Api(api) => api.message,
-        ClientError::Timeout => "Notchling didn't answer in time.".into(),
-        other => format!("notchling: {other}"),
-    }
+    failure
 }
 
 fn text<'a>(v: &'a Value, key: &str) -> &'a str {
@@ -234,47 +213,25 @@ pub fn shown(args: &Args, reply: &Value) -> String {
     out.trim_end().to_string()
 }
 
-fn say_err(text: &str) {
-    let _ = writeln!(std::io::stderr(), "{text}");
-}
-
-fn say_out(text: &str) {
-    let _ = writeln!(std::io::stdout(), "{text}");
-}
-
 pub fn run(args: &[String]) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = match parse(args) {
         Ok(p) => p,
-        Err(message) => {
-            say_err(&message);
-            return TROUBLE;
-        }
+        Err(message) => return Failure::usage(message).report(json),
     };
     let writes = !matches!(parsed.job, Job::Setup { apply: false } | Job::Check);
-    let Some(layout) = Layout::from_env(parsed.socket.as_deref()) else {
-        say_err(&message_of(ClientError::Unsupported, writes));
-        return TROUBLE;
+    let mut client = match contract::connect(parsed.socket.as_deref()) {
+        Ok(c) => c,
+        Err(failure) => return failure.report(json),
     };
-    let mut client =
-        match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
-            Ok(c) => c,
-            Err(e) => {
-                say_err(&message_of(e, writes));
-                return TROUBLE;
-            }
-        };
     client.set_timeout(WAIT);
     let (op, body) = request(&parsed);
     match client.call(op, body) {
         Ok(reply) => {
-            say_out(&shown(&parsed, &reply));
+            let _ = writeln!(std::io::stdout(), "{}", shown(&parsed, &reply));
             DONE
         }
-        Err(e) => {
-            let code = code_of(&e);
-            say_err(&message_of(e, writes));
-            code
-        }
+        Err(e) => failure_of(e, op, writes).report(json),
     }
 }
 

@@ -1,5 +1,6 @@
-use crate::cluster_cli::{Sub, DONE, REFUSED, TROUBLE, USAGE};
+use crate::cluster_cli::{Sub, DONE, USAGE};
 use crate::cluster_wiring::{loopback_ok, LOOPBACK_ENV};
+use crate::contract::Failure;
 use notchling_cluster_net::allowed;
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
@@ -70,18 +71,17 @@ pub fn report(
             let _ = writeln!(out, "reached {addr}:{port}");
             DONE
         }
-        Outcome::NoAnswer => {
-            let _ = writeln!(err, "no answer in {} s", TIMEOUT.as_secs());
-            REFUSED
-        }
-        Outcome::Refused => {
-            let _ = writeln!(err, "refused");
-            REFUSED
-        }
+        Outcome::NoAnswer => Failure::failed("")
+            .with_human(format!("no answer in {} s", TIMEOUT.as_secs()))
+            .emit(false, out, err),
+        Outcome::Refused => Failure::failed("")
+            .with_human("refused")
+            .emit(false, out, err),
         Outcome::Failed(why) => {
             let why = why.lines().next().unwrap_or("");
-            let _ = writeln!(err, "no connection: {why}");
-            REFUSED
+            Failure::failed("")
+                .with_human(format!("no connection: {why}"))
+                .emit(false, out, err)
         }
     }
 }
@@ -95,8 +95,7 @@ pub fn run_in(
     err: &mut dyn Write,
 ) -> i32 {
     if let Err(message) = check_addr(addr, loopback) {
-        let _ = writeln!(err, "{message}\n{USAGE}");
-        return TROUBLE;
+        return Failure::usage(format!("{message}\n{USAGE}")).emit(false, out, err);
     }
     report(addr, port, &reach(addr, port, timeout), out, err)
 }

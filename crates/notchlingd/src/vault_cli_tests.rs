@@ -142,9 +142,38 @@ fn find_json_lists_names_and_never_a_value() {
     }
 
     let (code, value) = find_json(&json!({"entries": [], "saved": ["gh"]}), "gitlab");
-    assert_eq!((code, value["entries"].clone()), (1, json!([])));
+    assert_eq!((code, value["result"]["entries"].clone()), (1, json!([])));
+    assert_eq!(value["result"]["saved"], json!(["gh"]));
+    assert_eq!(value["error"]["exit"], 1);
+    assert_eq!(value["error"]["reason"], "failed");
+    assert_eq!(value["error"]["op"], "vault.find");
+    assert!(!value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("gitlab"));
     let (code, value) = find_json(&json!({"entries": [], "saved": []}), "");
-    assert_eq!((code, value["saved"].clone()), (1, json!([])));
+    assert_eq!((code, value["result"]["saved"].clone()), (1, json!([])));
+    assert_eq!(value["error"]["exit"], 1);
+}
+
+#[test]
+fn a_json_flag_is_never_taken_from_a_value() {
+    let (r, _) = parse_request(&args(&["gh", "--note", "--json"])).unwrap();
+    assert_eq!(r.note.as_deref(), Some("--json"));
+    let (r, _) =
+        parse_request(&args(&["gh", "--json", "--reason", "--json", "--how", "x"])).unwrap();
+    assert_eq!(
+        (r.reason.as_deref(), r.how_to.as_deref()),
+        (Some("--json"), Some("x"))
+    );
+    let (r, _) = parse_request(&args(&["--json", "gh"])).unwrap();
+    assert_eq!(r.name, "gh");
+    let parsed = parse_use(&args(&["gh", "--socket", "--json", "--", "make"])).unwrap();
+    assert_eq!(parsed.socket, Some(PathBuf::from("--json")));
+    let parsed = parse_use(&args(&["--json", "gh", "--", "make"])).unwrap();
+    assert_eq!(parsed.names, ["gh"]);
+    let parsed = parse_use(&args(&["gh", "--json", "--", "make", "--json"])).unwrap();
+    assert_eq!(parsed.command, ["make", "--json"]);
 }
 
 #[test]

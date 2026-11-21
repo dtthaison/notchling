@@ -104,7 +104,11 @@ impl Answer {
             if !text.starts_with('{') {
                 return None;
             }
-            let d: Value = serde_json::from_str(text).ok()?;
+            let value: Value = serde_json::from_str(text).ok()?;
+            let d = match value.get("result").filter(|o| o.is_object()) {
+                Some(outcome) => outcome,
+                None => &value,
+            };
             d.get("tool")?;
             let string = |k: &str| d.get(k).and_then(Value::as_str).map(String::from);
             Some(Answer {

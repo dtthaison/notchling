@@ -50,7 +50,7 @@ use crate::tailscale_ops::TailscaleOps;
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
 use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
-use crate::{op_kinds, quiet_ops};
+use crate::{capabilities_ops, op_kinds, quiet_ops};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::activity::EventsDb;
@@ -67,8 +67,8 @@ use notchling_engine::versions::Version;
 use notchling_events::kinds::choices::AgentTool;
 use notchling_events::{Emit, Salt};
 use notchling_local_api::{
-    ops, topics, AgentCall, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, Handler,
-    OpHome, OpSpec, Tier,
+    ops, topics, AgentCall, AgentIdentity, ApiError, Caller, ClientKind, Handler, OpHome, OpSpec,
+    Tier,
 };
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -233,7 +233,7 @@ impl Ops {
         let list = if every {
             let mut rows = tagged(list, CLAUDE);
             if let Some(other) = &self.every {
-                rows.extend(other.values(now_ms()));
+                rows.extend(other.values(crate::acting_ops::now_ms()));
             }
             if let Some(shells) = &self.shells {
                 rows.extend(shells.rows());
@@ -253,13 +253,6 @@ impl Ops {
             _ => Ok((list, landed)),
         }
     }
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 impl Handler for Ops {
@@ -301,7 +294,7 @@ impl Handler for Ops {
 
     fn agent_called(&self, call: &AgentCall) {
         if let Some(names) = &self.names {
-            names.enqueue(call, now_ms());
+            names.enqueue(call, crate::acting_ops::now_ms());
         }
     }
 
@@ -331,7 +324,7 @@ impl Handler for Ops {
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if self.acting.as_ref().is_some_and(|a| !a.is_on()) && acting_gated(caller, op, args) {
-            return Err(ApiError::new(ErrorCode::Forbidden, ACTING_OFF));
+            return Err(crate::acting_ops::switch_off("acting", ACTING_OFF));
         }
         if let Some(gate) = &self.gate {
             let acting = self.acting.as_ref();
@@ -398,6 +391,10 @@ impl Handler for Ops {
 
     fn acting(&self) -> Option<bool> {
         self.acting.as_ref().map(|a| a.is_on())
+    }
+
+    fn agent_path(&self, op: &str) -> Option<(String, Value)> {
+        crate::commands::why_not(op)
     }
 }
 
@@ -907,6 +904,7 @@ impl Wired {
                 SwitchOps::new(self.switches.clone(), self.acting.room.clone())
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
+            .with_group(Arc::new(capabilities_ops::CapabilitiesOps::wired(self)))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())

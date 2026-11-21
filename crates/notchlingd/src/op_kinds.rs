@@ -14,6 +14,7 @@ pub enum Home {
 pub const HOMES: &[(&str, Home)] = &[
     (ops::HELLO, Home::Kind("app.attached")),
     (ops::DAEMON_STATUS, Home::Quiet),
+    (ops::DAEMON_CAPABILITIES, Home::Quiet),
     (ops::SESSIONS_LIST, Home::Quiet),
     (ops::EVENTS_SUBSCRIBE, Home::Called),
     (ops::SESSION_REPLY, Home::Kind("session.reply")),

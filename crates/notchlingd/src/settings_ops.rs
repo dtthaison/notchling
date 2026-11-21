@@ -375,11 +375,13 @@ impl SettingsOps {
             return Err(forbidden(format!(
                 "{} ({}) is a switch: only the user turns it on or off, in Notchling's Settings, under Daemon.",
                 s.title, s.key
-            )));
+            ))
+            .with_reason("never")
+            .with_field("never", json!(true)));
         }
         let Some(spec) = spec(key) else {
             note(None, AgentSetResult::UnknownKey, &raw);
-            return Err(bad(unknown(key)));
+            return Err(bad(unknown(key)).with_reason("unknown_key"));
         };
         if !spec.access.shown() {
             note(class_of(spec), AgentSetResult::Refused, &raw);
@@ -388,12 +390,14 @@ impl SettingsOps {
                 spec.shown_title(),
                 spec.name,
                 spec.why
-            )));
+            ))
+            .with_reason("never")
+            .with_field("never", json!(true)));
         }
         let value = spec.read_value(raw);
         if let Err(why) = spec.check(&value) {
             note(class_of(spec), AgentSetResult::BadValue, &value);
-            return Err(bad(format!("{why}.")));
+            return Err(bad(format!("{why}.")).with_reason("bad_value"));
         }
         let app = caller.tier == Tier::App;
         if app || spec.access == Access::Free {
@@ -456,7 +460,8 @@ impl SettingsOps {
                     "Changing {} needs the user's approval in Notchling's Inbox, and the app isn't open. Ask the user to open Notchling, or to change it there.",
                     spec.shown_title()
                 ),
-            ));
+            )
+            .with_reason("no_app"));
         };
         let id = notchling_engine::vault::random_id("setting-")
             .ok_or_else(|| ApiError::internal("no randomness for an ask id"))?;
@@ -464,9 +469,10 @@ impl SettingsOps {
         self.asks.start(self.writer.clone(), Some(inbox.clone()));
         if !self.asks.open(&id, ask) {
             said(AgentSetResult::Full, &value);
-            return Err(failed(
-                "Too many changes wait for the user's approval; try again later.",
-            ));
+            return Err(
+                failed("Too many changes wait for the user's approval; try again later.")
+                    .with_reason("busy"),
+            );
         }
         let before = self
             .store()

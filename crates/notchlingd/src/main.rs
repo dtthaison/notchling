@@ -8,8 +8,12 @@ fn main() {
             std::process::exit(0)
         }
         Err(message) => {
-            eprintln!("notchling: {message}\n\n{}", cli::usage());
-            std::process::exit(2);
+            let json = notchling_notchlingd::contract::wants_json(&args);
+            let failure = notchling_notchlingd::contract::Failure::usage(format!(
+                "notchling: {message}\n\n{}",
+                cli::usage()
+            ));
+            std::process::exit(failure.report(json));
         }
     };
     std::process::exit(notchling_notchlingd::run(command));

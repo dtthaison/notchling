@@ -1,7 +1,7 @@
-use crate::layout::Layout;
+use crate::contract::{self, Failure};
 use notchling_engine::vault::list::describe;
 use notchling_engine::vault::{expiry, runner, Kind, VaultEntry, VaultRequest};
-use notchling_local_api::{ops, Client, ClientError, ClientKind, ErrorCode};
+use notchling_local_api::ops;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -28,7 +28,21 @@ pub struct UseArgs {
 }
 
 pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
-    let Some(first) = args.first().filter(|a| !a.starts_with("--")) else {
+    let mut first: Option<String> = None;
+    let mut socket = None;
+    let mut rest = args.iter();
+    loop {
+        match rest.next().map(String::as_str) {
+            Some("--") => break,
+            Some("--json") => {}
+            Some("--socket") => socket = rest.next().map(PathBuf::from),
+            Some(word) if !word.starts_with("--") && first.is_none() => {
+                first = Some(word.to_string());
+            }
+            _ => return Err(usage()),
+        }
+    }
+    let Some(first) = first else {
         return Err(usage());
     };
     let names: Vec<String> = first
@@ -36,15 +50,6 @@ pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
         .collect();
-    let mut socket = None;
-    let mut rest = args[1..].iter();
-    loop {
-        match rest.next().map(String::as_str) {
-            Some("--") => break,
-            Some("--socket") => socket = rest.next().map(PathBuf::from),
-            _ => return Err(usage()),
-        }
-    }
     let command: Vec<String> = rest.cloned().collect();
     if names.is_empty() || command.is_empty() {
         return Err(usage());
@@ -57,6 +62,8 @@ pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
 }
 
 pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>), String> {
+    let lead = args.iter().take_while(|a| *a == "--json").count();
+    let args = &args[lead..];
     let Some(name) = args.first().filter(|a| !a.starts_with("--")) else {
         return Err(REQUEST_USAGE.to_string());
     };
@@ -67,6 +74,9 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
     let mut socket = None;
     let mut rest = args[1..].iter();
     while let Some(flag) = rest.next() {
+        if flag == "--json" {
+            continue;
+        }
         let value = rest.next().cloned();
         let slot = match flag.as_str() {
             "--kind" => &mut request.kind,
@@ -181,15 +191,16 @@ pub fn find_json(reply: &Value, query: &str) -> (i32, Value) {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
     let shown = entries(reply, "entries");
-    let code = if saved.is_empty() || shown.is_empty() {
-        1
+    let found = json!({"query": query, "saved": saved, "entries": shown});
+    let message = if saved.is_empty() {
+        "No secrets are saved yet."
+    } else if shown.is_empty() {
+        "Nothing saved fits that name."
     } else {
-        0
+        return (contract::OK, found);
     };
-    (
-        code,
-        json!({"query": query, "saved": saved, "entries": shown}),
-    )
+    let failure = Failure::failed(message).with_op(ops::VAULT_FIND);
+    (failure.exit, failure.to_value_with(found))
 }
 
 pub fn saved_report(entry: &VaultEntry, today: i64) -> String {
@@ -219,33 +230,10 @@ fn ask(
     op: &str,
     args: Value,
     timeout: Duration,
-    said_no: i32,
-) -> Result<Value, (String, i32)> {
-    let layout = Layout::from_env(socket).ok_or_else(|| {
-        (
-            "notchling: no home folder in the environment, so no data folder".to_string(),
-            2,
-        )
-    })?;
-    let not_running = || {
-        (
-            "Notchling isn't running. Ask the user to open it, then try again.".to_string(),
-            2,
-        )
-    };
-    let mut client =
-        match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
-            Ok(c) => c,
-            Err(ClientError::NotRunning(_) | ClientError::Unsupported) => return Err(not_running()),
-            Err(e) => return Err((format!("notchling: {e}"), 2)),
-        };
+) -> Result<Value, Failure> {
+    let mut client = contract::connect(socket)?;
     client.set_timeout(timeout);
-    client.call(op, args).map_err(|e| match e {
-        ClientError::Api(e) if e.code == ErrorCode::NeedsApproval => (e.message, said_no),
-        ClientError::Api(e) => (e.message, 2),
-        ClientError::Timeout => ("Notchling didn't answer.".to_string(), 2),
-        other => (format!("notchling: {other}"), 2),
-    })
+    contract::call(&mut client, op, args)
 }
 
 pub fn secrets(args: &[String]) -> i32 {
@@ -255,53 +243,48 @@ pub fn secrets(args: &[String]) -> i32 {
         ops::VAULT_FIND,
         json!({"query": query}),
         notchling_local_api::CALL_TIMEOUT,
-        2,
     );
     match reply {
         Ok(reply) => {
             if json {
                 let (code, value) = find_json(&reply, &query);
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
-                );
+                println!("{}", contract::pretty(&value));
                 return code;
             }
             let (code, text) = find_report(&reply, &query, today());
             println!("{text}");
             code
         }
-        Err((message, code)) => {
-            eprintln!("{message}");
-            code
-        }
+        Err(failure) => failure.report(json),
     }
 }
 
+fn stopped(failure: Failure, json: bool) -> i32 {
+    let mut failure = failure;
+    failure.exit = contract::STOPPED;
+    failure.code = "stopped".to_string();
+    let line = if json {
+        failure.to_value().to_string()
+    } else {
+        failure.line()
+    };
+    eprintln!("{line}");
+    failure.exit
+}
+
 pub fn secret(args: &[String]) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = match parse_use(args) {
         Ok(p) => p,
-        Err(message) => {
-            eprintln!("{message}");
-            return 2;
-        }
+        Err(message) => return stopped(Failure::usage(message), json),
     };
     let folder = std::env::current_dir()
         .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default();
     let args = json!({"names": parsed.names, "command": shown(&parsed.command), "folder": folder});
-    let reply = match ask(
-        parsed.socket.as_deref(),
-        ops::VAULT_USE,
-        args,
-        USE_TIMEOUT,
-        3,
-    ) {
+    let reply = match ask(parsed.socket.as_deref(), ops::VAULT_USE, args, USE_TIMEOUT) {
         Ok(reply) => reply,
-        Err((message, code)) => {
-            eprintln!("{message}");
-            return code;
-        }
+        Err(failure) => return stopped(failure, json),
     };
     let map = |key: &str| -> BTreeMap<String, String> {
         reply
@@ -317,36 +300,29 @@ pub fn secret(args: &[String]) -> i32 {
 }
 
 pub fn secret_request(args: &[String]) -> i32 {
+    let json = contract::wants_json(args);
     let (request, socket) = match parse_request(args) {
         Ok(p) => p,
-        Err(message) => {
-            eprintln!("{message}");
-            return 2;
-        }
+        Err(message) => return Failure::usage(message).report(json),
     };
     let args = serde_json::to_value(&request).unwrap_or(Value::Null);
-    match ask(
-        socket.as_deref(),
-        ops::VAULT_REQUEST,
-        args,
-        REQUEST_TIMEOUT,
-        1,
-    ) {
+    match ask(socket.as_deref(), ops::VAULT_REQUEST, args, REQUEST_TIMEOUT) {
         Ok(reply) => match reply.get("entry").cloned().map(serde_json::from_value) {
+            Some(Ok(entry)) if json => {
+                let shown = json!({"entry": entry, "request": reply.get("request").cloned()});
+                println!("{}", contract::pretty(&shown));
+                0
+            }
             Some(Ok(entry)) => {
                 let mut out = std::io::stdout();
                 let _ = writeln!(out, "{}", saved_report(&entry, today()));
                 0
             }
-            _ => {
-                eprintln!("Notchling didn't answer.");
-                2
-            }
+            _ => Failure::new(contract::FAILED, "failed", "Notchling didn't answer.")
+                .with_op(ops::VAULT_REQUEST)
+                .report(json),
         },
-        Err((message, code)) => {
-            eprintln!("{message}");
-            code
-        }
+        Err(failure) => failure.report(json),
     }
 }
 

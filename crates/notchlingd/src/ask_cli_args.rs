@@ -3,7 +3,7 @@ use std::path::PathBuf;
 pub(crate) const ASK_USAGE: &str = "Usage: notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] [--socket <path>] -- <question>";
 pub(crate) const ASKS_USAGE: &str = "Usage: notchling asks [--wait] [--json] [--socket <path>]";
 pub(crate) const ANSWER_USAGE: &str =
-    "Usage: notchling answer <id> (--choice <n> | -- <text>) [--socket <path>]";
+    "Usage: notchling answer <id> (--choice <n> | -- <text>) [--json] [--socket <path>]";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct AskArgs {
@@ -28,6 +28,7 @@ pub(crate) struct AnswerArgs {
     pub id: String,
     pub choice: Option<u8>,
     pub text: Option<String>,
+    pub json: bool,
     pub socket: Option<PathBuf>,
 }
 
@@ -91,6 +92,7 @@ pub(crate) fn parse_answer(args: &[String]) -> Result<AnswerArgs, String> {
         id: id.clone(),
         choice: None,
         text: None,
+        json: false,
         socket: None,
     };
     let mut rest = args[1..].iter();
@@ -110,6 +112,7 @@ pub(crate) fn parse_answer(args: &[String]) -> Result<AnswerArgs, String> {
                     .filter(|n| *n > 0);
                 parsed.choice = Some(n.ok_or("--choice takes the number of a choice, from 1.")?);
             }
+            "--json" => parsed.json = true,
             "--socket" => parsed.socket = Some(PathBuf::from(flag_value(&mut rest, ANSWER_USAGE)?)),
             other => return Err(format!("Unknown option {other}.\n{ANSWER_USAGE}")),
         }

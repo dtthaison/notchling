@@ -7,6 +7,24 @@ pub const MARK: &str = ".notchling-skill";
 const MARK_TEXT: &str = "Written by Notchling. Notchling updates and removes this skill; delete this file to keep the folder as it is.\n";
 const SKILL_FILE: &str = "SKILL.md";
 
+pub const CONTRACT: &str = "## Exit codes and `--json` for every notchling command
+
+Run the command with `help --json` to read every command, its flags and its exit codes. The codes are the same for every command (`secret` passes its own command's code through):
+
+- 0: done.
+- 1: Notchling tried and it didn't work, or the request was withdrawn. Read the error; retry if it makes sense.
+- 2: the command line or a value is wrong; nothing changed.
+- 3: Notchling isn't running, didn't answer, or is older than this command. Ask the user to open it.
+- 4: refused: a switch is off, only the user may do it, or it isn't yours. Follow `error.ask`; when `error.never` is true, stop.
+- 5: the user said no, dismissed or cancelled. Stop; don't ask again at once.
+- 6: the request is saved and still waits for the user; its id is in the output. A command that waits can take minutes: run it in the background.
+- 7: a limit was reached. Wait `error.retryAfterMs`, then retry.
+- 124: no answer in time; the request is closed. Ask again only if you still need it.
+- 125: `secret` only: Notchling stopped before running your command; read stderr.
+
+With `--json`, stdout holds exactly one JSON value and stderr stays empty. A failure is `{\"error\": {\"exit\", \"code\", \"reason\", \"message\", \"ask\", \"never\", ...}}`. Without `--json`, every failure line ends with the code's name, such as `(denied)`: read the name when this text is out of date.
+";
+
 pub const TOOL_MISSING: &str = "the tool is not installed here";
 
 #[derive(Clone, Debug)]
@@ -105,6 +123,15 @@ fn skill_dir(roots: &ToolRoots, tool: SkillTool, name: &str) -> PathBuf {
     roots.root(tool).join("skills").join(name)
 }
 
+fn full_text(spec: &SkillSpec, tool: SkillTool) -> String {
+    let text = (spec.text)(tool);
+    if spec.name.starts_with("notchling-") {
+        format!("{}\n{CONTRACT}", text.trim_end())
+    } else {
+        text
+    }
+}
+
 fn plan_one(roots: &ToolRoots, spec: &SkillSpec, tool: SkillTool, want: Want) -> SkillPlan {
     let dir = skill_dir(roots, tool, &spec.name);
     let done = |action, reason: Option<&str>| SkillPlan {
@@ -127,7 +154,7 @@ fn plan_one(roots: &ToolRoots, spec: &SkillSpec, tool: SkillTool, want: Want) ->
         (Owner::Free, _) => done(Action::Write, None),
         (Owner::Ours, _) => {
             let same =
-                fs::read_to_string(dir.join(SKILL_FILE)).is_ok_and(|t| t == (spec.text)(tool));
+                fs::read_to_string(dir.join(SKILL_FILE)).is_ok_and(|t| t == full_text(spec, tool));
             done(
                 if same {
                     Action::Unchanged
@@ -177,7 +204,7 @@ pub fn apply_skills(
             let spec = specs.iter().find(|s| s.name == plan.name);
             let error = match (plan.action, spec) {
                 (Action::Write | Action::Update, Some(spec)) => {
-                    write_skill(&plan.dir, &(spec.text)(plan.tool)).err()
+                    write_skill(&plan.dir, &full_text(spec, plan.tool)).err()
                 }
                 (Action::Remove, _) => remove_skill(&plan.dir).err(),
                 _ => None,

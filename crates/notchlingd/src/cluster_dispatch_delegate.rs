@@ -1,5 +1,7 @@
 use crate::acting_ops::bad;
 use crate::cluster_node::DELEGATE_WAIT;
+use crate::contract::{self, Failure};
+use crate::delegate_cli;
 use crate::layout::Layout;
 use notchling_engine::cluster::shell_job::CODEX_DELEGATE;
 use notchling_engine::delegate::command::{self, Context};
@@ -135,23 +137,6 @@ fn find_node(status: &Value, wanted: &str) -> Option<String> {
         .and_then(|m| m.get("id").and_then(Value::as_str).map(str::to_string))
 }
 
-fn trouble(e: ClientError, err: &mut dyn Write) -> i32 {
-    match e {
-        ClientError::Api(api) => {
-            let _ = writeln!(err, "{}", api.message);
-            1
-        }
-        ClientError::Timeout => {
-            let _ = writeln!(err, "Notchling didn't answer.");
-            2
-        }
-        other => {
-            let _ = writeln!(err, "notchling: {other}");
-            2
-        }
-    }
-}
-
 pub fn run_remote(
     machine: &str,
     rest: &[String],
@@ -159,25 +144,28 @@ pub fn run_remote(
     call: &mut Call<'_>,
     (out, err): (&mut dyn Write, &mut dyn Write),
 ) -> i32 {
+    let json = contract::wants_json(rest);
     let parsed = match options::parse(rest, cwd, home) {
         Ok(p) => p,
-        Err(e) => {
-            let _ = writeln!(err, "{}", e.message);
-            return 2;
-        }
+        Err(e) => return Failure::usage(e.message).emit(json, out, err),
     };
     let list = to_args(&parsed);
     if let Err(e) = check(&list) {
-        let _ = writeln!(err, "{}", e.message);
-        return 2;
+        return Failure::usage(e.message).emit(json, out, err);
     }
     let status = match call(ops::CLUSTER_STATUS, json!({})) {
         Ok(status) => status,
-        Err(e) => return trouble(e, err),
+        Err(e) => return Failure::from_client(Some(ops::CLUSTER_STATUS), e).emit(json, out, err),
     };
     let Some(node) = find_node(&status, machine) else {
-        let _ = writeln!(err, "No node named {machine}.");
-        return 2;
+        return Failure::new(
+            contract::BAD_REQUEST,
+            "bad_value",
+            "No active machine has that name.",
+        )
+        .with_human(format!("No node named {machine}."))
+        .with_op(ops::CLUSTER_DISPATCH)
+        .emit(json, out, err);
     };
     let key = notchling_engine::vault::random_id("d-").unwrap_or_else(|| {
         format!(
@@ -194,61 +182,46 @@ pub fn run_remote(
         json!({"node": node, "delegate": list, "key": key}),
     ) {
         Ok(reply) => reply,
-        Err(e) => return trouble(e, err),
+        Err(e) => return Failure::from_client(Some(ops::CLUSTER_DISPATCH), e).emit(json, out, err),
     };
-    if let Some(warning) = reply.get("warning").and_then(Value::as_str) {
+    if let (Some(warning), false) = (reply.get("warning").and_then(Value::as_str), json) {
         let _ = writeln!(err, "{warning}");
     }
     let Some(code) = reply.get("exit").and_then(Value::as_i64) else {
         let job = reply.get("job").and_then(Value::as_str).unwrap_or("");
         let state = reply.get("state").and_then(Value::as_str).unwrap_or("");
-        let _ = writeln!(err, "The job {job} is {state}.");
-        return 1;
+        return Failure::failed("The job has not finished.")
+            .with_human(format!("The job {job} is {state}."))
+            .with_op(ops::CLUSTER_DISPATCH)
+            .emit(json, out, err);
     };
-    let _ = write!(
-        out,
-        "{}",
-        reply.get("out").and_then(Value::as_str).unwrap_or("")
-    );
-    let _ = write!(
-        err,
-        "{}",
-        reply.get("err").and_then(Value::as_str).unwrap_or("")
-    );
-    i32::try_from(code).unwrap_or(1)
+    let text = |name: &str| reply.get(name).and_then(Value::as_str).unwrap_or("");
+    delegate_cli::conclude(
+        i32::try_from(code).unwrap_or(contract::FAILED),
+        (text("out"), text("err")),
+        json,
+        (out, err),
+    )
 }
 
 pub fn run_machine(args: &[String]) -> Option<i32> {
+    let json = contract::wants_json(args);
     let (machine, rest) = match take_machine(args) {
         Ok(taken) => taken,
-        Err(e) => {
-            let _ = writeln!(std::io::stderr(), "{}", e.message);
-            return Some(2);
-        }
+        Err(e) => return Some(Failure::usage(e.message).report(json)),
     };
     let machine = machine?;
     let Some(layout) = Layout::from_env(None) else {
-        let _ = writeln!(
-            std::io::stderr(),
-            "notchling: no home folder in the environment"
-        );
-        return Some(2);
+        return Some(Failure::not_running().report(json));
     };
     let Ok(cwd) = std::env::current_dir() else {
-        let _ = writeln!(
-            std::io::stderr(),
-            "notchling: can't tell which folder this runs in"
-        );
-        return Some(2);
+        return Some(Failure::failed("Can't tell which folder this runs in.").report(json));
     };
     let home = notchling_platform::paths::home().unwrap_or_else(|| layout.home());
     let mut client =
         match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
             Ok(client) => client,
-            Err(e) => {
-                let _ = writeln!(std::io::stderr(), "notchling: {e}");
-                return Some(2);
-            }
+            Err(e) => return Some(Failure::from_client(None, e).report(json)),
         };
     client.set_timeout(DELEGATE_WAIT + Duration::from_secs(60));
     let mut call = |op: &str, args: Value| client.call(op, args);

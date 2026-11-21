@@ -63,7 +63,7 @@ Prints the saved secrets that fit, best first (exit code 1 when none does). Each
 '{binary}' secret-request <name> --kind token|login --url '<url>' --note '<what it is for>' --how '<steps to get it>' --expires YYYY-MM-DD --reason '<why you need it now>'
 ```
 
-Opens Notchling's form with those fields filled in; the user types the value there. Whenever you ask for a token, fill `--how` with the steps for getting it (where to click, which scopes to tick, a link to the page): the form shows it under the value field. Add `--expires` whenever you know the last day; Notchling reminds the user before it. `--note` and `--how` may span lines. For a name that exists (an expired token, a changed password) it opens that secret for editing: each of `--note`, `--url`, `--how` and `--expires` you pass replaces the saved text in the form, the others keep their saved values, and the user saves or cancels. It waits for the user, so give it the longest timeout your shell tool allows (Claude Code's Bash: 600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 1). Use names like `github`, `npm`, `aws-prod`.
+Opens Notchling's form with those fields filled in; the user types the value there. Whenever you ask for a token, fill `--how` with the steps for getting it (where to click, which scopes to tick, a link to the page): the form shows it under the value field. Add `--expires` whenever you know the last day; Notchling reminds the user before it. `--note` and `--how` may span lines. For a name that exists (an expired token, a changed password) it opens that secret for editing: each of `--note`, `--url`, `--how` and `--expires` you pass replaces the saved text in the form, the others keep their saved values, and the user saves or cancels. It waits for the user, so give it the longest timeout your shell tool allows (Claude Code's Bash: 600000 ms). It prints the saved secret (exit 0) or says the user cancelled (exit 5). Use names like `github`, `npm`, `aws-prod`.
 
 ## 3. Use it
 
@@ -78,7 +78,7 @@ The command runs with the secret's variables set. With a single argument after `
 '{binary}' secret registry -- 'printf %s "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USERNAME" --password-stdin "$REGISTRY_URL"'
 ```
 
-Its output comes back with every value replaced by `[secret:<name>]`; its exit code is the command's. When the secret says the user approves each use, Notchling shows them the command first and the call waits (exit 3 when they deny it), so give it a long timeout too.
+Its output comes back with every value replaced by `[secret:<name>]`; its exit code is the command's. When the secret says the user approves each use, Notchling shows them the command first and the call waits (exit 125, with the reason on stderr, when they deny it or Notchling stops before running your command), so give it a long timeout too.
 
 Rules:
 - Never echo, print, encode, log or write a value to a file, a commit, a URL you show, or your reply. Don't put a value on a command line where `ps` would see it when a tool takes it from the environment or stdin.

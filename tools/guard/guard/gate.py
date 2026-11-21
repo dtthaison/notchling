@@ -123,6 +123,12 @@ def provider_gap_reasons(repo: Path, base: str, head: str) -> List[str]:
     return reasons
 
 
+def agent_path_reasons(repo: Path, base: str, head: str) -> List[str]:
+    from guard import agentpaths
+
+    return agentpaths.growth_reasons(repo, base, head)
+
+
 def approved_head(reviews: List[Dict], head_sha: str, maintainers: frozenset) -> bool:
     latest: Dict[str, Dict] = {}
     for r in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
@@ -171,6 +177,7 @@ def main(repo: Path, base: str, head: str, reviews_file: Optional[Path], post: b
     reasons = needs_maintainer(changes, zones) + collision_reasons(Path(repo), base, head, changes)
     reasons += baseline_reasons(Path(repo), base, head)
     reasons += provider_gap_reasons(Path(repo), base, head)
+    reasons += agent_path_reasons(Path(repo), base, head)
     decision = decide(reasons, reviews, head_sha)
     for line in decision.details:
         print(line)

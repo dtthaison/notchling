@@ -100,8 +100,8 @@ fn open_error(error: OpenError) -> ApiError {
         OpenError::Choices => bad(GIVE_CHOICES),
         OpenError::ChoiceText => bad(CHOICE_TEXT),
         OpenError::WorkerNeedsChoices => bad(WORKER_CHOICES),
-        OpenError::SessionFull => failed(SESSION_FULL),
-        OpenError::AllFull => failed(ALL_FULL),
+        OpenError::SessionFull => failed(SESSION_FULL).with_reason("busy"),
+        OpenError::AllFull => failed(ALL_FULL).with_reason("busy"),
         OpenError::Db(_) => failed(SAVE_QUESTION_FAILED),
     }
 }
@@ -324,7 +324,7 @@ impl AskOps {
         let hit = pid.and_then(|pid| self.caller.session_of(pid));
         let (Some(pid), Some(hit)) = (pid, hit) else {
             self.refuse(None, mode, args);
-            return Err(forbidden(NO_SESSION));
+            return Err(forbidden(NO_SESSION).with_reason("no_session"));
         };
         let refuse = |error: ApiError| {
             self.refuse(Some(&hit), mode, args);

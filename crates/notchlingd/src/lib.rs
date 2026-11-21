@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 mod account_history;
 mod accounts_late;
 pub mod accounts_ops;
@@ -36,6 +38,7 @@ pub mod bridge_cluster;
 pub mod bridge_machines;
 pub mod bridge_ops;
 pub mod caller_session;
+pub mod capabilities_ops;
 pub mod catalog_ops;
 pub mod chrome_ops;
 pub mod cli;
@@ -108,6 +111,8 @@ pub mod cluster_workspace_send;
 pub mod codex_children;
 pub mod codex_fence;
 pub mod codex_ops;
+pub mod commands;
+pub mod contract;
 pub mod control_ops;
 pub mod cost_ops;
 pub mod cost_profile_json;
@@ -134,6 +139,7 @@ pub mod grant_janitor;
 pub mod grant_roots;
 pub mod grant_use;
 pub mod grant_wiring;
+pub mod help_cli;
 pub mod hook;
 pub mod hook_fence;
 pub mod hook_guard;
@@ -509,34 +515,32 @@ pub fn run(command: Command) -> i32 {
             println!("{}", cli::version_line());
             0
         }
-        Command::Help => {
-            println!("{}", cli::usage());
-            0
-        }
+        Command::Help { json } => help_cli::help(json, &mut std::io::stdout()),
+        Command::Capabilities { json, socket } => help_cli::capabilities(json, socket.as_deref()),
         Command::Daemon { socket } => run_daemon(socket.as_deref()),
-        Command::Status { json, socket } => match layout_for(socket.as_deref()) {
-            Some(l) => clients::status(&l.socket, json),
-            None => 1,
+        Command::Status { json, socket } => match client_layout(socket.as_deref(), json) {
+            Ok(l) => clients::status(&l.socket, json),
+            Err(code) => code,
         },
-        Command::Sessions { json, socket } => match layout_for(socket.as_deref()) {
-            Some(l) => clients::sessions(&l.socket, json),
-            None => 1,
+        Command::Sessions { json, socket } => match client_layout(socket.as_deref(), json) {
+            Ok(l) => clients::sessions(&l.socket, json),
+            Err(code) => code,
         },
         Command::Pages {
             query,
             json,
             socket,
-        } => match layout_for(socket.as_deref()) {
-            Some(l) => pages_cli::run(&l, &query, true, json),
-            None => 1,
+        } => match client_layout(socket.as_deref(), json) {
+            Ok(l) => pages_cli::run(&l, &query, true, json),
+            Err(code) => code,
         },
         Command::Page {
             query,
             json,
             socket,
-        } => match layout_for(socket.as_deref()) {
-            Some(l) => pages_cli::run(&l, &query, false, json),
-            None => 1,
+        } => match client_layout(socket.as_deref(), json) {
+            Ok(l) => pages_cli::run(&l, &query, false, json),
+            Err(code) => code,
         },
         Command::Providers { json } => providers_cli::run(json, &mut std::io::stdout()),
         Command::Delegate { args } => delegate_cli::run(&args),
@@ -553,10 +557,7 @@ pub fn run(command: Command) -> i32 {
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Session { args } => match args.first().map(String::as_str) {
             Some("reload") => reload_cli::run(&args),
-            _ => {
-                eprintln!("{}", reload_cli::USAGE);
-                reload_cli::TROUBLE
-            }
+            _ => contract::Failure::usage(reload_cli::USAGE).report(contract::wants_json(&args)),
         },
         Command::Ask { args } => ask_cli::run_ask(&args, None),
         Command::Asks { args } => ask_cli::run_asks(&args, None),
@@ -591,6 +592,10 @@ fn layout_for(socket: Option<&Path>) -> Option<Layout> {
         eprintln!("notchling: no home folder in the environment, so no data folder");
     }
     layout
+}
+
+fn client_layout(socket: Option<&Path>, json: bool) -> Result<Layout, i32> {
+    Layout::from_env(socket).ok_or_else(|| contract::Failure::not_running().report(json))
 }
 
 fn run_daemon(socket: Option<&Path>) -> i32 {
