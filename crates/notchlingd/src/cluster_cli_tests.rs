@@ -1,4 +1,5 @@
-use super::{parse, read_token, run_with, status_lines, Args, Sub, TOKEN_ON_STDIN, TROUBLE};
+use super::{parse, read_token, run_with, status_lines, Args, Sub, TOKEN_ON_STDIN};
+use crate::contract::BAD_REQUEST;
 use serde_json::json;
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -35,7 +36,7 @@ fn cli_join_reads_token_from_stdin_only() {
         &mut out,
         &mut err,
     );
-    assert_eq!(code, TROUBLE);
+    assert_eq!(code, BAD_REQUEST);
     assert!(out.is_empty());
     let said = String::from_utf8(err).unwrap();
     assert!(said.contains("pass the token on stdin"), "{said}");

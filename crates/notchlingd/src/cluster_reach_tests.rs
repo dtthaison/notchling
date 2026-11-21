@@ -1,4 +1,5 @@
-use crate::cluster_cli::{parse, Args, Sub, REFUSED, TROUBLE};
+use crate::cluster_cli::{parse, Args, Sub};
+use crate::contract::{BAD_REQUEST, FAILED};
 use crate::cluster_reach::{check_addr, reach, reach_with, report, run_in, Outcome, TIMEOUT};
 use std::net::{Ipv4Addr, TcpListener};
 use std::time::Duration;
@@ -63,7 +64,7 @@ fn refuses_non_tailscale_address() {
         &mut out,
         &mut err,
     );
-    assert_eq!(code, TROUBLE);
+    assert_eq!(code, BAD_REQUEST);
     assert!(out.is_empty());
     assert!(String::from_utf8(err).unwrap().contains("not a Tailscale"));
 }
@@ -91,9 +92,9 @@ fn closed_port_says_refused() {
     assert_eq!(reach(LOOP, port, Duration::from_secs(2)), Outcome::Refused);
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = run_in(LOOP, port, true, Duration::from_secs(2), &mut out, &mut err);
-    assert_eq!(code, REFUSED);
+    assert_eq!(code, FAILED);
     assert!(out.is_empty());
-    assert_eq!(String::from_utf8(err).unwrap(), "refused\n");
+    assert_eq!(String::from_utf8(err).unwrap(), "refused (failed)\n");
 }
 
 #[test]
@@ -107,9 +108,9 @@ fn times_out_in_three_seconds() {
     assert_eq!(outcome, Outcome::NoAnswer);
     assert_eq!(asked.get(), Some(Duration::from_millis(20)));
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    assert_eq!(report(LOOP, 9, &outcome, &mut out, &mut err), REFUSED);
+    assert_eq!(report(LOOP, 9, &outcome, &mut out, &mut err), FAILED);
     assert!(out.is_empty());
-    assert_eq!(String::from_utf8(err).unwrap(), "no answer in 3 s\n");
+    assert_eq!(String::from_utf8(err).unwrap(), "no answer in 3 s (failed)\n");
     let other = reach_with(LOOP, 9, TIMEOUT, |_, _| {
         Err(std::io::Error::other("network is unreachable"))
     });

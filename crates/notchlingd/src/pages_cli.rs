@@ -1,3 +1,4 @@
+use crate::contract::Failure;
 use crate::layout::Layout;
 use crate::pages_ops::find_value;
 use notchling_engine::pages::PageLibrary;
@@ -51,7 +52,7 @@ pub fn report(reply: &Value, query: &str, list: bool) -> Result<String, String> 
     Ok(out)
 }
 
-fn lookup(layout: &Layout, query: &str) -> Result<Value, String> {
+fn lookup(layout: &Layout, query: &str) -> Result<Value, Failure> {
     let direct = || {
         Ok(find_value(
             &PageLibrary::read_only(layout.data_dir.join("pages")),
@@ -62,12 +63,12 @@ fn lookup(layout: &Layout, query: &str) -> Result<Value, String> {
         match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
             Ok(c) => c,
             Err(ClientError::NotRunning(_) | ClientError::Unsupported) => return direct(),
-            Err(e) => return Err(format!("notchling: {e}")),
+            Err(e) => return Err(Failure::from_client(Some(ops::PAGES_FIND), e)),
         };
     match client.call(ops::PAGES_FIND, json!({ "query": query })) {
         Ok(v) => Ok(v),
         Err(ClientError::Api(e)) if e.code == ErrorCode::UnknownOp => direct(),
-        Err(e) => Err(format!("notchling: {e}")),
+        Err(e) => Err(Failure::from_client(Some(ops::PAGES_FIND), e)),
     }
 }
 
@@ -92,20 +93,14 @@ fn run_to(
 ) -> i32 {
     let reply = match lookup(layout, query) {
         Ok(v) => v,
-        Err(message) => {
-            let _ = writeln!(err, "{message}");
-            return 1;
-        }
+        Err(failure) => return failure.emit(json, out, err),
     };
     if json {
         let text = serde_json::to_string_pretty(&reply).unwrap_or_else(|_| reply.to_string());
         let _ = writeln!(out, "{text}");
         return match report(&reply, query, list) {
             Ok(_) => 0,
-            Err(message) => {
-                let _ = writeln!(err, "{message}");
-                1
-            }
+            Err(_) => 1,
         };
     }
     match report(&reply, query, list) {
@@ -113,10 +108,7 @@ fn run_to(
             let _ = writeln!(out, "{text}");
             0
         }
-        Err(message) => {
-            let _ = writeln!(err, "{message}");
-            1
-        }
+        Err(message) => Failure::failed(message).emit(false, out, err),
     }
 }
 
@@ -226,7 +218,7 @@ mod tests {
         assert!(out.is_empty());
         assert_eq!(
             String::from_utf8(err).unwrap(),
-            "No saved page matches \"nothing here\".\n"
+            "No saved page matches \"nothing here\". (failed)\n"
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -265,10 +257,7 @@ mod tests {
         );
         let v: Value = serde_json::from_slice(&out).unwrap();
         assert!(v["pages"].as_array().unwrap().is_empty());
-        assert_eq!(
-            String::from_utf8(err).unwrap(),
-            "No saved page matches \"nothing here\".\n"
-        );
+        assert_eq!(String::from_utf8(err).unwrap(), "");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -283,7 +272,7 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8(err).unwrap(),
-            "No saved page matches \"\".\n"
+            "No saved page matches \"\". (failed)\n"
         );
         let _ = std::fs::remove_dir_all(root);
     }

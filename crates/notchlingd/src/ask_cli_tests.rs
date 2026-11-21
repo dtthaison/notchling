@@ -197,7 +197,7 @@ fn json_prints_the_answer_record() {
         printed,
         json!({"id": "q9", "state": "answered", "answer": "Keep it", "choice": 1, "by": "mac"})
     );
-    assert_eq!(rig.stderr(), "Asked (q9). Waiting for the answer.\n");
+    assert_eq!(rig.stderr(), "");
     let open = link.of("ask.open")[0];
     assert_eq!(open["choices"], json!(["Keep it", "Drop it"]));
 }
@@ -290,7 +290,7 @@ fn retried_open_sends_the_same_key() {
 }
 
 #[test]
-fn dismissed_exits_2() {
+fn dismissed_exits_5() {
     let mut rig = Rig::new();
     let mut link = Fake::new(
         &rig.clock,
@@ -298,16 +298,16 @@ fn dismissed_exits_2() {
     );
     assert_eq!(
         rig.run(|env| ask(&mut link, &ask_args(&["--", "q"]), env)),
-        2
+        5
     );
     assert!(rig
         .stderr()
-        .contains("No answer: the question was dismissed.\n"));
+        .contains("No answer: the question was dismissed. (denied)\n"));
     assert_eq!(rig.stdout(), "");
 }
 
 #[test]
-fn refused_exits_3_with_the_reason() {
+fn a_refusal_exits_by_its_kind_with_the_reason() {
     for (code, message) in [
         (
             ErrorCode::Forbidden,
@@ -328,11 +328,17 @@ fn refused_exits_3_with_the_reason() {
     ] {
         let mut rig = Rig::new();
         let mut link = Fake::new(&rig.clock, vec![refusal(code, message)]);
+        let exit = match code {
+            ErrorCode::Forbidden => 4,
+            ErrorCode::BadRequest => 2,
+            _ => 1,
+        };
         assert_eq!(
             rig.run(|env| ask(&mut link, &ask_args(&["--", "q"]), env)),
-            3
+            exit
         );
-        assert_eq!(rig.stderr(), format!("{message}\n"));
+        let name = crate::contract::name_of(exit);
+        assert_eq!(rig.stderr(), format!("{message} ({name})\n"));
         assert_eq!(rig.stdout(), "");
         assert_eq!(link.ops(), ["ask.open"], "a refusal is not retried");
     }
@@ -350,7 +356,7 @@ fn no_daemon_for_60s_exits_3() {
     assert_eq!(&rig.sleeps.borrow()[..4], [1_000, 2_000, 5_000, 10_000]);
     assert_eq!(
         rig.stderr(),
-        "Notchling isn't running. Ask the user to open it, then try again.\n"
+        "Notchling isn't running. Ask the user to open it, then try again. (not_running)\n"
     );
     let opens = link.of("ask.open");
     assert!(opens.len() > 3);
@@ -385,7 +391,7 @@ fn wait_deadline_is_capped_by_the_delegate() {
     let open = link.of("ask.open")[0];
     assert_eq!(open["deadlineMs"], json!(T0 + 540_000));
     assert_eq!(open["wait"], json!(true));
-    assert_eq!(rig.stderr().lines().last(), Some("No answer in time."));
+    assert_eq!(rig.stderr().lines().last(), Some("No answer in time. (expired)"));
     assert_eq!(rig.stdout(), "");
     let waits = link.of("ask.wait");
     assert!(waits
@@ -431,7 +437,7 @@ fn the_daemon_saying_expired_exits_124() {
     );
     let args = ask_args(&["--wait", "--", "q"]);
     assert_eq!(rig.run(|env| ask(&mut link, &args, env)), 124);
-    assert_eq!(rig.stderr().lines().last(), Some("No answer in time."));
+    assert_eq!(rig.stderr().lines().last(), Some("No answer in time. (expired)"));
 }
 
 #[test]

@@ -169,8 +169,9 @@ fn asks_and_answer_print_and_exit() {
             json!({"answered": false, "state": "delivered", "by": "phone"}),
         )],
     );
-    assert_eq!(rig.run(|env| answer(&mut link, &args, env)), 2);
-    assert_eq!(rig.stdout(), "Already answered · Phone.\n");
+    assert_eq!(rig.run(|env| answer(&mut link, &args, env)), 1);
+    assert_eq!(rig.stdout(), "");
+    assert_eq!(rig.stderr(), "Already answered · Phone. (failed)\n");
 
     let mut rig = Rig::new();
     let mut link = Fake::new(

@@ -342,7 +342,7 @@ impl Handler for Ops {
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if self.acting.as_ref().is_some_and(|a| !a.is_on()) && acting_gated(caller, op, args) {
-            return Err(ApiError::new(ErrorCode::Forbidden, ACTING_OFF));
+            return Err(crate::acting_ops::switch_off("acting", ACTING_OFF));
         }
         if let Some(gate) = &self.gate {
             let acting = self.acting.as_ref();
@@ -409,6 +409,10 @@ impl Handler for Ops {
 
     fn acting(&self) -> Option<bool> {
         self.acting.as_ref().map(|a| a.is_on())
+    }
+
+    fn agent_path(&self, op: &str) -> Option<(String, Value)> {
+        crate::commands::why_not(op)
     }
 }
 
@@ -890,6 +894,28 @@ impl Wired {
                 .map(|v| v.is_array() || v.is_object() || v.is_null())
                 .unwrap_or(false)
         }));
+        let switched: crate::capabilities_ops::Switched = {
+            let (acting, bridge, switches) = (
+                self.acting.clone(),
+                self.bridge.clone(),
+                self.switches.clone(),
+            );
+            Arc::new(move |name: &str| match name {
+                "acting" => acting.is_on(),
+                "bridge" => bridge.is_on(),
+                other => switches.get(other).is_some_and(|flag| flag.is_on()),
+            })
+        };
+        let sessioned: crate::capabilities_ops::Sessioned = {
+            let acting = self.acting.clone();
+            Arc::new(move |pid| acting.session_of(pid))
+        };
+        let capabilities = crate::capabilities_ops::CapabilitiesOps::new(
+            env!("CARGO_PKG_VERSION"),
+            switched,
+            sessioned,
+            self.acting.room.clone(),
+        );
         let ops = Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
@@ -902,6 +928,7 @@ impl Wired {
                 SwitchOps::new(self.switches.clone(), self.acting.room.clone())
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
+            .with_group(Arc::new(capabilities))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())

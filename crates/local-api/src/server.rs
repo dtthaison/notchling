@@ -90,6 +90,9 @@ pub trait Handler: Send + Sync + 'static {
     fn acting(&self) -> Option<bool> {
         None
     }
+    fn agent_path(&self, _op: &str) -> Option<(String, Value)> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

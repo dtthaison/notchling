@@ -368,10 +368,13 @@ impl Session {
                 RefusedWhy::Forbidden,
                 None,
             );
-            return Err(ApiError::new(
-                ErrorCode::Forbidden,
-                "only the Notchling app may do this",
-            ));
+            let (message, data) = handler.agent_path(op).unwrap_or_else(|| {
+                (
+                    "only the Notchling app may do this".to_string(),
+                    serde_json::json!({"reason": "app_only"}),
+                )
+            });
+            return Err(ApiError::new(ErrorCode::Forbidden, message).with_data(data));
         }
         if spec.tier == Tier::App && !self.still_the_hello_process() {
             self.shared.refused(
@@ -397,7 +400,8 @@ impl Session {
             return Err(ApiError::new(
                 ErrorCode::NeedsApproval,
                 "this needs approval in the Notchling app, and the app isn't attached",
-            ));
+            )
+            .with_reason("no_app"));
         }
         let caller = Caller {
             tier: self.tier,

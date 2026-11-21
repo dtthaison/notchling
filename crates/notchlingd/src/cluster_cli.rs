@@ -1,5 +1,5 @@
-use crate::layout::Layout;
-use notchling_local_api::{ops, Client, ClientError, ClientKind, CALL_TIMEOUT};
+use crate::contract::{self, Failure};
+use notchling_local_api::{ops, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -9,9 +9,7 @@ pub const TOKEN_ON_STDIN: &str = "pass the token on stdin: notchling cluster joi
 
 const TOKEN_MAX: usize = 4096;
 
-pub const DONE: i32 = 0;
-pub const REFUSED: i32 = 1;
-pub const TROUBLE: i32 = 2;
+pub const DONE: i32 = contract::OK;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sub {
@@ -117,31 +115,16 @@ pub fn status_lines(status: &Value) -> Vec<String> {
     lines
 }
 
-fn connect(socket: Option<&std::path::Path>) -> Result<Client, ClientError> {
-    let layout = Layout::from_env(socket).ok_or(ClientError::Unsupported)?;
-    Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION"))
-}
-
-fn message_of(e: ClientError) -> (i32, String) {
-    match e {
-        ClientError::Api(api) => (REFUSED, api.message),
-        ClientError::Timeout => (TROUBLE, "Notchling didn't answer.".to_string()),
-        other => (TROUBLE, format!("notchling: {other}")),
-    }
-}
-
 pub fn run_with(
     args: &[String],
     input: &mut dyn BufRead,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = match parse(args) {
         Ok(p) => p,
-        Err(message) => {
-            let _ = writeln!(err, "{message}");
-            return TROUBLE;
-        }
+        Err(message) => return Failure::usage(message).emit(json, out, err),
     };
     if let Sub::Reach { addr, port } = parsed.sub {
         return crate::cluster_reach::run(addr, port, out, err);
@@ -149,31 +132,26 @@ pub fn run_with(
     let token = match parsed.sub {
         Sub::Join => match read_token(input) {
             Ok(token) => Some(token),
-            Err(message) => {
-                let _ = writeln!(err, "{message}");
-                return TROUBLE;
-            }
+            Err(message) => return Failure::usage(message).emit(json, out, err),
         },
         _ => None,
     };
-    let reply = connect(parsed.socket.as_deref()).and_then(|mut client| {
+    let reply = contract::connect(parsed.socket.as_deref()).and_then(|mut client| {
         client.set_timeout(CALL_TIMEOUT + CALL_TIMEOUT);
         match (&parsed.sub, token) {
-            (Sub::Reach { .. }, _) => Err(ClientError::Unsupported),
-            (Sub::Status, _) => client.call(ops::CLUSTER_STATUS, json!({})),
-            (Sub::Join, token) => client.call(ops::CLUSTER_JOIN, json!({"token": token})),
+            (Sub::Reach { .. }, _) => Err(Failure::not_running()),
+            (Sub::Status, _) => contract::call(&mut client, ops::CLUSTER_STATUS, json!({})),
+            (Sub::Join, token) => {
+                contract::call(&mut client, ops::CLUSTER_JOIN, json!({"token": token}))
+            }
         }
     });
     let reply = match reply {
         Ok(reply) => reply,
-        Err(e) => {
-            let (code, message) = message_of(e);
-            let _ = writeln!(err, "{message}");
-            return code;
-        }
+        Err(failure) => return failure.emit(json, out, err),
     };
     let shown = if parsed.json {
-        serde_json::to_string_pretty(&reply).unwrap_or_else(|_| reply.to_string())
+        contract::pretty(&reply)
     } else {
         match parsed.sub {
             Sub::Status => status_lines(&reply).join("\n"),

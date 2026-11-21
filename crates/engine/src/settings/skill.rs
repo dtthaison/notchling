@@ -36,9 +36,12 @@ Lists every setting: its key, title, value, what it takes, and who may change it
 Give a value the list shows: `true` or `false`, a number, or one of the choices. Exit codes:
 
 - 0: set. The app shows it at once.
-- 1: refused: an unknown key, a value it doesn't take, or a key agents can't change. The message says which, and what the key takes.
-- 2: Notchling isn't running, or the command was wrong.
-- 3: the user denied the change or didn't answer in time, or Notchling's app isn't open to ask them.
+- 2: an unknown key or a value it doesn't take, or the command was wrong. The message says which, and what the key takes.
+- 3: Notchling isn't running.
+- 4: refused: a key agents can't change.
+- 5: the user denied the change.
+- 6: the request still waits for the user (with `--json`, the reply holds the request).
+- 124: the user didn't answer in time.
 
 For an `ask` key it says it waits for the user's approval in Notchling's Inbox and waits up to five minutes, so give it a long timeout (Claude Code's Bash: 600000 ms) and tell the user to allow it there. If the command stops waiting first, the change still applies once the user allows it; check with `settings get`.
 

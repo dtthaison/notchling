@@ -87,7 +87,13 @@ pub enum Command {
         args: Vec<String>,
     },
     Version,
-    Help,
+    Help {
+        json: bool,
+    },
+    Capabilities {
+        json: bool,
+        socket: Option<PathBuf>,
+    },
 }
 
 pub fn version_line() -> String {
@@ -102,50 +108,13 @@ fn version_line_of(build: Option<&str>) -> String {
 }
 
 pub fn usage() -> &'static str {
-    "usage:\n  \
-     notchling daemon [--socket <path>]          serve the local API\n  \
-     notchling status [--json] [--socket <path>]  the daemon's version, pid, uptime and clients\n  \
-     notchling sessions [--json] [--socket <path>]  the sessions the daemon sees\n  \
-     notchling providers [--json]          what Notchling can do for each tool: native, fallback, not applicable, gap\n  \
-     notchling pages [words] [--json] [--socket <path>]  the saved Artifact pages (id, title, account), newest first\n  \
-     notchling page <link|id|words> [--json] [--socket <path>]  where a saved page is, and who can republish it\n  \
-     notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>\n  \
-     \u{20}                                           hand a job to another tool and wait (read-only unless --write)\n  \
-     notchling delegate agy --machine <node> [--folder --model --effort --timeout --json] -- <prompt>\n  \
-     \u{20}                                           the same on another machine of your cluster (read-only)\n  \
-     notchling delegate-models [codex|agy] [--json]  the models and efforts each tool offers, with what each is for\n  \
-     notchling delegate-models --for <role>  the tool, model and effort for review, review-final, review-secrets or spec-check\n  \
-     notchling models [check|update] [--json]  read each tool's models and efforts; update writes Notchling's copy (--force accepts a list that shrank)\n  \
-     notchling cost report [--days N] [--plan api|subscription] [--json]  what your agents spent over the last N days (14 by default) and what to change\n  \
-     notchling cost setup [--apply] [--consent a,b] [--json]  plan the Cost Profile's files and show every diff; --apply writes them\n  \
-     notchling cost check [--json]           which of those files drifted since Notchling wrote them\n  \
-     notchling cost undo <claude|codex|agy>  put one tool's files back from their backups\n  \
-     notchling secrets [words] [--json]    the saved secrets that fit a URL, host or words (never values)\n  \
-     notchling secret <name>[,<name>…] -- <command> [args…]\n  \
-     \u{20}                                           run a command with secrets, its output hidden\n  \
-     notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD --reason]\n  \
-     \u{20}                                           ask the user to add or update a secret, and wait\n  \
-     notchling settings list [--json]      every setting: its key, value, and whether an agent may change it\n  \
-     notchling settings get <key> [--json]  one setting\n  \
-     notchling settings set <key> <value> [--json]\n  \
-     \u{20}                                           change a setting; some wait for the user's approval in the Inbox\n  \
-     notchling session reload <id|self> [--after-turn] [--json]\n  \
-     \u{20}                                           restart a session's process with the same conversation, to pick up new MCP servers, settings, skills and hooks\n  \
-     notchling cluster status [--json]     this machine's cluster and its members\n  \
-     notchling cluster join --token-stdin   join the cluster whose token is on stdin\n  \
-     notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>\n  \
-     \u{20}                                           ask the person a question and wait for the answer\n  \
-     notchling asks [--wait] [--json]      the open questions you may answer; --wait blocks until there is one\n  \
-     notchling answer <id> (--choice <n> | -- <text>)  answer a question you may answer\n  \
-     notchling service install|uninstall|print [--dir <folder>]\n  \
-     notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  \
-     notchling hook --fence                      Claude Code's PreToolUse hook for cluster sessions: reads the fence file only\n  \
-     notchling hook --guard                      Claude Code's cost guard hook (log only): records what it would have done and never changes a call\n  \
-     notchling agy-sidecar                       Antigravity's sidecar: carries the messages you write in Notchling into Antigravity conversations\n  \
-     notchling agy-hook pre-tool|pre-invocation  Antigravity's hooks for the sidecar channel: asks the daemon, passes on any trouble\n  \
-     notchling --version | --help\n\n\
-     NOTCHLING_DATA_ROOT=<dir> reads <dir>/claude and <dir>/notchling instead of your own folders.\n\
-     service install writes the file and prints the command that loads it; it never loads it."
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        format!(
+            "usage:\n  notchling daemon [--socket <path>]\n      serve the local API\n{}\n  notchling service install|uninstall|print [--dir <folder>]\n  notchling hook [--socket <path>]            Claude Code's hook: asks the daemon, passes on any trouble\n  notchling hook --fence                      Claude Code's PreToolUse hook for cluster sessions: reads the fence file only\n  notchling hook --guard                      Claude Code's cost guard hook (log only): records what it would have done and never changes a call\n  notchling agy-sidecar                       Antigravity's sidecar: carries the messages you write in Notchling into Antigravity conversations\n  notchling agy-hook pre-tool|pre-invocation  Antigravity's hooks for the sidecar channel: asks the daemon, passes on any trouble\n  notchling --version | --help\n\nNOTCHLING_DATA_ROOT=<dir> reads <dir>/claude and <dir>/notchling instead of your own folders.\nservice install writes the file and prints the command that loads it; it never loads it.\nEvery command but the hooks and the sidecar exits by one table: run `notchling help --json`.",
+            crate::commands::usage_lines().join("\n")
+        )
+    })
 }
 
 fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<PathBuf, String> {
@@ -179,11 +148,29 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
     }
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
-        return Ok(Command::Help);
+        return Ok(Command::Help { json: false });
     };
     match first.as_str() {
         "--version" | "-V" | "version" => return Ok(Command::Version),
-        "--help" | "-h" | "help" => return Ok(Command::Help),
+        "--help" | "-h" | "help" => {
+            let rest: Vec<String> = args.collect();
+            return match rest.as_slice() {
+                [] => Ok(Command::Help { json: false }),
+                [flag] if flag == "--json" => Ok(Command::Help { json: true }),
+                _ => Err("help takes only --json".into()),
+            };
+        }
+        "capabilities" => {
+            let (mut json, mut socket) = (false, None);
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--json" => json = true,
+                    "--socket" => socket = Some(value(&mut args, "--socket")?),
+                    other => return Err(format!("unknown argument for capabilities: {other}")),
+                }
+            }
+            return Ok(Command::Capabilities { json, socket });
+        }
         _ => {}
     }
     match first.as_str() {
@@ -351,7 +338,7 @@ mod tests {
                 socket: None
             })
         );
-        assert_eq!(p(&[]), Ok(Command::Help));
+        assert_eq!(p(&[]), Ok(Command::Help { json: false }));
         assert_eq!(p(&["--version"]), Ok(Command::Version));
     }
 

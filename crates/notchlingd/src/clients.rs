@@ -1,9 +1,10 @@
+use crate::contract::Failure;
 use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_local_api::{Client, ClientError, ClientKind, DaemonStatus};
 use serde_json::Value;
 use std::path::Path;
 
-pub const NOT_RUNNING: i32 = 3;
+pub const NOT_RUNNING: i32 = crate::contract::NOT_RUNNING;
 
 pub fn status_line(s: &DaemonStatus) -> String {
     let acting = match s.acting {
@@ -47,19 +48,14 @@ fn connect(socket: &Path) -> Result<Client, ClientError> {
     Client::connect(socket, ClientKind::Cli, env!("CARGO_PKG_VERSION"))
 }
 
-fn fail(e: ClientError) -> i32 {
-    match e {
-        ClientError::NotRunning(_) => {
-            eprintln!(
-                "notchling: the daemon isn't running. Start it with `notchling daemon`, or install the service with `notchling service install`."
-            );
-            NOT_RUNNING
-        }
-        e => {
-            eprintln!("notchling: {e}");
-            1
-        }
+fn fail(e: ClientError, json: bool) -> i32 {
+    let mut failure = Failure::from_client(None, e);
+    if failure.reason == "not_running" {
+        failure = failure.with_human(
+            "notchling: the daemon isn't running. Start it with `notchling daemon`, or install the service with `notchling service install`.",
+        );
     }
+    failure.report(json)
 }
 
 pub fn status(socket: &Path, json: bool) -> i32 {
@@ -69,16 +65,13 @@ pub fn status(socket: &Path, json: bool) -> i32 {
                 println!("{text}");
                 0
             }
-            Err(e) => {
-                eprintln!("notchling: {e}");
-                1
-            }
+            Err(e) => Failure::failed(format!("notchling: {e}")).report(json),
         },
         Ok(s) => {
             println!("{}", status_line(&s));
             0
         }
-        Err(e) => fail(e),
+        Err(e) => fail(e, json),
     }
 }
 
@@ -92,11 +85,11 @@ pub fn list_every_tool(client: &mut Client) -> Result<Value, ClientError> {
 pub fn sessions(socket: &Path, json: bool) -> i32 {
     let mut client = match connect(socket) {
         Ok(c) => c,
-        Err(e) => return fail(e),
+        Err(e) => return fail(e, json),
     };
     let list = match list_every_tool(&mut client) {
         Ok(list) => list,
-        Err(e) => return fail(e),
+        Err(e) => return fail(e, json),
     };
     if json {
         println!(
@@ -112,7 +105,7 @@ pub fn sessions(socket: &Path, json: bool) -> i32 {
             }
             0
         }
-        Err(e) => fail(ClientError::Protocol(e.to_string())),
+        Err(e) => fail(ClientError::Protocol(e.to_string()), json),
     }
 }
 

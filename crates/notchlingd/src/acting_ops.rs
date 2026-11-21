@@ -102,6 +102,13 @@ pub(crate) fn forbidden(message: &str) -> ApiError {
     ApiError::new(ErrorCode::Forbidden, message)
 }
 
+pub(crate) fn switch_off(name: &str, message: &str) -> ApiError {
+    forbidden(message)
+        .with_reason("switch_off")
+        .with_field("switch", json!(name))
+        .with_field("ask", json!({"command": "notchling ask -- …", "kind": "ask"}))
+}
+
 pub(crate) fn bad(message: impl Into<String>) -> ApiError {
     ApiError::bad_request(message)
 }
@@ -326,7 +333,7 @@ impl ActingOps {
             if op == ops::SESSION_REPLY {
                 self.note_acting_off(args, who(caller, args).via);
             }
-            return Err(forbidden(ACTING_OFF));
+            return Err(switch_off("acting", ACTING_OFF));
         }
         match op {
             ops::SETTINGS_GET_ACTING => Ok(json!({"acting": self.acting.is_on()})),
@@ -794,7 +801,7 @@ impl ActingOps {
             }
         }
         if !self.acting.is_on() {
-            return Err(forbidden(ACTING_OFF));
+            return Err(switch_off("acting", ACTING_OFF));
         }
         if caller.tier != Tier::App {
             return Err(forbidden(

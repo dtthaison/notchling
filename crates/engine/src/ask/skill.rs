@@ -26,10 +26,12 @@ Ask only for a decision you can't make or find out yourself. Notchling saves the
 ## Exit codes
 
 - 0: answered. `Answer:` is the answer, `From:` says who gave it.
-- 2: dismissed, or already answered. Decide yourself, or report the question to your caller.
-- 3: Notchling refused or isn't running. Ask your caller the way you would without Notchling.
+- 5: dismissed. Decide yourself, or report the question to your caller.
+- 4: Notchling refused. Ask your caller the way you would without Notchling.
+- 3: Notchling isn't running. Ask your caller the way you would without Notchling.
 - 124: no answer in time. Decide yourself, or report the question to your caller.
-- 1: anything else; the reason is on stderr.
+- 2: the command was wrong.
+- 1: the question is no longer waiting (already answered), or anything else; the reason is on stderr.
 
 ## If you are the main session
 

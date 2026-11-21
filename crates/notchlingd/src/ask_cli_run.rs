@@ -2,11 +2,11 @@ use crate::acting_ops::now_ms;
 use crate::ask_cli::{
     answer, ask, asks, parse_answer, parse_ask, parse_asks, AskLink, Env, LinkError,
 };
+use crate::contract::{self, Failure};
 use crate::layout::Layout;
 use notchling_engine::ask::DEADLINE_VARIABLE;
 use notchling_local_api::{Client, ClientError, ClientKind};
 use serde_json::Value;
-use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -79,18 +79,14 @@ fn delegate_deadline() -> Option<i64> {
 fn drive(
     socket: Option<PathBuf>,
     usage_error: Option<String>,
+    json: bool,
     run: impl FnOnce(&mut SocketLink, &mut Env) -> i32,
 ) -> i32 {
     if let Some(message) = usage_error {
-        let _ = writeln!(std::io::stderr(), "{message}");
-        return 1;
+        return Failure::usage(message).report(json);
     }
     let Some(layout) = Layout::from_env(socket.as_deref()) else {
-        let _ = writeln!(
-            std::io::stderr(),
-            "notchling: no home folder in the environment, so no data folder"
-        );
-        return 1;
+        return Failure::not_running().report(json);
     };
     let mut link = SocketLink {
         socket: layout.socket,
@@ -112,37 +108,40 @@ fn drive(
 }
 
 pub fn run_ask(args: &[String], socket: Option<PathBuf>) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = parse_ask(args);
     let (socket, error) = match &parsed {
         Ok(p) => (p.socket.clone().or(socket), None),
         Err(message) => (socket, Some(message.clone())),
     };
-    drive(socket, error, |link, env| match &parsed {
+    drive(socket, error, json, |link, env| match &parsed {
         Ok(p) => ask(link, p, env),
-        Err(_) => 1,
+        Err(_) => contract::BAD_REQUEST,
     })
 }
 
 pub fn run_asks(args: &[String], socket: Option<PathBuf>) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = parse_asks(args);
     let (socket, error) = match &parsed {
         Ok(p) => (p.socket.clone().or(socket), None),
         Err(message) => (socket, Some(message.clone())),
     };
-    drive(socket, error, |link, env| match &parsed {
+    drive(socket, error, json, |link, env| match &parsed {
         Ok(p) => asks(link, p, env),
-        Err(_) => 1,
+        Err(_) => contract::BAD_REQUEST,
     })
 }
 
 pub fn run_answer(args: &[String], socket: Option<PathBuf>) -> i32 {
+    let json = contract::wants_json(args);
     let parsed = parse_answer(args);
     let (socket, error) = match &parsed {
         Ok(p) => (p.socket.clone().or(socket), None),
         Err(message) => (socket, Some(message.clone())),
     };
-    drive(socket, error, |link, env| match &parsed {
+    drive(socket, error, json, |link, env| match &parsed {
         Ok(p) => answer(link, p, env),
-        Err(_) => 1,
+        Err(_) => contract::BAD_REQUEST,
     })
 }

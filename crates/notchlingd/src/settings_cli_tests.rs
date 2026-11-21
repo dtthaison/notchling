@@ -107,12 +107,12 @@ fn each_outcome_has_its_words_and_exit_code() {
     let mut same = base("applied");
     same["changed"] = json!(false);
     assert_eq!(outcome(&same), (DONE, "limitMode is already off.".into()));
-    assert_eq!(outcome(&base("denied")).0, NOT_ALLOWED);
+    assert_eq!(outcome(&base("denied")).0, contract::DENIED);
     assert!(outcome(&base("expired"))
         .1
         .contains("didn't answer in time"));
-    assert_eq!(outcome(&base("expired")).0, NOT_ALLOWED);
-    assert_eq!(outcome(&base("failed")), (REFUSED, "m".into()));
-    assert_eq!(outcome(&base("withdrawn")), (TROUBLE, "m".into()));
-    assert_eq!(outcome(&base("waiting")).0, NOT_ALLOWED);
+    assert_eq!(outcome(&base("expired")).0, contract::EXPIRED);
+    assert_eq!(outcome(&base("failed")), (contract::FAILED, "m".into()));
+    assert_eq!(outcome(&base("withdrawn")), (contract::FAILED, "m".into()));
+    assert_eq!(outcome(&base("waiting")).0, contract::PENDING);
 }

@@ -1,3 +1,4 @@
+use crate::contract::{self, Failure};
 use crate::layout::Layout;
 use notchling_engine::delegate::command::{self, Context, RecordTo};
 use notchling_engine::delegate::options::DEPTH_VARIABLE;
@@ -60,11 +61,10 @@ pub fn folders(
     }
 }
 
-fn setup() -> Option<(Layout, Folders)> {
+fn setup(json: bool) -> Option<(Layout, Folders)> {
     let Some(layout) = Layout::from_env(None) else {
-        eprintln!(
-            "notchling: no home folder in the environment, so nothing to find the tools from"
-        );
+        Failure::failed("No home folder in the environment, so nothing to find the tools from.")
+            .report(json);
         return None;
     };
     let real_home = notchling_platform::paths::home().unwrap_or_else(|| layout.home());
@@ -82,12 +82,12 @@ pub fn run(args: &[String]) -> i32 {
     if let Some(code) = crate::cluster_dispatch_delegate::run_machine(args) {
         return code;
     }
-    let Some((layout, folders)) = setup() else {
-        return 2;
+    let json = contract::wants_json(args);
+    let Some((layout, folders)) = setup(json) else {
+        return contract::FAILED;
     };
     let Ok(cwd) = std::env::current_dir() else {
-        eprintln!("notchling: can't tell which folder this runs in");
-        return 2;
+        return Failure::failed("Can't tell which folder this runs in.").report(json);
     };
     let raw_depth = std::env::var(DEPTH_VARIABLE).ok();
     if let Ok(deeper) = notchling_engine::delegate::options::enter_depth(raw_depth.as_deref()) {
@@ -114,26 +114,56 @@ pub fn run(args: &[String]) -> i32 {
             pid: std::process::id(),
         }),
     };
-    command::run(
-        args,
-        &ctx,
-        deps,
-        &mut std::io::stdout(),
-        &mut std::io::stderr(),
-    )
+    if !json {
+        return command::run(
+            args,
+            &ctx,
+            deps,
+            &mut std::io::stdout(),
+            &mut std::io::stderr(),
+        );
+    }
+    let mut out = Vec::new();
+    let code = command::run(args, &ctx, deps, &mut out, &mut std::io::sink());
+    if code == contract::BAD_REQUEST {
+        return Failure::usage(String::from_utf8_lossy(&out).trim().to_string()).report(true);
+    }
+    let _ = std::io::Write::write_all(&mut std::io::stdout(), &out);
+    code
+}
+
+fn listing(args: &[String], json: bool, deps: &notchling_engine::delegate::deps::Deps) -> i32 {
+    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
+    let mut out = Vec::new();
+    let code = if json {
+        command::models_listing_json(&args, deps, &mut out)
+    } else {
+        command::models_listing(&args, deps, &mut out)
+    };
+    let text = String::from_utf8_lossy(&out).trim().to_string();
+    match code {
+        contract::OK => {
+            println!("{text}");
+            code
+        }
+        contract::BAD_REQUEST => Failure::usage(text).report(json),
+        _ if json && serde_json::from_str::<serde_json::Value>(&text).is_ok() => {
+            println!("{text}");
+            code
+        }
+        _ => Failure::new(code, "failed", "Notchling couldn't give the models.")
+            .with_human(text)
+            .report(json),
+    }
 }
 
 pub fn models(args: &[String]) -> i32 {
-    let Some((_, folders)) = setup() else {
-        return 2;
+    let json = contract::wants_json(args);
+    let Some((_, folders)) = setup(json) else {
+        return contract::FAILED;
     };
-    let json = args.iter().any(|a| a == "--json");
-    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
     let deps = real::deps(&folders, Arc::new(AtomicBool::new(false)));
-    if json {
-        return command::models_listing_json(&args, &deps, &mut std::io::stdout());
-    }
-    command::models_listing(&args, &deps, &mut std::io::stdout())
+    listing(args, json, &deps)
 }
 
 #[cfg(test)]

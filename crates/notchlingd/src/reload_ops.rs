@@ -661,7 +661,7 @@ impl ActingOps {
         let own = caller
             .pid
             .and_then(|pid| self.own_agent(pid))
-            .ok_or_else(|| forbidden("Notchling can't tell which session this is."))?;
+            .ok_or_else(|| forbidden("Notchling can't tell which session this is.").with_reason("no_session"))?;
         if asked != "self" && asked != own.id {
             return Err(forbidden("A session may reload only itself."));
         }

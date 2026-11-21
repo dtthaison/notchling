@@ -49,7 +49,7 @@ const OWN_QUIET: [&str; 12] = [
     ops::CODEX_CHILDREN,
 ];
 
-const NEVER_QUIET: [&str; 135] = [
+const NEVER_QUIET: [&str; 136] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -60,6 +60,7 @@ const NEVER_QUIET: [&str; 135] = [
     ops::LOG_CHAIN_START,
     ops::LOG_AUDIT_DELETE,
     ops::DAEMON_STATUS,
+    ops::DAEMON_CAPABILITIES,
     ops::SESSIONS_LIST,
     ops::EVENTS_SUBSCRIBE,
     ops::SESSION_REPLY,

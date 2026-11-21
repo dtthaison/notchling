@@ -31,13 +31,15 @@ impl VaultOps {
             return Err(refusal(
                 said_no(
                     "This secret needs the user's approval in the Notchling app, and the app isn't open. Ask the user to open it, then try again.",
-                ),
+                )
+                .with_reason("no_app"),
                 SecretResult::NoApp,
             ));
         }
         let ticket = self.approvals.open().map_err(|r| match r {
             Refused::Full => refusal(
-                failed("Too many uses wait for the user's approval; try again later."),
+                failed("Too many uses wait for the user's approval; try again later.")
+                    .with_reason("busy"),
                 SecretResult::Failed,
             ),
             Refused::NoId => refusal(
@@ -175,7 +177,9 @@ impl VaultOps {
             ),
         };
         let ticket = self.requests.open().map_err(|r| match r {
-            Refused::Full => failed("Too many requests wait for the user; try again later."),
+            Refused::Full => {
+                failed("Too many requests wait for the user; try again later.").with_reason("busy")
+            }
             Refused::NoId => ApiError::internal("no randomness for a request id"),
         })?;
         let id = ticket.id.clone();
@@ -222,7 +226,7 @@ impl VaultOps {
         match saved {
             Some(_) if !given => Err(failed(LOG_DOWN)),
             Some(entry) => Ok(json!({"entry": entry_json(&entry)})),
-            None => Err(said_no("The user cancelled.")),
+            None => Err(said_no("The user cancelled.").with_reason("cancelled")),
         }
     }
 
