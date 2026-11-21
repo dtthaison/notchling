@@ -86,6 +86,12 @@ pub enum Command {
     Answer {
         args: Vec<String>,
     },
+    Consent {
+        args: Vec<String>,
+    },
+    Consents {
+        args: Vec<String>,
+    },
     Version,
     Help {
         json: bool,
@@ -236,6 +242,16 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "answer" => {
             return Ok(Command::Answer {
+                args: args.collect(),
+            })
+        }
+        "consent" => {
+            return Ok(Command::Consent {
+                args: args.collect(),
+            })
+        }
+        "consents" => {
+            return Ok(Command::Consents {
                 args: args.collect(),
             })
         }

@@ -1,11 +1,15 @@
 use super::*;
 use crate::acting_ops_tests::{app, FakeRoom};
+use crate::consent_ops::ConsentOps;
+use crate::consent_testkit::{consent_at, item_for, item_id_for};
+use crate::inbox_ops::InboxOps;
 use crate::event_assert::{of, results, text};
 use crate::limits_ops_tests::TempDir;
+use notchling_engine::inbox::ActionId;
 use notchling_engine::limits::mode::CLAUDE;
 use notchling_events::{MemorySink, Salt};
 use notchling_local_api::ClientKind;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 struct Rig {
     tmp: TempDir,
@@ -13,6 +17,8 @@ struct Rig {
     inbox: Arc<InboxOps>,
     limits: Arc<LimitConfig>,
     sink: Arc<MemorySink>,
+    consent: Arc<ConsentOps>,
+    clock: Arc<AtomicI64>,
     ops: SettingsOps,
 }
 
@@ -25,7 +31,7 @@ fn agent() -> Caller {
     }
 }
 
-fn rig(tag: &str, wait: Duration) -> Rig {
+fn rig(tag: &str) -> Rig {
     let tmp = TempDir::new(&format!("settings-{tag}"));
     let room = Arc::new(FakeRoom::default());
     let inbox = InboxOps::new(tmp.path("inbox"), room.clone());
@@ -36,17 +42,27 @@ fn rig(tag: &str, wait: Duration) -> Rig {
         _ => None,
     });
     let sink = Arc::new(MemorySink::new());
+    let clock = Arc::new(AtomicI64::new(1_000_000));
+    let ticking = clock.clone();
+    let consent = consent_at(
+        room.clone(),
+        inbox.clone(),
+        sink.clone(),
+        Arc::new(move || ticking.load(Ordering::SeqCst)),
+    );
     let ops = SettingsOps::new(tmp.path("data"), room.clone(), states)
         .with_events(Events::fixed(sink.clone(), Salt([1; 32])))
         .with_limits(limits.clone())
-        .with_inbox(inbox.clone())
-        .with_ask_wait(wait);
+        .with_consent(consent.clone());
+    consent.register(notchling_engine::consent::SETTING, ops.writer());
     Rig {
         tmp,
         room,
         inbox,
         limits,
         sink,
+        consent,
+        clock,
         ops,
     }
 }
@@ -81,18 +97,19 @@ impl Rig {
     }
 
     fn item(&self, id: &str) -> Value {
-        self.inbox.flush();
-        let list = self
-            .inbox
-            .call(&app(), ops::INBOX_LIST, &json!({}))
-            .unwrap();
-        list["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|i| i["id"] == item_id(id))
-            .cloned()
-            .unwrap_or(Value::Null)
+        item_for(&self.inbox, id)
+    }
+
+    fn item_id(&self, id: &str) -> String {
+        item_id_for(&self.inbox, id)
+    }
+
+    fn wait_for(&self, what: &str, until: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !until() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(until(), "{what}");
     }
 }
 
@@ -107,7 +124,7 @@ fn entry<'a>(list: &'a Value, key: &str) -> &'a Value {
 
 #[test]
 fn every_op_is_agent_tier_on_the_settings_topic() {
-    let r = rig("spec", ASK_WAIT);
+    let r = rig("spec");
     for op in SETTINGS_OPS {
         let want = if op == ops::SETTINGS_SET {
             OpSpec::AGENT_ACTS
@@ -122,7 +139,7 @@ fn every_op_is_agent_tier_on_the_settings_topic() {
 
 #[test]
 fn an_agent_lists_and_gets_every_setting_with_its_class() {
-    let r = rig("list", ASK_WAIT);
+    let r = rig("list");
     let list = r.call(&agent(), ops::SETTINGS_LIST, json!({})).unwrap();
     let acting = entry(&list, "switch.acting");
     assert_eq!(acting["value"], true);
@@ -168,7 +185,7 @@ fn an_agent_lists_and_gets_every_setting_with_its_class() {
 
 #[test]
 fn a_free_key_is_set_at_once_published_and_audited() {
-    let r = rig("free", ASK_WAIT);
+    let r = rig("free");
     let reply = r
         .call(
             &agent(),
@@ -206,7 +223,7 @@ fn a_free_key_is_set_at_once_published_and_audited() {
 
 #[test]
 fn switches_and_never_keys_are_refused_and_audited() {
-    let r = rig("never", ASK_WAIT);
+    let r = rig("never");
     for (key, value) in [
         ("switch.acting", json!(true)),
         ("acting", json!("on")),
@@ -251,7 +268,7 @@ fn switches_and_never_keys_are_refused_and_audited() {
 
 #[test]
 fn bad_values_and_unknown_keys_are_refused_with_what_they_take() {
-    let r = rig("bad", ASK_WAIT);
+    let r = rig("bad");
     r.app_follows_the_inbox();
     for (key, value, says) in [
         (
@@ -329,17 +346,24 @@ fn asked(r: &Rig, id: &str) -> Value {
 
 #[test]
 fn an_ask_key_raises_an_inbox_item_and_allow_applies_it() {
-    let r = rig("allow", ASK_WAIT);
+    let r = rig("allow");
     r.app_follows_the_inbox();
     let id = ask(&r, "limitMode", json!("notify"));
     let item = r.item(&id);
     assert_eq!(item["kind"], "setting_change");
-    assert_eq!(item["title"], "Set Claude Code limit to notify");
+    assert!(
+        item["title"]
+            .as_str()
+            .unwrap()
+            .starts_with("Claude Code asks to change"),
+        "{item}"
+    );
+    assert!(!item.to_string().contains("because"), "the reason stays out of the item");
     assert!(
         item["detail"]
             .as_str()
             .unwrap()
-            .ends_with("Now notifyAndSwitch."),
+            .ends_with("It would become notify."),
         "{item}"
     );
     let actions: Vec<&str> = item["actions"]
@@ -360,7 +384,7 @@ fn an_ask_key_raises_an_inbox_item_and_allow_applies_it() {
 
     let decided = r
         .inbox
-        .decide(&item_id(&id), ActionId::Allow, "phone")
+        .decide(&r.item_id(&id), ActionId::Allow, "phone")
         .unwrap();
     assert!(decided.answered);
     let done = asked(&r, &id);
@@ -372,21 +396,22 @@ fn an_ask_key_raises_an_inbox_item_and_allow_applies_it() {
         vec![json!({"key": "limitMode", "value": "notify", "by": "agent", "ask": id})]
     );
     assert_eq!(r.item(&id)["answered_by"], "phone");
+    r.wait_for("the allowed line", || r.results().len() >= 2);
     assert_eq!(r.results(), ["asked", "allowed"]);
     let again = r
         .inbox
-        .decide(&item_id(&id), ActionId::Deny, "mac")
+        .decide(&r.item_id(&id), ActionId::Deny, "mac")
         .unwrap();
     assert!(!again.answered, "the first answer wins");
 }
 
 #[test]
 fn deny_leaves_the_setting_as_it_was() {
-    let r = rig("deny", ASK_WAIT);
+    let r = rig("deny");
     r.app_follows_the_inbox();
     let id = ask(&r, "keepPages", json!("false"));
     r.inbox
-        .decide(&item_id(&id), ActionId::Deny, "mac")
+        .decide(&r.item_id(&id), ActionId::Deny, "mac")
         .unwrap();
     let done = asked(&r, &id);
     assert_eq!(done["state"], "denied");
@@ -402,44 +427,45 @@ fn deny_leaves_the_setting_as_it_was() {
 
 #[test]
 fn an_unanswered_ask_expires_and_closes_its_item() {
-    let r = rig("expire", Duration::from_millis(200));
+    let r = rig("expire");
     r.app_follows_the_inbox();
     let id = ask(&r, "continueAfterSleep", json!(false));
+    let reply = r.call(&agent(), ops::SETTINGS_ASKED, json!({"id": id})).unwrap();
+    assert_eq!(reply["state"], "waiting");
+    r.clock.fetch_add(16 * 60_000, Ordering::SeqCst);
+    r.consent.tick();
     let done = asked(&r, &id);
     assert_eq!(done["state"], "expired", "{done}");
     assert!(r.stored("continueAfterSleep").is_none());
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while r.item(&id)["state"] != "expired" && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
     assert_eq!(r.item(&id)["state"], "expired");
     let late = r
         .inbox
-        .decide(&item_id(&id), ActionId::Allow, "mac")
+        .decide(&r.item_id(&id), ActionId::Allow, "mac")
         .unwrap();
     assert!(!late.answered);
     assert!(r.stored("continueAfterSleep").is_none());
 }
 
 #[test]
-fn an_ask_with_no_app_to_answer_fails_closed() {
-    let r = rig("no-app", ASK_WAIT);
-    let e = r
+fn an_ask_with_no_app_attached_is_saved_and_waits() {
+    let r = rig("no-app");
+    let reply = r
         .call(
             &agent(),
             ops::SETTINGS_SET,
             json!({"key": "limitMode", "value": "off"}),
         )
-        .unwrap_err();
-    assert_eq!(e.code, ErrorCode::NeedsApproval);
-    assert!(e.message.contains("the app isn't open"), "{}", e.message);
-    assert!(r.inbox.items().is_empty());
-    assert_eq!(r.results(), ["no_app"]);
+        .unwrap();
+    assert_eq!(reply["state"], "waiting", "{reply}");
+    assert!(reply["request"]["id"].as_str().unwrap().starts_with('c'));
+    assert_eq!(reply["request"]["answerOn"], "mac_or_phone");
+    assert_eq!(r.inbox.items().len(), 1, "the card waits for the app");
+    assert_eq!(r.results(), ["asked"]);
 }
 
 #[test]
 fn the_app_sets_an_ask_key_without_asking() {
-    let r = rig("app", ASK_WAIT);
+    let r = rig("app");
     let reply = r
         .call(
             &app(),
@@ -457,25 +483,118 @@ fn the_app_sets_an_ask_key_without_asking() {
 }
 
 #[test]
-fn closing_withdraws_the_asks_still_waiting() {
-    let r = rig("close", ASK_WAIT);
+fn a_restart_keeps_a_waiting_ask_and_raises_a_fresh_item() {
+    let r = rig("restart");
     r.app_follows_the_inbox();
     let id = ask(&r, "answerFromNotch", json!(false));
-    r.ops.close();
-    let ask = r
+    let first = r.item_id(&id);
+    r.clock.fetch_add(5, Ordering::SeqCst);
+    r.consent.load();
+    let second = r.item_id(&id);
+    assert_ne!(first, second, "a fresh item, a fresh id");
+    assert_eq!(r.item(&id)["state"], "open");
+    let reply = r
         .call(&agent(), ops::SETTINGS_ASKED, json!({"id": id}))
         .unwrap();
-    assert_eq!(ask["state"], "withdrawn");
-    assert_eq!(r.item(&id)["state"], "withdrawn");
+    assert_eq!(reply["state"], "waiting");
     let e = r
-        .call(&agent(), ops::SETTINGS_ASKED, json!({"id": "setting-nope"}))
+        .call(&agent(), ops::SETTINGS_ASKED, json!({"id": "cnope"}))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Failed);
 }
 
 #[test]
+fn a_setting_that_changed_meanwhile_is_withdrawn_not_applied() {
+    let r = rig("changed");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    r.call(
+        &app(),
+        ops::SETTINGS_SET,
+        json!({"key": "limitMode", "value": "off"}),
+    )
+    .unwrap();
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Allow, "mac")
+        .unwrap();
+    let done = asked(&r, &id);
+    r.wait_for("withdrawn", || asked(&r, &id)["state"] == "withdrawn");
+    assert_ne!(done["state"], "applied");
+    assert_eq!(r.stored("limitMode"), Some(json!("off")));
+}
+
+#[test]
+fn a_dry_run_changes_and_opens_nothing_and_says_what_would_happen() {
+    let r = rig("dry");
+    let dry = |key: &str, value: Value| {
+        r.call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": key, "value": value, "dryRun": true}),
+        )
+        .unwrap()
+    };
+    let free = dry("showPet", json!(false));
+    assert_eq!((free["would"].as_str(), free["request"].is_null()), (Some("apply"), true));
+    let ask = dry("limitMode", json!("notify"));
+    assert_eq!(ask["would"], "ask");
+    assert_eq!(ask["request"]["kind"], "setting");
+    assert_eq!(ask["request"]["answerOn"], "mac_or_phone");
+    assert_eq!(ask["request"]["expiresInMs"], 900_000);
+    assert_eq!(ask["change"]["after"], "notify");
+    let never = dry("acting", json!(true));
+    assert_eq!(never["would"], "refuse");
+    assert_eq!(never["error"]["reason"], "never");
+    assert!(r.stored("showPet").is_none() && r.stored("limitMode").is_none());
+    assert!(r.inbox.items().is_empty());
+    assert!(r.results().is_empty(), "a dry run writes no settings line");
+}
+
+#[test]
+fn the_same_key_returns_the_same_request_and_another_value_is_key_reused() {
+    let r = rig("key");
+    let with_key = |value: &str| {
+        r.call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "limitMode", "value": value, "consent": {"key": "abc", "reason": "x"}}),
+        )
+    };
+    let first = with_key("notify").unwrap();
+    let again = with_key("notify").unwrap();
+    assert_eq!(first["id"], again["id"]);
+    assert_eq!(r.inbox.items().len(), 1, "counted and raised once");
+    let e = with_key("off").unwrap_err();
+    assert_eq!(e.data.as_ref().unwrap()["reason"], "key_reused");
+}
+
+#[test]
+fn a_planted_token_in_the_reason_stays_in_the_row_and_the_askers_reply_only() {
+    let r = rig("untrusted");
+    r.app_follows_the_inbox();
+    let token = "PLANTED-TOKEN-91";
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "limitMode", "value": "off", "consent": {"reason": token}}),
+        )
+        .unwrap();
+    let id = reply["id"].as_str().unwrap().to_string();
+    assert_eq!(reply["request"]["reason"], token);
+    let seen = format!("{:?}{}", r.sink.events(), r.item(&id));
+    assert!(!seen.contains(token), "never in an event or the Inbox item");
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Deny, "mac")
+        .unwrap();
+    r.wait_for("denied", || asked(&r, &id)["state"] == "denied");
+    let closed = asked(&r, &id);
+    assert!(closed["request"]["reason"].is_null(), "deleted at close: {closed}");
+}
+
+#[test]
 fn free_set_commits_before_writing() {
-    let r = rig("commit-first", ASK_WAIT);
+    let r = rig("commit-first");
     r.call(
         &agent(),
         ops::SETTINGS_SET,
@@ -488,7 +607,7 @@ fn free_set_commits_before_writing() {
 
 #[test]
 fn commit_failure_leaves_store_unchanged() {
-    let r = rig("commit-fails", ASK_WAIT);
+    let r = rig("commit-fails");
     r.sink.fail_commits(true);
     let e = r
         .call(
@@ -505,11 +624,11 @@ fn commit_failure_leaves_store_unchanged() {
 
 #[test]
 fn ask_allowed_commits_with_answered_by() {
-    let r = rig("ask-by", ASK_WAIT);
+    let r = rig("ask-by");
     r.app_follows_the_inbox();
     let id = ask(&r, "limitMode", json!("notify"));
     r.inbox
-        .decide(&item_id(&id), ActionId::Allow, "phone")
+        .decide(&r.item_id(&id), ActionId::Allow, "phone")
         .unwrap();
     let done = asked(&r, &id);
     assert_eq!(done["state"], "applied", "{done}");
@@ -525,21 +644,21 @@ fn ask_allowed_commits_with_answered_by() {
 
 #[test]
 fn an_allowed_ask_is_not_applied_when_the_commit_fails() {
-    let r = rig("ask-commit-fails", ASK_WAIT);
+    let r = rig("ask-commit-fails");
     r.app_follows_the_inbox();
     let id = ask(&r, "limitMode", json!("notify"));
     r.sink.fail_commits(true);
     r.inbox
-        .decide(&item_id(&id), ActionId::Allow, "mac")
+        .decide(&r.item_id(&id), ActionId::Allow, "mac")
         .unwrap();
     let done = asked(&r, &id);
-    assert_eq!(done["state"], "failed", "{done}");
+    r.wait_for("failed", || asked(&r, &id)["state"] == "failed");
     assert!(r.stored("limitMode").is_none());
 }
 
 #[test]
 fn text_value_is_chars_and_hash() {
-    let r = rig("text", ASK_WAIT);
+    let r = rig("text");
     r.app_follows_the_inbox();
     let marker = "ctrl+alt+marker7";
     ask(&r, "searchShortcut", json!(marker));
@@ -551,7 +670,7 @@ fn text_value_is_chars_and_hash() {
 
 #[test]
 fn unknown_key_is_hashed() {
-    let r = rig("unknown-hash", ASK_WAIT);
+    let r = rig("unknown-hash");
     let e = r
         .call(
             &agent(),

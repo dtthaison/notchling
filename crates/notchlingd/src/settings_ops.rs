@@ -1,16 +1,17 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::cluster_failover_setting::{parse, FailoverSink, KEY as FAILOVER_KEY};
-use crate::inbox_ops::InboxOps;
+use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_wire::{ask_message, view};
+use crate::contract::Failure;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
-use crate::settings_asks::{item_id, view, Applier, Ask, AskState, Asks, ASK_WAIT};
-use notchling_engine::inbox::{Action, ActionId, Item, Kind as ItemKind, Source, State};
+use notchling_engine::consent::{Consent, SETTING};
 use notchling_engine::limits::mode::PROVIDERS;
 use notchling_engine::limits::{LimitConfig, LimitMode};
 use notchling_engine::settings::{
     log_value, spec, switch, Access, KeySpec, Settings, SwitchSpec, KEYS, SWITCHES, SWITCH_WHY,
 };
-use notchling_events::kinds::choices::Answerer;
+use notchling_events::kinds::choices::{Answerer, ConsentThen};
 use notchling_events::kinds::settings::{AgentSetResult, SettingClass, SettingsAgent};
 use notchling_events::spec::Outcome;
 use notchling_events::{scope, Device, Event, Ref};
@@ -78,13 +79,6 @@ pub struct Said<'a> {
     pub result: AgentSetResult,
     pub by: Option<Answerer>,
     pub device: Option<&'a str>,
-}
-
-fn shown(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -178,37 +172,61 @@ impl Writer {
     }
 }
 
-impl Applier for Writer {
-    fn apply(&self, id: &str, ask: &Ask) -> Result<(), String> {
-        let spec = spec(ask.key).ok_or("the setting is gone")?;
+impl Handler for Writer {
+    fn recheck(&self, row: &Consent) -> Result<(), String> {
+        let before = row.change.get("before").cloned().unwrap_or(Value::Null);
+        let store = Settings::open(&self.file).map_err(|e| e.to_string())?;
+        let now = store.get(&row.target).unwrap_or(Value::Null);
+        if now == before {
+            Ok(())
+        } else {
+            Err("the setting changed meanwhile".to_string())
+        }
+    }
+
+    fn apply(
+        &self,
+        row: &Consent,
+        by: Option<Answerer>,
+        device: Option<&str>,
+    ) -> Result<Value, String> {
+        let spec = spec(&row.target).ok_or("the setting is gone")?;
+        let after = row.change.get("after").cloned().unwrap_or(Value::Null);
         let said = Said {
-            key: ask.key,
+            key: spec.name,
             class: class_of(spec),
-            value: &ask.value,
+            value: &after,
             result: AgentSetResult::Allowed,
-            by: ask.by,
-            device: ask.device.as_deref(),
+            by,
+            device,
         };
         if !self.record(&said, true) {
             return Err("the audit log can't be written".to_string());
         }
-        self.write(spec, &ask.value, "agent", Some(id)).map(|_| ())
+        let changed = self.write(spec, &after, "agent", Some(&row.id))?;
+        Ok(json!({"key": spec.name, "value": after, "changed": changed}))
     }
 
-    fn ended(&self, _id: &str, ask: &Ask) {
-        let result = match ask.state {
-            AskState::Denied => AgentSetResult::Denied,
-            AskState::Expired | AskState::Withdrawn => AgentSetResult::Expired,
-            AskState::Failed => AgentSetResult::Failed,
+    fn ended(&self, row: &Consent, then: ConsentThen, device: Option<&str>) {
+        let result = match then {
+            ConsentThen::Denied => AgentSetResult::Denied,
+            ConsentThen::Expired | ConsentThen::Withdrawn | ConsentThen::Cancelled => {
+                AgentSetResult::Expired
+            }
+            ConsentThen::Failed => AgentSetResult::Failed,
             _ => return,
         };
+        let Some(spec) = spec(&row.target) else {
+            return;
+        };
+        let after = row.change.get("after").cloned().unwrap_or(Value::Null);
         let said = Said {
-            key: ask.key,
-            class: spec(ask.key).and_then(class_of),
-            value: &ask.value,
+            key: spec.name,
+            class: class_of(spec),
+            value: &after,
             result,
-            by: ask.by,
-            device: ask.device.as_deref(),
+            by: row.by.as_deref().and_then(Answerer::from_name),
+            device,
         };
         self.record(&said, false);
     }
@@ -217,9 +235,7 @@ impl Applier for Writer {
 pub struct SettingsOps {
     writer: Arc<Writer>,
     switches: SwitchStates,
-    asks: Arc<Asks>,
-    inbox: Option<Arc<InboxOps>>,
-    ask_wait: Duration,
+    consent: Option<Arc<ConsentOps>>,
 }
 
 impl SettingsOps {
@@ -233,9 +249,7 @@ impl SettingsOps {
                 failover: OnceLock::new(),
             }),
             switches,
-            asks: Asks::new(),
-            inbox: None,
-            ask_wait: ASK_WAIT,
+            consent: None,
         }
     }
 
@@ -257,19 +271,16 @@ impl SettingsOps {
         let _ = self.writer.failover.set(sink);
     }
 
-    pub fn with_inbox(mut self, inbox: Arc<InboxOps>) -> SettingsOps {
-        self.inbox = Some(inbox);
+    pub fn with_consent(mut self, consent: Arc<ConsentOps>) -> SettingsOps {
+        self.consent = Some(consent);
         self
     }
 
-    pub fn with_ask_wait(mut self, wait: Duration) -> SettingsOps {
-        self.ask_wait = wait;
-        self
+    pub fn writer(&self) -> Arc<Writer> {
+        self.writer.clone()
     }
 
-    pub fn close(&self) {
-        self.asks.close();
-    }
+    pub fn close(&self) {}
 
     fn store(&self) -> Option<Settings> {
         Settings::open(&self.writer.file).ok()
@@ -330,15 +341,33 @@ impl SettingsOps {
         let store = self.store();
         let mut entry = self.entry(spec, store.as_ref(), caller.tier == Tier::App);
         let pending: Vec<Value> = self
-            .asks
-            .waiting_for(spec.name)
+            .consent
+            .as_ref()
+            .map(|c| c.waiting_for(SETTING, spec.name))
+            .unwrap_or_default()
             .iter()
-            .map(|(id, ask)| json!({"id": id, "value": ask.value}))
+            .map(|row| json!({"id": row.id, "value": row.change.get("after")}))
             .collect();
         if !pending.is_empty() {
             entry["pending"] = json!(pending);
         }
         Ok(entry)
+    }
+
+    fn dry_reply(
+        &self,
+        would: &str,
+        change: Value,
+        request: Value,
+        error: Option<&ApiError>,
+    ) -> Value {
+        let error = error
+            .map(|e| {
+                Failure::from_api(Some(ops::SETTINGS_SET), e.clone()).to_value()["error"].clone()
+            })
+            .unwrap_or(Value::Null);
+        json!({"dryRun": true, "op": ops::SETTINGS_SET, "would": would,
+               "change": change, "request": request, "error": error})
     }
 
     fn set(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -354,8 +383,9 @@ impl SettingsOps {
             .unwrap_or(0)
             .min(MAX_CALL_WAIT);
         let agent = caller.tier == Tier::Agent;
+        let dry = agent && args.get("dryRun").and_then(Value::as_bool) == Some(true);
         let note = |class: Option<SettingClass>, result: AgentSetResult, value: &Value| {
-            if agent {
+            if agent && !dry {
                 self.writer.record(
                     &Said {
                         key,
@@ -370,36 +400,67 @@ impl SettingsOps {
                 scope::mark_recorded();
             }
         };
+        let refuse = |e: ApiError, change: Value| -> Result<Value, ApiError> {
+            if dry {
+                Ok(self.dry_reply("refuse", change, Value::Null, Some(&e)))
+            } else {
+                Err(e)
+            }
+        };
         if let Some(s) = switch(key) {
             note(Some(SettingClass::Never), AgentSetResult::Refused, &raw);
-            return Err(forbidden(format!(
-                "{} ({}) is a switch: only the user turns it on or off, in Notchling's Settings, under Daemon.",
-                s.title, s.key
-            ))
-            .with_reason("never")
-            .with_field("never", json!(true)));
+            return refuse(
+                forbidden(format!(
+                    "{} ({}) is a switch: only the user turns it on or off, in Notchling's Settings, under Daemon.",
+                    s.title, s.key
+                ))
+                .with_reason("never")
+                .with_field("never", json!(true)),
+                json!({"key": key}),
+            );
         }
         let Some(spec) = spec(key) else {
             note(None, AgentSetResult::UnknownKey, &raw);
-            return Err(bad(unknown(key)).with_reason("unknown_key"));
+            return refuse(
+                bad(unknown(key)).with_reason("unknown_key"),
+                json!({"key": key}),
+            );
         };
         if !spec.access.shown() {
             note(class_of(spec), AgentSetResult::Refused, &raw);
-            return Err(forbidden(format!(
-                "{} ({}) can't be changed by an agent: {}. The user changes it in Notchling.",
-                spec.shown_title(),
-                spec.name,
-                spec.why
-            ))
-            .with_reason("never")
-            .with_field("never", json!(true)));
+            return refuse(
+                forbidden(format!(
+                    "{} ({}) can't be changed by an agent: {}. The user changes it in Notchling.",
+                    spec.shown_title(),
+                    spec.name,
+                    spec.why
+                ))
+                .with_reason("never")
+                .with_field("never", json!(true)),
+                json!({"key": key}),
+            );
         }
         let value = spec.read_value(raw);
         if let Err(why) = spec.check(&value) {
             note(class_of(spec), AgentSetResult::BadValue, &value);
-            return Err(bad(format!("{why}.")).with_reason("bad_value"));
+            return refuse(
+                bad(format!("{why}.")).with_reason("bad_value"),
+                json!({"key": key}),
+            );
         }
         let app = caller.tier == Tier::App;
+        let before = self
+            .store()
+            .and_then(|s| s.get(spec.name))
+            .unwrap_or(Value::Null);
+        if dry && spec.access == Access::Free {
+            return Ok(self.dry_reply(
+                "apply",
+                json!({"key": spec.name, "before": before, "after": value}),
+                Value::Null,
+                None,
+            ));
+        }
         if app || spec.access == Access::Free {
             let by = if app { "app" } else { "agent" };
             if !app {
@@ -424,14 +485,37 @@ impl SettingsOps {
                 json!({"key": spec.name, "value": value, "state": "applied", "changed": changed}),
             );
         }
-        self.ask(caller, spec, value, Duration::from_secs(wait))
+        self.ask(
+            caller,
+            spec,
+            (value, before),
+            (args, dry),
+            Duration::from_secs(wait),
+        )
+    }
+
+    fn opening(spec: &'static KeySpec, value: &Value, before: &Value, args: &Value) -> Opening {
+        let (reason, expires_in_ms, key) = options(args);
+        let text = matches!(spec.kind_name(), "string" | "list" | "object" | "json");
+        Opening {
+            kind: SETTING,
+            target: spec.name.to_string(),
+            change: json!({"key": spec.name, "title": spec.shown_title(), "before": before,
+                           "after": value, "text": text}),
+            facts: json!([{"line": "consent-setting-change",
+                           "args": {"key": spec.name, "title": spec.shown_title()}}]),
+            reason,
+            expires_in_ms,
+            key,
+        }
     }
 
     fn ask(
         &self,
         caller: &Caller,
         spec: &'static KeySpec,
-        value: Value,
+        (value, before): (Value, Value),
+        (args, dry): (&Value, bool),
         wait: Duration,
     ) -> Result<Value, ApiError> {
         let said = |result: AgentSetResult, value: &Value| {
@@ -448,76 +532,29 @@ impl SettingsOps {
             );
             scope::mark_recorded();
         };
-        let Some(inbox) = self
-            .inbox
+        let consent = self
+            .consent
             .as_ref()
-            .filter(|_| self.writer.room.can_follow(topics::INBOX))
-        else {
-            said(AgentSetResult::NoApp, &value);
-            return Err(ApiError::new(
-                ErrorCode::NeedsApproval,
-                format!(
-                    "Changing {} needs the user's approval in Notchling's Inbox, and the app isn't open. Ask the user to open Notchling, or to change it there.",
-                    spec.shown_title()
-                ),
-            )
-            .with_reason("no_app"));
-        };
-        let id = notchling_engine::vault::random_id("setting-")
-            .ok_or_else(|| ApiError::internal("no randomness for an ask id"))?;
-        let ask = Ask::new(spec.name, value.clone(), caller.peer.clone(), self.ask_wait);
-        self.asks.start(self.writer.clone(), Some(inbox.clone()));
-        if !self.asks.open(&id, ask) {
-            said(AgentSetResult::Full, &value);
-            return Err(
-                failed("Too many changes wait for the user's approval; try again later.")
-                    .with_reason("busy"),
-            );
+            .ok_or_else(|| ApiError::internal("settings has no consent ops"))?;
+        let opening = Self::opening(spec, &value, &before, args);
+        if dry {
+            let change = opening.change.clone();
+            return match consent.would(&opening) {
+                Ok(request) => Ok(self.dry_reply("ask", change, request, None)),
+                Err(e) => Ok(self.dry_reply("refuse", change, Value::Null, Some(&e))),
+            };
         }
-        let before = self
-            .store()
-            .and_then(|s| s.get(spec.name))
-            .map(|v| shown(&v))
-            .unwrap_or_else(|| "unset".into());
-        inbox.raise(
-            self.item(&id, spec, &value, &before),
-            Some(self.asks.responder(&id)),
-        );
-        said(AgentSetResult::Asked, &value);
-        let now = self
-            .asks
-            .wait(&id, wait)
-            .ok_or_else(|| failed("The ask ended."))?;
-        Ok(view(&id, &now))
-    }
-
-    fn item(&self, id: &str, spec: &KeySpec, value: &Value, before: &str) -> Item {
-        let created_ms = now_ms();
-        let lasts = i64::try_from(self.ask_wait.as_millis()).unwrap_or(i64::MAX);
-        let action = |id, label: &str, primary| Action {
-            id,
-            label: label.to_string(),
-            primary,
-        };
-        Item {
-            id: item_id(id),
-            kind: ItemKind::SettingChange,
-            title: format!("Set {} to {}", spec.shown_title(), shown(value)),
-            detail: format!("An agent asks. {}. Now {before}.", spec.about),
-            source: Source::default(),
-            created_ms,
-            expires_ms: Some(created_ms.saturating_add(lasts)),
-            actions: vec![
-                action(ActionId::Allow, "Allow", true),
-                action(ActionId::Deny, "Deny", false),
-            ],
-            state: State::Open,
-            answer: None,
-            answered_by: None,
-            seen: false,
-            open: None,
-            closed_ms: None,
+        let opened = consent.open(caller, opening).inspect_err(|_| {
+            said(AgentSetResult::Failed, &value);
+        })?;
+        let row = opened.row().clone();
+        if matches!(opened, notchling_engine::consent::Opened::Fresh(_)) {
+            said(AgentSetResult::Asked, &value);
+        } else {
+            scope::mark_recorded();
         }
+        let now = consent.wait_for(&row.id, wait).unwrap_or(row);
+        Ok(ask_view(&now))
     }
 
     fn asked(&self, args: &Value) -> Result<Value, ApiError> {
@@ -530,12 +567,20 @@ impl SettingsOps {
             .and_then(Value::as_u64)
             .unwrap_or(0)
             .min(MAX_CALL_WAIT);
-        let ask = self
-            .asks
-            .wait(id, Duration::from_secs(wait))
-            .ok_or_else(|| failed("No such ask: it may have ended over ten minutes ago."))?;
-        Ok(view(id, &ask))
+        let consent = self
+            .consent
+            .as_ref()
+            .ok_or_else(|| ApiError::internal("settings has no consent ops"))?;
+        let row = consent
+            .wait_for(id, Duration::from_secs(wait))
+            .ok_or_else(|| failed("No such ask: it may have ended over a week ago."))?;
+        Ok(ask_view(&row))
     }
+}
+
+fn ask_view(row: &Consent) -> Value {
+    json!({"id": row.id, "key": row.target, "value": row.change.get("after"),
+           "state": row.state.as_str(), "message": ask_message(row), "request": view(row)})
 }
 
 pub fn unknown(key: &str) -> String {

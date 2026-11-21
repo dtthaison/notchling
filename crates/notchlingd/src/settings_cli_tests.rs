@@ -11,7 +11,8 @@ fn the_three_commands_parse_and_anything_else_is_usage() {
         Ok(Args {
             sub: Sub::List,
             json: true,
-            socket: None
+            socket: None,
+            flags: Flags::default(),
         })
     );
     assert_eq!(
@@ -121,7 +122,7 @@ fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
             _ => Err(ClientError::Timeout),
         }
     };
-    let got = set(&mut call, "theme", "dark", true);
+    let got = set(&mut call, ("theme", "dark"), &Flags::default(), true);
     let (op, error) = got.unwrap_err();
     assert_eq!(op, ops::SETTINGS_ASKED);
     assert!(matches!(error, ClientError::Timeout));
@@ -130,7 +131,7 @@ fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
     let mut refused = |_: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
         Err(ClientError::Timeout)
     };
-    let (op, _) = set(&mut refused, "theme", "dark", true).unwrap_err();
+    let (op, _) = set(&mut refused, ("theme", "dark"), &Flags::default(), true).unwrap_err();
     assert_eq!(op, ops::SETTINGS_SET);
 }
 
@@ -153,4 +154,32 @@ fn each_outcome_has_its_words_and_exit_code() {
     assert_eq!(outcome(&base("failed")), (contract::FAILED, "m".into()));
     assert_eq!(outcome(&base("withdrawn")), (contract::FAILED, "m".into()));
     assert_eq!(outcome(&base("waiting")).0, contract::PENDING);
+}
+
+#[test]
+fn the_common_flags_are_read_and_sent_in_the_consent_object() {
+    let parsed = parse(&args(&[
+        "set", "limitMode", "off", "--reason", "asked", "--no-wait", "--timeout", "30",
+        "--expires-in", "600", "--key", "k1", "--dry-run",
+    ]))
+    .unwrap();
+    assert_eq!(parsed.flags.reason.as_deref(), Some("asked"));
+    assert!(!parsed.flags.wait && parsed.flags.dry_run);
+    assert_eq!(parsed.flags.timeout, Duration::from_secs(30));
+    assert_eq!(parsed.flags.expires_in, Some(600));
+    assert_eq!(parsed.flags.key.as_deref(), Some("k1"));
+    assert!(parse(&args(&["set", "a", "b", "--timeout", "soon"])).is_err());
+
+    let mut sent: Vec<Value> = Vec::new();
+    let mut call = |_: &str, body: Value, _: Duration| -> Result<Value, ClientError> {
+        sent.push(body);
+        Ok(json!({"state": "waiting", "id": "c1"}))
+    };
+    let got = set(&mut call, ("limitMode", "off"), &parsed.flags, true).unwrap();
+    assert_eq!(got["id"], "c1", "--no-wait returns the first reply at once");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["dryRun"], true);
+    assert_eq!(sent[0]["consent"]["reason"], "asked");
+    assert_eq!(sent[0]["consent"]["expiresInMs"], 600_000);
+    assert_eq!(sent[0]["consent"]["key"], "k1");
 }

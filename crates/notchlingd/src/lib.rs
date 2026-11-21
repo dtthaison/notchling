@@ -192,6 +192,12 @@ mod process_facts;
 pub mod prompts;
 pub mod providers_cli;
 pub mod providers_daemon;
+pub mod consent_cli;
+mod consent_events;
+#[cfg(test)]
+pub(crate) mod consent_testkit;
+pub mod consent_ops;
+mod consent_wire;
 mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
@@ -203,7 +209,6 @@ mod reply_screen;
 mod screen_keep;
 pub mod service;
 mod sessions_args;
-pub mod settings_asks;
 pub mod settings_cli;
 pub mod settings_ops;
 pub mod shell_jobs;
@@ -554,6 +559,8 @@ pub fn run(command: Command) -> i32 {
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
+        Command::Consent { args } => consent_cli::run(&args, false),
+        Command::Consents { args } => consent_cli::run(&args, true),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Session { args } => match args.first().map(String::as_str) {
             Some("reload") => reload_cli::run(&args),

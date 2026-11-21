@@ -25,6 +25,7 @@ use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{listed_folders, live_folders, GitOps};
 use crate::identity::{Identifier, Launches};
+use crate::consent_ops::ConsentOps;
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
 use crate::late_emit::{Events, LateEmit, LateSalt};
@@ -460,6 +461,7 @@ pub struct Wired {
     pub postmen: Postmen,
     pub outbox_notice: Arc<OutboxNotice>,
     pub vault: Arc<VaultOps>,
+    pub consent: Arc<ConsentOps>,
     pub install: Arc<InstallOps>,
     pub models: Arc<ModelsOps>,
     pub sidecar: Arc<AgySidecarOps>,
@@ -717,12 +719,20 @@ impl Wired {
                 other => switches.get(other).map(|s| s.is_on()),
             })
         };
+        let consent = ConsentOps::for_daemon(
+            &layout.data_dir,
+            room.clone(),
+            inbox.clone(),
+            events.clone(),
+        );
+        vault.set_consent(&consent);
         let settings = Arc::new(
             SettingsOps::new(layout.data_dir.clone(), room.clone(), states)
                 .with_events(events.clone())
                 .with_limits(limits.config().clone())
-                .with_inbox(inbox.clone()),
+                .with_consent(consent.clone()),
         );
+        consent.register(notchling_engine::consent::SETTING, settings.writer());
         let versions = VersionsOps::new(
             if layout.fixture {
                 VersionRoots::inside(&layout.home())
@@ -822,6 +832,7 @@ impl Wired {
             postmen,
             outbox_notice,
             vault,
+            consent,
             install,
             models,
             sidecar,
@@ -891,6 +902,9 @@ impl Wired {
             &self.names,
             &self.events,
         );
+        let known = identity.clone();
+        self.consent
+            .bind_identity(Arc::new(move |pid| known.identify(pid)));
         let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
             .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
@@ -923,6 +937,7 @@ impl Wired {
             .with_group(self.outbox.clone())
             .with_group(self.ask.clone())
             .with_group(self.vault.clone())
+            .with_group(self.consent.clone())
             .with_group(self.settings.clone())
             .with_group(self.versions.clone())
             .with_group(self.cluster.ops.clone())
@@ -957,11 +972,13 @@ impl Wired {
         self.postmen.begin();
         self.outbox_notice.spawn_loop();
         self.ask.spawn_loop();
+        self.consent.start();
     }
 
     pub fn load(&self) {
         self.inbox.load();
         self.ask.load(crate::acting_ops::now_ms());
+        self.consent.load();
         self.outbox.load(crate::acting_ops::now_ms());
     }
 
@@ -970,6 +987,7 @@ impl Wired {
             names.close();
         }
         self.ask.close();
+        self.consent.close();
         self.outbox_notice.close();
         self.postmen.stop();
         self.wake.close();

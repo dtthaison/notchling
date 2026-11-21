@@ -2,6 +2,7 @@ use self::release::Who;
 pub use self::release::{was_denied, Looked, ReleaseFor, Released, Still, DENIED};
 use self::vault_events::{Trail, LOG_DOWN};
 use crate::acting_ops::Room;
+use crate::consent_ops::{options, ConsentOps, Opening};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
@@ -10,6 +11,7 @@ pub use crate::switches::{SwitchFlag, VAULT_OFF};
 use crate::vault_args::{entry_from, entry_json, text, value_from, Decision};
 use crate::vault_caller::{Processes, SystemProcesses};
 use crate::vault_wait::{Answered, OffHook, Refused, Waiters};
+use notchling_engine::consent::SECRET_REQUEST;
 use notchling_engine::inbox::State;
 use notchling_engine::vault::list::{self, label};
 use notchling_engine::vault::{
@@ -25,9 +27,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(300);
-pub const REQUEST_WAIT: Duration = Duration::from_secs(540);
 pub const MAX_APPROVALS: usize = 8;
-pub const MAX_REQUESTS: usize = 4;
 
 const MAX_NAMES: usize = 16;
 const MAX_COMMAND: usize = 64 * 1024;
@@ -50,7 +50,6 @@ pub const VAULT_OPS: [&str; 10] = [
 #[derive(Clone, Copy, Debug)]
 pub struct VaultTiming {
     pub approval_wait: Duration,
-    pub request_wait: Duration,
     pub slice: Duration,
 }
 
@@ -58,7 +57,6 @@ impl Default for VaultTiming {
     fn default() -> Self {
         VaultTiming {
             approval_wait: APPROVAL_WAIT,
-            request_wait: REQUEST_WAIT,
             slice: Duration::from_millis(250),
         }
     }
@@ -75,7 +73,7 @@ pub struct VaultOps {
     room: Arc<dyn Room>,
     events: Option<Events>,
     approvals: Arc<Waiters<Answered<Decision>>>,
-    requests: Arc<Waiters<Answered<Option<VaultEntry>>>>,
+    consent: OnceLock<Arc<ConsentOps>>,
     timing: VaultTiming,
     processes: Arc<dyn Processes>,
     inbox: Option<Arc<InboxOps>>,
@@ -101,7 +99,7 @@ impl VaultOps {
             room,
             events: None,
             approvals: Arc::new(Waiters::new("vault-approval-", MAX_APPROVALS)),
-            requests: Arc::new(Waiters::new("vault-request-", MAX_REQUESTS)),
+            consent: OnceLock::new(),
             timing: VaultTiming::default(),
             processes: Arc::new(SystemProcesses),
             inbox: None,
@@ -120,7 +118,6 @@ impl VaultOps {
         OffHook {
             store: Arc::downgrade(&self.store),
             approvals: Arc::downgrade(&self.approvals),
-            requests: Arc::downgrade(&self.requests),
         }
     }
 
@@ -159,6 +156,36 @@ impl VaultOps {
     fn trusted_session(&self, caller: &Caller) -> Option<String> {
         let pid = caller.pid?;
         self.sessions.as_ref().and_then(|find| find(pid))
+    }
+
+    pub fn set_consent(self: &Arc<Self>, consent: &Arc<ConsentOps>) {
+        if self.consent.set(consent.clone()).is_err() {
+            return;
+        }
+        consent.register(
+            SECRET_REQUEST,
+            Arc::new(asks::SecretHandler {
+                ops: Arc::downgrade(self),
+            }),
+        );
+        let (room, weak) = (self.room.clone(), Arc::downgrade(consent));
+        self.switch.subscribe(move |on| {
+            if !on {
+                return;
+            }
+            let Some(consent) = weak.upgrade() else {
+                return;
+            };
+            for row in consent.store().open_rows().unwrap_or_default() {
+                if row.kind == SECRET_REQUEST && row.state.open() {
+                    room.publish(
+                        topics::VAULT,
+                        topics::VAULT_REQUEST_PENDING,
+                        &asks::request_event(&row),
+                    );
+                }
+            }
+        });
     }
 
     pub fn set_worker(&self, worker: Arc<dyn WorkerUse>) {
@@ -214,6 +241,11 @@ impl VaultOps {
                 return answer;
             }
         }
+        match op {
+            ops::VAULT_REQUEST => return self.request(caller, args),
+            ops::VAULT_REQUEST_CANCEL => return self.cancel(caller, args),
+            _ => {}
+        }
         if !self.switch.is_on() {
             self.off_hook().run();
             return Err(self.switch.refusal());
@@ -221,12 +253,10 @@ impl VaultOps {
         match op {
             ops::VAULT_FIND => self.find(args),
             ops::VAULT_USE => self.use_secrets(caller, args),
-            ops::VAULT_REQUEST => self.request(caller, args),
             ops::VAULT_LIST => self.entries().map(|e| json!({"entries": e})),
             ops::VAULT_SAVE => self.save(caller, args),
             ops::VAULT_REMOVE => self.remove(args),
             ops::VAULT_APPROVAL_ANSWER => self.answer(caller, args),
-            ops::VAULT_REQUEST_CANCEL => self.cancel(caller, args),
             ops::VAULT_PENDING => Ok(self.pending()),
             ops::VAULT_ADMIN => self.admin_secret(caller, args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
@@ -235,7 +265,6 @@ impl VaultOps {
 
     pub fn close(&self) {
         self.approvals.drain();
-        self.requests.drain();
     }
 
     fn entries(&self) -> Result<Vec<VaultEntry>, ApiError> {
@@ -372,35 +401,56 @@ impl VaultOps {
     }
 
     fn save(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
-        let request = text(args, "request", MAX_SHORT)?;
+        let request = match text(args, "consentId", MAX_SHORT)? {
+            Some(id) => Some(id),
+            None => text(args, "request", MAX_SHORT)?,
+        };
         if request.is_some() {
             Self::the_app(caller)?;
         }
         let entry = entry_from(args.get("entry"))?;
         let value = value_from(args.get("value"))?;
+        let used = match (&request, self.consent.get()) {
+            (Some(id), Some(consent)) => {
+                Some((consent, consent.use_for_app(caller, id, SECRET_REQUEST, &entry.name)?))
+            }
+            _ => None,
+        };
+        let ended = |outcome: Result<Value, String>| {
+            if let Some((consent, row)) = &used {
+                consent.finish_use(row, outcome);
+            }
+        };
         let old = match text(args, "replacing", MAX_SHORT)? {
-            Some(name) => Some(
-                self.store
-                    .entry(&name)
-                    .map_err(|e| failed(e.to_string()))?
-                    .ok_or_else(|| failed(format!("There's no secret named {name}.")))?,
-            ),
+            Some(name) => match self.store.entry(&name) {
+                Ok(Some(old)) => Some(old),
+                Ok(None) => {
+                    let why = format!("There's no secret named {name}.");
+                    ended(Err(why.clone()));
+                    return Err(failed(why));
+                }
+                Err(e) => {
+                    ended(Err(e.to_string()));
+                    return Err(failed(e.to_string()));
+                }
+            },
             None => None,
         };
-        let saved = self
-            .store
-            .save(&entry, value, old.as_ref(), &now_iso())
-            .map_err(|e| failed(e.to_string()))?;
+        let saved = match self.store.save(&entry, value, old.as_ref(), &now_iso()) {
+            Ok(saved) => saved,
+            Err(e) => {
+                ended(Err(e.to_string()));
+                return Err(failed(e.to_string()));
+            }
+        };
         let mut names = vec![saved.entry.name.as_str()];
         if let Some(old) = old.as_ref().filter(|o| o.id() != saved.entry.id()) {
             names.push(old.name.as_str());
         }
         self.publish_changed(&names, saved.value_changed);
         self.note_saved(old.as_ref(), &saved);
-        let answered = request.as_deref().is_some_and(|id| {
-            self.requests
-                .answer(id, Answered::by_mac(Some(saved.entry.clone())))
-        });
+        let answered = used.is_some();
+        ended(Ok(json!({"entry": entry_json(&saved.entry)})));
         Ok(json!({"entry": entry_json(&saved.entry), "answered": answered}))
     }
 

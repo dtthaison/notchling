@@ -42,10 +42,18 @@ fn shown(value: &Value) -> String {
     }
 }
 
+fn change_title(row: &Consent) -> String {
+    row.change
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or(&row.target)
+        .to_string()
+}
+
 pub fn title_of(row: &Consent) -> String {
     let who = tool_label(&row.tool);
     let text = match row.kind.as_str() {
-        SETTING => format!("{who} asks to change {}", row.target),
+        SETTING => format!("{who} asks to change {}", change_title(row)),
         SECRET_REQUEST => format!("{who} asks you to add the secret {}", row.target),
         _ => format!("{who} asks for your yes"),
     };
@@ -54,10 +62,13 @@ pub fn title_of(row: &Consent) -> String {
 
 pub fn detail_of(row: &Consent) -> String {
     let text = match row.kind.as_str() {
+        SETTING if row.change.get("text") == Some(&Value::Bool(true)) => {
+            format!("{} would change. The new value is on the card.", change_title(row))
+        }
         SETTING => {
             let before = row.change.get("before").map(shown).unwrap_or_default();
             let after = row.change.get("after").map(shown).unwrap_or_default();
-            format!("{} is now {before}. It would become {after}.", row.target)
+            format!("{} is now {before}. It would become {after}.", change_title(row))
         }
         SECRET_REQUEST => {
             "Open the form on your Mac to add it. Its value never reaches the agent.".to_string()
