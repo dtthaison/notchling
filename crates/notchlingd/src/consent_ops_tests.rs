@@ -17,16 +17,16 @@ impl Handler for Applies {
     }
 }
 
-struct Rig {
-    _tmp: TempDir,
-    inbox: Arc<InboxOps>,
-    sink: Arc<MemorySink>,
-    store: Arc<ConsentStore>,
-    clock: Arc<AtomicI64>,
-    consent: Arc<ConsentOps>,
+pub(super) struct Rig {
+    pub(super) _tmp: TempDir,
+    pub(super) inbox: Arc<InboxOps>,
+    pub(super) sink: Arc<MemorySink>,
+    pub(super) store: Arc<ConsentStore>,
+    pub(super) clock: Arc<AtomicI64>,
+    pub(super) consent: Arc<ConsentOps>,
 }
 
-fn at(pid: u32) -> Caller {
+pub(super) fn at(pid: u32) -> Caller {
     Caller {
         pid: Some(pid),
         ..agent_caller()
@@ -41,7 +41,7 @@ fn identity(pid: u32) -> AgentIdentity {
     }
 }
 
-fn build(
+pub(super) fn build(
     tmp: &TempDir,
     room: &Arc<FakeRoom>,
     store: &Arc<ConsentStore>,
@@ -63,7 +63,7 @@ fn build(
     (inbox, consent)
 }
 
-fn rig(tag: &str) -> Rig {
+pub(super) fn rig(tag: &str) -> Rig {
     let tmp = TempDir::new(&format!("consent-{tag}"));
     let room = Arc::new(FakeRoom::default());
     let store = Arc::new(ConsentStore::in_memory_for_tests());
@@ -86,7 +86,7 @@ impl Drop for Rig {
     }
 }
 
-fn opening(kind: &'static str, target: &str, reason: Option<&str>) -> Opening {
+pub(super) fn opening(kind: &'static str, target: &str, reason: Option<&str>) -> Opening {
     Opening {
         kind,
         target: target.to_string(),
@@ -101,7 +101,7 @@ fn opening(kind: &'static str, target: &str, reason: Option<&str>) -> Opening {
 }
 
 impl Rig {
-    fn open(&self, pid: u32, kind: &'static str, target: &str) -> Consent {
+    pub(super) fn open(&self, pid: u32, kind: &'static str, target: &str) -> Consent {
         self.consent
             .open(&at(pid), opening(kind, target, None))
             .unwrap()
@@ -109,7 +109,7 @@ impl Rig {
             .clone()
     }
 
-    fn state(&self, id: &str) -> String {
+    pub(super) fn state(&self, id: &str) -> String {
         self.store
             .get(id)
             .unwrap()
@@ -119,7 +119,7 @@ impl Rig {
             .to_string()
     }
 
-    fn eventually_state(&self, id: &str, want: &str) {
+    pub(super) fn eventually_state(&self, id: &str, want: &str) {
         for _ in 0..500 {
             if self.state(id) == want {
                 return;
@@ -129,7 +129,7 @@ impl Rig {
         assert_eq!(self.state(id), want);
     }
 
-    fn eventually_item(&self, id: &str, want: &str) -> Value {
+    pub(super) fn eventually_item(&self, id: &str, want: &str) -> Value {
         for _ in 0..500 {
             let item = item_for(&self.inbox, id);
             if item["state"] == want {
@@ -140,7 +140,7 @@ impl Rig {
         item_for(&self.inbox, id)
     }
 
-    fn thens(&self) -> Vec<String> {
+    pub(super) fn thens(&self) -> Vec<String> {
         of(&self.sink, "agent.consent")
             .iter()
             .filter_map(|e| text(e, "then"))

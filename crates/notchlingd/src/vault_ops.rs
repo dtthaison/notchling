@@ -560,6 +560,9 @@ mod pending_tests;
 #[path = "vault_release_tests.rs"]
 mod release_tests;
 #[cfg(test)]
+#[path = "vault_ops_consent_tests.rs"]
+mod consent_tests;
+#[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;
 #[cfg(test)]

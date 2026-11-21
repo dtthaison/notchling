@@ -647,3 +647,7 @@ impl OpGroup for SettingsOps {
 #[cfg(test)]
 #[path = "settings_ops_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_ops_scope_tests.rs"]
+mod scope_tests;
