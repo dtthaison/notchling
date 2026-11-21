@@ -97,6 +97,44 @@ fn one_setting_says_what_it_takes_and_who_may_change_it() {
 }
 
 #[test]
+fn a_withdrawn_request_says_withdrawn_and_a_failed_one_says_failed() {
+    for (state, reason) in [("withdrawn", "withdrawn"), ("failed", "failed")] {
+        let reply = json!({"key": "theme", "value": "dark", "state": state, "message": "m"});
+        let (code, text) = outcome(&reply);
+        let failure = failure_of(&reply, code, text);
+        assert_eq!(
+            (failure.exit, failure.reason.as_str()),
+            (1, reason),
+            "{state}"
+        );
+        assert_eq!(failure.op.as_deref(), Some("settings.set"));
+    }
+}
+
+#[test]
+fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
+    let mut calls: Vec<String> = Vec::new();
+    let mut call = |op: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
+        calls.push(op.to_string());
+        match op {
+            "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
+            _ => Err(ClientError::Timeout),
+        }
+    };
+    let got = set(&mut call, "theme", "dark", true);
+    let (op, error) = got.unwrap_err();
+    assert_eq!(op, ops::SETTINGS_ASKED);
+    assert!(matches!(error, ClientError::Timeout));
+    assert_eq!(calls, ["settings.set", "settings.asked"]);
+
+    let mut refused = |_: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
+        Err(ClientError::Timeout)
+    };
+    let (op, _) = set(&mut refused, "theme", "dark", true).unwrap_err();
+    assert_eq!(op, ops::SETTINGS_SET);
+}
+
+#[test]
 fn each_outcome_has_its_words_and_exit_code() {
     let base =
         |state: &str| json!({"key": "limitMode", "value": "off", "state": state, "message": "m"});

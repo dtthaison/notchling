@@ -48,8 +48,8 @@ fn connect(socket: &Path) -> Result<Client, ClientError> {
     Client::connect(socket, ClientKind::Cli, env!("CARGO_PKG_VERSION"))
 }
 
-fn fail(e: ClientError, json: bool) -> i32 {
-    let mut failure = Failure::from_client(None, e);
+fn fail(e: ClientError, op: &str, json: bool) -> i32 {
+    let mut failure = Failure::from_client(Some(op), e);
     if failure.reason == "not_running" {
         failure = failure.with_human(
             "notchling: the daemon isn't running. Start it with `notchling daemon`, or install the service with `notchling service install`.",
@@ -71,7 +71,7 @@ pub fn status(socket: &Path, json: bool) -> i32 {
             println!("{}", status_line(&s));
             0
         }
-        Err(e) => fail(e, json),
+        Err(e) => fail(e, notchling_local_api::ops::DAEMON_STATUS, json),
     }
 }
 
@@ -83,13 +83,14 @@ pub fn list_every_tool(client: &mut Client) -> Result<Value, ClientError> {
 }
 
 pub fn sessions(socket: &Path, json: bool) -> i32 {
+    let op = notchling_local_api::ops::SESSIONS_LIST;
     let mut client = match connect(socket) {
         Ok(c) => c,
-        Err(e) => return fail(e, json),
+        Err(e) => return fail(e, op, json),
     };
     let list = match list_every_tool(&mut client) {
         Ok(list) => list,
-        Err(e) => return fail(e, json),
+        Err(e) => return fail(e, op, json),
     };
     if json {
         println!(
@@ -105,7 +106,7 @@ pub fn sessions(socket: &Path, json: bool) -> i32 {
             }
             0
         }
-        Err(e) => fail(ClientError::Protocol(e.to_string()), json),
+        Err(e) => fail(ClientError::Protocol(e.to_string()), op, json),
     }
 }
 

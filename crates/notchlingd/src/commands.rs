@@ -102,7 +102,7 @@ pub const COMMANDS: &[Row] = &[
         &[read("daemon.status")],
         "none",
         true,
-        &[0, 1, 3],
+        READ_EXITS,
         "",
     ),
     row(
@@ -112,7 +112,7 @@ pub const COMMANDS: &[Row] = &[
         &[read("sessions.list")],
         "none",
         true,
-        &[0, 1, 3],
+        READ_EXITS,
         "",
     ),
     row(
@@ -122,7 +122,7 @@ pub const COMMANDS: &[Row] = &[
         &[],
         "none",
         true,
-        &[0, 1],
+        LOCAL_EXITS,
         "",
     ),
     row(
@@ -132,7 +132,7 @@ pub const COMMANDS: &[Row] = &[
         &[read("pages.list")],
         "none",
         true,
-        LOCAL_EXITS,
+        READ_EXITS,
         "notchling-pages",
     ),
     row(
@@ -142,7 +142,7 @@ pub const COMMANDS: &[Row] = &[
         &[read("pages.find")],
         "none",
         true,
-        LOCAL_EXITS,
+        READ_EXITS,
         "notchling-pages",
     ),
     row(
@@ -152,7 +152,7 @@ pub const COMMANDS: &[Row] = &[
         &[],
         "none",
         true,
-        &[0, 1, 2, 124],
+        &[0, 1, 2, 3, 4, 124],
         "notchling-delegate",
     ),
     row(
@@ -228,7 +228,7 @@ pub const COMMANDS: &[Row] = &[
     row(
         "secret",
         "notchling secret [--json] <name>[,<name>…] -- <command> [args…]",
-        "run a command with secrets, its output hidden; exits 125 when it stops before the command",
+        "run a command with secrets, its output hidden; exits 125 when it stops before the command, else with the command's own code (126 can't run it, 127 not found)",
         &[with_switch(acts("vault.use"), "vault")],
         "by_entry",
         true,
@@ -355,7 +355,7 @@ pub const COMMANDS: &[Row] = &[
         &[],
         "none",
         true,
-        &[0],
+        &[0, 2],
         "",
     ),
     row(
@@ -365,7 +365,7 @@ pub const COMMANDS: &[Row] = &[
         &[read("daemon.capabilities")],
         "none",
         true,
-        &[0, 1, 3],
+        READ_EXITS,
         "",
     ),
 ];
@@ -666,6 +666,9 @@ pub fn registry_value() -> Value {
 
 pub fn help_value(version: &str) -> Value {
     let mut value = registry_value();
+    if let Some(map) = value.as_object_mut() {
+        map.remove("internal");
+    }
     value["notchling"] = json!(version);
     value["api"] = json!(notchling_local_api::API_VERSION);
     value

@@ -45,6 +45,22 @@ fn a_reason_from_the_daemon_sets_the_exit_and_the_fields() {
 }
 
 #[test]
+fn json_is_a_flag_only_where_a_flag_can_stand() {
+    let a = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    assert!(wants_json(&a(&["set", "k", "v", "--json"])));
+    assert!(!wants_json(&a(&["set", "k", "v", "--reason", "--json"])));
+    assert!(!wants_json(&a(&["gh", "--note", "--json", "--how", "x"])));
+    assert!(wants_json(&a(&["gh", "--note", "x", "--json"])));
+    assert!(!wants_json(&a(&["gh", "--socket", "--json"])));
+    assert!(!wants_json(&a(&["gh", "--", "make", "--json"])));
+    assert!(wants_json(&a(&["--json", "gh", "--", "make"])));
+    assert!(wants_json(&a(&[
+        "codex", "--model", "m", "--json", "--", "p"
+    ])));
+    assert!(!wants_json(&a(&["codex", "--model", "--json", "--", "p"])));
+}
+
+#[test]
 fn a_reason_the_list_does_not_know_is_ignored() {
     let data = json!({"reason": "made_up"});
     let f = Failure::from_client(None, api(ErrorCode::Forbidden, Some(data)));

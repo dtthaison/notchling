@@ -383,6 +383,8 @@ A success prints what it prints today, so readers of today's output keep working
 - `message` is the fixed text, never a value or a parse error that could quote one.
 - `ask` says how to get it allowed: the command and the consent kind. For an op whose agent path is planned for a later phase, the reason is `not_yet` with its `phase` and `ask: {"command": "notchling ask -- …"}`, so the agent can still ask the user in words. A user-only op has `never: true` and no `ask`.
 - `request` is the `Consent` when one was opened (exit 6, 5 or 124).
+- A failure that still has data for the caller keeps it in `result`, a sibling of `error`: a delegated job's outcome (`delegate` exit 1 or 124, local or `--machine`), the empty list of `page`, `pages` and `secrets`, a role with no model for `delegate-models --for`. The value on stdout is then `{"error": {...}, "result": {...}}`.
+- `--json` is a flag only where a flag can stand: not the value of `--reason`, `--note`, `--socket` or any other option that takes one (`contract::VALUE_FLAGS`), and not after `--`.
 
 **An updated Notchling with the old daemon still running.** The command and the daemon ship in one bundle, but a daemon keeps running across the swap until the app restarts it. The command reads the daemon's version from `hello`; a newer command that gets `unknown_op` from an older daemon exits 3, reason `old_daemon`, "Notchling was updated. Open it to finish, then try again." A newer daemon with an older app keeps publishing `vault.request.pending` on the vault topic and reads `vault.save {request}` for one release, so a secret request still works until the app restarts.
 

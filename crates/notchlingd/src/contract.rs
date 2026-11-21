@@ -118,10 +118,44 @@ pub fn exit_of_reason(reason: &str) -> Option<i32> {
     })
 }
 
+pub const VALUE_FLAGS: &[&str] = &[
+    "--socket",
+    "--timeout",
+    "--session",
+    "--out",
+    "--model",
+    "--effort",
+    "--folder",
+    "--expires",
+    "--choice",
+    "--url",
+    "--reason",
+    "--prompt-file",
+    "--note",
+    "--machine",
+    "--kind",
+    "--how",
+    "--days",
+    "--plan",
+    "--consent",
+    "--for",
+    "--key",
+    "--expires-in",
+];
+
 pub fn wants_json(args: &[String]) -> bool {
-    args.iter()
-        .take_while(|a| a.as_str() != "--")
-        .any(|a| a == "--json")
+    let mut rest = args.iter().map(String::as_str);
+    while let Some(arg) = rest.next() {
+        match arg {
+            "--" => return false,
+            "--json" => return true,
+            flag if VALUE_FLAGS.contains(&flag) => {
+                rest.next();
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -274,6 +308,12 @@ impl Failure {
         body.insert("never".into(), json!(self.never));
         body.insert("phase".into(), json!(self.phase));
         json!({ "error": Value::Object(body) })
+    }
+
+    pub fn to_value_with(&self, result: Value) -> Value {
+        let mut value = self.to_value();
+        value["result"] = result;
+        value
     }
 
     pub fn line(&self) -> String {

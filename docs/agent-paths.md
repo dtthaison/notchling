@@ -6,12 +6,12 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 
 | Command | Ops | Consent | Exits |
 | --- | --- | --- | --- |
-| `notchling status [--json] [--socket <path>]` | `daemon.status` (agent) | none | 0 1 3 |
-| `notchling sessions [--json] [--socket <path>]` | `sessions.list` (agent) | none | 0 1 3 |
-| `notchling providers [--json]` | none | none | 0 1 |
-| `notchling pages [words] [--json] [--socket <path>]` | `pages.list` (agent) | none | 0 1 2 |
-| `notchling page <link|id|words> [--json] [--socket <path>]` | `pages.find` (agent) | none | 0 1 2 |
-| `notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>` | none | none | 0 1 2 124 |
+| `notchling status [--json] [--socket <path>]` | `daemon.status` (agent) | none | 0 1 2 3 4 |
+| `notchling sessions [--json] [--socket <path>]` | `sessions.list` (agent) | none | 0 1 2 3 4 |
+| `notchling providers [--json]` | none | none | 0 1 2 |
+| `notchling pages [words] [--json] [--socket <path>]` | `pages.list` (agent) | none | 0 1 2 3 4 |
+| `notchling page <link|id|words> [--json] [--socket <path>]` | `pages.find` (agent) | none | 0 1 2 3 4 |
+| `notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>` | none | none | 0 1 2 3 4 124 |
 | `notchling delegate-models [codex|agy] [--for <role>] [--json]` | none | none | 0 1 2 |
 | `notchling models [check|update] [--json] [--no-skills] [--force]` | `models.check` (agent), `models.update` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling cost report [--days N] [--plan api|subscription|auto] [--json]` | `cost.report` (agent) | none | 0 1 2 3 4 |
@@ -31,8 +31,8 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>` | `ask.open` (agent, acts), `ask.wait` (agent) | none | 0 1 2 3 4 5 124 |
 | `notchling asks [--wait] [--json]` | `ask.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling answer <id> (--choice <n> | -- <text>) [--json]` | `ask.answer` (agent, acts) | own_free | 0 1 2 3 4 |
-| `notchling help [--json]` | none | none | 0 |
-| `notchling capabilities [--json] [--socket <path>]` | `daemon.capabilities` (agent) | none | 0 1 3 |
+| `notchling help [--json]` | none | none | 0 2 |
+| `notchling capabilities [--json] [--socket <path>]` | `daemon.capabilities` (agent) | none | 0 1 2 3 4 |
 
 ## Planned
 

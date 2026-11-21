@@ -26,6 +26,7 @@ description: Use to hand a job to another AI tool on this Mac and get its result
 - `--out <dir>`: copy the images, videos or audio it generated there. Without it, they are listed where the tool saved them.
 - `--session <id>`: continue that session (the id is in the output), for a follow-up on the same job.
 - Exit code 0 when it finished, 1 when it failed, 124 on timeout (default 1800 s). Nested delegation stops at two levels.
+- With `--json`, a failure prints `{"error": {...}, "result": {...}}`: the job's own `reply`, `session` and `error` are in `result`.
 
 It blocks until the other tool's turn ends; nothing polls. Run it in the background and carry on: {wait_note}
 

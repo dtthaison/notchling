@@ -142,6 +142,50 @@ fn the_help_json_has_the_shape_agents_read() {
     );
     assert!(help["planned"][0]["phase"].is_u64());
     assert!(help["userOnly"][0]["why"].is_string());
+    assert!(
+        help.get("internal").is_none(),
+        "help does not list internal ops"
+    );
+    assert!(
+        registry_value().get("internal").is_some(),
+        "the golden keeps them"
+    );
+    let text = help.to_string();
+    for entry in INTERNAL {
+        assert!(!text.contains(&format!("\"{}\"", entry.op)), "{}", entry.op);
+    }
+}
+
+#[test]
+fn every_row_lists_the_codes_its_failures_can_return() {
+    for row in COMMANDS {
+        let has = |code: i32| row.exits.contains(&code);
+        assert!(has(0), "{} can succeed", row.command);
+        let mut sorted = row.exits.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted, row.exits,
+            "{} lists its codes once, in order",
+            row.command
+        );
+        if row.command == "secret" {
+            for code in [125, 126, 127] {
+                assert!(has(code), "secret can stop with {code}");
+            }
+            continue;
+        }
+        assert!(has(2), "{} fails on a wrong command line", row.command);
+        if !row.ops.is_empty() {
+            for code in [1, 3, 4] {
+                assert!(
+                    has(code),
+                    "{} calls the daemon, so it can exit {code}",
+                    row.command
+                );
+            }
+        }
+    }
 }
 
 fn sorted(value: &Value) -> Value {

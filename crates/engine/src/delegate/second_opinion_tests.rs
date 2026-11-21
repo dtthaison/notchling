@@ -147,6 +147,29 @@ fn it_reads_the_delegate_json_back() {
 }
 
 #[test]
+fn it_reads_the_result_of_a_contract_error() {
+    let mut o = Outcome::new(Tool::Codex);
+    o.session = Some("abc".into());
+    o.reply = "partial".into();
+    o.error = Some("boom".into());
+    o.timed_out = true;
+    let wrapped = format!(
+        "{{\"error\":{{\"exit\":124,\"code\":\"expired\",\"reason\":\"expired\"}},\"result\":{}}}",
+        to_json(&o)
+    );
+    let r = Answer::parse(&wrapped).unwrap();
+    assert!(!r.ok && r.timed_out);
+    assert_eq!(r.reply, "partial");
+    assert_eq!(r.session.as_deref(), Some("abc"));
+    assert_eq!(r.error.as_deref(), Some("boom"));
+    assert_eq!(
+        Answer::parse("{\"error\":{\"exit\":2},\"result\":{\"ok\":true}}"),
+        None,
+        "a result without a tool is not ours"
+    );
+}
+
+#[test]
 fn finish_applies_the_result() {
     let mut o = Outcome::new(Tool::Agy);
     o.session = Some("conv-1".into());

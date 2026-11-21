@@ -449,6 +449,21 @@ fn the_daemon_saying_expired_exits_124() {
 }
 
 #[test]
+fn a_timeout_on_this_side_names_its_op_and_the_request() {
+    let mut rig = Rig::new();
+    let mut link = Fake::new(&rig.clock, vec![opened("q1")]);
+    link.idle_waits = true;
+    let args = ask_args(&["--wait", "--timeout", "60", "--json", "--", "q"]);
+    assert_eq!(rig.run(|env| ask(&mut link, &args, env)), 124);
+    assert_eq!(rig.stderr(), "");
+    let v: Value = serde_json::from_str(rig.stdout().trim()).unwrap();
+    assert_eq!(v["error"]["exit"], 124);
+    assert_eq!(v["error"]["op"], "ask.wait");
+    assert_eq!(v["error"]["request"]["id"], "q1");
+    assert_eq!(v["error"]["request"]["state"], "expired");
+}
+
+#[test]
 fn without_wait_there_is_no_deadline() {
     let mut rig = Rig::new();
     rig.delegate = Some(T0 + 60_000);

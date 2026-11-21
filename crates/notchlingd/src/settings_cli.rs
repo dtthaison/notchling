@@ -1,6 +1,6 @@
 use crate::contract::{self, Failure};
 use crate::settings_asks::ASK_WAIT;
-use notchling_local_api::{ops, Client, ClientError, CALL_TIMEOUT};
+use notchling_local_api::{ops, ClientError, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -211,6 +211,9 @@ pub fn outcome(reply: &Value) -> (i32, String) {
 
 fn failure_of(reply: &Value, code: i32, text: String) -> Failure {
     let (reason, message) = match code {
+        contract::FAILED if str_of(reply, "state") == "withdrawn" => {
+            ("withdrawn", "The request was withdrawn.")
+        }
         contract::DENIED => ("denied", "The user denied this change."),
         contract::EXPIRED => ("expired", "The user didn't answer in time."),
         contract::PENDING => ("needs_consent", "The request still waits for the user."),
@@ -236,8 +239,20 @@ fn print_lines(lines: &[String]) {
     }
 }
 
-fn set(client: &mut Client, key: &str, text: &str, quiet: bool) -> Result<Value, ClientError> {
-    let first = client.call(ops::SETTINGS_SET, json!({"key": key, "value": text}))?;
+type Call<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, ClientError> + 'a;
+
+fn set(
+    call: &mut Call<'_>,
+    key: &str,
+    text: &str,
+    quiet: bool,
+) -> Result<Value, (&'static str, ClientError)> {
+    let first = call(
+        ops::SETTINGS_SET,
+        json!({"key": key, "value": text}),
+        CALL_TIMEOUT,
+    )
+    .map_err(|e| (ops::SETTINGS_SET, e))?;
     if str_of(&first, "state") != "waiting" {
         return Ok(first);
     }
@@ -246,10 +261,14 @@ fn set(client: &mut Client, key: &str, text: &str, quiet: bool) -> Result<Value,
     }
     let id = str_of(&first, "id").to_string();
     let end = Instant::now() + ASK_WAIT + Duration::from_secs(15);
-    client.set_timeout(POLL_TIMEOUT);
     let mut last = first;
     while Instant::now() < end {
-        last = client.call(ops::SETTINGS_ASKED, json!({"id": id, "wait": POLL}))?;
+        last = call(
+            ops::SETTINGS_ASKED,
+            json!({"id": id, "wait": POLL}),
+            POLL_TIMEOUT,
+        )
+        .map_err(|e| (ops::SETTINGS_ASKED, e))?;
         if !matches!(str_of(&last, "state"), "waiting" | "applying") {
             break;
         }
@@ -267,21 +286,25 @@ pub fn run(args: &[String]) -> i32 {
         Ok(c) => c,
         Err(failure) => return failure.report(json),
     };
-    client.set_timeout(CALL_TIMEOUT);
-    let (op, reply) = match &parsed.sub {
-        Sub::List => (
+    let mut call = |op: &str, args: Value, timeout: Duration| {
+        client.set_timeout(timeout);
+        client.call(op, args)
+    };
+    let plain = |reply: Result<Value, ClientError>, op: &'static str| reply.map_err(|e| (op, e));
+    let reply = match &parsed.sub {
+        Sub::List => plain(
+            call(ops::SETTINGS_LIST, json!({}), CALL_TIMEOUT),
             ops::SETTINGS_LIST,
-            client.call(ops::SETTINGS_LIST, json!({})),
         ),
-        Sub::Get(key) => (
+        Sub::Get(key) => plain(
+            call(ops::SETTINGS_GET, json!({"key": key}), CALL_TIMEOUT),
             ops::SETTINGS_GET,
-            client.call(ops::SETTINGS_GET, json!({"key": key})),
         ),
-        Sub::Set(key, value) => (ops::SETTINGS_SET, set(&mut client, key, value, json)),
+        Sub::Set(key, value) => set(&mut call, key, value, json),
     };
     let reply = match reply {
         Ok(reply) => reply,
-        Err(e) => return Failure::from_client(Some(op), e).report(json),
+        Err((op, e)) => return Failure::from_client(Some(op), e).report(json),
     };
     if let Sub::Set(..) = parsed.sub {
         let (code, text) = outcome(&reply);

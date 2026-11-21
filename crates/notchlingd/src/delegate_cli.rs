@@ -5,6 +5,8 @@ use notchling_engine::delegate::options::DEPTH_VARIABLE;
 use notchling_engine::delegate::real::{self, Folders};
 use notchling_engine::delegate::record;
 use notchling_engine::settings::Settings;
+use serde_json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -114,22 +116,63 @@ pub fn run(args: &[String]) -> i32 {
             pid: std::process::id(),
         }),
     };
-    if !json {
-        return command::run(
-            args,
-            &ctx,
-            deps,
-            &mut std::io::stdout(),
-            &mut std::io::stderr(),
-        );
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = command::run(args, &ctx, deps, &mut out, &mut err);
+    conclude(
+        code,
+        (&text_of(out), &text_of(err)),
+        json,
+        (&mut std::io::stdout(), &mut std::io::stderr()),
+    )
+}
+
+fn text_of(bytes: Vec<u8>) -> String {
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+pub fn conclude(
+    code: i32,
+    (out, err): (&str, &str),
+    json: bool,
+    (to_out, to_err): (&mut dyn Write, &mut dyn Write),
+) -> i32 {
+    match code {
+        contract::OK => {
+            let _ = write!(to_out, "{out}");
+            if !json {
+                let _ = write!(to_err, "{err}");
+            }
+            code
+        }
+        contract::BAD_REQUEST => {
+            let human = [err, out]
+                .iter()
+                .map(|text| text.trim())
+                .find(|text| !text.is_empty())
+                .unwrap_or_default();
+            Failure::usage(human).emit(json, to_out, to_err)
+        }
+        contract::FAILED | contract::EXPIRED => {
+            let failure = if code == contract::EXPIRED {
+                Failure::new(contract::EXPIRED, "expired", "The job ran out of time.")
+            } else {
+                Failure::failed("The job failed.")
+            };
+            if json {
+                let value = match serde_json::from_str::<Value>(out.trim()) {
+                    Ok(outcome) => failure.to_value_with(outcome),
+                    Err(_) => failure.to_value(),
+                };
+                let _ = writeln!(to_out, "{value}");
+                return code;
+            }
+            let _ = write!(to_out, "{out}");
+            let _ = write!(to_err, "{err}");
+            failure.emit(false, to_out, to_err)
+        }
+        _ => Failure::failed("The job ended in a way Notchling doesn't know.")
+            .emit(json, to_out, to_err),
     }
-    let mut out = Vec::new();
-    let code = command::run(args, &ctx, deps, &mut out, &mut std::io::sink());
-    if code == contract::BAD_REQUEST {
-        return Failure::usage(String::from_utf8_lossy(&out).trim().to_string()).report(true);
-    }
-    let _ = std::io::Write::write_all(&mut std::io::stdout(), &out);
-    code
 }
 
 fn listing(args: &[String], json: bool, deps: &notchling_engine::delegate::deps::Deps) -> i32 {
@@ -147,13 +190,19 @@ fn listing(args: &[String], json: bool, deps: &notchling_engine::delegate::deps:
             code
         }
         contract::BAD_REQUEST => Failure::usage(text).report(json),
-        _ if json && serde_json::from_str::<serde_json::Value>(&text).is_ok() => {
-            println!("{text}");
-            code
+        _ => {
+            let failure =
+                Failure::failed("No model is picked for that role.").with_human(text.clone());
+            if json {
+                let value = match serde_json::from_str::<Value>(&text) {
+                    Ok(listing) => failure.to_value_with(listing),
+                    Err(_) => failure.to_value(),
+                };
+                println!("{value}");
+                return failure.exit;
+            }
+            failure.report(false)
         }
-        _ => Failure::new(code, "failed", "Notchling couldn't give the models.")
-            .with_human(text)
-            .report(json),
     }
 }
 

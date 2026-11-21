@@ -121,6 +121,12 @@ fn expired() -> Failure {
     Failure::new(contract::EXPIRED, "expired", IN_TIME)
 }
 
+fn late(id: &str) -> Failure {
+    let mut failure = expired().with_op(ops::ASK_WAIT);
+    failure.request = Some(record(id, "expired", &Value::Null));
+    failure
+}
+
 fn deadline_for(args: &AskArgs, env: &Env) -> Option<i64> {
     if !args.wait {
         return None;
@@ -251,7 +257,7 @@ pub(crate) fn ask(link: &mut dyn AskLink, args: &AskArgs, env: &mut Env) -> i32 
     let mut backoff = Backoff::new();
     loop {
         let wait_ms = match remaining(env, deadline) {
-            Some(left) if left <= 0 => return stop(env, args.json, expired()),
+            Some(left) if left <= 0 => return stop(env, args.json, late(&id)),
             Some(left) => left.min(WAIT_MS_MAX),
             None => WAIT_MS_MAX,
         };
@@ -261,7 +267,7 @@ pub(crate) fn ask(link: &mut dyn AskLink, args: &AskArgs, env: &mut Env) -> i32 
                 Some("open") | None => {}
                 Some(state) => return finish(env, args, &id, state, &reply),
             },
-            Err(Stop::Late) => return stop(env, args.json, expired()),
+            Err(Stop::Late) => return stop(env, args.json, late(&id)),
             Err(Stop::Api(e)) if e.code == notchling_local_api::ErrorCode::BadRequest => {
                 let failure = Failure::new(contract::FAILED, "withdrawn", NO_LONGER);
                 return stop(env, args.json, failure.with_op(ops::ASK_WAIT));
@@ -346,7 +352,9 @@ pub(crate) fn asks(link: &mut dyn AskLink, args: &AsksArgs, env: &mut Env) -> i3
             Err(Stop::Fatal(message)) => {
                 return stop(env, args.json, Failure::failed(message));
             }
-            Err(Stop::Late) => return contract::FAILED,
+            Err(Stop::Late) => {
+                return stop(env, args.json, expired().with_op(ops::ASK_MINE));
+            }
         }
     };
     if args.json {

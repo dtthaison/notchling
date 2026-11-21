@@ -100,21 +100,84 @@ fn a_codex_job_runs_read_only_prints_the_reply_and_copies_its_images() {
     assert!(!seen.contains("network_access"), "{seen}");
 }
 
+fn only_json(out: &Output) -> serde_json::Value {
+    serde_json::from_str(&text(&out.stdout))
+        .unwrap_or_else(|e| panic!("not one JSON value ({e}): {}", text(&out.stdout)))
+}
+
 #[test]
-fn json_and_the_exit_code_of_a_failed_job() {
-    let dir = scratch("fail");
+fn a_failed_job_under_json_is_one_error_object_with_the_outcome_as_its_result() {
+    let dir = scratch("fail-json");
     fake_codex(
         &dir.0,
         "echo '{\"type\":\"error\",\"message\":\"usage limit\"}'\nexit 1",
     );
     let out = run(&dir.0, &["delegate", "codex", "--json", "x"]);
     assert_eq!(out.status.code(), Some(1));
-    let v: serde_json::Value = serde_json::from_str(&text(&out.stdout)).unwrap();
-    assert_eq!(
-        (v["ok"].as_bool(), v["error"].as_str()),
-        (Some(false), Some("usage limit"))
+    assert_eq!(text(&out.stderr), "");
+    let v = only_json(&out);
+    assert_eq!(v["error"]["exit"], 1, "{v}");
+    assert_eq!(v["error"]["code"], "failed");
+    assert_eq!(v["error"]["reason"], "failed");
+    assert!(v["error"]["message"].is_string());
+    assert_eq!(v["result"]["ok"], false);
+    assert_eq!(v["result"]["error"], "usage limit");
+    assert_eq!(v["result"]["tool"], "codex");
+}
+
+#[test]
+fn a_job_that_runs_out_of_time_under_json_exits_124_as_expired() {
+    let dir = scratch("late-json");
+    fake_codex(&dir.0, &format!("echo '{THREAD}'\nexec sleep 30"));
+    let out = run(
+        &dir.0,
+        &["delegate", "codex", "--json", "--timeout", "0.3", "x"],
     );
-    assert_eq!(v["tool"], "codex");
+    assert_eq!(out.status.code(), Some(124), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stderr), "");
+    let v = only_json(&out);
+    assert_eq!(v["error"]["exit"], 124, "{v}");
+    assert_eq!(v["error"]["code"], "expired");
+    assert_eq!(v["error"]["reason"], "expired");
+    assert_eq!(v["result"]["timedOut"], true);
+}
+
+#[test]
+fn a_failed_job_without_json_keeps_its_text_and_names_the_code_on_stderr() {
+    let dir = scratch("fail-text");
+    fake_codex(
+        &dir.0,
+        "echo '{\"type\":\"error\",\"message\":\"usage limit\"}'\nexit 1",
+    );
+    let out = run(&dir.0, &["delegate", "codex", "x"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stdout).starts_with("Codex: failed in "),
+        "{}",
+        text(&out.stdout)
+    );
+    assert!(
+        text(&out.stderr).trim_end().ends_with("(failed)"),
+        "{}",
+        text(&out.stderr)
+    );
+}
+
+#[test]
+fn a_bad_command_line_under_json_is_one_usage_error_and_nothing_on_stderr() {
+    let dir = scratch("usage-json");
+    for args in [
+        &["delegate", "--json"][..],
+        &["delegate", "codex", "--json"],
+        &["delegate", "claude", "--json", "x"],
+    ] {
+        let out = run(&dir.0, args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert_eq!(text(&out.stderr), "", "{args:?}");
+        let v = only_json(&out);
+        assert_eq!(v["error"]["exit"], 2, "{args:?}: {v}");
+        assert_eq!(v["error"]["reason"], "usage");
+    }
 }
 
 #[test]
@@ -128,7 +191,7 @@ fn a_third_level_of_delegation_is_refused_without_starting_anything() {
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(
         text(&out.stderr),
-        "This job was itself delegated 2 times; do it yourself instead of delegating again.\n"
+        "This job was itself delegated 2 times; do it yourself instead of delegating again. (bad_request)\n"
     );
     assert_eq!(text(&out.stdout), "");
     assert!(!dir.0.join("ran").exists());
@@ -146,6 +209,10 @@ fn a_bad_command_line_prints_the_usage_and_exits_2() {
         assert_eq!(out.status.code(), Some(2), "{args:?}");
         assert!(
             text(&out.stderr).contains("Usage: notchling delegate"),
+            "{args:?}"
+        );
+        assert!(
+            text(&out.stderr).trim_end().ends_with("(bad_request)"),
             "{args:?}"
         );
     }
@@ -195,8 +262,9 @@ fn a_stop_signal_stops_the_tool_and_reports_it() {
     let out = child.wait_with_output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
     let v: serde_json::Value = serde_json::from_str(&text(&out.stdout)).unwrap();
-    assert_eq!(v["error"], "Codex was stopped.");
-    assert_eq!(v["session"], "019e-s1");
-    assert!(v.get("timedOut").is_none());
+    assert_eq!(v["error"]["exit"], 1);
+    assert_eq!(v["result"]["error"], "Codex was stopped.");
+    assert_eq!(v["result"]["session"], "019e-s1");
+    assert!(v["result"].get("timedOut").is_none());
     assert!(begin.elapsed() < Duration::from_secs(25));
 }

@@ -114,6 +114,39 @@ fn a_wrong_command_line_exits_2_and_changes_nothing() {
 }
 
 #[test]
+fn a_wrong_flag_gives_a_code_every_row_lists() {
+    let dir = scratch("contract-exits");
+    let home = common::home(&dir.0);
+    let root = dir.0.join("root");
+    for row in notchling_notchlingd::commands::COMMANDS {
+        let mut args: Vec<&str> = row.command.split(' ').collect();
+        args.extend(["--definitely-not-a-flag", "--json"]);
+        let (code, out, err) = notchling(&root, &home, &args);
+        assert!(
+            row.exits.contains(&code),
+            "{}: exit {code} is not in {:?}: {out} {err}",
+            row.command,
+            row.exits
+        );
+    }
+}
+
+#[test]
+fn a_failure_names_the_op_of_its_command() {
+    let dir = scratch("contract-ops");
+    let home = common::home(&dir.0);
+    let root = dir.0.join("root");
+    for (args, op) in [
+        (&["status", "--json"][..], "daemon.status"),
+        (&["sessions", "--json"][..], "sessions.list"),
+    ] {
+        let (code, out, err) = notchling(&root, &home, args);
+        assert_eq!((code, err.as_str()), (3, ""), "{args:?}");
+        assert_eq!(error_of(&out)["op"], op, "{args:?}");
+    }
+}
+
+#[test]
 fn a_secret_stops_with_125_and_one_json_line_on_stderr() {
     let dir = scratch("contract-secret");
     let home = common::home(&dir.0);

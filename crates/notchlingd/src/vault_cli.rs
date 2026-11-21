@@ -27,18 +27,22 @@ pub struct UseArgs {
     pub socket: Option<PathBuf>,
 }
 
-fn without_json(args: &[String]) -> Vec<String> {
-    let split = args.iter().position(|a| a == "--").unwrap_or(args.len());
-    args.iter()
-        .enumerate()
-        .filter(|(at, a)| *at >= split || *a != "--json")
-        .map(|(_, a)| a.clone())
-        .collect()
-}
-
 pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
-    let args = &without_json(args);
-    let Some(first) = args.first().filter(|a| !a.starts_with("--")) else {
+    let mut first: Option<String> = None;
+    let mut socket = None;
+    let mut rest = args.iter();
+    loop {
+        match rest.next().map(String::as_str) {
+            Some("--") => break,
+            Some("--json") => {}
+            Some("--socket") => socket = rest.next().map(PathBuf::from),
+            Some(word) if !word.starts_with("--") && first.is_none() => {
+                first = Some(word.to_string());
+            }
+            _ => return Err(usage()),
+        }
+    }
+    let Some(first) = first else {
         return Err(usage());
     };
     let names: Vec<String> = first
@@ -46,15 +50,6 @@ pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
         .collect();
-    let mut socket = None;
-    let mut rest = args[1..].iter();
-    loop {
-        match rest.next().map(String::as_str) {
-            Some("--") => break,
-            Some("--socket") => socket = rest.next().map(PathBuf::from),
-            _ => return Err(usage()),
-        }
-    }
     let command: Vec<String> = rest.cloned().collect();
     if names.is_empty() || command.is_empty() {
         return Err(usage());
@@ -67,11 +62,8 @@ pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
 }
 
 pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>), String> {
-    let args = &args
-        .iter()
-        .filter(|a| *a != "--json")
-        .cloned()
-        .collect::<Vec<_>>();
+    let lead = args.iter().take_while(|a| *a == "--json").count();
+    let args = &args[lead..];
     let Some(name) = args.first().filter(|a| !a.starts_with("--")) else {
         return Err(REQUEST_USAGE.to_string());
     };
@@ -82,6 +74,9 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
     let mut socket = None;
     let mut rest = args[1..].iter();
     while let Some(flag) = rest.next() {
+        if flag == "--json" {
+            continue;
+        }
         let value = rest.next().cloned();
         let slot = match flag.as_str() {
             "--kind" => &mut request.kind,
@@ -196,15 +191,16 @@ pub fn find_json(reply: &Value, query: &str) -> (i32, Value) {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
     let shown = entries(reply, "entries");
-    let code = if saved.is_empty() || shown.is_empty() {
-        1
+    let found = json!({"query": query, "saved": saved, "entries": shown});
+    let message = if saved.is_empty() {
+        "No secrets are saved yet."
+    } else if shown.is_empty() {
+        "Nothing saved fits that name."
     } else {
-        0
+        return (contract::OK, found);
     };
-    (
-        code,
-        json!({"query": query, "saved": saved, "entries": shown}),
-    )
+    let failure = Failure::failed(message).with_op(ops::VAULT_FIND);
+    (failure.exit, failure.to_value_with(found))
 }
 
 pub fn saved_report(entry: &VaultEntry, today: i64) -> String {

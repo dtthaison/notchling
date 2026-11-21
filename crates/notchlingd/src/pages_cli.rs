@@ -1,4 +1,4 @@
-use crate::contract::Failure;
+use crate::contract::{self, Failure};
 use crate::layout::Layout;
 use crate::pages_ops::find_value;
 use notchling_engine::pages::PageLibrary;
@@ -52,7 +52,12 @@ pub fn report(reply: &Value, query: &str, list: bool) -> Result<String, String> 
     Ok(out)
 }
 
-fn lookup(layout: &Layout, query: &str) -> Result<Value, Failure> {
+fn lookup(layout: &Layout, query: &str, list: bool) -> Result<Value, Failure> {
+    let op = if list {
+        ops::PAGES_LIST
+    } else {
+        ops::PAGES_FIND
+    };
     let direct = || {
         Ok(find_value(
             &PageLibrary::read_only(layout.data_dir.join("pages")),
@@ -63,12 +68,12 @@ fn lookup(layout: &Layout, query: &str) -> Result<Value, Failure> {
         match Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION")) {
             Ok(c) => c,
             Err(ClientError::NotRunning(_) | ClientError::Unsupported) => return direct(),
-            Err(e) => return Err(Failure::from_client(Some(ops::PAGES_FIND), e)),
+            Err(e) => return Err(Failure::from_client(Some(op), e)),
         };
     match client.call(ops::PAGES_FIND, json!({ "query": query })) {
         Ok(v) => Ok(v),
         Err(ClientError::Api(e)) if e.code == ErrorCode::UnknownOp => direct(),
-        Err(e) => Err(Failure::from_client(Some(ops::PAGES_FIND), e)),
+        Err(e) => Err(Failure::from_client(Some(op), e)),
     }
 }
 
@@ -91,16 +96,27 @@ fn run_to(
     out: &mut dyn std::io::Write,
     err: &mut dyn std::io::Write,
 ) -> i32 {
-    let reply = match lookup(layout, query) {
+    let reply = match lookup(layout, query, list) {
         Ok(v) => v,
         Err(failure) => return failure.emit(json, out, err),
     };
     if json {
-        let text = serde_json::to_string_pretty(&reply).unwrap_or_else(|_| reply.to_string());
+        let shown = match report(&reply, query, list) {
+            Ok(_) => reply,
+            Err(_) => Failure::failed("No saved page matches.")
+                .with_op(if list {
+                    ops::PAGES_LIST
+                } else {
+                    ops::PAGES_FIND
+                })
+                .to_value_with(reply),
+        };
+        let text = serde_json::to_string_pretty(&shown).unwrap_or_else(|_| shown.to_string());
         let _ = writeln!(out, "{text}");
-        return match report(&reply, query, list) {
-            Ok(_) => 0,
-            Err(_) => 1,
+        return if shown.get("error").is_some() {
+            contract::FAILED
+        } else {
+            contract::OK
         };
     }
     match report(&reply, query, list) {
@@ -256,8 +272,39 @@ mod tests {
             1
         );
         let v: Value = serde_json::from_slice(&out).unwrap();
-        assert!(v["pages"].as_array().unwrap().is_empty());
+        assert_eq!(v["error"]["exit"], 1);
+        assert_eq!(v["error"]["code"], "failed");
+        assert_eq!(v["error"]["reason"], "failed");
+        assert!(!v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("nothing here"));
+        assert!(v["result"]["pages"].as_array().unwrap().is_empty());
         assert_eq!(String::from_utf8(err).unwrap(), "");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_lookup_names_the_op_of_the_command() {
+        let root = std::path::PathBuf::from(format!("/tmp/nlp-op-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("notchling")).unwrap();
+        let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(&layout.socket).unwrap();
+        let held = std::thread::spawn(move || {
+            while let Ok((stream, _)) = listener.accept() {
+                drop(stream);
+            }
+        });
+        for (list, op) in [(true, "pages.list"), (false, "pages.find")] {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = run_to(&layout, "x", list, true, &mut out, &mut err);
+            assert_ne!(code, 0);
+            let v: Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(v["error"]["op"], op, "{v}");
+        }
+        drop(held);
         let _ = std::fs::remove_dir_all(root);
     }
 

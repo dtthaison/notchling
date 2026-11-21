@@ -184,7 +184,10 @@ fn pages_and_page_json_with_and_without_a_daemon() {
         let (code, out, err) = run(root, &["page", "no such page", "--json"]);
         assert_eq!(code, 1);
         assert_eq!(err, "");
-        assert_eq!(json_of(&out)["pages"], json!([]));
+        let v = json_of(&out);
+        assert_eq!(v["error"]["exit"], 1);
+        assert_eq!(v["error"]["reason"], "failed");
+        assert_eq!(v["result"]["pages"], json!([]));
     };
     check(&root);
     let _daemon = start_daemon(&root);
@@ -251,6 +254,32 @@ fn delegate_models_json_lists_the_codex_cache() {
     let (code, text, _) = run(&root, &["delegate-models", "codex"]);
     assert_eq!(code, 0);
     assert!(text.starts_with("codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n"));
+}
+
+#[test]
+fn a_role_with_no_model_under_json_is_an_error_with_the_listing_as_its_result() {
+    let dir = scratch("for-role-json");
+    let root = dir.0.join("root");
+    std::fs::create_dir_all(root.join("codex")).unwrap();
+    std::fs::write(
+        root.join("codex/models_cache.json"),
+        r#"{"models":[{"slug":"gpt-5-sol","priority":1,"visibility":"list"}]}"#,
+    )
+    .unwrap();
+    for role in ["review-final", "poetry"] {
+        let (code, out, err) = run(&root, &["delegate-models", "--for", role, "--json"]);
+        assert_eq!((code, err.as_str()), (1, ""), "{role}");
+        let v = json_of(&out);
+        assert_eq!(v["error"]["exit"], 1, "{v}");
+        assert_eq!(v["error"]["code"], "failed");
+        assert_eq!(v["error"]["reason"], "failed");
+        assert!(!v["error"]["message"].as_str().unwrap().contains(role));
+        assert_eq!(v["result"]["role"], role);
+        assert!(v["result"]["error"].is_string(), "{v}");
+    }
+    let (code, out, _) = run(&root, &["delegate-models", "--json", "--for"]);
+    assert_eq!(code, 2);
+    assert_eq!(json_of(&out)["error"]["reason"], "usage");
 }
 
 #[test]
