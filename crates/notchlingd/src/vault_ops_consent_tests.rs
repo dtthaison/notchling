@@ -141,3 +141,68 @@ fn the_op_id_of_the_save_is_recorded_on_the_request() {
         Some(event["id"].as_str().unwrap().to_string())
     );
 }
+
+#[test]
+fn a_save_is_refused_when_the_secret_was_saved_again_within_the_same_second() {
+    let s = setup("consent-same-second", true);
+    seed(&s, false);
+    let (_, event) = ask(&s, json!({"name": "gh", "note": "new"}));
+    assert_eq!(event["existing"], true);
+    let shown = s.ops.store.entry("gh").unwrap().unwrap();
+    let value = notchling_engine::vault::VaultValue {
+        secret: "fake-gh-0002".into(),
+        ..Default::default()
+    };
+    let again = s
+        .ops
+        .store
+        .save(&shown, Some(value), Some(&shown), &shown.updated)
+        .unwrap();
+    assert_eq!(again.entry.updated, shown.updated, "the clock did not move");
+    let e = err(save_with(&s, &event, json!({"replacing": "gh"})));
+    assert_eq!(
+        (e.code, e.data.unwrap()["reason"].clone()),
+        (ErrorCode::Forbidden, json!("needs_consent"))
+    );
+    assert_eq!(
+        ended(&s, event["id"].as_str().unwrap())["state"],
+        "withdrawn"
+    );
+    let kept = s.ops.store.entry("gh").unwrap().unwrap();
+    assert_eq!(
+        s.ops.store.value(&kept).unwrap().unwrap().secret,
+        "fake-gh-0002"
+    );
+    assert_ne!(kept.note, "new");
+}
+
+#[test]
+fn an_entry_written_before_the_counter_is_saved_under_a_fresh_consent() {
+    let s = setup("consent-legacy-rev", true);
+    seed(&s, false);
+    let index = notchling_engine::vault::list::VaultIndex::in_data(&s.dir);
+    let mut list = index.read().unwrap();
+    for entry in &mut list {
+        entry.rev = 0;
+        entry.updated = "2026-11-05T00:00:00Z".into();
+    }
+    index.write(&list).unwrap();
+    let old = s.ops.store.entry("gh").unwrap().unwrap();
+    assert_eq!(
+        (old.rev, old.revision().as_str()),
+        (0, "2026-11-05T00:00:00Z")
+    );
+    let (_, event) = ask(&s, json!({"name": "gh", "note": "new"}));
+    assert_eq!(event["existing"], true);
+    assert!(event["entry"].get("rev").is_none(), "{}", event["entry"]);
+    let id = event["id"].as_str().unwrap();
+    let shown = s.consent.store().get(id).unwrap().unwrap();
+    assert_eq!(shown.change["revision"], "2026-11-05T00:00:00Z");
+    save_with(&s, &event, json!({"replacing": "gh"})).unwrap();
+    assert_eq!(ended(&s, id)["state"], "applied");
+    let kept = s.ops.store.entry("gh").unwrap().unwrap();
+    assert_eq!((kept.rev, kept.note.as_str()), (1, "new"));
+    assert_ne!(kept.revision(), old.revision());
+    let again = save_with(&s, &event, json!({"replacing": "gh"}));
+    assert_eq!(err(again).code, ErrorCode::Forbidden);
+}
