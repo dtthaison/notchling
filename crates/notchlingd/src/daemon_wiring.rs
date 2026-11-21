@@ -3,6 +3,7 @@ use crate::accounts_ops::AccountsOps;
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
 use crate::activity_ops::ActivityOps;
+use crate::agent_named::AgentNames;
 use crate::agy_ops::AgyOps;
 use crate::agy_sidecar_ops::AgySidecarOps;
 use crate::ask_ops::AskOps;
@@ -23,10 +24,9 @@ use crate::codex_ops::CodexOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
 use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{listed_folders, live_folders, GitOps};
+use crate::identity::{Identifier, Launches};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
-use crate::agent_named::AgentNames;
-use crate::identity::{Identifier, Launches};
 use crate::late_emit::{Events, LateEmit, LateSalt};
 use crate::layout::Layout;
 use crate::limits_ops::LimitsOps;
@@ -42,6 +42,7 @@ use crate::pages_ops::{PagesOps, PagesSetup};
 use crate::postmen_wiring::postmen_for;
 use crate::providers_daemon::ProviderStores;
 use crate::providers_ops::ProvidersOps;
+use crate::sessions_args::{every_tool, tagged, with_remote_kinds};
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::shell_jobs::ShellJobs;
 use crate::switches::{SwitchFlag, SwitchOps, Switches};
@@ -217,46 +218,6 @@ impl Ops {
         self.first_wait = wait;
         self
     }
-}
-
-fn every_tool(args: &Value) -> Result<bool, ApiError> {
-    match args.get("tools") {
-        None | Some(Value::Null) => Ok(false),
-        Some(Value::String(tools)) if tools == "claude" => Ok(false),
-        Some(Value::String(tools)) if tools == "all" => Ok(true),
-        Some(_) => Err(ApiError::bad_request(
-            "sessions.list takes {\"tools\": \"all\" | \"claude\"}",
-        )),
-    }
-}
-
-fn with_remote_kinds(args: &Value) -> Result<(bool, bool), ApiError> {
-    let usage = "sessions.list takes {\"remote\": \"shell\" | \"codex\" | [\"shell\", \"codex\"]}";
-    let kinds: Vec<&str> = match args.get("remote") {
-        None | Some(Value::Null) => return Ok((false, false)),
-        Some(Value::String(kind)) => vec![kind.as_str()],
-        Some(Value::Array(list)) => list
-            .iter()
-            .map(|k| k.as_str().ok_or_else(|| ApiError::bad_request(usage)))
-            .collect::<Result<_, _>>()?,
-        Some(_) => return Err(ApiError::bad_request(usage)),
-    };
-    if kinds.iter().any(|k| *k != "shell" && *k != "codex") {
-        return Err(ApiError::bad_request(usage));
-    }
-    Ok((kinds.contains(&"shell"), kinds.contains(&"codex")))
-}
-
-fn tagged(list: Value, tool: &str) -> Vec<Value> {
-    let Value::Array(rows) = list else {
-        return Vec::new();
-    };
-    rows.into_iter()
-        .map(|mut row| {
-            row["tool"] = Value::String(tool.to_string());
-            row
-        })
-        .collect()
 }
 
 impl Ops {
@@ -922,29 +883,13 @@ impl Wired {
                 .map(|v| v.is_array() || v.is_object() || v.is_null())
                 .unwrap_or(false)
         }));
-        let home = PathBuf::from(home_of(&layout.roots()));
-        let names = self
-            .names
-            .get_or_init(|| {
-                Arc::new(AgentNames::spawn(
-                    self.events.clone(),
-                    self.salt.clone(),
-                    sessions.clone(),
-                ))
-            })
-            .clone();
-        let identity = Arc::new(
-            Identifier::new(
-                layout.roots(),
-                Arc::new(crate::vault_caller::SystemProcesses),
-                sessions.clone(),
-                self.salt.clone(),
-                self.launches.clone(),
-            )
-            .with_organizations(
-                notchling_engine::organizations::Organizations::new(&layout.data_dir)
-                    .with_home(&home),
-            ),
+        let (identity, names) = crate::identity::for_daemon(
+            layout,
+            &sessions,
+            &self.salt,
+            &self.launches,
+            &self.names,
+            &self.events,
         );
         let ops = Ops::with_acting(sessions, self.acting.clone())
             .with_identity(identity, names)

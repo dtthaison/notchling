@@ -1,6 +1,6 @@
+use crate::server::AgentIdentity;
 use crate::server::Shared;
 use crate::wire::{ops, ErrorCode, Tier};
-use crate::server::AgentIdentity;
 use notchling_events::kinds::agents::AgentCalled;
 use notchling_events::kinds::choices::{AgentResult, CallerTier, FailWhy, SwitchName};
 use notchling_events::kinds::diagnostics::{CallResult, OpCalled, OpFailed};

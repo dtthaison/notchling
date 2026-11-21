@@ -439,7 +439,11 @@ impl Session {
         self.shared.handler.agent_called(&AgentCall {
             scope: scope::current(),
             identity: who.clone(),
-            pid: self.at_hello.as_ref().map_or(self.at_accept.pid, |p| p.pid).into(),
+            pid: self
+                .at_hello
+                .as_ref()
+                .map_or(self.at_accept.pid, |p| p.pid)
+                .into(),
         });
     }
 

@@ -201,3 +201,70 @@ fn reply_is_capped_at_900k() {
     assert_eq!(shown[0]["time_ms"], 1_000 + 1_199);
     assert!(shown[0]["detail"].as_str().expect("detail").chars().count() <= 201);
 }
+
+fn agent_row(seq: u64, kind: &str, op_id: &str, f: Value) -> ActivityRow {
+    let mut r = row(seq, 1_000 + seq as i64, kind, "agents", "ok", f);
+    r.actor_tier = Some("agent".to_owned());
+    r.actor_exe = Some("notchling".to_owned());
+    r.op_id = Some(op_id.to_owned());
+    r
+}
+
+#[test]
+fn the_agents_filter_keeps_every_row_an_agent_made_whatever_its_kind() {
+    let called = agent_row(
+        1,
+        "agent.called",
+        "op-1",
+        json!({"op": "settings.set", "tool": "claude", "verified": true, "result": "ok"}),
+    );
+    let named = agent_row(
+        2,
+        "agent.named",
+        "op-1",
+        json!({"asker": "subagent", "agent": "a1"}),
+    );
+    let own = agent_row(3, "vault.secret_used", "op-2", json!({"secrets": ["X"]}));
+    let app = row(
+        4,
+        1_004,
+        "op.called",
+        "diagnostics",
+        "ok",
+        json!({"op": "x"}),
+    );
+    let rows = vec![called, named, own, app];
+    let q = Query::from_args(&json!({"kinds": ["agents"]})).expect("query");
+    let out = reply(&rows, &q, &no_names);
+    let shown = out["rows"].as_array().expect("rows");
+    assert_eq!(shown.len(), 2);
+    assert!(shown.iter().all(|r| r["by_agent"] == true));
+    let call = shown.iter().find(|r| r["event"] == "agent.called").unwrap();
+    assert_eq!(call["tool"], "claude");
+    assert_eq!(call["verified"], true);
+    assert_eq!(call["agent"]["as"], "subagent");
+    assert_eq!(call["agent"]["id"], "a1");
+    assert_eq!(call["op"], "settings.set");
+    let all = reply(&rows, &Query::plain(50), &no_names);
+    assert_eq!(all["rows"].as_array().unwrap().len(), 3);
+    assert!(all["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["event"] != "agent.named"));
+}
+
+#[test]
+fn a_call_with_no_label_yet_has_no_agent_entry() {
+    let called = agent_row(
+        1,
+        "agent.called",
+        "op-9",
+        json!({"op": "settings.set", "tool": "shell", "verified": false, "result": "refused"}),
+    );
+    let out = reply(&[called], &Query::plain(10), &no_names);
+    let first = &out["rows"][0];
+    assert!(first.get("agent").is_none());
+    assert_eq!(first["verified"], false);
+    assert_eq!(first["result"], "refused");
+}

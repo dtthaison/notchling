@@ -408,8 +408,8 @@ fn list_and_topic_rows_have_answers_agents_never_do() {
     assert_eq!(topic.last().unwrap()["answer"], json!("b"));
     assert_eq!(r.ops.spec(ops::ASK_LIST), Some(OpSpec::APP));
     assert_eq!(r.ops.spec(ops::ASK_DISMISS), Some(OpSpec::APP));
-    assert_eq!(r.ops.spec(ops::ASK_OPEN), Some(OpSpec::AGENT_READ));
-    assert_eq!(r.ops.spec(ops::ASK_ANSWER), Some(OpSpec::AGENT_READ));
+    assert_eq!(r.ops.spec(ops::ASK_OPEN), Some(OpSpec::AGENT_ACTS));
+    assert_eq!(r.ops.spec(ops::ASK_ANSWER), Some(OpSpec::AGENT_ACTS));
     assert_eq!(r.ops.topic_tier(topics::ASKS), Some(Tier::App));
     assert_eq!(r.ops.topics(), &[topics::ASKS]);
     let by_agent = r.ops.call(&asker_at(ASKER), ops::ASK_LIST, &json!({}));

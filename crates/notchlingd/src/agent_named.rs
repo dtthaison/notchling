@@ -30,7 +30,7 @@ pub struct Label {
     pub agent: Option<String>,
 }
 
-type Key = (Option<String>, Option<String>, Option<String>);
+type Key = (String, Option<String>, Option<String>, Option<String>);
 
 impl AgentNames {
     pub fn spawn(emit: Arc<dyn Emit>, salt: LateSalt, sessions: Arc<Mutex<Value>>) -> AgentNames {
@@ -60,7 +60,10 @@ impl AgentNames {
     }
 
     pub fn close(&self) {
-        self.tx.lock().unwrap_or_else(PoisonError::into_inner).take();
+        self.tx
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         if let Some(thread) = self
             .thread
             .lock()
@@ -82,6 +85,7 @@ fn work(emit: &dyn Emit, salt: &LateSalt, sessions: &Mutex<Value>, rx: &Receiver
         for queued in batch {
             let who = &queued.call.identity;
             let key: Key = (
+                format!("{:?}", who.tool),
                 who.session.clone(),
                 who.cmd_hash.clone(),
                 who.out_hash.clone(),

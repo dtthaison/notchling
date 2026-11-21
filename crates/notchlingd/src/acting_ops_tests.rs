@@ -304,13 +304,12 @@ fn every_acting_op_is_app_tier_and_refused_while_off() {
     assert!(s.writes.lock().unwrap().is_empty(), "nothing typed");
     assert_eq!(s.ops.spec(ops::SETTINGS_SET_ACTING), Some(OpSpec::APP));
     assert_eq!(s.ops.spec(ops::PROMPTS_LIST), Some(OpSpec::APP));
-    for op in [
-        ops::SETTINGS_GET_ACTING,
-        ops::SESSION_QUESTION,
-        ops::HOOK_REQUEST,
-    ] {
-        assert_eq!(s.ops.spec(op), Some(OpSpec::AGENT_READ), "{op}");
-    }
+    assert_eq!(
+        s.ops.spec(ops::SETTINGS_GET_ACTING),
+        Some(OpSpec::AGENT_READ)
+    );
+    assert_eq!(s.ops.spec(ops::SESSION_QUESTION), Some(OpSpec::AGENT_ACTS));
+    assert_eq!(s.ops.spec(ops::HOOK_REQUEST), Some(OpSpec::AGENT_HOOK));
     assert_eq!(s.ops.spec("git.status"), None);
 }
 

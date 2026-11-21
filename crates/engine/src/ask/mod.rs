@@ -26,6 +26,9 @@ pub use words::{same_command, simple_commands};
 #[path = "branch_tests.rs"]
 mod branch_tests;
 #[cfg(test)]
+#[path = "evidence_tests.rs"]
+mod evidence_tests;
+#[cfg(test)]
 #[path = "find_tests.rs"]
 mod find_tests;
 #[cfg(test)]

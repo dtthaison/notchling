@@ -214,6 +214,35 @@ impl Identifier {
     }
 }
 
+pub fn for_daemon(
+    layout: &crate::layout::Layout,
+    sessions: &Arc<Mutex<Value>>,
+    salt: &LateSalt,
+    launches: &Launches,
+    names: &std::sync::OnceLock<Arc<crate::agent_named::AgentNames>>,
+    events: &Arc<crate::late_emit::LateEmit>,
+) -> (Arc<Identifier>, Arc<crate::agent_named::AgentNames>) {
+    let home = PathBuf::from(notchling_engine::control::session::home_of(&layout.roots()));
+    let names = names
+        .get_or_init(|| {
+            Arc::new(crate::agent_named::AgentNames::spawn(
+                events.clone(),
+                salt.clone(),
+                sessions.clone(),
+            ))
+        })
+        .clone();
+    let identity = Identifier::new(
+        layout.roots(),
+        Arc::new(crate::vault_caller::SystemProcesses),
+        sessions.clone(),
+        salt.clone(),
+        launches.clone(),
+    )
+    .with_organizations(Organizations::new(&layout.data_dir).with_home(&home));
+    (Arc::new(identity), names)
+}
+
 #[cfg(test)]
 #[path = "identity_tests.rs"]
 mod tests;

@@ -191,7 +191,7 @@ fn an_idle_session_is_reloaded_and_the_op_is_agent_tier() {
     let (_d, s) = faked("idle", &fake, true);
     assert_eq!(
         s.ops.spec(ops::SESSION_RELOAD),
-        Some(notchling_local_api::OpSpec::AGENT_READ)
+        Some(notchling_local_api::OpSpec::AGENT_ACTS)
     );
     assert_eq!(
         s.ops.spec(ops::SESSION_RELOAD_STATE),

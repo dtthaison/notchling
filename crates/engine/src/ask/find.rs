@@ -85,7 +85,9 @@ pub fn find(
     let tails: Vec<Option<String>> = candidates.iter().map(|c| tail(&c.path)).collect();
     if let Some(stdout) = asking.stdout {
         let wanted = canon(stdout);
-        let hits = hits(&tails, |text| background_hit(text, &|path| canon(path) == wanted));
+        let hits = hits(&tails, |text| {
+            background_hit(text, &|path| canon(path) == wanted)
+        });
         if let Some(found) = decide(candidates, &hits) {
             return Some(found);
         }
@@ -106,9 +108,7 @@ pub fn find_by_evidence(
     let tails: Vec<Option<String>> = candidates.iter().map(|c| tail(&c.path)).collect();
     if let Some(wanted) = evidence.out_hash {
         let hits = hits(&tails, |text| {
-            background_hit(text, &|path| {
-                output_hash(evidence.salt, path) == wanted
-            })
+            background_hit(text, &|path| output_hash(evidence.salt, path) == wanted)
         });
         if let Some(found) = decide(candidates, &hits) {
             return Some(found);

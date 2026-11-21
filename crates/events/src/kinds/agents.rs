@@ -1,4 +1,6 @@
-use super::choices::{AgentResult, AgentTool, Answerer, AskMode, AskThen, AskerKind, DoneOrFailed, FailWhy, ToolName};
+use super::choices::{
+    AgentResult, AgentTool, Answerer, AskMode, AskThen, AskerKind, DoneOrFailed, FailWhy, ToolName,
+};
 use crate::field::{Count, ErrorCode, Hex, Millis, Op, Tokens, Tool, Version};
 use crate::field_ref::{
     Account, Agent, Consent, Device, Folder, Model, Organization, Page, Ref, Session,

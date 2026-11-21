@@ -4,7 +4,8 @@ use crate::client::{Client, ClientError, ConnectOptions};
 use crate::hub::Hub;
 use crate::presence::Presence;
 use crate::server::{
-    AgentIdentity, Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle, Shared,
+    AgentIdentity, Caller, Handler, Limits, OpHome, OpSpec, Server, ServerConfig, ServerHandle,
+    Shared,
 };
 use crate::testutil::{field_text, summary, TempDir};
 use crate::tier::Allowlist;

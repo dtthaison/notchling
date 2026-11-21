@@ -24,11 +24,7 @@ pub fn command_hash(salt: &[u8; 32], argv: &[String]) -> Option<String> {
 }
 
 pub fn output_hash(salt: &[u8; 32], path: &Path) -> String {
-    evidence_hash(
-        salt,
-        "out",
-        &[&super::find::canon(path).to_string_lossy()],
-    )
+    evidence_hash(salt, "out", &[&super::find::canon(path).to_string_lossy()])
 }
 
 pub struct Evidence<'a> {

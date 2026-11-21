@@ -267,3 +267,51 @@ fn the_verify_request_asks_for_one_line() {
     assert_eq!(r.op, "log.verify");
     assert_eq!(r.args, json!({"n": 41}));
 }
+
+fn agent_row(kind: &str, tool: &str, verified: bool, agent: Option<&str>) -> Value {
+    let mut r = json!({
+        "time_ms": 5_000, "source": "audit", "kind": kind, "op": "settings.set", "who": "notchling",
+        "result": "ok", "by_agent": true, "tool": tool, "verified": verified,
+    });
+    if let Some(agent) = agent {
+        r["agent"] = json!({"as": agent, "id": "a1"});
+    }
+    r
+}
+
+#[test]
+fn the_agents_chip_keeps_every_row_an_agent_made_next_to_the_other_chips() {
+    let mut m = ActivityModel::default();
+    m.finish(Ok(reply(json!([
+        row(1_000, "acted", "session.reply", "ok"),
+        agent_row("acted", "claude", true, Some("subagent")),
+        agent_row("refused", "shell", false, None),
+    ]))));
+    assert_eq!(m.count(Kind::Agents), 2);
+    m.toggle(Kind::Agents);
+    assert_eq!(m.visible().len(), 2);
+    m.toggle(Kind::Refused);
+    assert_eq!(m.visible().len(), 2);
+    m.toggle(Kind::Agents);
+    assert_eq!(m.visible().len(), 1);
+    assert_eq!(Kind::Agents.wire(), "agents");
+}
+
+#[test]
+fn an_agent_row_shows_the_tool_the_label_as_the_transcript_says_and_whether_it_is_verified() {
+    let said = |v: Value| Entry::parse(&v).expect("a row").line();
+    let main = said(agent_row("acted", "claude", true, Some("subagent")));
+    assert!(
+        main.contains("claude") && main.contains("subagent"),
+        "{main}"
+    );
+    assert!(main.contains("transcript"), "{main}");
+    assert!(!main.contains("not verified"), "{main}");
+    let shell = said(agent_row("refused", "shell", false, None));
+    assert!(
+        shell.contains("shell") && shell.contains("not verified"),
+        "{shell}"
+    );
+    let app = said(row(1, "acted", "x", "ok"));
+    assert!(app.starts_with("app"), "{app}");
+}

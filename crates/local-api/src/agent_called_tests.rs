@@ -7,9 +7,9 @@ use crate::server::{
 use crate::testutil::{field_text, TempDir};
 use crate::tier::Allowlist;
 use crate::wire::{ApiError, ClientKind, ErrorCode};
+use notchling_events::field::FieldValue;
 use notchling_events::kinds::choices::AgentTool;
 use notchling_events::scope::{self, ConsentNote};
-use notchling_events::field::FieldValue;
 use notchling_events::{Event, MemorySink};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -227,7 +227,10 @@ fn the_line_carries_the_session_the_executable_and_the_identity() {
     assert_eq!(named.len(), 1);
     assert_eq!(named[0].identity.session.as_deref(), Some("sess-9"));
     let actor = named[0].scope.actor.clone().expect("an actor");
-    assert_eq!(actor.session.map(|s| s.as_str().to_owned()), Some("sess-9".to_owned()));
+    assert_eq!(
+        actor.session.map(|s| s.as_str().to_owned()),
+        Some("sess-9".to_owned())
+    );
     assert!(actor.exe.is_some());
     assert!(named[0].scope.op_id.is_some());
 }
