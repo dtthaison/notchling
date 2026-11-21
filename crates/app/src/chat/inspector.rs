@@ -43,6 +43,8 @@ pub struct SubagentRow {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShellRow {
+    pub id: String,
+    pub started: Option<i64>,
     pub title: String,
     pub command: String,
     pub status: Status,

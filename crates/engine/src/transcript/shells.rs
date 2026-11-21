@@ -136,7 +136,7 @@ pub fn parse_writers(text: &str) -> Vec<i32> {
     result
 }
 
-const NOT_WRITERS: [&str; 3] = ["claude", "node", "Notchling"];
+pub(crate) const NOT_WRITERS: [&str; 3] = ["claude", "node", "Notchling"];
 
 pub fn lsof_args(paths: &[String]) -> Vec<String> {
     ["-w", "-F", "pcan", "--"]

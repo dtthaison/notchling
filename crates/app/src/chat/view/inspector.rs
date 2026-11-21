@@ -25,6 +25,7 @@ use crate::chat::inspector::{
 use crate::chat::paging::Counts;
 use crate::chat::remote_control::Action;
 use crate::chat::shell_list::Listing;
+use crate::chat::shell_rows;
 use crate::chat::worktrees::GitSection;
 use notchling_engine::transcript::model::{BackgroundShell, Conversation};
 
@@ -124,6 +125,14 @@ pub(super) fn model(view: &ChatView, _: &App) -> DetailsModel {
         worktrees_ask::section_of(view),
     );
     model.reveal = !view.selected_refused(Action::Files);
+    for row in model.i.shells.iter_mut() {
+        if !row.running && view.shell_probe_stopped(&row.output_path) {
+            let (status, word, mark) = shell_rows::ended_look("stopped");
+            row.status = status;
+            row.status_word = word;
+            row.mark = mark;
+        }
+    }
     model
 }
 
@@ -431,6 +440,13 @@ fn task_row(index: usize, task: &TaskRow, a: Appearance) -> Div {
 }
 
 fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatView>) -> Div {
+    let now_s = super::now_ms() / 1000;
+    let stuck = shell_rows::stuck_of(s, now_s);
+    let status_word = if s.running {
+        shell_rows::running_word(s.started, now_s)
+    } else {
+        s.status_word.clone()
+    };
     let mut text = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(2.0));
     if s.title != s.command {
         text = text.child(
@@ -473,7 +489,7 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                     .child(
                         select::detail_keyed(
                             format!("shell-{index}-status"),
-                            &s.status_word,
+                            &status_word,
                             TypeRole::Meta,
                             Ink::TextFaint,
                             a,
@@ -482,9 +498,39 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                     )
                     .children(
                         (!s.output_path.is_empty()).then(|| output_link(index, s, a, chat.clone())),
+                    )
+                    .children(
+                        (s.running && !s.output_path.is_empty())
+                            .then(|| stop_link(index, s, a, chat.clone())),
                     ),
-            ),
+            )
+            .children(stuck.map(|why| {
+                select::detail_keyed(
+                    format!("shell-{index}-stuck"),
+                    &shell_rows::stuck_words(why),
+                    TypeRole::Meta,
+                    Ink::Needs,
+                    a,
+                )
+                .line_height(px(ROW_LINE))
+            })),
         )
+}
+
+fn stop_link(
+    index: usize,
+    s: &ShellRow,
+    a: Appearance,
+    chat: WeakEntity<ChatView>,
+) -> Stateful<Div> {
+    let path = s.output_path.clone();
+    div()
+        .id(SharedString::from(format!("shell-stop-{index}")))
+        .cursor_pointer()
+        .child(label(t::chat::shell_stop(), TypeRole::Meta, Ink::AccentText, a).line_height(px(ROW_LINE)))
+        .on_click(move |_, _, cx| {
+            chat.update(cx, |this, cx| this.stop_shell(&path, cx)).ok();
+        })
 }
 
 fn output_link(

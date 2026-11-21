@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::{Command, Stdio};
 
 use gpui::Context;
 use notchling_engine::transcript::shells::parse_writers_by_name;
+use notchling_engine::transcript::shells_stop::{stop_output, GRACE};
 
 use super::now_ms;
 use super::ChatView;
@@ -16,6 +17,9 @@ pub struct Probe {
     writers: HashMap<String, Vec<i32>>,
     last_ms: i64,
     busy: bool,
+    stopped: HashSet<String>,
+    stopping: HashSet<String>,
+    minute: i64,
 }
 
 impl Probe {
@@ -68,6 +72,38 @@ impl ChatView {
         );
     }
 
+    pub(super) fn shell_probe_stopped(&self, path: &str) -> bool {
+        self.shell_probe.stopped.contains(path)
+    }
+
+    pub(super) fn stop_shell(&mut self, path: &str, cx: &mut Context<Self>) {
+        if path.is_empty() || !self.shell_probe.stopping.insert(path.to_owned()) {
+            return;
+        }
+        let path = path.to_owned();
+        cx.spawn(async move |this, cx| {
+            let target = path.clone();
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { stop_output(&target, GRACE) })
+                .await;
+            let _ = this.update(cx, |view, cx| {
+                let probe = &mut view.shell_probe;
+                probe.stopping.remove(&path);
+                if outcome.survivors == 0 {
+                    if outcome.targets > 0 {
+                        probe.stopped.insert(path.clone());
+                    }
+                    probe.writers.insert(path, Vec::new());
+                }
+                view.refresh_shells(0);
+                view.redraw_details(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn load_more_shells(&mut self, cx: &mut Context<Self>) {
         self.refresh_shells(1);
         self.shell_probe.last_ms = 0;
@@ -117,8 +153,14 @@ pub fn tick(view: &mut ChatView, cx: &mut Context<ChatView>) {
             }
             let before = view.shells.clone();
             view.refresh_shells(0);
-            if changed || view.shells != before {
+            let minute = now_ms() / 60_000;
+            let tick = view.shell_probe.minute != minute;
+            view.shell_probe.minute = minute;
+            if changed || view.shells != before || tick {
                 cx.notify();
+                if tick {
+                    view.redraw_details(cx);
+                }
             }
         });
     })
