@@ -265,8 +265,8 @@ fn stop_names_the_session_the_shell_its_file_and_the_owner_process() {
             Arc::new(|paths| running_map(&["bself"], paths)),
             Arc::new(move |request, _| {
                 seen.lock().unwrap().push(format!(
-                    "{} {} {} {:?}",
-                    request.session, request.id, request.path, request.owner
+                    "{} {} {} {:?} {}",
+                    request.session, request.id, request.path, request.owner, request.orphans
                 ));
                 Ok(Outcome {
                     targets: 1,
@@ -285,7 +285,7 @@ fn stop_names_the_session_the_shell_its_file_and_the_owner_process() {
     assert_eq!(
         *got.lock().unwrap(),
         [format!(
-            "{SESSION} bself /tmp/nl-fake/bself.output Some(31337)"
+            "{SESSION} bself /tmp/nl-fake/bself.output Some(31337) false"
         )]
     );
 }

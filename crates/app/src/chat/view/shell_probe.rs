@@ -126,6 +126,7 @@ impl ChatView {
                             id: &shell,
                             path: &target,
                             owner,
+                            orphans: true,
                         },
                         GRACE,
                     )

@@ -168,3 +168,106 @@ fn two_live_processes_for_one_session_are_no_owner() {
     let table = vec![proc(4003, began, false), proc(4004, began, false)];
     assert_eq!(session_owner(&roots, SESSION, &table), None);
 }
+
+fn claude_proc(pid: i32, started: &str, command: &str) -> Proc {
+    Proc {
+        pid,
+        ppid: 1,
+        pgid: pid,
+        started: started.to_string(),
+        zombie: false,
+        command: command.to_string(),
+    }
+}
+
+#[test]
+fn a_numeric_procstart_that_differs_is_no_owner() {
+    let dir = scratch("numeric-differs");
+    let roots = Roots::new(&dir.0, &dir.0.join("data"));
+    session_file(&dir.0, 4010, SESSION, "1");
+    let table = vec![proc(4010, "Fri Nov 20 23:53:37 2026", false)];
+    assert_eq!(session_owner(&roots, SESSION, &table), None);
+}
+
+#[test]
+fn an_owner_that_is_not_claude_code_is_no_owner() {
+    let dir = scratch("not-claude");
+    let roots = Roots::new(&dir.0, &dir.0.join("data"));
+    let began = "Fri Nov 20 23:53:37 2026";
+    session_file(&dir.0, 4011, SESSION, began);
+    let table = vec![claude_proc(4011, began, "/usr/bin/tmux")];
+    assert_eq!(session_owner(&roots, SESSION, &table), None);
+}
+
+fn session_value(dir: &Path, pid: u32, body: serde_json::Value) {
+    let sessions = dir.join(".claude/sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    std::fs::write(sessions.join(format!("{pid}.json")), body.to_string()).expect("file");
+}
+
+#[test]
+fn a_numeric_procstart_that_matches_is_the_owner() {
+    let began = "Fri Nov 20 23:53:37 2026";
+    let epoch = lstart_epoch(began).expect("epoch");
+    for (tag, value) in [
+        ("secs", serde_json::json!(epoch)),
+        ("millis", serde_json::json!(epoch * 1000)),
+        ("text", serde_json::json!(epoch.to_string())),
+    ] {
+        let dir = scratch(&format!("numeric-{tag}"));
+        let roots = Roots::new(&dir.0, &dir.0.join("data"));
+        let body = serde_json::json!({"pid": 4020, "sessionId": SESSION, "procStart": value});
+        session_value(&dir.0, 4020, body);
+        let table = vec![proc(4020, began, false)];
+        assert_eq!(session_owner(&roots, SESSION, &table), Some(4020), "{tag}");
+        let later = vec![proc(4020, "Fri Nov 20 23:59:00 2026", false)];
+        assert_eq!(session_owner(&roots, SESSION, &later), None, "{tag} reused");
+    }
+}
+
+#[test]
+fn a_session_file_without_procstart_names_a_live_claude_process() {
+    let dir = scratch("no-procstart");
+    let roots = Roots::new(&dir.0, &dir.0.join("data"));
+    session_value(
+        &dir.0,
+        4021,
+        serde_json::json!({"pid": 4021, "sessionId": SESSION}),
+    );
+    let began = "Fri Nov 20 23:53:37 2026";
+    let table = vec![claude_proc(
+        4021,
+        began,
+        "/Users/me/.local/share/claude/versions/2.1.0",
+    )];
+    assert_eq!(session_owner(&roots, SESSION, &table), Some(4021));
+    let other = vec![claude_proc(4021, began, "/usr/bin/tmux")];
+    assert_eq!(session_owner(&roots, SESSION, &other), None);
+}
+
+#[test]
+fn a_start_time_in_another_spelling_is_the_same_start() {
+    let p = proc(1, "Fri Nov 20 23:53:37 2026", false);
+    assert!(same_start(
+        &serde_json::json!("Fri  Nov 20  23:53:37 2026"),
+        &p
+    ));
+    assert!(!same_start(
+        &serde_json::json!("Fri Nov 20 23:53:38 2026"),
+        &p
+    ));
+}
+
+#[test]
+fn the_temp_roots_include_the_real_form_of_each() {
+    let roots = tmp_roots();
+    for base in ["/tmp", "/private/tmp"] {
+        assert!(roots.contains(&PathBuf::from(base)) || !Path::new(base).exists());
+        if let Ok(real) = std::fs::canonicalize(base) {
+            assert!(roots.contains(&real), "{base}");
+        }
+    }
+    if let Ok(real) = std::fs::canonicalize(std::env::temp_dir()) {
+        assert!(roots.contains(&real));
+    }
+}

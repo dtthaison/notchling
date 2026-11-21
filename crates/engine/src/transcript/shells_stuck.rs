@@ -77,15 +77,20 @@ pub struct Shape {
     pub wait_loop: bool,
 }
 
+fn cached(command: &str) -> Option<Shape> {
+    let cache = SHAPES.lock().unwrap_or_else(PoisonError::into_inner);
+    cache.get(command).copied()
+}
+
 pub fn shape_of(command: &str) -> Shape {
-    let mut cache = SHAPES.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(shape) = cache.get(command) {
-        return *shape;
+    if let Some(shape) = cached(command) {
+        return shape;
     }
     let shape = Shape {
         itself: matches_itself(command),
         wait_loop: is_wait_loop(command),
     };
+    let mut cache = SHAPES.lock().unwrap_or_else(PoisonError::into_inner);
     if cache.len() >= CACHE_MAX {
         cache.clear();
     }
@@ -198,9 +203,7 @@ fn read_word(text: &str) -> Option<(Word, &str)> {
             }
             '\'' => {
                 let rest = &text[at + 1..];
-                let Some(close) = rest.find('\'') else {
-                    return finish(word, expands, false, &text[at..]);
-                };
+                let close = rest.find('\'')?;
                 word.push_str(&rest[..close]);
                 quoted = true;
                 for _ in 0..rest[..close].chars().count() + 1 {
@@ -236,7 +239,7 @@ fn read_word(text: &str) -> Option<(Word, &str)> {
                     }
                 }
                 if !closed {
-                    return finish(word, expands, false, &text[at..]);
+                    return None;
                 }
             }
             '\\' => {
@@ -273,6 +276,9 @@ fn pgrep_calls(command: &str) -> Vec<Call> {
         let (mut full, mut exact, mut skip_value, mut scoped) = (false, false, false, false);
         let mut pattern = None;
         while let Some((word, tail)) = read_word(rest) {
+            if tail.len() >= rest.len() {
+                break;
+            }
             rest = tail;
             if skip_value {
                 skip_value = false;

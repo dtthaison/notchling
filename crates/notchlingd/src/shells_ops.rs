@@ -196,6 +196,7 @@ impl ShellsOps {
             id: &shell.id,
             path: &shell.output_path,
             owner: (self.owner)(caller, &session),
+            orphans: false,
         };
         let outcome = (self.stopper)(&request, GRACE).map_err(refused)?;
         if outcome.survivors > 0 {

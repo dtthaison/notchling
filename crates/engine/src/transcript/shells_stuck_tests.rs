@@ -178,3 +178,61 @@ fn a_shape_is_the_same_whether_computed_or_cached() {
     assert_eq!(stuck_by(shape, Some(1)), Some(Stuck::Itself));
     assert_eq!(stuck_by(Shape::default(), Some(99_999)), None);
 }
+
+fn odd_inputs() -> Vec<String> {
+    let pieces = [
+        "pgrep", " ", "-f", "-a", "\"", "'", "\\", "$", "`", "x", ";", "&&", "while", "do", "done",
+        "sleep", "\n", "é", "--full", "-u", "=",
+    ];
+    let mut out: Vec<String> = vec![
+        "pgrep \"-f".into(),
+        "pgrep \"-a".into(),
+        "pgrep \"--full".into(),
+        "sh -c \"pgrep -a\" && echo \"-f".into(),
+        "while pgrep -f \"worker; do sleep 1; done".into(),
+        "pgrep -f 'worker".into(),
+        "pgrep x\"-f".into(),
+        "pgrep -f \"a\\".into(),
+    ];
+    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+    for _ in 0..4000 {
+        let mut text = String::new();
+        for _ in 0..(seed % 9 + 1) {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            text.push_str(pieces[(seed >> 33) as usize % pieces.len()]);
+        }
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        out.push(text);
+    }
+    out
+}
+
+#[test]
+fn odd_commands_always_finish() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for command in odd_inputs() {
+            let _ = (
+                pgrep_patterns(&command),
+                matches_itself(&command),
+                is_wait_loop(&command),
+            );
+        }
+        let _ = tx.send(());
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_secs(20)).is_ok(),
+        "a parse never ends"
+    );
+}
+
+#[test]
+fn an_unclosed_quote_ends_the_parse_without_a_pattern() {
+    for command in [
+        "while pgrep \"-f worker; do sleep 1; done",
+        "while pgrep -f 'worker; do sleep 1; done",
+    ] {
+        assert!(pgrep_patterns(command).is_empty(), "{command}");
+        assert!(!matches_itself(command), "{command}");
+    }
+}

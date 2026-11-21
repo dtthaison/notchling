@@ -8,10 +8,18 @@ use crate::sessions::task_output::plain_id;
 use crate::sessions::{config_dirs, Roots};
 
 pub fn tmp_roots() -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = ["/tmp", "/private/tmp"].iter().map(PathBuf::from).collect();
-    let own = std::env::temp_dir();
-    if !roots.contains(&own) {
-        roots.push(own);
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for base in [
+        PathBuf::from("/tmp"),
+        PathBuf::from("/private/tmp"),
+        std::env::temp_dir(),
+    ] {
+        let real = std::fs::canonicalize(&base).ok();
+        for root in std::iter::once(base).chain(real) {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
     }
     roots
 }
@@ -76,9 +84,96 @@ pub fn shell_output(
     })
 }
 
-fn same_start(recorded: &str, started: &str) -> bool {
-    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    recorded.trim().parse::<u64>().is_ok() || words(recorded) == words(started)
+fn words(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(unix)]
+#[allow(clippy::useless_conversion)]
+fn lstart_epoch(text: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let mut parts = text.split_whitespace().skip(1);
+    let name = parts.next()?;
+    let month = i32::try_from(MONTHS.iter().position(|m| *m == name)?).ok()?;
+    let day: i32 = parts.next()?.parse().ok()?;
+    let mut clock = parts.next()?.split(':');
+    let hour: i32 = clock.next()?.parse().ok()?;
+    let minute: i32 = clock.next()?.parse().ok()?;
+    let second: i32 = clock.next()?.parse().ok()?;
+    let year: i32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || clock.next().is_some() {
+        return None;
+    }
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = second;
+    tm.tm_isdst = -1;
+    let at = unsafe { libc::mktime(&mut tm) };
+    (at != -1).then_some(i64::from(at))
+}
+
+#[cfg(not(unix))]
+fn lstart_epoch(_: &str) -> Option<i64> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn ticks_of(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ticks_of(_: i32) -> Option<u64> {
+    None
+}
+
+fn same_count(count: u64, proc: &Proc) -> bool {
+    if ticks_of(proc.pid) == Some(count) {
+        return true;
+    }
+    let Some(began) = lstart_epoch(&proc.started).and_then(|at| u64::try_from(at).ok()) else {
+        return false;
+    };
+    let secs = if count >= 100_000_000_000 {
+        count / 1000
+    } else {
+        count
+    };
+    secs.abs_diff(began) <= 2
+}
+
+fn same_start(recorded: &Value, proc: &Proc) -> bool {
+    let text = match recorded {
+        Value::String(text) => text.trim().to_string(),
+        Value::Number(number) => number.to_string(),
+        _ => return true,
+    };
+    if text.is_empty() {
+        return true;
+    }
+    if let Ok(count) = text.parse::<u64>() {
+        return same_count(count, proc);
+    }
+    words(&text) == words(&proc.started)
+        || lstart_epoch(&text).is_some_and(|at| lstart_epoch(&proc.started) == Some(at))
+}
+
+fn claude_code(proc: &Proc) -> bool {
+    matches!(proc.name(), "claude" | "node")
+        || proc.command.contains("/claude/")
+        || proc.command.contains("/claude-code/")
 }
 
 pub fn session_owner(roots: &Roots, session: &str, procs: &[Proc]) -> Option<u32> {
@@ -101,11 +196,16 @@ pub fn session_owner(roots: &Roots, session: &str, procs: &[Proc]) -> Option<u32
                 continue;
             }
             let Some(pid) = pid_of(&row) else { continue };
-            let recorded = row.get("procStart").and_then(Value::as_str).unwrap_or("");
             let live = i32::try_from(pid)
                 .ok()
                 .and_then(|pid| procs.iter().find(|p| p.pid == pid))
-                .is_some_and(|p| !p.zombie && same_start(recorded, &p.started));
+                .is_some_and(|p| {
+                    !p.zombie
+                        && claude_code(p)
+                        && row
+                            .get("procStart")
+                            .is_none_or(|recorded| same_start(recorded, p))
+                });
             if live && !found.contains(&pid) {
                 found.push(pid);
             }

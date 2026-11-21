@@ -216,6 +216,7 @@ mod live {
             id: ID,
             path: path.to_str().expect("utf8"),
             owner,
+            orphans: false,
         }
     }
 
@@ -346,5 +347,245 @@ mod live {
         assert_eq!(outcome.killed, 1);
         assert_eq!(outcome.survivors, 0);
         let _ = kids.0[0].wait();
+    }
+}
+
+#[cfg(unix)]
+mod slash_tmp {
+    use super::super::*;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+
+    const SESSION: &str = "5e5510aa-0000-4000-8000-0000000000ac";
+    const ID: &str = "bshell0002";
+
+    struct Base(PathBuf);
+
+    impl Drop for Base {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn shell(tag: &str, uid: u32) -> (Base, PathBuf, Child) {
+        let base = PathBuf::from("/tmp")
+            .join(format!("claude-{uid}"))
+            .join(format!("nl-shells-slash-tmp-{tag}-{}", std::process::id()));
+        let tasks = base.join(SESSION).join("tasks");
+        std::fs::create_dir_all(&tasks).expect("tasks folder");
+        let output = tasks.join(format!("{ID}.output"));
+        let file = std::fs::File::create(&output).expect("output file");
+        let kid = Command::new("sh")
+            .args(["-c", "sleep 60"])
+            .stdout(file)
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("spawn");
+        (Base(base), output, kid)
+    }
+
+    #[test]
+    fn shells_under_slash_tmp_are_found_by_their_real_names() {
+        let uid = shells_guard::current_uid();
+        let (_a, first, mut one) = shell("a", uid);
+        let (_b, second, mut two) = shell("b", uid);
+        std::thread::sleep(Duration::from_millis(400));
+        let paths = vec![
+            first.to_str().expect("utf8").to_string(),
+            second.to_str().expect("utf8").to_string(),
+        ];
+        let found = writers_of_many(&paths);
+        assert_eq!(found[&paths[0]], vec![one.id() as i32], "{found:?}");
+        assert_eq!(found[&paths[1]], vec![two.id() as i32], "{found:?}");
+        let request = StopRequest {
+            session: SESSION,
+            id: ID,
+            path: &paths[0],
+            owner: Some(std::process::id()),
+            orphans: false,
+        };
+        let outcome = stop_shell_in(&request, &shells_guard::tmp_roots(), uid, GRACE);
+        let second_alive = two.try_wait().expect("wait").is_none();
+        let _ = one.kill();
+        let _ = one.wait();
+        let _ = two.kill();
+        let _ = two.wait();
+        let outcome = outcome.expect("allowed");
+        assert!(
+            outcome.targets >= 1 && outcome.survivors == 0,
+            "{outcome:?}"
+        );
+        assert!(second_alive, "the other shell is left running");
+    }
+}
+
+fn orphans() -> Vec<Proc> {
+    vec![
+        proc(1, 0, 1, "/sbin/launchd"),
+        proc(800, 1, 800, "/bin/zsh"),
+        proc(801, 800, 800, "/bin/sleep"),
+        proc(900, 1, 900, "/bin/zsh"),
+        proc(612, OWNER, 612, "/bin/zsh"),
+        proc(OWN, 1, OWN, "/usr/local/bin/notchlingd"),
+    ]
+}
+
+#[test]
+fn an_orphaned_shell_tree_with_one_root_under_launchd_is_a_target_pid_by_pid() {
+    let got = orphan_targets(&[800, 801], &orphans(), &scope());
+    assert_eq!(got.iter().map(|t| t.pid).collect::<Vec<_>>(), [800, 801]);
+}
+
+#[test]
+fn two_roots_or_a_root_with_a_live_parent_are_not_orphans() {
+    assert!(orphan_targets(&[800, 900], &orphans(), &scope()).is_empty());
+    assert!(orphan_targets(&[612], &orphans(), &scope()).is_empty());
+    assert!(orphan_targets(&[404], &orphans(), &scope()).is_empty());
+}
+
+#[test]
+fn a_protected_or_own_writer_refuses_the_whole_orphan_tree() {
+    let mut procs = orphans();
+    procs.push(proc(802, 800, 800, "/usr/local/bin/node"));
+    assert!(orphan_targets(&[800, 801, 802], &procs, &scope()).is_empty());
+    assert!(orphan_targets(&[OWN], &procs, &scope()).is_empty());
+}
+
+#[test]
+fn ps_runs_in_the_c_locale() {
+    assert!(ps()
+        .get_envs()
+        .any(|(key, value)| key == "LC_ALL" && value == Some(std::ffi::OsStr::new("C"))));
+}
+
+#[cfg(unix)]
+mod orphaned {
+    use super::super::*;
+    use std::os::unix::process::CommandExt;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+
+    const SESSION: &str = "5e5510aa-0000-4000-8000-0000000000ad";
+    const ID: &str = "bshell0003";
+
+    struct Dir(PathBuf);
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tasks(tag: &str) -> (Dir, PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("nl-shells-orphan-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let tasks = root
+            .join(format!("claude-{}", shells_guard::current_uid()))
+            .join("-work")
+            .join(SESSION)
+            .join("tasks");
+        std::fs::create_dir_all(&tasks).expect("tasks folder");
+        let output = tasks.join(format!("{ID}.output"));
+        (Dir(root.clone()), root, output)
+    }
+
+    fn orphan(output: &Path) {
+        let file = std::fs::File::create(output).expect("output file");
+        Command::new("sh")
+            .args(["-c", "sh -c 'sleep 60 & wait' & exit 0"])
+            .stdout(file)
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("spawn")
+            .wait()
+            .expect("wait");
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    fn reap(pids: &[i32]) {
+        for pid in pids {
+            unsafe {
+                libc::kill(*pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    fn request<'a>(path: &'a Path, owner: Option<u32>, orphans: bool) -> StopRequest<'a> {
+        StopRequest {
+            session: SESSION,
+            id: ID,
+            path: path.to_str().expect("utf8"),
+            owner,
+            orphans,
+        }
+    }
+
+    #[test]
+    fn the_ui_ends_an_orphaned_shell_whose_owner_is_gone() {
+        let (_dir, root, output) = tasks("ui");
+        orphan(&output);
+        let text = output.to_str().expect("utf8");
+        let before = writers_of(text);
+        assert!(before.len() >= 2, "{before:?}");
+        let uid = shells_guard::current_uid();
+        let outcome = stop_shell_in(&request(&output, None, true), &[root], uid, GRACE);
+        let after = writers_of(text);
+        reap(&before);
+        let outcome = outcome.expect("allowed");
+        assert!(
+            outcome.targets >= 2 && outcome.survivors == 0,
+            "{outcome:?}"
+        );
+        assert!(after.is_empty(), "{after:?}");
+    }
+
+    #[test]
+    fn an_agents_stop_never_ends_an_orphan() {
+        let (_dir, root, output) = tasks("agent");
+        orphan(&output);
+        let text = output.to_str().expect("utf8");
+        let before = writers_of(text);
+        let uid = shells_guard::current_uid();
+        let none = stop_shell_in(
+            &request(&output, None, false),
+            std::slice::from_ref(&root),
+            uid,
+            GRACE,
+        );
+        let some = stop_shell_in(
+            &request(&output, Some(std::process::id()), false),
+            std::slice::from_ref(&root),
+            uid,
+            GRACE,
+        );
+        let after = writers_of(text);
+        reap(&before);
+        assert_eq!(none, Err(Refusal::OwnerUnknown));
+        assert_eq!(some.expect("allowed").targets, 0);
+        assert_eq!(after.len(), before.len());
+    }
+
+    #[test]
+    fn the_ui_leaves_a_writer_whose_parent_is_alive() {
+        let (_dir, root, output) = tasks("parent");
+        let file = std::fs::File::create(&output).expect("output file");
+        let mut kid = Command::new("sh")
+            .args(["-c", "sleep 60"])
+            .stdout(file)
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("spawn");
+        std::thread::sleep(Duration::from_millis(400));
+        let uid = shells_guard::current_uid();
+        let outcome = stop_shell_in(&request(&output, None, true), &[root], uid, GRACE);
+        let alive = kid.try_wait().expect("wait").is_none();
+        let _ = kid.kill();
+        let _ = kid.wait();
+        assert_eq!(outcome.expect("allowed").targets, 0);
+        assert!(alive);
     }
 }

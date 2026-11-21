@@ -216,10 +216,50 @@ pub fn plan(writers: &[i32], procs: &[Proc], scope: &Scope) -> Plan {
     plan
 }
 
+fn names_of(path: &str) -> Vec<String> {
+    let mut names = vec![path.to_string()];
+    if let Ok(real) = std::fs::canonicalize(path) {
+        let real = real.to_string_lossy().into_owned();
+        if !names.contains(&real) {
+            names.push(real);
+        }
+    }
+    names
+}
+
+pub fn orphan_targets(writers: &[i32], procs: &[Proc], scope: &Scope) -> Vec<Target> {
+    let by_pid: HashMap<i32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
+    let mut found: Vec<&Proc> = Vec::new();
+    for pid in writers {
+        let Some(proc) = by_pid.get(pid).copied() else {
+            continue;
+        };
+        if !proc.zombie && !found.iter().any(|f| f.pid == proc.pid) {
+            found.push(proc);
+        }
+    }
+    let roots: Vec<&Proc> = found
+        .iter()
+        .copied()
+        .filter(|p| !found.iter().any(|q| q.pid == p.ppid))
+        .collect();
+    let [root] = roots[..] else {
+        return Vec::new();
+    };
+    let clean = root.ppid == 1
+        && found
+            .iter()
+            .all(|p| p.pid > 1 && p.pid != scope.own_pid && p.pid != scope.owner && !p.protected());
+    if !clean {
+        return Vec::new();
+    }
+    found.iter().map(|p| target_of(p)).collect()
+}
+
 pub fn writers_of_many(paths: &[String]) -> HashMap<String, Vec<i32>> {
     let wanted: Vec<(String, Vec<String>)> = paths
         .iter()
-        .map(|path| (path.clone(), vec![path.clone()]))
+        .map(|path| (path.clone(), names_of(path)))
         .collect();
     if paths.is_empty() {
         return HashMap::new();
@@ -244,8 +284,14 @@ pub fn writers_of(path: &str) -> Vec<i32> {
         .unwrap_or_default()
 }
 
+fn ps() -> Command {
+    let mut command = Command::new("ps");
+    command.env("LC_ALL", "C");
+    command
+}
+
 pub fn process_table() -> Option<Vec<Proc>> {
-    let out = Command::new("ps")
+    let out = ps()
         .args(["-axo", "pid=,ppid=,pgid=,stat=,lstart=,comm="])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -389,6 +435,7 @@ pub struct StopRequest<'a> {
     pub id: &'a str,
     pub path: &'a str,
     pub owner: Option<u32>,
+    pub orphans: bool,
 }
 
 pub fn stop_shell(request: &StopRequest, grace: Duration) -> Result<Outcome, Refusal> {
@@ -411,11 +458,13 @@ pub fn stop_shell_in(
     let owner = request
         .owner
         .and_then(|pid| i32::try_from(pid).ok())
-        .filter(|pid| *pid > 1)
-        .ok_or(Refusal::OwnerUnknown)?;
+        .filter(|pid| *pid > 1);
+    if owner.is_none() && !request.orphans {
+        return Err(Refusal::OwnerUnknown);
+    }
     let (own_pid, own_pgid) = own();
     let scope = Scope {
-        owner,
+        owner: owner.unwrap_or(0),
         own_pid,
         own_pgid,
     };
@@ -430,7 +479,17 @@ pub fn stop_shell_in(
             survivors: writers.len(),
         });
     };
-    Ok(execute(&plan(&writers, &table, &scope), &scope, grace))
+    let mut found = plan(&writers, &table, &scope);
+    if request.orphans {
+        let taken = found.every_pid();
+        let rest: Vec<i32> = writers
+            .iter()
+            .copied()
+            .filter(|pid| !taken.contains(pid))
+            .collect();
+        found.pids.extend(orphan_targets(&rest, &table, &scope));
+    }
+    Ok(execute(&found, &scope, grace))
 }
 
 #[cfg(test)]
