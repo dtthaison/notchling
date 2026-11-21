@@ -163,8 +163,9 @@ def _guard_provider_gaps() -> bool:
 
 def _guard_agent_path() -> bool:
     wire = "pub mod ops {\n    pub const A: &str = \"a.one\";\n    pub const B: &str = \"a.two\";\n}\n"
-    golden = json.dumps({"commands": [{"command": "a", "ops": [{"op": "a.one"}]}],
-                         "planned": [], "userOnly": [], "internal": []})
+    row = {"command": "a", "usage": "notchling a", "consent": "none", "exits": [0],
+           "ops": [{"op": "a.one", "tier": "agent", "acts": False}]}
+    golden = json.dumps({"commands": [row], "planned": [], "userOnly": [], "internal": []})
     problems = agentpaths.check_ops(wire, golden)
     with _tmp() as root:
         planned = json.dumps({"commands": [], "planned": [], "userOnly": [], "internal": []})
