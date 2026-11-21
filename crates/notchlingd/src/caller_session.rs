@@ -12,6 +12,7 @@ pub struct SessionHit {
     pub claude_pid: u32,
     pub config_dir: PathBuf,
     pub cwd: Option<String>,
+    pub job_id: Option<String>,
     pub chain: Vec<u32>,
 }
 
@@ -85,14 +86,15 @@ pub(crate) fn find_session_where(
         chain.push(p);
         let found = lanes.iter().find_map(|lane| {
             let file = lane.dir.join("sessions").join(format!("{p}.json"));
-            session_id_in(&file).map(|id| (id, lane.dir.clone(), session_cwd_in(&file)))
+            session_id_in(&file).map(|id| (id, lane.dir.clone(), session_extras_in(&file)))
         });
-        if let Some((session_id, config_dir, cwd)) = found.filter(|_| accept(p)) {
+        if let Some((session_id, config_dir, (cwd, job_id))) = found.filter(|_| accept(p)) {
             return Some(SessionHit {
                 session_id,
                 claude_pid: p,
                 config_dir,
                 cwd,
+                job_id,
                 chain,
             });
         }
@@ -113,10 +115,15 @@ pub(crate) fn session_id_in(path: &Path) -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
-fn session_cwd_in(path: &Path) -> Option<String> {
-    std::fs::read(path)
+fn session_extras_in(path: &Path) -> (Option<String>, Option<String>) {
+    let file = std::fs::read(path)
         .ok()
-        .and_then(|data| serde_json::from_slice::<Value>(&data).ok())
-        .and_then(|s| s.get("cwd").and_then(Value::as_str).map(str::to_owned))
-        .filter(|cwd| !cwd.is_empty())
+        .and_then(|data| serde_json::from_slice::<Value>(&data).ok());
+    let text = |key: &str| {
+        file.as_ref()
+            .and_then(|s| s.get(key).and_then(Value::as_str))
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    (text("cwd"), text("jobId"))
 }

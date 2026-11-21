@@ -37,11 +37,24 @@ fn reads_helper_runs_commands_as_the_session_process() {
 }
 
 fn as_session(root: &Path, home: &Path, steps: &[&[&str]]) -> Vec<Value> {
+    as_session_in(root, home, steps, None)
+}
+
+fn as_session_in(
+    root: &Path,
+    home: &Path,
+    steps: &[&[&str]],
+    live_folder: Option<&Path>,
+) -> Vec<Value> {
     let claude_dir = root.join(".local/share/claude/versions/1");
     std::fs::create_dir_all(&claude_dir).unwrap();
     let claude = claude_dir.join("claude");
     std::fs::copy(std::env::current_exe().unwrap(), &claude).unwrap();
-    let mut parent = Command::new(&claude)
+    let mut command = Command::new(&claude);
+    if let Some(folder) = live_folder {
+        command.current_dir(folder);
+    }
+    let mut parent = command
         .args(["--exact", HELPER, "--nocapture", "--test-threads=1"])
         .env("NL_READS_E2E_BIN", env!("CARGO_BIN_EXE_notchling"))
         .env("NL_READS_E2E_STEPS", serde_json::to_string(steps).unwrap())
@@ -54,15 +67,18 @@ fn as_session(root: &Path, home: &Path, steps: &[&[&str]]) -> Vec<Value> {
         .unwrap();
     let sessions = root.join("claude/sessions");
     std::fs::create_dir_all(&sessions).unwrap();
-    std::fs::write(
-        sessions.join(format!("{}.json", parent.id())),
-        json!({
+    let file = match live_folder {
+        Some(_) => json!({"sessionId": SESSION, "pid": parent.id()}),
+        None => json!({
             "sessionId": SESSION,
             "pid": parent.id(),
             "cwd": root.join("launch").to_string_lossy(),
             "jobId": "j1",
-        })
-        .to_string(),
+        }),
+    };
+    std::fs::write(
+        sessions.join(format!("{}.json", parent.id())),
+        file.to_string(),
     )
     .unwrap();
     writeln!(parent.stdin.take().unwrap(), "go").unwrap();
@@ -173,4 +189,15 @@ fn a_live_session_in_no_organization_folder_reads_as_personal() {
     let _daemon = Daemon::start(&root, &home);
     let steps = as_session(&root, &home, READS);
     assert_answered_for_the_session(&steps, "personal", true);
+}
+
+#[test]
+fn a_live_session_with_no_row_and_no_file_folder_reads_by_its_process_folder() {
+    let (dir, root, home, acme) = a_live_background_session("reads-verified-proc", false);
+    std::fs::remove_dir_all(root.join("claude/jobs/j1")).unwrap();
+    let live = dir.0.join("work/app");
+    std::fs::create_dir_all(&live).unwrap();
+    let _daemon = Daemon::start(&root, &home);
+    let steps = as_session_in(&root, &home, READS, Some(&live));
+    assert_answered_for_the_session(&steps, &acme, false);
 }

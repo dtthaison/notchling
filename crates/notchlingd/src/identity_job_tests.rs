@@ -8,11 +8,12 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-const SESSION: &str = "52afae32-0000-4000-8000-000000000001";
-const JOB_SESSION: &str = "be50d36a-0000-4000-8000-000000000002";
+pub(crate) const SESSION: &str = "52afae32-0000-4000-8000-000000000001";
+pub(crate) const JOB_SESSION: &str = "be50d36a-0000-4000-8000-000000000002";
 
-struct Procs {
-    claude: PathBuf,
+pub(crate) struct Procs {
+    pub(crate) claude: PathBuf,
+    pub(crate) cwd: Option<PathBuf>,
 }
 
 impl Processes for Procs {
@@ -27,8 +28,8 @@ impl Processes for Procs {
     fn name(&self, _: u32) -> Option<String> {
         None
     }
-    fn cwd(&self, _: u32) -> Option<PathBuf> {
-        None
+    fn cwd(&self, pid: u32) -> Option<PathBuf> {
+        self.cwd.clone().filter(|_| pid == 800)
     }
     fn resolve(&self, path: &Path) -> Option<PathBuf> {
         Some(path.to_path_buf())
@@ -38,7 +39,7 @@ impl Processes for Procs {
     }
 }
 
-struct Home(PathBuf);
+pub(crate) struct Home(pub(crate) PathBuf);
 
 impl Drop for Home {
     fn drop(&mut self) {
@@ -52,13 +53,15 @@ fn salt() -> LateSalt {
     Arc::new(cell)
 }
 
-struct Rig {
-    home: Home,
-    acme: String,
-    work: PathBuf,
+pub(crate) struct Rig {
+    pub(crate) home: Home,
+    pub(crate) acme: String,
+    pub(crate) beta: String,
+    pub(crate) work: PathBuf,
+    pub(crate) other: PathBuf,
 }
 
-fn rig(tag: &str, session_file: Value) -> Rig {
+pub(crate) fn rig(tag: &str, session_file: Value) -> Rig {
     let dir = std::env::temp_dir().join(format!("nl-ident-job-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join(".claude/sessions")).unwrap();
@@ -74,19 +77,34 @@ fn rig(tag: &str, session_file: Value) -> Rig {
     let acme = book.create("Acme", None, None).unwrap();
     book.set_folders(&acme, &[work.to_string_lossy().into_owned()])
         .unwrap();
+    let other = dir.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let beta = book.create("Beta", None, None).unwrap();
+    book.set_folders(&beta, &[other.to_string_lossy().into_owned()])
+        .unwrap();
     Rig {
         home: Home(dir),
         acme,
+        beta,
         work,
+        other,
     }
 }
 
-fn identify(rig: &Rig, rows: Value) -> notchling_local_api::AgentIdentity {
+pub(crate) fn identify(rig: &Rig, rows: Value) -> notchling_local_api::AgentIdentity {
+    identify_in(rig, rows, None)
+}
+
+pub(crate) fn identify_in(
+    rig: &Rig,
+    rows: Value,
+    cwd: Option<PathBuf>,
+) -> notchling_local_api::AgentIdentity {
     let home = &rig.home.0;
     let claude = home.join(".local/share/claude/versions/2.1.0/claude");
     Identifier::new(
         Roots::new(home, &home.join("data")),
-        Arc::new(Procs { claude }),
+        Arc::new(Procs { claude, cwd }),
         Arc::new(Mutex::new(rows)),
         salt(),
         Launches::default(),
@@ -105,7 +123,10 @@ fn a_session_the_list_holds_under_its_job_id_keeps_its_folder_and_organization()
     let inside = r.work.join("app").to_string_lossy().into_owned();
     let who = identify(
         &r,
-        json!([{"id": JOB_SESSION, "cwd": inside, "resumeSessionId": SESSION}]),
+        json!([{
+            "id": JOB_SESSION, "cwd": inside, "resumeSessionId": SESSION,
+            "target": {"job": "j1"}, "group": "working", "label": "Working",
+        }]),
     );
     assert!(who.verified);
     assert_eq!(who.session.as_deref(), Some(SESSION));
@@ -128,10 +149,10 @@ fn a_session_the_list_lacks_takes_its_folder_from_its_own_session_file() {
 }
 
 #[test]
-fn a_verified_session_with_no_known_folder_is_personal_never_unknown() {
+fn a_verified_session_with_no_known_folder_has_no_organization() {
     let r = rig("none", json!({"sessionId": SESSION}));
     let who = identify(&r, json!([]));
     assert!(who.verified);
     assert!(who.folder.is_none());
-    assert_eq!(who.organization.as_deref(), Some("personal"));
+    assert!(who.organization.is_none());
 }
