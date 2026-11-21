@@ -253,8 +253,9 @@ fn an_agent_lists_and_stops_its_own_stuck_shell_and_nothing_else() {
     assert!(text.contains("bwatch  running"), "{text}");
     assert!(text.contains("bstuck  ended"), "{text}");
 
-    assert_eq!(steps[5]["code"], 0, "{:?}", steps[5]);
-    assert_eq!(parsed(&steps[5])["stopped"], false);
+    assert_eq!(steps[5]["code"], 1, "{:?}", steps[5]);
+    assert_eq!(parsed(&steps[5])["result"]["stopped"], false);
+    assert_eq!(parsed(&steps[5])["error"]["reason"], "some_left");
     assert!(
         stranger.try_wait().unwrap().is_none(),
         "a process outside the session's Claude Code is never signalled"
