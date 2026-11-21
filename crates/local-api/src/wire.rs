@@ -119,6 +119,10 @@ pub mod ops {
     pub const COST_SETUP_CHECK: &str = "cost.setup.check";
 
     pub const INBOX_LIST: &str = "inbox.list";
+    pub const INBOX_MINE: &str = "inbox.mine";
+    pub const ACCOUNTS_SUMMARY: &str = "accounts.summary";
+    pub const LIMITS_SUMMARY: &str = "limits.summary";
+    pub const ORGANIZATIONS_MINE: &str = "organizations.mine";
     pub const INBOX_ANSWER: &str = "inbox.answer";
     pub const INBOX_SEEN: &str = "inbox.seen";
 

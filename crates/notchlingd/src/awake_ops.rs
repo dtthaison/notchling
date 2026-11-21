@@ -17,7 +17,7 @@ impl AwakeOps {
 
 impl OpGroup for AwakeOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        (op == ops::AWAKE_STATE).then_some(OpSpec::APP)
+        (op == ops::AWAKE_STATE).then_some(OpSpec::AGENT_READ)
     }
 
     fn call(&self, _caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {

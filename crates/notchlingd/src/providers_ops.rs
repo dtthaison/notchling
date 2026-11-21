@@ -142,6 +142,15 @@ impl ProvidersOps {
             .store(limit.as_millis() as u64, Ordering::SeqCst);
     }
 
+    pub fn states(&self) -> Vec<(String, ProviderState)> {
+        self.sh
+            .registry
+            .providers()
+            .iter()
+            .map(|p| (p.id().as_str().to_string(), p.state()))
+            .collect()
+    }
+
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         PROVIDERS_OPS.contains(&op).then_some(OpSpec::APP)
     }

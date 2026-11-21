@@ -528,7 +528,7 @@ impl OpGroup for CatalogService {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::CATALOG_GET => Some(OpSpec::AGENT_READ),
-            ops::CATALOG_ROLES => Some(OpSpec::APP_QUIET),
+            ops::CATALOG_ROLES => Some(OpSpec::AGENT_READ),
             _ => None,
         }
     }
