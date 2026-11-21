@@ -1,13 +1,13 @@
 use super::{parse, FailoverSink, KeyMirror, NodeSink, SinkNode, KEY, STARTING};
-use crate::acting_ops_tests::{app, FakeRoom};
+use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_node::Hooks;
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_testkit::{eventually, node, online, Opts, TestNode};
+use crate::consent_testkit::{consent, item_for, item_id_for};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::limits_ops_tests::TempDir;
 use crate::op_group::OpGroup;
-use crate::consent_testkit::{consent, item_for, item_id_for};
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, CLUSTER, CLUSTER_OFF};
 use notchling_cluster_net::MemNet;
@@ -314,7 +314,10 @@ fn agent_set_raises_an_item_and_deny_keeps_off() {
     let id = r.ask("30m");
     let item = r.item(&id);
     assert_eq!(item["kind"], "setting_change");
-    assert_eq!(item["title"], "Claude Code asks to change Automatic Failover");
+    assert_eq!(
+        item["title"],
+        "Claude Code asks to change Automatic Failover"
+    );
     assert!(
         item["detail"]
             .as_str()

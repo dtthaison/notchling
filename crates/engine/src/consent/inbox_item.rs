@@ -63,12 +63,18 @@ pub fn title_of(row: &Consent) -> String {
 pub fn detail_of(row: &Consent) -> String {
     let text = match row.kind.as_str() {
         SETTING if row.change.get("text") == Some(&Value::Bool(true)) => {
-            format!("{} would change. The new value is on the card.", change_title(row))
+            format!(
+                "{} would change. The new value is on the card.",
+                change_title(row)
+            )
         }
         SETTING => {
             let before = row.change.get("before").map(shown).unwrap_or_default();
             let after = row.change.get("after").map(shown).unwrap_or_default();
-            format!("{} is now {before}. It would become {after}.", change_title(row))
+            format!(
+                "{} is now {before}. It would become {after}.",
+                change_title(row)
+            )
         }
         SECRET_REQUEST => {
             "Open the form on your Mac to add it. Its value never reaches the agent.".to_string()

@@ -78,8 +78,13 @@ pub(crate) fn item_for(inbox: &Arc<InboxOps>, id: &str) -> Value {
     inbox
         .items()
         .into_iter()
-        .rev()
-        .find(|i| consent_of(&i.id) == Some(id))
+        .filter(|i| consent_of(&i.id) == Some(id))
+        .max_by_key(|i| {
+            i.id.rsplit(':')
+                .next()
+                .and_then(|ms| ms.parse::<i64>().ok())
+                .unwrap_or(0)
+        })
         .map(|i| serde_json::to_value(i).unwrap())
         .unwrap_or(Value::Null)
 }

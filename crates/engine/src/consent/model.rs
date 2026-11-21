@@ -18,6 +18,8 @@ pub const ROOT_WAITING: usize = 1;
 pub const ROOT_PER_HOUR: usize = 3;
 pub const ROOT_MAX_EXPIRY_MS: i64 = 15 * 60_000;
 pub const HOUR_MS: i64 = 3_600_000;
+pub const UNVERIFIED_WAITING: usize = 3;
+pub const UNVERIFIED_PER_HOUR: usize = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -160,6 +162,8 @@ pub struct Consent {
     pub pid: u32,
     pub pid_start: Option<u64>,
     pub idem_key: Option<String>,
+    pub request: Value,
+    pub extended: bool,
     pub state: State,
     pub answer_on: AnswerOn,
     pub applied_by: AppliedBy,
@@ -176,6 +180,10 @@ pub struct Consent {
 impl Consent {
     pub fn bucket(&self) -> String {
         bucket_of(self.verified, self.session.as_deref(), self.root.as_deref())
+    }
+
+    pub fn in_session(&self) -> bool {
+        self.verified && self.session.is_some()
     }
 }
 
@@ -203,6 +211,7 @@ pub struct New {
     pub pid: u32,
     pub pid_start: Option<u64>,
     pub idem_key: Option<String>,
+    pub request: Value,
     pub answer_on: AnswerOn,
     pub applied_by: AppliedBy,
     pub expires_in_ms: i64,
@@ -222,14 +231,8 @@ pub enum Refusal {
     Db(String),
 }
 
-pub fn new_id() -> String {
-    crate::vault::random_id("c").unwrap_or_else(|| {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        format!("c{nanos:032x}")
-    })
+pub fn new_id() -> Option<String> {
+    crate::vault::random_id("c")
 }
 
 pub fn clean_reason(text: &str) -> String {

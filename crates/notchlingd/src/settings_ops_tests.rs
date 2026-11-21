@@ -2,8 +2,8 @@ use super::*;
 use crate::acting_ops_tests::{app, FakeRoom};
 use crate::consent_ops::ConsentOps;
 use crate::consent_testkit::{consent_at, item_for, item_id_for};
-use crate::inbox_ops::InboxOps;
 use crate::event_assert::{of, results, text};
+use crate::inbox_ops::InboxOps;
 use crate::limits_ops_tests::TempDir;
 use notchling_engine::inbox::ActionId;
 use notchling_engine::limits::mode::CLAUDE;
@@ -11,18 +11,18 @@ use notchling_events::{MemorySink, Salt};
 use notchling_local_api::ClientKind;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-struct Rig {
-    tmp: TempDir,
-    room: Arc<FakeRoom>,
-    inbox: Arc<InboxOps>,
-    limits: Arc<LimitConfig>,
-    sink: Arc<MemorySink>,
-    consent: Arc<ConsentOps>,
-    clock: Arc<AtomicI64>,
-    ops: SettingsOps,
+pub(super) struct Rig {
+    pub(super) tmp: TempDir,
+    pub(super) room: Arc<FakeRoom>,
+    pub(super) inbox: Arc<InboxOps>,
+    pub(super) limits: Arc<LimitConfig>,
+    pub(super) sink: Arc<MemorySink>,
+    pub(super) consent: Arc<ConsentOps>,
+    pub(super) clock: Arc<AtomicI64>,
+    pub(super) ops: SettingsOps,
 }
 
-fn agent() -> Caller {
+pub(super) fn agent() -> Caller {
     Caller {
         tier: Tier::Agent,
         client: ClientKind::Cli,
@@ -31,7 +31,7 @@ fn agent() -> Caller {
     }
 }
 
-fn rig(tag: &str) -> Rig {
+pub(super) fn rig(tag: &str) -> Rig {
     let tmp = TempDir::new(&format!("settings-{tag}"));
     let room = Arc::new(FakeRoom::default());
     let inbox = InboxOps::new(tmp.path("inbox"), room.clone());
@@ -68,7 +68,7 @@ fn rig(tag: &str) -> Rig {
 }
 
 impl Rig {
-    fn call(&self, caller: &Caller, op: &str, args: Value) -> Result<Value, ApiError> {
+    pub(super) fn call(&self, caller: &Caller, op: &str, args: Value) -> Result<Value, ApiError> {
         self.ops.call(caller, op, &args)
     }
 
@@ -87,7 +87,7 @@ impl Rig {
         results(&self.sink, "settings.agent")
     }
 
-    fn app_follows_the_inbox(&self) {
+    pub(super) fn app_follows_the_inbox(&self) {
         self.room.app.store(true, Ordering::SeqCst);
         self.room
             .following
@@ -96,15 +96,15 @@ impl Rig {
             .push(topics::INBOX.into());
     }
 
-    fn item(&self, id: &str) -> Value {
+    pub(super) fn item(&self, id: &str) -> Value {
         item_for(&self.inbox, id)
     }
 
-    fn item_id(&self, id: &str) -> String {
+    pub(super) fn item_id(&self, id: &str) -> String {
         item_id_for(&self.inbox, id)
     }
 
-    fn wait_for(&self, what: &str, until: impl Fn() -> bool) {
+    pub(super) fn wait_for(&self, what: &str, until: impl Fn() -> bool) {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !until() && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
@@ -327,7 +327,7 @@ fn bad_values_and_unknown_keys_are_refused_with_what_they_take() {
     );
 }
 
-fn ask(r: &Rig, key: &str, value: Value) -> String {
+pub(super) fn ask(r: &Rig, key: &str, value: Value) -> String {
     let reply = r
         .call(
             &agent(),
@@ -339,7 +339,7 @@ fn ask(r: &Rig, key: &str, value: Value) -> String {
     reply["id"].as_str().unwrap().to_string()
 }
 
-fn asked(r: &Rig, id: &str) -> Value {
+pub(super) fn asked(r: &Rig, id: &str) -> Value {
     r.call(&agent(), ops::SETTINGS_ASKED, json!({"id": id, "wait": 5}))
         .unwrap()
 }
@@ -358,7 +358,10 @@ fn an_ask_key_raises_an_inbox_item_and_allow_applies_it() {
             .starts_with("Claude Code asks to change"),
         "{item}"
     );
-    assert!(!item.to_string().contains("because"), "the reason stays out of the item");
+    assert!(
+        !item.to_string().contains("because"),
+        "the reason stays out of the item"
+    );
     assert!(
         item["detail"]
             .as_str()
@@ -430,7 +433,9 @@ fn an_unanswered_ask_expires_and_closes_its_item() {
     let r = rig("expire");
     r.app_follows_the_inbox();
     let id = ask(&r, "continueAfterSleep", json!(false));
-    let reply = r.call(&agent(), ops::SETTINGS_ASKED, json!({"id": id})).unwrap();
+    let reply = r
+        .call(&agent(), ops::SETTINGS_ASKED, json!({"id": id}))
+        .unwrap();
     assert_eq!(reply["state"], "waiting");
     r.clock.fetch_add(16 * 60_000, Ordering::SeqCst);
     r.consent.tick();
@@ -535,7 +540,10 @@ fn a_dry_run_changes_and_opens_nothing_and_says_what_would_happen() {
         .unwrap()
     };
     let free = dry("showPet", json!(false));
-    assert_eq!((free["would"].as_str(), free["request"].is_null()), (Some("apply"), true));
+    assert_eq!(
+        (free["would"].as_str(), free["request"].is_null()),
+        (Some("apply"), true)
+    );
     let ask = dry("limitMode", json!("notify"));
     assert_eq!(ask["would"], "ask");
     assert_eq!(ask["request"]["kind"], "setting");
@@ -589,7 +597,10 @@ fn a_planted_token_in_the_reason_stays_in_the_row_and_the_askers_reply_only() {
         .unwrap();
     r.wait_for("denied", || asked(&r, &id)["state"] == "denied");
     let closed = asked(&r, &id);
-    assert!(closed["request"]["reason"].is_null(), "deleted at close: {closed}");
+    assert!(
+        closed["request"]["reason"].is_null(),
+        "deleted at close: {closed}"
+    );
 }
 
 #[test]
@@ -639,7 +650,16 @@ fn ask_allowed_commits_with_answered_by() {
         .unwrap();
     assert_eq!(text(allowed, "answered_by").as_deref(), Some("phone"));
     assert_eq!(text(allowed, "class").as_deref(), Some("ask"));
-    assert_eq!(r.sink.commits(), 1);
+    let thens: Vec<String> = of(&r.sink, "agent.consent")
+        .iter()
+        .filter_map(|e| text(e, "then"))
+        .collect();
+    assert_eq!(thens, ["asked", "allowed", "applied"]);
+    assert_eq!(
+        r.sink.commits(),
+        4,
+        "three consent lines and the setting's own"
+    );
 }
 
 #[test]
@@ -651,7 +671,6 @@ fn an_allowed_ask_is_not_applied_when_the_commit_fails() {
     r.inbox
         .decide(&r.item_id(&id), ActionId::Allow, "mac")
         .unwrap();
-    let done = asked(&r, &id);
     r.wait_for("failed", || asked(&r, &id)["state"] == "failed");
     assert!(r.stored("limitMode").is_none());
 }

@@ -90,6 +90,14 @@ fn said_no(message: &str) -> ApiError {
     ApiError::new(ErrorCode::NeedsApproval, message)
 }
 
+fn drifted() -> ApiError {
+    ApiError::new(
+        ErrorCode::Forbidden,
+        "That request no longer matches what you were shown.",
+    )
+    .with_reason("needs_consent")
+}
+
 impl VaultOps {
     pub fn new(switch: Arc<SwitchFlag>, store: VaultStore, room: Arc<dyn Room>) -> VaultOps {
         let ops = VaultOps {
@@ -168,20 +176,25 @@ impl VaultOps {
                 ops: Arc::downgrade(self),
             }),
         );
-        let (room, weak) = (self.room.clone(), Arc::downgrade(consent));
+        let (room, weak, me) = (
+            self.room.clone(),
+            Arc::downgrade(consent),
+            Arc::downgrade(self),
+        );
         self.switch.subscribe(move |on| {
             if !on {
                 return;
             }
-            let Some(consent) = weak.upgrade() else {
+            let (Some(consent), Some(ops)) = (weak.upgrade(), me.upgrade()) else {
                 return;
             };
+            let now = consent.now();
             for row in consent.store().open_rows().unwrap_or_default() {
-                if row.kind == SECRET_REQUEST && row.state.open() {
+                if row.kind == SECRET_REQUEST && row.state.open() && row.expires_ms > now {
                     room.publish(
                         topics::VAULT,
                         topics::VAULT_REQUEST_PENDING,
-                        &asks::request_event(&row),
+                        &ops.request_event(&row),
                     );
                 }
             }
@@ -410,18 +423,41 @@ impl VaultOps {
         }
         let entry = entry_from(args.get("entry"))?;
         let value = value_from(args.get("value"))?;
+        let replacing = text(args, "replacing", MAX_SHORT)?;
         let used = match (&request, self.consent.get()) {
-            (Some(id), Some(consent)) => {
-                Some((consent, consent.use_for_app(caller, id, SECRET_REQUEST, &entry.name)?))
-            }
+            (Some(id), Some(consent)) => Some((
+                consent,
+                consent.use_for_app(caller, id, SECRET_REQUEST, &entry.name)?,
+            )),
             _ => None,
+        };
+        let shown = match &used {
+            Some((consent, row)) => match self.holds(row, replacing.as_deref()) {
+                Ok(shown) => Some(shown),
+                Err(e) => {
+                    consent.withdraw_use(row);
+                    return Err(e);
+                }
+            },
+            None => None,
+        };
+        let still = |current: Option<&VaultEntry>| match (&used, &shown) {
+            (Some((consent, row)), Some((existing, revision))) => {
+                consent.now() < row.expires_ms
+                    && match (existing, current) {
+                        (false, None) => true,
+                        (true, Some(now)) => revision.as_ref().is_none_or(|r| *r == now.updated),
+                        _ => false,
+                    }
+            }
+            _ => true,
         };
         let ended = |outcome: Result<Value, String>| {
             if let Some((consent, row)) = &used {
                 consent.finish_use(row, outcome);
             }
         };
-        let old = match text(args, "replacing", MAX_SHORT)? {
+        let old = match replacing {
             Some(name) => match self.store.entry(&name) {
                 Ok(Some(old)) => Some(old),
                 Ok(None) => {
@@ -436,8 +472,17 @@ impl VaultOps {
             },
             None => None,
         };
-        let saved = match self.store.save(&entry, value, old.as_ref(), &now_iso()) {
+        let saved = match self
+            .store
+            .save_checked(&entry, value, old.as_ref(), &now_iso(), &still)
+        {
             Ok(saved) => saved,
+            Err(notchling_engine::vault::VaultError::Changed) => {
+                if let Some((consent, row)) = &used {
+                    consent.withdraw_use(row);
+                }
+                return Err(drifted());
+            }
             Err(e) => {
                 ended(Err(e.to_string()));
                 return Err(failed(e.to_string()));
@@ -452,6 +497,35 @@ impl VaultOps {
         let answered = used.is_some();
         ended(Ok(json!({"entry": entry_json(&saved.entry)})));
         Ok(json!({"entry": entry_json(&saved.entry), "answered": answered}))
+    }
+
+    fn holds(
+        &self,
+        row: &notchling_engine::consent::Consent,
+        replacing: Option<&str>,
+    ) -> Result<(bool, Option<String>), ApiError> {
+        if replacing.is_some_and(|name| name != row.target) {
+            return Err(drifted());
+        }
+        let Some(existing) = row.change.get("existing").and_then(Value::as_bool) else {
+            return Err(drifted());
+        };
+        let current = self
+            .store
+            .entry(&row.target)
+            .map_err(|e| failed(e.to_string()))?;
+        let revision = row
+            .change
+            .get("revision")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        match (existing, current) {
+            (false, None) => Ok((existing, revision)),
+            (true, Some(now)) if revision.as_ref().is_none_or(|r| *r == now.updated) => {
+                Ok((existing, revision))
+            }
+            _ => Err(drifted()),
+        }
     }
 
     fn remove(&self, args: &Value) -> Result<Value, ApiError> {
@@ -508,6 +582,9 @@ mod vault_events;
 #[path = "vault_ops_admin_tests.rs"]
 mod admin_tests;
 #[cfg(test)]
+#[path = "vault_ops_consent_tests.rs"]
+mod consent_tests;
+#[cfg(test)]
 #[path = "vault_ops_events_tests.rs"]
 mod events_tests;
 #[cfg(test)]
@@ -516,6 +593,9 @@ mod pending_tests;
 #[cfg(test)]
 #[path = "vault_release_tests.rs"]
 mod release_tests;
+#[cfg(test)]
+#[path = "vault_ops_snapshot_tests.rs"]
+mod snapshot_tests;
 #[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;

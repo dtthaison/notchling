@@ -70,20 +70,14 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
 pub fn parse_request_flags(
     args: &[String],
 ) -> Result<(VaultRequest, Option<PathBuf>, Flags), String> {
-    let lead = args.iter().take_while(|a| *a == "--json").count();
-    let args = &args[lead..];
-    let Some(name) = args.first().filter(|a| !a.starts_with("--")) else {
-        return Err(REQUEST_USAGE.to_string());
-    };
-    let mut request = VaultRequest {
-        name: name.clone(),
-        ..VaultRequest::default()
-    };
+    let mut name: Option<String> = None;
+    let mut request = VaultRequest::default();
     let mut socket = None;
     let mut flags = Flags::default();
-    let mut rest = args[1..].iter();
+    let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         match flag.as_str() {
+            "--help" | "-h" => return Err(REQUEST_USAGE.to_string()),
             "--json" => continue,
             "--wait" => {
                 flags.wait = true;
@@ -98,6 +92,13 @@ pub fn parse_request_flags(
                 continue;
             }
             _ => {}
+        }
+        if !flag.starts_with("--") {
+            if name.is_some() {
+                return Err(format!("Unexpected {flag}.\n{REQUEST_USAGE}"));
+            }
+            name = Some(flag.clone());
+            continue;
         }
         let value = rest.next().cloned();
         let seconds = |value: &Option<String>| -> Result<u64, String> {
@@ -116,9 +117,8 @@ pub fn parse_request_flags(
                 continue;
             }
             "--key" => {
-                flags.key = Some(
-                    value.ok_or_else(|| format!("--key needs a value.\n{REQUEST_USAGE}"))?,
-                );
+                flags.key =
+                    Some(value.ok_or_else(|| format!("--key needs a value.\n{REQUEST_USAGE}"))?);
                 continue;
             }
             _ => {}
@@ -144,6 +144,10 @@ pub fn parse_request_flags(
             None => return Err(REQUEST_USAGE.to_string()),
         }
     }
+    let Some(name) = name else {
+        return Err(REQUEST_USAGE.to_string());
+    };
+    request.name = name;
     if request
         .kind
         .as_deref()
@@ -348,6 +352,16 @@ pub fn secret_request(args: &[String]) -> i32 {
     let json = contract::wants_json(args);
     let (request, socket, flags) = match parse_request_flags(args) {
         Ok(p) => p,
+        Err(message)
+            if message == REQUEST_USAGE && args.iter().any(|a| a == "--help" || a == "-h") =>
+        {
+            if json {
+                println!("{}", contract::pretty(&json!({"usage": REQUEST_USAGE})));
+            } else {
+                println!("{REQUEST_USAGE}");
+            }
+            return contract::OK;
+        }
         Err(message) => return Failure::usage(message).report(json),
     };
     let mut body = serde_json::to_value(&request).unwrap_or(Value::Null);
@@ -382,19 +396,26 @@ pub fn secret_request(args: &[String]) -> i32 {
         .unwrap_or_default()
         .to_string();
     let end = std::time::Instant::now() + flags.timeout;
-    client.set_timeout(CALL_WAIT + Duration::from_millis(POLL_MS));
+    let ask = |left: Duration| {
+        let slice = contract::wait_slice(left, POLL_MS);
+        (
+            json!({"id": id, "waitMs": slice}),
+            CALL_WAIT + Duration::from_millis(slice),
+        )
+    };
     while flags.wait && crate::consent_cli::exit_of(state_of(&request)) == contract::PENDING {
-        let left = end.saturating_duration_since(std::time::Instant::now());
-        if left.is_zero() {
+        if std::time::Instant::now() >= end {
             break;
         }
-        let slice = POLL_MS.min(u64::try_from(left.as_millis()).unwrap_or(POLL_MS));
-        request = match contract::call(
+        request = match contract::call_through_restart(
             &mut client,
+            socket.as_deref(),
             ops::CONSENT_GET,
-            json!({"id": id, "waitMs": slice}),
+            &ask,
+            end,
         ) {
             Ok(reply) => reply,
+            Err(failure) if contract::lost(&failure) => break,
             Err(failure) => return failure.report(json),
         };
     }

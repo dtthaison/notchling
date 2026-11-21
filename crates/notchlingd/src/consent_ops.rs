@@ -5,18 +5,22 @@ use crate::inbox_ops::{InboxOps, Responder};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::consent::{
-    clean_reason, item, spec, Consent, ConsentStore, New, Opened, Refusal, State,
-    MAX_EXPIRY_MS, MIN_EXPIRY_MS,
+    clean_reason, item, spec, Consent, ConsentStore, New, Opened, Refusal, State, MAX_EXPIRY_MS,
+    MIN_EXPIRY_MS,
 };
 use notchling_engine::inbox::{ActionId, Item, State as ItemState};
 use notchling_events::kinds::choices::{Answerer, ConsentThen};
 use notchling_events::scope::{self, ConsentNote};
-use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{
+    bound_identity, ops, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
+#[cfg(test)]
+use std::sync::OnceLock;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -37,6 +41,7 @@ const OTHER_SESSION: &str = "Only the agent that asked can see this request.";
 const LOG_DOWN: &str = "the audit log can't be written";
 
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+#[cfg(test)]
 pub type Identify = Arc<dyn Fn(u32) -> AgentIdentity + Send + Sync>;
 
 pub trait Handler: Send + Sync {
@@ -54,6 +59,8 @@ pub trait Handler: Send + Sync {
     }
 
     fn ended(&self, _row: &Consent, _then: ConsentThen, _device: Option<&str>) {}
+
+    fn shape(&self, _row: &Consent, _view: &mut Value, _agent: bool) {}
 }
 
 pub struct Opening {
@@ -61,6 +68,7 @@ pub struct Opening {
     pub target: String,
     pub change: Value,
     pub facts: Value,
+    pub request: Value,
     pub reason: Option<String>,
     pub expires_in_ms: Option<i64>,
     pub key: Option<String>,
@@ -77,6 +85,7 @@ pub struct ConsentOps {
     room: Arc<dyn Room>,
     inbox: Option<Arc<InboxOps>>,
     events: Option<Events>,
+    #[cfg(test)]
     identify: OnceLock<Identify>,
     handlers: Mutex<HashMap<&'static str, Arc<dyn Handler>>>,
     clock: Clock,
@@ -138,6 +147,7 @@ impl ConsentOps {
             room,
             inbox,
             events,
+            #[cfg(test)]
             identify: OnceLock::new(),
             handlers: Mutex::new(HashMap::new()),
             clock,
@@ -156,10 +166,15 @@ impl ConsentOps {
         inbox: Arc<InboxOps>,
         events: Events,
     ) -> Arc<ConsentOps> {
-        let store = ConsentStore::open(data_dir).unwrap_or_else(|_| ConsentStore::in_memory_for_tests());
-        ConsentOps::new(Arc::new(store), room, Some(inbox), Some(events))
+        ConsentOps::new(
+            Arc::new(store_for(data_dir)),
+            room,
+            Some(inbox),
+            Some(events),
+        )
     }
 
+    #[cfg(test)]
     pub fn bind_identity(&self, identify: Identify) {
         let _ = self.identify.set(identify);
     }
@@ -172,15 +187,20 @@ impl ConsentOps {
         &self.store
     }
 
-    fn now(&self) -> i64 {
+    pub fn now(&self) -> i64 {
         (self.clock)()
     }
 
     pub fn who(&self, caller: &Caller) -> AgentIdentity {
-        match self.identify.get() {
-            Some(identify) => identify(caller.pid.unwrap_or(0)),
-            None => AgentIdentity::shell(),
+        if let Some(bound) = bound_identity() {
+            return bound;
         }
+        #[cfg(test)]
+        if let Some(identify) = self.identify.get() {
+            return identify(caller.pid.unwrap_or(0));
+        }
+        let _ = caller;
+        AgentIdentity::shell()
     }
 
     fn wake(&self) {
@@ -198,15 +218,15 @@ impl ConsentOps {
                 "Too many requests are waiting, or this one was just denied. Try again later.",
             )
             .with_data(json!({"reason": "busy", "retryAfterMs": retry_after_ms})),
-            Refusal::LongExpiry => ApiError::bad_request(
-                "That end time is longer than this caller may ask for.",
-            )
-            .with_reason("bad_value"),
-            Refusal::KeyReused => ApiError::bad_request(
-                "That key was used for a different request. Use a new key.",
-            )
-            .with_reason("key_reused"),
-            Refusal::Db(why) => failed(why),
+            Refusal::LongExpiry => {
+                ApiError::bad_request("That end time is longer than this caller may ask for.")
+                    .with_reason("bad_value")
+            }
+            Refusal::KeyReused => {
+                ApiError::bad_request("That key was used for a different request. Use a new key.")
+                    .with_reason("key_reused")
+            }
+            Refusal::Db(_) => failed("Requests can't be saved right now."),
         }
     }
 
@@ -214,8 +234,10 @@ impl ConsentOps {
         let spec = spec(kind).ok_or_else(|| ApiError::internal("no such kind"))?;
         let ms = asked.unwrap_or(spec.default_expiry_ms);
         if !(MIN_EXPIRY_MS..=spec.max_expiry_ms.min(MAX_EXPIRY_MS)).contains(&ms) {
-            return Err(ApiError::bad_request(notchling_engine::consent::rules::BAD_EXPIRY)
-                .with_reason("bad_value"));
+            return Err(
+                ApiError::bad_request(notchling_engine::consent::rules::BAD_EXPIRY)
+                    .with_reason("bad_value"),
+            );
         }
         Ok(ms)
     }
@@ -235,19 +257,17 @@ impl ConsentOps {
         let spec = spec(o.kind).ok_or_else(|| ApiError::internal("no such kind"))?;
         let expires_in_ms = Self::expiry(o.kind, o.expires_in_ms)?;
         let who = self.who(caller);
-        let started = caller
-            .pid
-            .and_then(|pid| crate::vault_caller::Processes::start_time(&crate::vault_caller::SystemProcesses, pid));
+        let started = caller.pid.and_then(|pid| {
+            crate::vault_caller::Processes::start_time(&crate::vault_caller::SystemProcesses, pid)
+        });
         let new = New {
             kind: o.kind.to_string(),
             target: o.target,
             change: o.change,
             facts: o.facts,
+            request: o.request,
             parts: None,
-            reason: o
-                .reason
-                .map(|r| clean_reason(&r))
-                .filter(|r| !r.is_empty()),
+            reason: o.reason.map(|r| clean_reason(&r)).filter(|r| !r.is_empty()),
             session: who.session.clone().filter(|_| who.verified),
             tool: who.tool.name().to_string(),
             verified: who.verified,
@@ -256,23 +276,37 @@ impl ConsentOps {
             organization: who.organization.clone(),
             pid: caller.pid.unwrap_or(0),
             pid_start: started,
-            idem_key: o.key.filter(|k| !k.is_empty()).map(|k| k.chars().take(64).collect()),
+            idem_key: o
+                .key
+                .filter(|k| !k.is_empty())
+                .map(|k| k.chars().take(64).collect()),
             answer_on: spec.answer_on,
             applied_by: spec.applied_by,
             expires_in_ms,
         };
         let opened = self.store.insert(&new, self.now()).map_err(Self::refusal)?;
         let row = opened.row().clone();
-        scope::note_consent(&row.id, ConsentNote::Pending);
+        self.note(&row);
         if let Opened::Fresh(_) = &opened {
             if !commit(self.events.as_ref(), &row, ConsentThen::Asked, self.now()) {
-                let _ = self.store.finish(&row.id, State::Withdrawn, None, self.now());
+                let _ = self
+                    .store
+                    .finish(&row.id, State::Withdrawn, None, self.now());
                 return Err(failed(LOG_DOWN));
             }
             self.raise(&row);
             self.wake();
         }
         Ok(opened)
+    }
+
+    pub fn note(&self, row: &Consent) {
+        let note = if row.state.closed() {
+            ConsentNote::Used
+        } else {
+            ConsentNote::Pending
+        };
+        scope::note_consent(&row.id, note);
     }
 
     fn raise(&self, row: &Consent) {
@@ -330,13 +364,14 @@ impl ConsentOps {
                 ));
             }
             if !row.answer_on.may_allow(by) {
-                return Err(forbidden(
-                    "Only the Mac may allow this.",
-                    "app_only",
-                ));
+                return Err(forbidden("Only the Mac may allow this.", "app_only"));
             }
         }
-        let to = if allow { State::Applying } else { State::Denied };
+        let to = if allow {
+            State::Applying
+        } else {
+            State::Denied
+        };
         let taken = self
             .store
             .answer(id, to, by, parts, self.now())
@@ -350,9 +385,9 @@ impl ConsentOps {
                 self.wake();
                 Ok(json!({"answered": true, "state": row.state.as_str(), "by": by}))
             }
-            notchling_engine::consent::Taken::Lost(row) => Ok(
-                json!({"answered": false, "state": row.state.as_str(), "by": row.by}),
-            ),
+            notchling_engine::consent::Taken::Lost(row) => {
+                Ok(json!({"answered": false, "state": row.state.as_str(), "by": row.by}))
+            }
             notchling_engine::consent::Taken::Gone => Err(failed(NO_SUCH)),
         }
     }
@@ -372,7 +407,7 @@ impl ConsentOps {
         if let Some(handler) = self.handler(&row.kind) {
             handler.ended(row, then, device.as_deref());
         }
-        if then == ConsentThen::Applied {
+        if matches!(then, ConsentThen::Applied | ConsentThen::Cancelled) {
             commit(self.events.as_ref(), row, then, self.now());
         } else {
             emit(self.events.as_ref(), row, then, self.now());
@@ -394,6 +429,10 @@ impl ConsentOps {
 
     fn apply(&self, row: Consent) {
         let now = self.now();
+        if now >= row.expires_ms {
+            self.end(&row, State::Withdrawn, None, ConsentThen::Withdrawn);
+            return;
+        }
         if !commit(self.events.as_ref(), &row, ConsentThen::Allowed, now) {
             self.end(&row, State::Failed, None, ConsentThen::Failed);
             return;
@@ -402,7 +441,7 @@ impl ConsentOps {
             self.end(&row, State::Failed, None, ConsentThen::Failed);
             return;
         };
-        if let Err(_why) = handler.recheck(&row) {
+        if handler.recheck(&row).is_err() || self.now() >= row.expires_ms {
             self.end(&row, State::Withdrawn, None, ConsentThen::Withdrawn);
             return;
         }
@@ -431,9 +470,7 @@ impl ConsentOps {
         kind: &str,
         target: &str,
     ) -> Result<Consent, ApiError> {
-        if caller.tier != Tier::App || caller.client != ClientKind::App {
-            return Err(forbidden("Only the Notchling app may use a request.", "app_only"));
-        }
+        Self::app_only(caller)?;
         let row = self
             .store
             .get(id)
@@ -448,15 +485,34 @@ impl ConsentOps {
         if row.applied_by != notchling_engine::consent::AppliedBy::App {
             return Err(forbidden("The daemon applies this one.", "needs_consent"));
         }
-        self.store
-            .used(id, "app", "mac", self.now())
+        let op_id = scope::current()
+            .op_id
+            .map(|op| op.as_str().to_string())
+            .unwrap_or_default();
+        let used = self
+            .store
+            .used(id, &op_id, "mac", self.now())
             .map_err(failed)?
             .ok_or_else(|| {
                 forbidden(
                     "That request is no longer waiting for your yes.",
                     "needs_consent",
                 )
-            })
+            })?;
+        scope::note_consent(&used.id, ConsentNote::Used);
+        Ok(used)
+    }
+
+    pub fn app_only(caller: &Caller) -> Result<(), ApiError> {
+        if caller.tier == Tier::App && caller.client == ClientKind::App {
+            Ok(())
+        } else {
+            Err(forbidden("Only the Notchling app may do this.", "app_only"))
+        }
+    }
+
+    pub fn withdraw_use(&self, row: &Consent) {
+        self.end(row, State::Withdrawn, None, ConsentThen::Withdrawn);
     }
 
     pub fn finish_use(&self, row: &Consent, outcome: Result<Value, String>) {
@@ -484,12 +540,16 @@ impl ConsentOps {
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| ApiError::bad_request(usage.to_string()))?;
+        self.row_of(caller, id)
+    }
+
+    pub fn row_of(&self, caller: &Caller, id: &str) -> Result<Consent, ApiError> {
         let row = self
             .store
             .get(id)
             .map_err(failed)?
             .ok_or_else(|| failed(NO_SUCH))?;
-        if caller.tier == Tier::Agent && !self.may_see(caller, &row) {
+        if Self::app_only(caller).is_err() && !self.may_see(caller, &row) {
             return Err(forbidden(OTHER_SESSION, "other_session"));
         }
         Ok(row)
@@ -524,7 +584,15 @@ impl ConsentOps {
             self.wait_for(&row.id, Duration::from_millis(wait))
                 .unwrap_or(row)
         };
-        Ok(view(&row))
+        Ok(self.project(&row, Self::app_only(caller).is_err()))
+    }
+
+    pub fn project(&self, row: &Consent, agent: bool) -> Value {
+        let mut out = view(row);
+        if let Some(handler) = self.handler(&row.kind) {
+            handler.shape(row, &mut out, agent);
+        }
+        out
     }
 
     fn mine(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -541,7 +609,7 @@ impl ConsentOps {
         let rows: Vec<Value> = rows
             .iter()
             .filter(|r| states.as_ref().is_none_or(|s| s.contains(&r.state)))
-            .map(view)
+            .map(|r| self.project(r, true))
             .collect();
         Ok(json!({"requests": rows}))
     }
@@ -562,14 +630,20 @@ impl ConsentOps {
         }
     }
 
-    fn list(&self) -> Result<Value, ApiError> {
+    fn list(&self, caller: &Caller) -> Result<Value, ApiError> {
+        Self::app_only(caller)?;
         let mut rows = self.store.all().map_err(failed)?;
         rows.sort_by_key(|r| (r.state.closed(), -r.created_ms));
-        let rows: Vec<Value> = rows.iter().take(200).map(view).collect();
+        let rows: Vec<Value> = rows
+            .iter()
+            .take(200)
+            .map(|r| self.project(r, false))
+            .collect();
         Ok(json!({"requests": rows}))
     }
 
-    fn answer(&self, args: &Value) -> Result<Value, ApiError> {
+    fn answer(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        Self::app_only(caller)?;
         let usage = "consent.answer takes {consentId, decision: \"allow\" | \"deny\", parts?}";
         let id = args
             .get("consentId")
@@ -583,17 +657,24 @@ impl ConsentOps {
         self.decide(id, allow, args.get("parts"), "mac", None)
     }
 
-    fn opened(&self, args: &Value) -> Result<Value, ApiError> {
+    fn opened(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        Self::app_only(caller)?;
         let id = args
             .get("consentId")
             .and_then(Value::as_str)
             .ok_or_else(|| ApiError::bad_request("consent.opened takes {consentId}"))?;
+        let was = self
+            .store
+            .get(id)
+            .map_err(failed)?
+            .ok_or_else(|| failed(NO_SUCH))?
+            .state;
         let row = self
             .store
             .open_sheet(id, self.now())
             .map_err(failed)?
             .ok_or_else(|| failed(NO_SUCH))?;
-        if row.state == State::Opened {
+        if row.state == State::Opened && was == State::Waiting {
             emit(self.events.as_ref(), &row, ConsentThen::Opened, self.now());
             self.wake();
         }
@@ -602,13 +683,16 @@ impl ConsentOps {
 
     pub fn load(&self) {
         let now = self.now();
-        let Ok((waiting, withdrawn)) = self.store.restart(now) else {
+        let Ok(restart) = self.store.restart(now) else {
             return;
         };
-        for row in &withdrawn {
+        for row in &restart.withdrawn {
             self.closed(row, ConsentThen::Withdrawn);
         }
-        for row in &waiting {
+        for row in &restart.expired {
+            self.closed(row, ConsentThen::Expired);
+        }
+        for row in &restart.waiting {
             emit(self.events.as_ref(), row, ConsentThen::Restored, now);
             self.raise(row);
         }
@@ -666,9 +750,26 @@ impl ConsentOps {
             .collect()
     }
 
+    pub fn pending_for(&self, caller: &Caller, kind: &str, target: &str) -> Vec<Consent> {
+        let rows = self.waiting_for(kind, target);
+        if Self::app_only(caller).is_ok() {
+            return rows;
+        }
+        let who = self.who(caller);
+        rows.into_iter()
+            .filter(|r| {
+                r.verified && who.verified && who.session.is_some() && who.session == r.session
+            })
+            .collect()
+    }
+
     pub fn app_attached(&self) -> bool {
         self.room.can_answer()
     }
+}
+
+pub fn store_for(data_dir: &Path) -> ConsentStore {
+    ConsentStore::open(data_dir).unwrap_or_else(|_| ConsentStore::unavailable())
 }
 
 struct Answers {
@@ -721,10 +822,18 @@ impl OpGroup for ConsentOps {
             ops::CONSENT_GET => self.get(caller, args),
             ops::CONSENT_MINE => self.mine(caller, args),
             ops::CONSENT_CANCEL => self.cancel(caller, args),
-            ops::CONSENT_LIST => self.list(),
-            ops::CONSENT_ANSWER => self.answer(args),
-            ops::CONSENT_OPENED => self.opened(args),
+            ops::CONSENT_LIST => self.list(caller),
+            ops::CONSENT_ANSWER => self.answer(caller, args),
+            ops::CONSENT_OPENED => self.opened(caller, args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }
 }
+
+#[cfg(test)]
+#[path = "consent_ops_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "consent_ops_review_tests.rs"]
+mod review_tests;

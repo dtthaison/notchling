@@ -391,3 +391,23 @@ fn failover_kinds_and_actions_use_their_wire_words_and_survive_a_save() {
         .iter()
         .all(|i| i.actions.len() == actions.len()));
 }
+
+#[test]
+fn a_kind_this_build_does_not_know_reads_as_a_notice_and_the_consent_kind_round_trips() {
+    assert_eq!(
+        serde_json::from_value::<Kind>(serde_json::json!("kind_from_a_newer_build")).unwrap(),
+        Kind::Notice
+    );
+    assert_eq!(
+        serde_json::to_value(Kind::Notice).unwrap(),
+        serde_json::json!("notice")
+    );
+    assert_eq!(
+        serde_json::to_value(Kind::Consent).unwrap(),
+        serde_json::json!("consent")
+    );
+    assert_eq!(
+        serde_json::from_value::<Kind>(serde_json::json!("consent")).unwrap(),
+        Kind::Consent
+    );
+}

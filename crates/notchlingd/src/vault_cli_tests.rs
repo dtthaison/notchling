@@ -38,6 +38,16 @@ fn request_parsing_keeps_newlines_and_checks_expiry() {
     assert!(parse_request(&args(&["gh", "--kind", "pin"])).is_err());
     assert!(parse_request(&args(&[])).is_err());
     assert!(parse_request(&args(&["--kind", "token"])).is_err());
+    let (before, _, flags) =
+        parse_request_flags(&args(&["--no-wait", "--kind", "token", "npm", "--dry-run"])).unwrap();
+    assert_eq!(before.name, "npm");
+    assert_eq!(before.kind.as_deref(), Some("token"));
+    assert!(!flags.wait && flags.dry_run);
+    assert_eq!(
+        parse_request(&args(&["--help"])).unwrap_err(),
+        REQUEST_USAGE
+    );
+    assert!(parse_request(&args(&["npm", "gh"])).is_err());
     assert!(parse_request(&args(&["gh", "--colour", "x"])).is_err());
     let (odd, _) = parse_request(&args(&["gh", "--note", "--not-a-flag"])).unwrap();
     assert_eq!(odd.note.as_deref(), Some("--not-a-flag"));
@@ -182,4 +192,14 @@ fn usage_names_all_three() {
     assert!(text.contains("notchling secret <name>"));
     assert!(text.contains("notchling secrets [url | host | words]"));
     assert!(text.contains("notchling secret-request <name>"));
+}
+
+#[test]
+fn asking_secret_request_for_help_succeeds_and_a_missing_name_does_not() {
+    assert_eq!(secret_request(&args(&["--help"])), contract::OK);
+    assert_eq!(secret_request(&args(&["-h", "--json"])), contract::OK);
+    assert_eq!(
+        secret_request(&args(&["--kind", "token"])),
+        contract::BAD_REQUEST
+    );
 }

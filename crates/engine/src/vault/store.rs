@@ -62,6 +62,7 @@ pub enum VaultError {
     Keychain(KeychainError),
     ItemUnreadable,
     NoSuchSecret(String),
+    Changed,
 }
 
 impl std::fmt::Display for VaultError {
@@ -72,6 +73,7 @@ impl std::fmt::Display for VaultError {
             VaultError::Keychain(e) => write!(f, "{e}"),
             VaultError::ItemUnreadable => f.write_str("The vault's Keychain item can't be read."),
             VaultError::NoSuchSecret(name) => write!(f, "There's no secret named {name}."),
+            VaultError::Changed => f.write_str("The secret changed since it was shown."),
         }
     }
 }
@@ -192,14 +194,28 @@ impl VaultStore {
         old: Option<&VaultEntry>,
         now: &str,
     ) -> Result<Saved, VaultError> {
+        self.save_checked(entry, value, old, now, &|_| true)
+    }
+
+    pub fn save_checked(
+        &self,
+        entry: &VaultEntry,
+        value: Option<VaultValue>,
+        old: Option<&VaultEntry>,
+        now: &str,
+        still: &dyn Fn(Option<&VaultEntry>) -> bool,
+    ) -> Result<Saved, VaultError> {
         let _held = self.lock();
         let generation = self.generation();
         let index = self.index.read()?;
+        let id = entry.id();
+        if !still(index.iter().find(|e| e.id() == id)) {
+            return Err(VaultError::Changed);
+        }
         if let Some(problem) = list::problem(entry, &index, old) {
             return Err(VaultError::Problem(problem));
         }
         let mut values = self.load(generation)?;
-        let id = entry.id();
         let old_id = old.map(VaultEntry::id);
         let stored = match value {
             Some(v) => Some(v),

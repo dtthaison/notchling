@@ -780,6 +780,39 @@ able to point a sandboxed-but-writable agent anywhere or pass Codex options:
   prompt that starts with `-` follows a `--`;
 - a prompt is at most 100 KB, and at most eight turns run at once.
 
+## `consent_ops.rs`
+
+The consent request ([design](superpowers/specs/2026-11-21-agents-first-design.md), Phase 1): an agent asks for the user's yes, the person answers on a card in the Inbox (on the Mac, or on a paired phone where the kind allows it), and the answer goes back to the command that waits. Rows live in the `consents` table in `notchling.db` (`engine/src/consent/`); `ConsentOps` (`consent_ops.rs`, `consent_wire.rs`, `consent_events.rs`) serves the ops below. A request is opened by the op that needs the yes, not by a `consent.*` op: `settings.set` on an `ask` key and `vault.request` take `consent: {reason?, key?, expiresInMs?}`, and their reply carries the request (the view below) with its id. The kinds today are `setting` (answered on the Mac or a phone, applied by the daemon) and `secret_request` (answered and applied on the Mac only). The `consent.*` ops are not behind the `acting` switch: they read or end a request that was already opened.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `consent.get` | agent | `{id, waitMs?}` | the request (below); `waitMs` (0 to 50000, default 0) holds the call until the request closes |
+| `consent.mine` | agent | `{states?: ["waiting", ...]}` | `{requests: [request, ...]}`: this session's requests |
+| `consent.cancel` | agent, acts | `{id}` | `{cancelled: true, state: "cancelled"}`, or `{cancelled: false, state}` when the request had already closed |
+| `consent.list` | app, quiet | `{}` | `{requests: [request, ...]}`: open ones first, then closed, newest first, at most 200 |
+| `consent.answer` | app (the Notchling app only) | `{consentId, decision: "allow" or "deny", parts?}` | `{answered: true, state, by: "mac"}`, or `{answered: false, state, by}` when another answer came first |
+| `consent.opened` | app (the Notchling app only) | `{consentId}` | `{state}`: `opened` when this was the first sight of a waiting request, else the state as it is |
+
+The request is `{id, kind, target, change, facts, parts?, partsAllowed?, state, answerOn, appliedBy, createdMs, expiresMs, answeredMs?, by?, usedMs?, session?, tool, verified, organization?, folder?, root?, scope: {once, session?, until}, result?, reason?}`. `state` is one of `waiting`, `opened` (the card or sheet was shown), `applying` (allowed, the write is running), `applied`, `failed`, `denied`, `expired`, `cancelled` (the agent withdrew it) or `withdrawn` (the daemon stopped first). `answerOn` is `mac` or `mac_or_phone`; `appliedBy` is `daemon` or `app`. The first answer wins: the store changes the row once, under its lock, and the Inbox item's responder only asks the store. The item is `consent:<id>:<raisedMs>`, its kind the request kind's own (`setting_change`, `secret_request`) or `consent`; a cluster peer is sent a `consent` item as a `notice`, so an older peer keeps taking the rest of the sync. A reply with `answered: false` says what happened to the request, never an error. A restart withdraws the requests that were `opened` or `applying`, expires the late ones and raises the `waiting` ones again.
+
+An agent sees a verified request only from the session that asked for it (`session`, as the kernel vouches for it); a request from a caller the daemon could not vouch for (`verified: false`) is visible to any agent. The app tier sees all. `consent.mine` is empty for a caller with no verified session. The `facts` are lines the card shows (words in `locales/en/consent.ftl`); the agent's `reason` is cut and never recorded in the Audit.
+
+Errors:
+
+- `bad_request` with the usage text when an argument is missing or of the wrong type (`consent.get takes {id, waitMs?}`, `consent.cancel takes {id}`, `consent.answer takes {consentId, decision: "allow" | "deny", parts?}`, `consent.opened takes {consentId}`). On the op that opens a request: reason `bad_value` for an end time outside 1 minute to 12 hours (15 minutes for a root caller), and `key_reused` when a `key` was used for a different request.
+- `failed` "No such request." for an id that is not (or no longer) there; `failed` "Requests can't be saved right now." when the store cannot be written; `failed` with reason `busy` and `retryAfterMs` when too many requests wait or the same one was just denied; `failed` "the audit log can't be written" when the request cannot be committed to the Audit first (nothing is opened).
+- `forbidden` with reason `other_session` ("Only the agent that asked can see this request.") for another session's verified request; `app_only` for `consent.list`, `consent.answer` and `consent.opened` from anything but the Notchling app, for an Allow of a request the Mac's app applies on its card, and for an Allow from a phone of a `mac`-only request; `needs_consent` when the app's use of a request finds it no longer waiting for the yes, meant for something else, or applied by the daemon.
+
+The `notchling` commands (`consent_cli.rs`). Exit codes: 0 the request was applied, 1 failed or withdrawn, 2 bad arguments, 3 daemon not running, 4 refused, 5 denied or cancelled, 6 still waiting, 124 expired.
+
+| Command | Op | Notes |
+| --- | --- | --- |
+| `notchling consent <id> [--wait] [--timeout <seconds>] [--json]` | `consent.get` | Without `--wait` it asks once. With it, it asks in slices of 25 s until the request closes or the timeout (default 900 s) passes, and survives a daemon restart. Exit 0 prints the request; any other exit reports a failure with reason `needs_consent`, `denied`, `cancelled`, `expired`, `withdrawn` or `failed`, and the request. |
+| `notchling consents [--json]` | `consent.mine` | One line per request: `id  state  kind target`. |
+| `notchling consent cancel <id> [--json]` | `consent.cancel` | Exit 1 with the request when it had already closed. |
+
+Every `consent.cancel` is an `agent.called` event, and each step of a request (`asked`, `opened`, `allowed`, `denied`, `expired`, `cancelled`, `withdrawn`, `applied`, `failed`, `restored`) an `agent.consent` event ([log-kinds](log-kinds.md)); the Audit write comes before the effect.
+
 ## `control_ops.rs`
 
 Session control (E11) as daemon ops: `engine::control`'s planners, run through the daemon's

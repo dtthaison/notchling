@@ -1,7 +1,7 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::cluster_failover_setting::{parse, FailoverSink, KEY as FAILOVER_KEY};
 use crate::consent_ops::{options, ConsentOps, Handler, Opening};
-use crate::consent_wire::{ask_message, view};
+use crate::consent_wire::ask_message;
 use crate::contract::Failure;
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
@@ -343,7 +343,7 @@ impl SettingsOps {
         let pending: Vec<Value> = self
             .consent
             .as_ref()
-            .map(|c| c.waiting_for(SETTING, spec.name))
+            .map(|c| c.pending_for(caller, SETTING, spec.name))
             .unwrap_or_default()
             .iter()
             .map(|row| json!({"id": row.id, "value": row.change.get("after")}))
@@ -496,12 +496,14 @@ impl SettingsOps {
 
     fn opening(spec: &'static KeySpec, value: &Value, before: &Value, args: &Value) -> Opening {
         let (reason, expires_in_ms, key) = options(args);
-        let text = matches!(spec.kind_name(), "string" | "list" | "object" | "json");
+        let text = spec.allowed.is_empty()
+            && matches!(spec.kind_name(), "string" | "list" | "object" | "json");
         Opening {
             kind: SETTING,
             target: spec.name.to_string(),
             change: json!({"key": spec.name, "title": spec.shown_title(), "before": before,
                            "after": value, "text": text}),
+            request: json!({"op": ops::SETTINGS_SET, "key": spec.name, "value": value}),
             facts: json!([{"line": "consent-setting-change",
                            "args": {"key": spec.name, "title": spec.shown_title()}}]),
             reason,
@@ -554,10 +556,11 @@ impl SettingsOps {
             scope::mark_recorded();
         }
         let now = consent.wait_for(&row.id, wait).unwrap_or(row);
-        Ok(ask_view(&now))
+        consent.note(&now);
+        Ok(ask_view(consent, &now))
     }
 
-    fn asked(&self, args: &Value) -> Result<Value, ApiError> {
+    fn asked(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
         let id = args
             .get("id")
             .and_then(Value::as_str)
@@ -571,16 +574,25 @@ impl SettingsOps {
             .consent
             .as_ref()
             .ok_or_else(|| ApiError::internal("settings has no consent ops"))?;
+        let gone = || failed("No such ask: it may have ended over a week ago.");
+        let seen = consent.row_of(caller, id).map_err(|e| match e.code {
+            ErrorCode::Forbidden => e,
+            _ => gone(),
+        })?;
+        if seen.kind != SETTING {
+            return Err(gone());
+        }
         let row = consent
             .wait_for(id, Duration::from_secs(wait))
-            .ok_or_else(|| failed("No such ask: it may have ended over a week ago."))?;
-        Ok(ask_view(&row))
+            .ok_or_else(gone)?;
+        Ok(ask_view(consent, &row))
     }
 }
 
-fn ask_view(row: &Consent) -> Value {
+fn ask_view(consent: &ConsentOps, row: &Consent) -> Value {
     json!({"id": row.id, "key": row.target, "value": row.change.get("after"),
-           "state": row.state.as_str(), "message": ask_message(row), "request": view(row)})
+           "state": row.state.as_str(), "message": ask_message(row),
+           "request": consent.project(row, true)})
 }
 
 pub fn unknown(key: &str) -> String {
@@ -622,7 +634,7 @@ impl OpGroup for SettingsOps {
             ops::SETTINGS_LIST => Ok(self.list(caller)),
             ops::SETTINGS_GET => self.get(caller, args),
             ops::SETTINGS_SET => self.set(caller, args),
-            ops::SETTINGS_ASKED => self.asked(args),
+            ops::SETTINGS_ASKED => self.asked(caller, args),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
     }
@@ -635,3 +647,7 @@ impl OpGroup for SettingsOps {
 #[cfg(test)]
 #[path = "settings_ops_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_ops_scope_tests.rs"]
+mod scope_tests;

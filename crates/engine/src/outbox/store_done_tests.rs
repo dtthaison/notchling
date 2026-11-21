@@ -136,7 +136,7 @@ fn a_database_from_before_the_count_gets_the_column_and_keeps_its_rows() {
         .unwrap()
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 }
 
 #[test]

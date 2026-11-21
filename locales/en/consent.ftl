@@ -41,3 +41,11 @@ consent-notch-deny = Deny
 
 # Line under the Deny option of the notch's permission card.
 consent-notch-deny-detail = { -brand-claude } tries something else
+
+## The cards that ask the user's yes for an agent's request
+
+# What a card asks when an agent wants a setting changed. $title is the setting's name as Settings shows it.
+consent-setting-change = Change { $title }
+
+# What a card asks when an agent wants a secret saved in the Vault, new or replacing one of the same name. $name is the secret's name.
+consent-secret-request = Save the secret { $name } in the Vault

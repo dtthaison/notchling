@@ -20,10 +20,13 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling cost undo <claude|codex|agy> [--json]` | `cost.setup.undo` (app, acts) | none | 0 1 2 3 4 |
 | `notchling secrets [words] [--json] [--socket <path>]` | `vault.find` (agent) | none | 0 1 2 3 4 |
 | `notchling secret [--json] <name>[,<name>…] -- <command> [args…]` | `vault.use` (agent, acts) | by_entry | 0 125 126 127 |
-| `notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD --reason] [--json]` | `vault.request` (agent, acts) | request | 0 1 2 3 4 5 6 7 124 |
+| `notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]` | `vault.request` (agent, acts) | request | 0 1 2 3 4 5 6 7 124 |
 | `notchling settings list [--json]` | `settings.list` (agent) | none | 0 1 2 3 4 |
 | `notchling settings get <key> [--json]` | `settings.get` (agent) | none | 0 1 2 3 4 |
-| `notchling settings set <key> <value> [--json]` | `settings.set` (agent, acts), `settings.asked` (agent, acts) | by_key_class | 0 1 2 3 4 5 6 7 124 |
+| `notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]` | `settings.set` (agent, acts), `settings.asked` (agent, acts) | by_key_class | 0 1 2 3 4 5 6 7 124 |
+| `notchling consent <id> [--wait] [--timeout <seconds>] [--json]` | `consent.get` (agent) | none | 0 1 2 3 4 5 6 124 |
+| `notchling consents [--json]` | `consent.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling consent cancel <id> [--json]` | `consent.cancel` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling session reload <id|self> [--after-turn] [--json]` | `session.reload` (agent, acts) | own_free | 0 1 2 3 4 |
 | `notchling cluster status [--json]` | `cluster.status` (agent) | none | 0 1 2 3 4 |
 | `notchling cluster join --token-stdin [--json]` | `cluster.join` (agent, acts) | none | 0 1 2 3 4 |
@@ -139,6 +142,7 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `bridge.pair.answer` | Pair a phone | A paired phone answers cards: an agent could approve itself. |
 | `bridge.revoke` | Revoke a phone | A paired phone answers cards: an agent could approve itself. |
 | `inbox.answer` | Answer an Inbox item | The card is the user's yes. |
+| `consent.answer` | Answer a consent card | The card is the user's yes. |
 | `ask.dismiss` | Dismiss a question | The card is the user's yes. |
 | `vault.approval.answer` | Answer a secret approval | The card is the user's yes. |
 | `vault.list` | List the Vault | Values never reach an agent. |
@@ -161,6 +165,8 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | --- | --- |
 | `hello` | protocol |
 | `ask.list` | app_ui |
+| `consent.list` | app_ui |
+| `consent.opened` | app_ui |
 | `hook.request` | hook |
 | `session.question` | hook |
 | `agy.sidecar.take` | hook |
