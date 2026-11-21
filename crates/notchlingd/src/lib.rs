@@ -35,11 +35,11 @@ pub mod bridge_cluster;
 pub mod bridge_machines;
 pub mod bridge_ops;
 pub mod caller_session;
+pub mod capabilities_ops;
 pub mod catalog_ops;
 pub mod chrome_ops;
 pub mod cli;
 pub mod clients;
-pub mod capabilities_ops;
 pub mod cluster_blobs;
 pub mod cluster_cli;
 pub mod cluster_dispatch;
@@ -508,9 +508,7 @@ pub fn run(command: Command) -> i32 {
             0
         }
         Command::Help { json } => help_cli::help(json, &mut std::io::stdout()),
-        Command::Capabilities { json, socket } => {
-            help_cli::capabilities(json, socket.as_deref())
-        }
+        Command::Capabilities { json, socket } => help_cli::capabilities(json, socket.as_deref()),
         Command::Daemon { socket } => run_daemon(socket.as_deref()),
         Command::Status { json, socket } => match client_layout(socket.as_deref(), json) {
             Ok(l) => clients::status(&l.socket, json),

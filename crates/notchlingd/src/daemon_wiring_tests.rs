@@ -1,7 +1,7 @@
 use super::*;
 use crate::acting_ops_tests::FakeRoom;
 use crate::switches::{ACCOUNTS, VAULT};
-use notchling_local_api::{ops, ClientKind};
+use notchling_local_api::{ops, ClientKind, ErrorCode};
 use serde_json::json;
 
 struct Root(PathBuf);

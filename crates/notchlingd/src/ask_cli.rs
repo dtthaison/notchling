@@ -1,5 +1,5 @@
-use notchling_engine::ask::{DEADLINE_MARGIN_MS, WAIT_DEFAULT_S, WAIT_MS_MAX};
 use crate::contract::{self, Failure};
+use notchling_engine::ask::{DEADLINE_MARGIN_MS, WAIT_DEFAULT_S, WAIT_MS_MAX};
 use notchling_local_api::{ops, ApiError};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -183,7 +183,11 @@ fn open_question(
             Err(LinkError::Down) => {
                 let left = OPEN_RETRY_MS - ((env.now)() - started);
                 if left <= 0 {
-                    return Err(stop(env, json, Failure::not_running().with_op(ops::ASK_OPEN)));
+                    return Err(stop(
+                        env,
+                        json,
+                        Failure::not_running().with_op(ops::ASK_OPEN),
+                    ));
                 }
                 (env.sleep)(backoff.next_ms().min(left as u64));
             }

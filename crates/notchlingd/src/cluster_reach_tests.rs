@@ -1,6 +1,6 @@
 use crate::cluster_cli::{parse, Args, Sub};
-use crate::contract::{BAD_REQUEST, FAILED};
 use crate::cluster_reach::{check_addr, reach, reach_with, report, run_in, Outcome, TIMEOUT};
+use crate::contract::{BAD_REQUEST, FAILED};
 use std::net::{Ipv4Addr, TcpListener};
 use std::time::Duration;
 
@@ -110,7 +110,10 @@ fn times_out_in_three_seconds() {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     assert_eq!(report(LOOP, 9, &outcome, &mut out, &mut err), FAILED);
     assert!(out.is_empty());
-    assert_eq!(String::from_utf8(err).unwrap(), "no answer in 3 s (failed)\n");
+    assert_eq!(
+        String::from_utf8(err).unwrap(),
+        "no answer in 3 s (failed)\n"
+    );
     let other = reach_with(LOOP, 9, TIMEOUT, |_, _| {
         Err(std::io::Error::other("network is unreachable"))
     });

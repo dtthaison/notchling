@@ -118,6 +118,12 @@ fn applying_as_a_non_app_says_who_applies() {
         reading.line(),
         "only the Notchling app may do this (refused)"
     );
-    assert_eq!(failure_of(ClientError::Timeout, ops::COST_SETUP_PLAN, false).exit, 3);
-    assert_eq!(failure_of(api(ErrorCode::UnknownOp, "x"), ops::COST_SETUP_PLAN, false).reason, "old_daemon");
+    assert_eq!(
+        failure_of(ClientError::Timeout, ops::COST_SETUP_PLAN, false).exit,
+        3
+    );
+    assert_eq!(
+        failure_of(api(ErrorCode::UnknownOp, "x"), ops::COST_SETUP_PLAN, false).reason,
+        "old_daemon"
+    );
 }

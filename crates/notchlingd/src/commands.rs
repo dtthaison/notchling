@@ -491,7 +491,11 @@ const SCOPE: &str = "It changes what an agent may see.";
 pub const USER_ONLY: &[UserOnly] = &[
     only("session.permission", "Answer a permission prompt", PROMPT),
     only("agy.permission", "Answer a permission prompt", PROMPT),
-    only("install.remove", "Remove hooks and skills", "An agent would remove the check on itself."),
+    only(
+        "install.remove",
+        "Remove hooks and skills",
+        "An agent would remove the check on itself.",
+    ),
     only("log.audit.delete", "Delete the Audit", TRAIL),
     only("log.chain.start", "Start a new log chain", TRAIL),
     only("bridge.pair.begin", "Pair a phone", PHONE),
@@ -511,7 +515,11 @@ pub const USER_ONLY: &[UserOnly] = &[
     only("organizations.create", "Create an organization", SCOPE),
     only("organizations.rename", "Rename an organization", SCOPE),
     only("organizations.color.set", "Colour an organization", SCOPE),
-    only("organizations.folders.set", "Set an organization's folders", SCOPE),
+    only(
+        "organizations.folders.set",
+        "Set an organization's folders",
+        SCOPE,
+    ),
     only("organizations.delete", "Delete an organization", SCOPE),
 ];
 

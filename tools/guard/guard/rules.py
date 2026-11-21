@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
-from guard import capability, claudemd, featuremap, gate, lint, pins, rulesets, weakening
+from guard import agentpaths, capability, claudemd, featuremap, gate, lint, pins, rulesets, weakening
 from guard.changes import Change, diff
 from guard.zones import Zones
 
@@ -161,6 +161,25 @@ def _guard_provider_gaps() -> bool:
     return any(r.startswith("GUARD-PROVIDER-GAPS:") for r in grew)
 
 
+def _guard_agent_path() -> bool:
+    wire = "pub mod ops {\n    pub const A: &str = \"a.one\";\n    pub const B: &str = \"a.two\";\n}\n"
+    golden = json.dumps({"commands": [{"command": "a", "ops": [{"op": "a.one"}]}],
+                         "planned": [], "userOnly": [], "internal": []})
+    problems = agentpaths.check_ops(wire, golden)
+    with _tmp() as root:
+        planned = json.dumps({"commands": [], "planned": [], "userOnly": [], "internal": []})
+        base = _repo(root, {str(agentpaths.GOLDEN): planned})
+        grown = json.dumps({"commands": [], "planned": [{"op": "a.two", "feature": "f", "phase": 2}],
+                            "userOnly": [], "internal": []})
+        write(root, {str(agentpaths.GOLDEN): grown})
+        _git(root, "commit", "-q", "-am", "grow")
+        grew = gate.agent_path_reasons(root, base, _git(root, "rev-parse", "HEAD"))
+    spec = agentpaths.check_spec("2026-11-22-x-design.md", "# x\n")
+    return (len(problems) == 1 and "a.two" in problems[0] and problems[0].startswith(agentpaths.RULE)
+            and any(r.startswith(agentpaths.RULE) for r in grew)
+            and len(spec) == 1 and spec[0].startswith(agentpaths.RULE))
+
+
 def _guard_claude_md() -> bool:
     with _tmp() as root:
         _repo(root, {"CLAUDE.md": "@AGENTS.md\n", "crates/app/CLAUDE.md": "a second source\n"})
@@ -272,6 +291,7 @@ REGISTRY.update({
     "GUARD-RULESETS": _guard_rulesets,
     "GUARD-BASELINE": _guard_baseline,
     "GUARD-PROVIDER-GAPS": _guard_provider_gaps,
+    "GUARD-AGENT-PATH": _guard_agent_path,
     "GUARD-CLAUDE-MD": _guard_claude_md,
     "GUARD-FEATURE-MAP": _guard_feature_map,
     "GUARD-RULES": _guard_rules,

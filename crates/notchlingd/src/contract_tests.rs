@@ -27,8 +27,14 @@ fn a_reason_from_the_daemon_sets_the_exit_and_the_fields() {
         "ask": {"command": "notchling switch on cluster", "kind": "switch"},
         "never": false, "phase": 4, "retryAfterMs": 500,
     });
-    let f = Failure::from_client(Some("cluster.dispatch"), api(ErrorCode::Forbidden, Some(data)));
-    assert_eq!((f.exit, f.code.as_str(), f.reason.as_str()), (4, "forbidden", "switch_off"));
+    let f = Failure::from_client(
+        Some("cluster.dispatch"),
+        api(ErrorCode::Forbidden, Some(data)),
+    );
+    assert_eq!(
+        (f.exit, f.code.as_str(), f.reason.as_str()),
+        (4, "forbidden", "switch_off")
+    );
     assert_eq!(f.switch.as_deref(), Some("cluster"));
     assert_eq!(f.ask.as_ref().unwrap()["kind"], "switch");
     assert_eq!((f.phase, f.retry_after_ms), (Some(4), Some(500)));
@@ -61,12 +67,27 @@ fn each_wire_code_without_a_reason_has_a_default() {
 
 #[test]
 fn the_persons_answer_and_the_clock_have_their_own_codes() {
-    let denied = Failure::from_client(None, api(ErrorCode::NeedsApproval, Some(json!({"reason": "denied"}))));
+    let denied = Failure::from_client(
+        None,
+        api(ErrorCode::NeedsApproval, Some(json!({"reason": "denied"}))),
+    );
     assert_eq!((denied.exit, denied.code.as_str()), (5, "denied"));
-    let late = Failure::from_client(None, api(ErrorCode::Failed, Some(json!({"reason": "expired"}))));
+    let late = Failure::from_client(
+        None,
+        api(ErrorCode::Failed, Some(json!({"reason": "expired"}))),
+    );
     assert_eq!((late.exit, late.code.as_str()), (124, "expired"));
-    let busy = Failure::from_client(None, api(ErrorCode::Failed, Some(json!({"reason": "busy", "retryAfterMs": 9}))));
-    assert_eq!((busy.exit, busy.code.as_str(), busy.retry_after_ms), (7, "busy", Some(9)));
+    let busy = Failure::from_client(
+        None,
+        api(
+            ErrorCode::Failed,
+            Some(json!({"reason": "busy", "retryAfterMs": 9})),
+        ),
+    );
+    assert_eq!(
+        (busy.exit, busy.code.as_str(), busy.retry_after_ms),
+        (7, "busy", Some(9))
+    );
 }
 
 #[test]
@@ -81,7 +102,10 @@ fn trouble_reaching_the_daemon_is_exit_three() {
         let f = Failure::from_client(None, error);
         assert_eq!((f.exit, f.reason.as_str()), (3, reason));
     }
-    assert_eq!(Failure::from_client(None, ClientError::Protocol("q".into())).exit, 1);
+    assert_eq!(
+        Failure::from_client(None, ClientError::Protocol("q".into())).exit,
+        1
+    );
 }
 
 #[test]
@@ -104,7 +128,9 @@ fn json_goes_to_stdout_only_and_text_to_stderr_only() {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     assert_eq!(f.emit(false, &mut out, &mut err), 3);
     assert!(out.is_empty());
-    assert!(String::from_utf8(err).unwrap().ends_with("then try again. (not_running)\n"));
+    assert!(String::from_utf8(err)
+        .unwrap()
+        .ends_with("then try again. (not_running)\n"));
 }
 
 #[test]

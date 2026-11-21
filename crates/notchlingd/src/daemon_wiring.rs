@@ -63,7 +63,7 @@ use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
 use notchling_events::{Emit, Salt};
 use notchling_local_api::{
-    ops, topics, ApiError, Caller, ClientKind, ErrorCode, Handler, OpHome, OpSpec, Tier,
+    ops, topics, ApiError, Caller, ClientKind, Handler, OpHome, OpSpec, Tier,
 };
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};

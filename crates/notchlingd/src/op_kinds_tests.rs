@@ -1,11 +1,12 @@
 use crate::acting_ops_tests::FakeRoom;
+use crate::commands::{COMMANDS, INTERNAL, PLANNED, USER_ONLY};
 use crate::daemon::FirstScan;
 use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
 use crate::op_kinds::{home, known_ops, Home, HOMES};
 use crate::quiet_ops::QUIET_READS;
 use notchling_events::registry;
-use notchling_local_api::{ops, Handler, OpHome, OpSpec};
+use notchling_local_api::{ops, Handler, OpHome, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -312,4 +313,55 @@ fn a_quiet_read_poll_that_syncs_is_recorded_when_it_asks_for_the_sync() {
     assert!(!ops.loud("lanes.list", &json!({"sync": true})));
     assert!(!ops.loud("bridge.status", &Value::Null));
     wired.close();
+}
+
+const SERVED_ELSEWHERE: [&str; 6] = [
+    ops::LOG_CHAIN_START,
+    ops::HELLO,
+    ops::DAEMON_STATUS,
+    ops::EVENTS_SUBSCRIBE,
+    ops::LOG_VERIFY,
+    ops::LOG_AUDIT_DELETE,
+];
+
+#[test]
+fn the_registry_and_the_tiers_agree() {
+    let (_root, wired, ops) = rig("tiers");
+    let mut wrong: Vec<String> = Vec::new();
+    let mut check = |op: &str, want: Option<Tier>, what: &str| {
+        let Some(spec) = ops.spec(op) else {
+            if !SERVED_ELSEWHERE.contains(&op) {
+                wrong.push(format!("{op} ({what}) has no spec"));
+            }
+            return;
+        };
+        if want.is_some_and(|tier| spec.tier != tier) {
+            wrong.push(format!("{op} ({what}) is {:?}", spec.tier));
+        }
+    };
+    for row in COMMANDS {
+        for used in row.ops {
+            let want = if used.tier == "app" {
+                Tier::App
+            } else {
+                Tier::Agent
+            };
+            check(used.op, Some(want), &format!("command {}", row.command));
+        }
+    }
+    for user in USER_ONLY {
+        check(user.op, Some(Tier::App), "user only");
+    }
+    for planned in PLANNED {
+        check(planned.op, None, "planned");
+    }
+    for internal in INTERNAL {
+        let want = match internal.why {
+            "app_ui" => Some(Tier::App),
+            _ => None,
+        };
+        check(internal.op, want, internal.why);
+    }
+    wired.close();
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }

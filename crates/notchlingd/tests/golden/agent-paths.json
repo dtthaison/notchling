@@ -1,0 +1,1395 @@
+{
+  "commands": [
+    {
+      "command": "status",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        3
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "daemon.status",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "the daemon's version, pid, uptime and clients",
+      "usage": "notchling status [--json] [--socket <path>]",
+      "waits": false
+    },
+    {
+      "command": "sessions",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        3
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "sessions.list",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "the sessions the daemon sees",
+      "usage": "notchling sessions [--json] [--socket <path>]",
+      "waits": false
+    },
+    {
+      "command": "providers",
+      "consent": "none",
+      "exits": [
+        0,
+        1
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [],
+      "skill": null,
+      "summary": "what Notchling can do for each tool: native, fallback, not applicable, gap",
+      "usage": "notchling providers [--json]",
+      "waits": false
+    },
+    {
+      "command": "pages",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "pages.list",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-pages",
+      "summary": "the saved Artifact pages (id, title, account), newest first",
+      "usage": "notchling pages [words] [--json] [--socket <path>]",
+      "waits": false
+    },
+    {
+      "command": "page",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "pages.find",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-pages",
+      "summary": "where a saved page is, and who can republish it",
+      "usage": "notchling page <link|id|words> [--json] [--socket <path>]",
+      "waits": false
+    },
+    {
+      "command": "delegate",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        124
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [],
+      "skill": "notchling-delegate",
+      "summary": "hand a job to another tool and wait (read-only unless --write)",
+      "usage": "notchling delegate <codex|agy> [--model --effort --folder --out --write --session --timeout --json] -- <prompt>",
+      "waits": false
+    },
+    {
+      "command": "delegate-models",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [],
+      "skill": "notchling-delegate",
+      "summary": "the models and efforts each tool offers, and the pick for a role",
+      "usage": "notchling delegate-models [codex|agy] [--for <role>] [--json]",
+      "waits": false
+    },
+    {
+      "command": "models",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "models.check",
+          "tier": "agent"
+        },
+        {
+          "acts": true,
+          "op": "models.update",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-models",
+      "summary": "read each tool's models and efforts; update writes Notchling's copy",
+      "usage": "notchling models [check|update] [--json] [--no-skills] [--force]",
+      "waits": false
+    },
+    {
+      "command": "cost report",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "cost.report",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "what your agents spent over the last N days and what to change",
+      "usage": "notchling cost report [--days N] [--plan api|subscription|auto] [--json]",
+      "waits": false
+    },
+    {
+      "command": "cost setup",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "cost.setup.plan",
+          "tier": "agent"
+        },
+        {
+          "acts": true,
+          "op": "cost.setup.apply",
+          "tier": "app"
+        }
+      ],
+      "skill": null,
+      "summary": "plan the Cost Profile's files and show every diff; --apply is the app's",
+      "usage": "notchling cost setup [--apply] [--consent a,b] [--json]",
+      "waits": false
+    },
+    {
+      "command": "cost check",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "cost.setup.check",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "which of those files drifted since Notchling wrote them",
+      "usage": "notchling cost check [--json]",
+      "waits": false
+    },
+    {
+      "command": "cost undo",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "cost.setup.undo",
+          "tier": "app"
+        }
+      ],
+      "skill": null,
+      "summary": "put one tool's files back from their backups (the app's)",
+      "usage": "notchling cost undo <claude|codex|agy> [--json]",
+      "waits": false
+    },
+    {
+      "command": "secrets",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "vault.find",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-vault",
+      "summary": "the saved secrets that fit a URL, host or words (never values)",
+      "usage": "notchling secrets [words] [--json] [--socket <path>]",
+      "waits": false
+    },
+    {
+      "command": "secret",
+      "consent": "by_entry",
+      "exits": [
+        0,
+        125,
+        126,
+        127
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "vault.use",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-vault",
+      "summary": "run a command with secrets, its output hidden; exits 125 when it stops before the command",
+      "usage": "notchling secret [--json] <name>[,<name>…] -- <command> [args…]",
+      "waits": false
+    },
+    {
+      "command": "secret-request",
+      "consent": "request",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        124
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "vault.request",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-vault",
+      "summary": "ask the user to add or update a secret, and wait",
+      "usage": "notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD --reason] [--json]",
+      "waits": true
+    },
+    {
+      "command": "settings list",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "settings.list",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-settings",
+      "summary": "every setting: its key, value, and whether an agent may change it",
+      "usage": "notchling settings list [--json]",
+      "waits": false
+    },
+    {
+      "command": "settings get",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "settings.get",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-settings",
+      "summary": "one setting",
+      "usage": "notchling settings get <key> [--json]",
+      "waits": false
+    },
+    {
+      "command": "settings set",
+      "consent": "by_key_class",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        124
+      ],
+      "idempotent": true,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "settings.set",
+          "tier": "agent"
+        },
+        {
+          "acts": true,
+          "op": "settings.asked",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-settings",
+      "summary": "change a setting; an Ask key waits for the user's yes in the Inbox",
+      "usage": "notchling settings set <key> <value> [--json]",
+      "waits": true
+    },
+    {
+      "command": "session reload",
+      "consent": "own_free",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "session.reload",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "restart a session's process with the same conversation, to pick up new MCP servers, settings, skills and hooks",
+      "usage": "notchling session reload <id|self> [--after-turn] [--json]",
+      "waits": false
+    },
+    {
+      "command": "cluster status",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "cluster.status",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "this machine's cluster and its members",
+      "usage": "notchling cluster status [--json]",
+      "waits": false
+    },
+    {
+      "command": "cluster join",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "cluster.join",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "join the cluster whose token is on stdin",
+      "usage": "notchling cluster join --token-stdin [--json]",
+      "waits": false
+    },
+    {
+      "command": "cluster reach",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2
+      ],
+      "idempotent": false,
+      "json": false,
+      "ops": [],
+      "skill": null,
+      "summary": "check that a Tailscale address answers on a port",
+      "usage": "notchling cluster reach <addr> <port>",
+      "waits": false
+    },
+    {
+      "command": "ask",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        124
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "ask.open",
+          "tier": "agent"
+        },
+        {
+          "acts": false,
+          "op": "ask.wait",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-ask",
+      "summary": "ask the person a question and wait for the answer",
+      "usage": "notchling ask [--choice <text>]... [--main-may-answer] [--wait] [--timeout <seconds>] [--json] -- <question>",
+      "waits": true
+    },
+    {
+      "command": "asks",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "ask.mine",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-ask",
+      "summary": "the open questions you may answer; --wait blocks until there is one",
+      "usage": "notchling asks [--wait] [--json]",
+      "waits": false
+    },
+    {
+      "command": "answer",
+      "consent": "own_free",
+      "exits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": true,
+          "op": "ask.answer",
+          "tier": "agent"
+        }
+      ],
+      "skill": "notchling-ask",
+      "summary": "answer a question you may answer",
+      "usage": "notchling answer <id> (--choice <n> | -- <text>) [--json]",
+      "waits": false
+    },
+    {
+      "command": "help",
+      "consent": "none",
+      "exits": [
+        0
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [],
+      "skill": null,
+      "summary": "every command; --json for agents",
+      "usage": "notchling help [--json]",
+      "waits": false
+    },
+    {
+      "command": "capabilities",
+      "consent": "none",
+      "exits": [
+        0,
+        1,
+        3
+      ],
+      "idempotent": false,
+      "json": true,
+      "ops": [
+        {
+          "acts": false,
+          "op": "daemon.capabilities",
+          "tier": "agent"
+        }
+      ],
+      "skill": null,
+      "summary": "what this caller may do now, and why not",
+      "usage": "notchling capabilities [--json] [--socket <path>]",
+      "waits": false
+    }
+  ],
+  "exitCodes": [
+    {
+      "code": 0,
+      "meaning": "Done: applied, answered, allowed and applied, or read.",
+      "name": "ok"
+    },
+    {
+      "code": 1,
+      "meaning": "Notchling tried and it didn't work, or the request was withdrawn.",
+      "name": "failed"
+    },
+    {
+      "code": 2,
+      "meaning": "The command line or a value is wrong; nothing changed.",
+      "name": "bad_request"
+    },
+    {
+      "code": 3,
+      "meaning": "No daemon, no answer, a socket Notchling doesn't trust, or a daemon older than this command.",
+      "name": "not_running"
+    },
+    {
+      "code": 4,
+      "meaning": "Not allowed: a switch is off, user-only, another session's, another organization's.",
+      "name": "refused"
+    },
+    {
+      "code": 5,
+      "meaning": "The person said no, dismissed or cancelled.",
+      "name": "denied"
+    },
+    {
+      "code": 6,
+      "meaning": "The request is saved and still waits; its id is in the output.",
+      "name": "pending"
+    },
+    {
+      "code": 7,
+      "meaning": "A limit was reached.",
+      "name": "busy"
+    },
+    {
+      "code": 124,
+      "meaning": "No answer in time; the request is closed.",
+      "name": "expired"
+    },
+    {
+      "code": 125,
+      "meaning": "secret only: Notchling stopped before running the command.",
+      "name": "stopped"
+    }
+  ],
+  "internal": [
+    {
+      "op": "hello",
+      "why": "protocol"
+    },
+    {
+      "op": "ask.list",
+      "why": "app_ui"
+    },
+    {
+      "op": "hook.request",
+      "why": "hook"
+    },
+    {
+      "op": "session.question",
+      "why": "hook"
+    },
+    {
+      "op": "agy.sidecar.take",
+      "why": "hook"
+    },
+    {
+      "op": "agy.sidecar.report",
+      "why": "hook"
+    },
+    {
+      "op": "agy.sidecar.status",
+      "why": "hook"
+    },
+    {
+      "op": "agy.hook",
+      "why": "hook"
+    },
+    {
+      "op": "vault.request.cancel",
+      "why": "app_ui"
+    },
+    {
+      "op": "vault.pending",
+      "why": "app_ui"
+    },
+    {
+      "op": "inbox.seen",
+      "why": "app_ui"
+    },
+    {
+      "op": "bridge.status",
+      "why": "app_ui"
+    },
+    {
+      "op": "bridge.devices",
+      "why": "app_ui"
+    },
+    {
+      "op": "bridge.tunnel.status",
+      "why": "app_ui"
+    },
+    {
+      "op": "accounts.add.finish",
+      "why": "app_ui"
+    },
+    {
+      "op": "accounts.result",
+      "why": "app_ui"
+    },
+    {
+      "op": "providers.add.cancel",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.status",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.diff",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.branch_diff_stat",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.branch_diff_file",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.branches",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.worktrees",
+      "why": "app_ui"
+    },
+    {
+      "op": "git.branch_list",
+      "why": "app_ui"
+    },
+    {
+      "op": "outbox.edit",
+      "why": "app_ui"
+    },
+    {
+      "op": "outbox.remove",
+      "why": "app_ui"
+    },
+    {
+      "op": "outbox.hold",
+      "why": "app_ui"
+    },
+    {
+      "op": "outbox.resend",
+      "why": "app_ui"
+    },
+    {
+      "op": "outbox.discard",
+      "why": "app_ui"
+    },
+    {
+      "op": "cluster.side_copy.hide",
+      "why": "app_ui"
+    },
+    {
+      "op": "organizations.folders.preview",
+      "why": "app_ui"
+    }
+  ],
+  "planned": [
+    {
+      "feature": "Follow events",
+      "op": "events.subscribe",
+      "phase": 2
+    },
+    {
+      "feature": "Search pages and sessions",
+      "op": "search.query",
+      "phase": 2
+    },
+    {
+      "feature": "Read the Inbox",
+      "op": "inbox.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read accounts",
+      "op": "accounts.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read providers",
+      "op": "providers.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read provider usage",
+      "op": "providers.usage",
+      "phase": 2
+    },
+    {
+      "feature": "Read limits",
+      "op": "limits.status",
+      "phase": 2
+    },
+    {
+      "feature": "Read limits",
+      "op": "limits.usage",
+      "phase": 2
+    },
+    {
+      "feature": "Change the limit mode",
+      "op": "limits.set_mode",
+      "phase": 2
+    },
+    {
+      "feature": "Read the cost summary",
+      "op": "cost.summary",
+      "phase": 2
+    },
+    {
+      "feature": "Read the organization",
+      "op": "organizations.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read the switches",
+      "op": "settings.switches",
+      "phase": 2
+    },
+    {
+      "feature": "Read the switches",
+      "op": "settings.get_acting",
+      "phase": 2
+    },
+    {
+      "feature": "Read Keep Awake",
+      "op": "awake.state",
+      "phase": 2
+    },
+    {
+      "feature": "Read tool versions",
+      "op": "versions.get",
+      "phase": 2
+    },
+    {
+      "feature": "Read the newest versions",
+      "op": "versions.latest",
+      "phase": 2
+    },
+    {
+      "feature": "Read worker versions",
+      "op": "versions.workers",
+      "phase": 2
+    },
+    {
+      "feature": "Check tool versions",
+      "op": "versions.check",
+      "phase": 2
+    },
+    {
+      "feature": "Read queued messages",
+      "op": "outbox.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read the session's activity",
+      "op": "activity.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read pending prompts",
+      "op": "prompts.list",
+      "phase": 2
+    },
+    {
+      "feature": "Read the role table",
+      "op": "catalog.roles",
+      "phase": 2
+    },
+    {
+      "feature": "Read the model catalog",
+      "op": "catalog.get",
+      "phase": 2
+    },
+    {
+      "feature": "Verify the log chain",
+      "op": "log.verify",
+      "phase": 2
+    },
+    {
+      "feature": "Switch Act on Sessions on",
+      "op": "settings.set_acting",
+      "phase": 3
+    },
+    {
+      "feature": "Switch the Phone Bridge on",
+      "op": "bridge.set",
+      "phase": 3
+    },
+    {
+      "feature": "Switch a daemon switch on",
+      "op": "settings.set_switch",
+      "phase": 3
+    },
+    {
+      "feature": "Start a session",
+      "op": "session.new",
+      "phase": 4
+    },
+    {
+      "feature": "Trust a folder for a session",
+      "op": "folder.trust",
+      "phase": 4
+    },
+    {
+      "feature": "Reply to a session",
+      "op": "session.reply",
+      "phase": 4
+    },
+    {
+      "feature": "Queue a reply to a session",
+      "op": "session.send",
+      "phase": 4
+    },
+    {
+      "feature": "Answer a session's question",
+      "op": "session.answer",
+      "phase": 4
+    },
+    {
+      "feature": "Interrupt a session",
+      "op": "session.interrupt",
+      "phase": 4
+    },
+    {
+      "feature": "Stop a session",
+      "op": "session.stop",
+      "phase": 4
+    },
+    {
+      "feature": "Remove a session",
+      "op": "session.remove",
+      "phase": 4
+    },
+    {
+      "feature": "Run a slash command in a session",
+      "op": "session.command",
+      "phase": 4
+    },
+    {
+      "feature": "Read a session's dialog",
+      "op": "session.dialog",
+      "phase": 4
+    },
+    {
+      "feature": "Pick in a session's dialog",
+      "op": "session.dialog_pick",
+      "phase": 4
+    },
+    {
+      "feature": "Dismiss a session's dialog",
+      "op": "session.dialog_dismiss",
+      "phase": 4
+    },
+    {
+      "feature": "Switch a session's Chrome",
+      "op": "session.chrome",
+      "phase": 4
+    },
+    {
+      "feature": "Read a session's shell output",
+      "op": "session.shell_output",
+      "phase": 4
+    },
+    {
+      "feature": "Read a reload's state",
+      "op": "session.reload.state",
+      "phase": 4
+    },
+    {
+      "feature": "Discard a held message",
+      "op": "session.held.discard",
+      "phase": 4
+    },
+    {
+      "feature": "Send to a Codex session",
+      "op": "codex.send",
+      "phase": 4
+    },
+    {
+      "feature": "Stop a Codex session",
+      "op": "codex.stop",
+      "phase": 4
+    },
+    {
+      "feature": "Delete a Codex session",
+      "op": "codex.delete",
+      "phase": 4
+    },
+    {
+      "feature": "Read a Codex session's children",
+      "op": "codex.children",
+      "phase": 4
+    },
+    {
+      "feature": "List Antigravity sessions",
+      "op": "agy.sessions",
+      "phase": 4
+    },
+    {
+      "feature": "Read an Antigravity session",
+      "op": "agy.state",
+      "phase": 4
+    },
+    {
+      "feature": "Read an Antigravity conversation",
+      "op": "agy.conversation",
+      "phase": 4
+    },
+    {
+      "feature": "Open an Antigravity session",
+      "op": "agy.open",
+      "phase": 4
+    },
+    {
+      "feature": "Send to an Antigravity session",
+      "op": "agy.send",
+      "phase": 4
+    },
+    {
+      "feature": "Cancel an Antigravity turn",
+      "op": "agy.cancel",
+      "phase": 4
+    },
+    {
+      "feature": "Set an Antigravity option",
+      "op": "agy.set_option",
+      "phase": 4
+    },
+    {
+      "feature": "Dispatch a job to a machine",
+      "op": "cluster.dispatch",
+      "phase": 5
+    },
+    {
+      "feature": "Follow a job",
+      "op": "cluster.follow",
+      "phase": 5
+    },
+    {
+      "feature": "Return a job's result",
+      "op": "cluster.return",
+      "phase": 5
+    },
+    {
+      "feature": "Stop a shell job",
+      "op": "shell.stop",
+      "phase": 5
+    },
+    {
+      "feature": "Create a cluster",
+      "op": "cluster.create",
+      "phase": 6
+    },
+    {
+      "feature": "Make a join token",
+      "op": "cluster.join.token",
+      "phase": 6
+    },
+    {
+      "feature": "Invite a machine",
+      "op": "cluster.invite",
+      "phase": 6
+    },
+    {
+      "feature": "Change a member",
+      "op": "cluster.member.set",
+      "phase": 6
+    },
+    {
+      "feature": "Remove a member",
+      "op": "cluster.remove",
+      "phase": 6
+    },
+    {
+      "feature": "Choose the primary",
+      "op": "cluster.main.set",
+      "phase": 6
+    },
+    {
+      "feature": "Move the home",
+      "op": "cluster.move_home",
+      "phase": 6
+    },
+    {
+      "feature": "Move the home now",
+      "op": "cluster.move.now",
+      "phase": 6
+    },
+    {
+      "feature": "Set failover",
+      "op": "cluster.failover.set",
+      "phase": 6
+    },
+    {
+      "feature": "Allow secrets for the cluster",
+      "op": "cluster.allow.set",
+      "phase": 6
+    },
+    {
+      "feature": "Switch an account",
+      "op": "accounts.switch",
+      "phase": 7
+    },
+    {
+      "feature": "Add an account",
+      "op": "accounts.add.begin",
+      "phase": 7
+    },
+    {
+      "feature": "Remove an account",
+      "op": "accounts.remove",
+      "phase": 7
+    },
+    {
+      "feature": "Move every session to a lane",
+      "op": "accounts.move_all",
+      "phase": 7
+    },
+    {
+      "feature": "Read lanes",
+      "op": "lanes.list",
+      "phase": 7
+    },
+    {
+      "feature": "Create a lane",
+      "op": "lanes.create",
+      "phase": 7
+    },
+    {
+      "feature": "Remove a lane",
+      "op": "lanes.remove",
+      "phase": 7
+    },
+    {
+      "feature": "Switch a lane",
+      "op": "lanes.switch",
+      "phase": 7
+    },
+    {
+      "feature": "Switch a provider",
+      "op": "providers.switch",
+      "phase": 7
+    },
+    {
+      "feature": "Add a provider",
+      "op": "providers.add.begin",
+      "phase": 7
+    },
+    {
+      "feature": "Remove a provider",
+      "op": "providers.remove",
+      "phase": 7
+    },
+    {
+      "feature": "Move a session to another account",
+      "op": "session.move",
+      "phase": 7
+    },
+    {
+      "feature": "Plan Set Up",
+      "op": "install.plan",
+      "phase": 8
+    },
+    {
+      "feature": "Apply Set Up",
+      "op": "install.apply",
+      "phase": 8
+    },
+    {
+      "feature": "Switch the tailnet",
+      "op": "tailscale.switch",
+      "phase": 8
+    },
+    {
+      "feature": "Update a tool",
+      "op": "versions.update_local",
+      "phase": 8
+    },
+    {
+      "feature": "Read the Cost Profile",
+      "op": "cost.profile.get",
+      "phase": 8
+    },
+    {
+      "feature": "Change the Cost Profile",
+      "op": "cost.profile.set",
+      "phase": 8
+    },
+    {
+      "feature": "Set up the Antigravity sidecar",
+      "op": "agy.sidecar.setup",
+      "phase": 8
+    }
+  ],
+  "reasons": [
+    "usage",
+    "bad_value",
+    "unknown_key",
+    "key_reused",
+    "not_running",
+    "untrusted_daemon",
+    "old_daemon",
+    "timeout",
+    "switch_off",
+    "app_only",
+    "no_app",
+    "not_yet",
+    "never",
+    "internal_op",
+    "other_session",
+    "other_organization",
+    "no_session",
+    "needs_consent",
+    "busy",
+    "denied",
+    "cancelled",
+    "expired",
+    "withdrawn",
+    "already_answered",
+    "failed",
+    "internal",
+    "other"
+  ],
+  "userOnly": [
+    {
+      "feature": "Answer a permission prompt",
+      "op": "session.permission",
+      "why": "A prompt is the user's own check on an agent."
+    },
+    {
+      "feature": "Answer a permission prompt",
+      "op": "agy.permission",
+      "why": "A prompt is the user's own check on an agent."
+    },
+    {
+      "feature": "Remove hooks and skills",
+      "op": "install.remove",
+      "why": "An agent would remove the check on itself."
+    },
+    {
+      "feature": "Delete the Audit",
+      "op": "log.audit.delete",
+      "why": "An agent would erase its own trail."
+    },
+    {
+      "feature": "Start a new log chain",
+      "op": "log.chain.start",
+      "why": "An agent would erase its own trail."
+    },
+    {
+      "feature": "Pair a phone",
+      "op": "bridge.pair.begin",
+      "why": "A paired phone answers cards: an agent could approve itself."
+    },
+    {
+      "feature": "Pair a phone",
+      "op": "bridge.pair.answer",
+      "why": "A paired phone answers cards: an agent could approve itself."
+    },
+    {
+      "feature": "Revoke a phone",
+      "op": "bridge.revoke",
+      "why": "A paired phone answers cards: an agent could approve itself."
+    },
+    {
+      "feature": "Answer an Inbox item",
+      "op": "inbox.answer",
+      "why": "The card is the user's yes."
+    },
+    {
+      "feature": "Dismiss a question",
+      "op": "ask.dismiss",
+      "why": "The card is the user's yes."
+    },
+    {
+      "feature": "Answer a secret approval",
+      "op": "vault.approval.answer",
+      "why": "The card is the user's yes."
+    },
+    {
+      "feature": "List the Vault",
+      "op": "vault.list",
+      "why": "Values never reach an agent."
+    },
+    {
+      "feature": "Save a secret",
+      "op": "vault.save",
+      "why": "Values never reach an agent."
+    },
+    {
+      "feature": "Use a secret on another machine",
+      "op": "vault.admin",
+      "why": "Values never reach an agent."
+    },
+    {
+      "feature": "Remove a secret",
+      "op": "vault.remove",
+      "why": "Values never reach an agent."
+    },
+    {
+      "feature": "Promote a machine",
+      "op": "cluster.promote",
+      "why": "It changes which machine drives the user's sessions."
+    },
+    {
+      "feature": "Take a machine back",
+      "op": "cluster.take_back",
+      "why": "It changes which machine drives the user's sessions."
+    },
+    {
+      "feature": "Continue a session here",
+      "op": "cluster.continue_here",
+      "why": "It changes which machine drives the user's sessions."
+    },
+    {
+      "feature": "Take a session back",
+      "op": "session.take_back",
+      "why": "It changes which machine drives the user's sessions."
+    },
+    {
+      "feature": "Create an organization",
+      "op": "organizations.create",
+      "why": "It changes what an agent may see."
+    },
+    {
+      "feature": "Rename an organization",
+      "op": "organizations.rename",
+      "why": "It changes what an agent may see."
+    },
+    {
+      "feature": "Colour an organization",
+      "op": "organizations.color.set",
+      "why": "It changes what an agent may see."
+    },
+    {
+      "feature": "Set an organization's folders",
+      "op": "organizations.folders.set",
+      "why": "It changes what an agent may see."
+    },
+    {
+      "feature": "Delete an organization",
+      "op": "organizations.delete",
+      "why": "It changes what an agent may see."
+    }
+  ]
+}

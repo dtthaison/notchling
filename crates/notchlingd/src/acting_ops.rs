@@ -106,7 +106,10 @@ pub(crate) fn switch_off(name: &str, message: &str) -> ApiError {
     forbidden(message)
         .with_reason("switch_off")
         .with_field("switch", json!(name))
-        .with_field("ask", json!({"command": "notchling ask -- …", "kind": "ask"}))
+        .with_field(
+            "ask",
+            json!({"command": "notchling ask -- …", "kind": "ask"}),
+        )
 }
 
 pub(crate) fn bad(message: impl Into<String>) -> ApiError {

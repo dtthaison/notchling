@@ -5,7 +5,9 @@ use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec, Tier, API_VERSI
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub const SWITCH_NAMES: [&str; 6] = ["acting", "bridge", "accounts", "vault", "install", "cluster"];
+pub const SWITCH_NAMES: [&str; 6] = [
+    "acting", "bridge", "accounts", "vault", "install", "cluster",
+];
 
 pub type Switched = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 pub type Sessioned = Arc<dyn Fn(u32) -> Option<String> + Send + Sync>;

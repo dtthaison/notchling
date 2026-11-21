@@ -80,6 +80,12 @@ def cmd_featuremap(args: argparse.Namespace) -> int:
     return featuremap.main(Path(args.repo))
 
 
+def cmd_agentpaths(args: argparse.Namespace) -> int:
+    from guard import agentpaths
+
+    return agentpaths.main(Path(args.repo))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="guard")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -116,6 +122,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("featuremap", help="every crates/*/src/ folder is named in docs/feature-map.md")
     p.add_argument("--repo", default=".")
     p.set_defaults(func=cmd_featuremap)
+    p = sub.add_parser("agentpaths", help="every op has an agent path or a reason, and every new design an Agent path")
+    p.add_argument("--repo", default=".")
+    p.set_defaults(func=cmd_agentpaths)
     args = parser.parse_args(argv)
     return args.func(args)
 

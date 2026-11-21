@@ -68,18 +68,28 @@ fn every_command_row_parses_and_names_known_exit_codes() {
                 row.command
             );
         }
-        assert_eq!(row.json, row.usage.contains("--json") || row.json && row.ops.is_empty());
+        assert_eq!(
+            row.json,
+            row.usage.contains("--json") || row.json && row.ops.is_empty()
+        );
         assert!(matches!(
             row.consent,
             "none" | "request" | "by_key_class" | "by_entry" | "own_free" | "never"
         ));
     }
-    assert_eq!(parse(["help".to_string()]), Ok(Command::Help { json: false }));
+    assert_eq!(
+        parse(["help".to_string()]),
+        Ok(Command::Help { json: false })
+    );
 }
 
 #[test]
 fn a_user_only_or_internal_op_never_has_a_command() {
-    for op in USER_ONLY.iter().map(|u| u.op).chain(INTERNAL.iter().map(|i| i.op)) {
+    for op in USER_ONLY
+        .iter()
+        .map(|u| u.op)
+        .chain(INTERNAL.iter().map(|i| i.op))
+    {
         assert!(command_of(op).is_none(), "{op}");
     }
     for i in INTERNAL {
@@ -96,7 +106,10 @@ fn an_op_an_agent_may_not_call_says_why() {
     assert_eq!(data["reason"], "never");
     assert_eq!(data["never"], true);
     let (_, data) = why_not("session.new").unwrap();
-    assert_eq!((data["reason"].as_str(), data["phase"].as_u64()), (Some("not_yet"), Some(4)));
+    assert_eq!(
+        (data["reason"].as_str(), data["phase"].as_u64()),
+        (Some("not_yet"), Some(4))
+    );
     assert_eq!(data["ask"]["command"], "notchling ask -- …");
     assert_eq!(why_not("git.status").unwrap().1["reason"], "app_only");
     assert_eq!(why_not("hook.request").unwrap().1["reason"], "internal_op");
@@ -108,7 +121,10 @@ fn the_help_json_has_the_shape_agents_read() {
     let help = help_value("9.9.9");
     assert_eq!(help["notchling"], "9.9.9");
     assert_eq!(help["api"], notchling_local_api::API_VERSION);
-    assert_eq!(help["exitCodes"].as_array().unwrap().len(), EXIT_CODES.len());
+    assert_eq!(
+        help["exitCodes"].as_array().unwrap().len(),
+        EXIT_CODES.len()
+    );
     assert_eq!(help["reasons"].as_array().unwrap().len(), REASONS.len());
     let set = help["commands"]
         .as_array()
@@ -120,13 +136,20 @@ fn the_help_json_has_the_shape_agents_read() {
     assert_eq!(set["waits"], true);
     assert_eq!(set["idempotent"], true);
     assert_eq!(set["skill"], "notchling-settings");
-    assert_eq!(set["ops"][0], json!({"op": "settings.set", "tier": "agent", "acts": true}));
+    assert_eq!(
+        set["ops"][0],
+        json!({"op": "settings.set", "tier": "agent", "acts": true})
+    );
     assert!(help["planned"][0]["phase"].is_u64());
     assert!(help["userOnly"][0]["why"].is_string());
 }
 
 fn table(rows: Vec<Vec<String>>, head: &[&str]) -> String {
-    let mut out = format!("| {} |\n| {} |\n", head.join(" | "), vec!["---"; head.len()].join(" | "));
+    let mut out = format!(
+        "| {} |\n| {} |\n",
+        head.join(" | "),
+        vec!["---"; head.len()].join(" | ")
+    );
     for row in rows {
         out.push_str(&format!("| {} |\n", row.join(" | ")));
     }
@@ -142,13 +165,28 @@ fn markdown() -> String {
                 let ops: Vec<String> = r
                     .ops
                     .iter()
-                    .map(|o| format!("`{}` ({}{})", o.op, o.tier, if o.acts { ", acts" } else { "" }))
+                    .map(|o| {
+                        format!(
+                            "`{}` ({}{})",
+                            o.op,
+                            o.tier,
+                            if o.acts { ", acts" } else { "" }
+                        )
+                    })
                     .collect();
                 vec![
                     format!("`{}`", r.usage),
-                    if ops.is_empty() { "none".into() } else { ops.join(", ") },
+                    if ops.is_empty() {
+                        "none".into()
+                    } else {
+                        ops.join(", ")
+                    },
                     r.consent.to_string(),
-                    r.exits.iter().map(i32::to_string).collect::<Vec<_>>().join(" "),
+                    r.exits
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" "),
                 ]
             })
             .collect(),
@@ -158,7 +196,13 @@ fn markdown() -> String {
     out.push_str(&table(
         PLANNED
             .iter()
-            .map(|p| vec![format!("`{}`", p.op), p.feature.to_string(), p.phase.to_string()])
+            .map(|p| {
+                vec![
+                    format!("`{}`", p.op),
+                    p.feature.to_string(),
+                    p.phase.to_string(),
+                ]
+            })
             .collect(),
         &["Op", "Feature", "Phase"],
     ));
@@ -166,7 +210,13 @@ fn markdown() -> String {
     out.push_str(&table(
         USER_ONLY
             .iter()
-            .map(|u| vec![format!("`{}`", u.op), u.feature.to_string(), u.why.to_string()])
+            .map(|u| {
+                vec![
+                    format!("`{}`", u.op),
+                    u.feature.to_string(),
+                    u.why.to_string(),
+                ]
+            })
             .collect(),
         &["Op", "Feature", "Why"],
     ));
@@ -183,7 +233,13 @@ fn markdown() -> String {
 
 #[test]
 fn the_golden_files_match_the_registry() {
-    let json = format!("{}\n", serde_json::to_string_pretty(&registry_value()).unwrap());
-    golden(root().join("crates/notchlingd/tests/golden/agent-paths.json"), json);
+    let json = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&registry_value()).unwrap()
+    );
+    golden(
+        root().join("crates/notchlingd/tests/golden/agent-paths.json"),
+        json,
+    );
     golden(root().join("docs/agent-paths.md"), markdown());
 }

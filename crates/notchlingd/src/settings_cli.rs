@@ -269,7 +269,10 @@ pub fn run(args: &[String]) -> i32 {
     };
     client.set_timeout(CALL_TIMEOUT);
     let (op, reply) = match &parsed.sub {
-        Sub::List => (ops::SETTINGS_LIST, client.call(ops::SETTINGS_LIST, json!({}))),
+        Sub::List => (
+            ops::SETTINGS_LIST,
+            client.call(ops::SETTINGS_LIST, json!({})),
+        ),
         Sub::Get(key) => (
             ops::SETTINGS_GET,
             client.call(ops::SETTINGS_GET, json!({"key": key})),

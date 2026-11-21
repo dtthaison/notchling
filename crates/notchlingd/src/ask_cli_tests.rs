@@ -391,7 +391,10 @@ fn wait_deadline_is_capped_by_the_delegate() {
     let open = link.of("ask.open")[0];
     assert_eq!(open["deadlineMs"], json!(T0 + 540_000));
     assert_eq!(open["wait"], json!(true));
-    assert_eq!(rig.stderr().lines().last(), Some("No answer in time. (expired)"));
+    assert_eq!(
+        rig.stderr().lines().last(),
+        Some("No answer in time. (expired)")
+    );
     assert_eq!(rig.stdout(), "");
     let waits = link.of("ask.wait");
     assert!(waits
@@ -437,7 +440,10 @@ fn the_daemon_saying_expired_exits_124() {
     );
     let args = ask_args(&["--wait", "--", "q"]);
     assert_eq!(rig.run(|env| ask(&mut link, &args, env)), 124);
-    assert_eq!(rig.stderr().lines().last(), Some("No answer in time. (expired)"));
+    assert_eq!(
+        rig.stderr().lines().last(),
+        Some("No answer in time. (expired)")
+    );
 }
 
 #[test]

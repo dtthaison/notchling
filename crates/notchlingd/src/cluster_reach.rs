@@ -1,6 +1,6 @@
 use crate::cluster_cli::{Sub, DONE, USAGE};
-use crate::contract::Failure;
 use crate::cluster_wiring::{loopback_ok, LOOPBACK_ENV};
+use crate::contract::Failure;
 use notchling_cluster_net::allowed;
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};

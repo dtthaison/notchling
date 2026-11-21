@@ -1,8 +1,8 @@
+use crate::contract::{self, Failure};
 use crate::cost_report_ops::{COST_REPORT, MAX_DAYS};
 use crate::cost_report_text;
-use crate::contract::{self, Failure};
-use std::io::Write;
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 

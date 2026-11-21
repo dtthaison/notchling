@@ -1,6 +1,5 @@
 use super::*;
 
-
 fn words(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
 }

@@ -252,7 +252,9 @@ impl Failure {
             ClientError::Protocol(_) => {
                 Failure::new(FAILED, "internal", "Notchling sent something unexpected.")
             }
-            ClientError::Io(_) => Failure::new(FAILED, "internal", "Notchling couldn't be reached."),
+            ClientError::Io(_) => {
+                Failure::new(FAILED, "internal", "Notchling couldn't be reached.")
+            }
         };
         failure.op = op.map(str::to_string);
         failure
@@ -299,11 +301,7 @@ pub fn connect(socket: Option<&Path>) -> Result<Client, Failure> {
         .map_err(|e| Failure::from_client(None, e))
 }
 
-pub fn call(
-    client: &mut Client,
-    op: &str,
-    args: Value,
-) -> Result<Value, Failure> {
+pub fn call(client: &mut Client, op: &str, args: Value) -> Result<Value, Failure> {
     client
         .call(op, args)
         .map_err(|e| Failure::from_client(Some(op), e))
