@@ -4,7 +4,9 @@ use std::process::{Command, Stdio};
 use gpui::Context;
 use notchling_engine::transcript::shells::parse_writers_by_name;
 use notchling_engine::transcript::shells_guard::session_owner;
-use notchling_engine::transcript::shells_stop::{process_table, stop_shell, StopRequest, GRACE};
+use notchling_engine::transcript::shells_stop::{
+    process_table, stop_shell, Outcome, StopRequest, GRACE,
+};
 
 use super::now_ms;
 use super::ChatView;
@@ -19,6 +21,7 @@ pub struct Probe {
     last_ms: i64,
     busy: bool,
     stopped: HashSet<String>,
+    left: HashSet<String>,
     stopping: HashSet<String>,
     minute: i64,
     clock: u64,
@@ -42,6 +45,22 @@ impl Probe {
     fn settle(&mut self, path: &str) {
         self.clock += 1;
         self.settled.insert(path.to_owned(), self.clock);
+    }
+
+    fn record_stop(&mut self, path: &str, outcome: &Outcome) {
+        self.stopping.remove(path);
+        self.settle(path);
+        if !outcome.left.is_empty() {
+            self.stopped.remove(path);
+            self.left.insert(path.to_owned());
+            self.writers.insert(path.to_owned(), outcome.left.clone());
+        } else if outcome.stopped() {
+            self.left.remove(path);
+            if outcome.targets > 0 {
+                self.stopped.insert(path.to_owned());
+            }
+            self.writers.insert(path.to_owned(), Vec::new());
+        }
     }
 
     fn apply(&mut self, began: u64, found: HashMap<String, Vec<i32>>) -> bool {
@@ -105,6 +124,10 @@ impl ChatView {
         self.shell_probe.stopped.contains(path)
     }
 
+    pub(super) fn shell_probe_left(&self, path: &str) -> bool {
+        self.shell_probe.left.contains(path)
+    }
+
     pub(super) fn stop_shell(&mut self, id: &str, path: &str, cx: &mut Context<Self>) {
         let Some(session) = self.selected.clone() else {
             return;
@@ -134,14 +157,11 @@ impl ChatView {
                 .await;
             let _ = this.update(cx, |view, cx| {
                 let probe = &mut view.shell_probe;
-                probe.stopping.remove(&path);
-                probe.settle(&path);
-                if let Ok(outcome) = outcome {
-                    if outcome.survivors == 0 {
-                        if outcome.targets > 0 {
-                            probe.stopped.insert(path.clone());
-                        }
-                        probe.writers.insert(path, Vec::new());
+                match outcome {
+                    Ok(outcome) => probe.record_stop(&path, &outcome),
+                    Err(_) => {
+                        probe.stopping.remove(&path);
+                        probe.settle(&path);
                     }
                 }
                 view.refresh_shells(0);
@@ -253,6 +273,52 @@ mod tests {
         probe.writers.insert(path.into(), Vec::new());
         let began = probe.begin();
         assert!(probe.apply(began, seen(path, vec![7])));
+        assert_eq!(probe.writing(path), Some(true));
+    }
+
+    fn outcome(targets: usize, left: Vec<i32>) -> Outcome {
+        Outcome {
+            targets,
+            killed: targets,
+            survivors: 0,
+            left,
+        }
+    }
+
+    #[test]
+    fn a_stop_that_left_writers_keeps_the_row_running_and_says_so() {
+        let path = "/tmp/a.output";
+        let mut probe = Probe::default();
+        probe.writers.insert(path.into(), vec![40, 41]);
+        let began = probe.begin();
+        probe.stopping.insert(path.to_owned());
+        probe.record_stop(path, &outcome(1, vec![41]));
+        assert_eq!(probe.writing(path), Some(true));
+        assert!(probe.left.contains(path));
+        assert!(!probe.stopped.contains(path));
+        assert!(!probe.stopping.contains(path));
+        assert!(!probe.apply(began, seen(path, Vec::new())));
+        assert_eq!(probe.writers(path), vec![41]);
+    }
+
+    #[test]
+    fn a_stop_with_no_writers_left_is_stopped_and_clears_an_earlier_left() {
+        let path = "/tmp/a.output";
+        let mut probe = Probe::default();
+        probe.record_stop(path, &outcome(1, vec![41]));
+        probe.record_stop(path, &outcome(1, Vec::new()));
+        assert_eq!(probe.writing(path), Some(false));
+        assert!(probe.stopped.contains(path));
+        assert!(!probe.left.contains(path));
+    }
+
+    #[test]
+    fn a_probe_after_a_stop_still_shows_a_writer_that_came_back() {
+        let path = "/tmp/a.output";
+        let mut probe = Probe::default();
+        probe.record_stop(path, &outcome(1, Vec::new()));
+        let began = probe.begin();
+        assert!(probe.apply(began, seen(path, vec![77])));
         assert_eq!(probe.writing(path), Some(true));
     }
 

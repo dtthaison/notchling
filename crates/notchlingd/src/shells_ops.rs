@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub const SOME_LEFT: &str = "some_left";
+
 pub type Writers = Arc<dyn Fn(&[String]) -> HashMap<String, Vec<i32>> + Send + Sync>;
 pub type Stopper = Arc<dyn Fn(&StopRequest, Duration) -> Result<Outcome, Refusal> + Send + Sync>;
 pub type Owner = Arc<dyn Fn(&Caller, &str) -> Option<u32> + Send + Sync>;
@@ -199,6 +201,16 @@ impl ShellsOps {
             orphans: false,
         };
         let outcome = (self.stopper)(&request, GRACE).map_err(refused)?;
+        if !outcome.left.is_empty() {
+            return Ok(json!({
+                "id": id,
+                "stopped": false,
+                "state": "running",
+                "killed": outcome.killed,
+                "left": outcome.left,
+                "reason": SOME_LEFT,
+            }));
+        }
         if outcome.survivors > 0 {
             return Err(ApiError::new(
                 ErrorCode::Failed,

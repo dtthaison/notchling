@@ -77,6 +77,7 @@ fn ops_with(
                     targets: 1,
                     killed: 0,
                     survivors: usize::from(survive),
+                    left: Vec::new(),
                 })
             }),
             Arc::new(|| 1_798_000_000.0),
@@ -212,6 +213,33 @@ fn a_shell_that_will_not_die_is_a_failure() {
 }
 
 #[test]
+fn a_stop_that_leaves_writers_running_says_so() {
+    let (_home, roots) = home("left", &transcript());
+    let ops = ShellsOps::new(roots)
+        .with_seams(
+            Arc::new(|paths| running_map(&["bself"], paths)),
+            Arc::new(|_, _| {
+                Ok(Outcome {
+                    targets: 1,
+                    killed: 1,
+                    survivors: 0,
+                    left: vec![801, 802],
+                })
+            }),
+            Arc::new(|| 1_798_000_000.0),
+            Some(Arc::new(|_| verified(SESSION))),
+        )
+        .with_owner(Arc::new(|_, _| Some(4242)));
+    let out = ops
+        .call(&agent_caller(), ops::SHELLS_STOP, &json!({"id": "bself"}))
+        .unwrap();
+    assert_eq!(out["stopped"], false);
+    assert_eq!(out["state"], "running");
+    assert_eq!(out["left"], json!([801, 802]));
+    assert_eq!(out["reason"], "some_left");
+}
+
+#[test]
 fn the_ops_have_the_agent_classes() {
     let ops = ops_with(
         Roots::new(
@@ -272,6 +300,7 @@ fn stop_names_the_session_the_shell_its_file_and_the_owner_process() {
                     targets: 1,
                     killed: 0,
                     survivors: 0,
+                    left: Vec::new(),
                 })
             }),
             Arc::new(|| 1_798_000_000.0),

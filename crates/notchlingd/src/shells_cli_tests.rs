@@ -5,6 +5,25 @@ fn words(list: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn a_stop_that_left_writers_running_exits_1_with_some_left() {
+    let reply = json!({"id": "bq1", "stopped": false, "state": "running", "left": [801], "reason": "some_left"});
+    let failure = stop_reply("bq1", &reply).unwrap_err();
+    assert_eq!(failure.exit, 1);
+    assert_eq!(failure.reason, "some_left");
+    let value = failure.to_value_with(reply);
+    assert_eq!(value["error"]["reason"], "some_left");
+    assert_eq!(value["result"]["left"], json!([801]));
+    assert_eq!(
+        stop_reply("bq1", &json!({"stopped": true})).unwrap(),
+        "Stopped bq1."
+    );
+    assert_eq!(
+        stop_reply("bq1", &json!({"stopped": false, "state": "ended"})).unwrap(),
+        "bq1 had already ended."
+    );
+}
+
+#[test]
 fn the_shells_command_lists_or_stops_one() {
     assert_eq!(
         parse(&words(&["--json"])).unwrap(),

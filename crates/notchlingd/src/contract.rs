@@ -86,6 +86,7 @@ pub const REASONS: &[&str] = &[
     "expired",
     "withdrawn",
     "already_answered",
+    "some_left",
     "failed",
     "internal",
     "other",
@@ -114,7 +115,7 @@ pub fn exit_of_reason(reason: &str) -> Option<i32> {
         "busy" => BUSY,
         "denied" | "cancelled" => DENIED,
         "expired" => EXPIRED,
-        "withdrawn" | "already_answered" | "failed" | "internal" => FAILED,
+        "withdrawn" | "already_answered" | "some_left" | "failed" | "internal" => FAILED,
         _ => return None,
     })
 }

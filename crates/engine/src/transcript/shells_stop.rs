@@ -1,27 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use super::shells::{lsof_args, parse_writers_by_name, NOT_WRITERS};
 use super::shells_guard;
+pub use super::shells_orphans::orphan_targets;
 
 pub const GRACE: Duration = Duration::from_secs(3);
 
-const DEPTH: usize = 256;
+pub(super) const DEPTH: usize = 256;
 
 const OTHER_TOOLS: [&str; 5] = ["notchling", "notchlingd", "codex", "agy", "antigravity"];
-
-const SHARED: [&str; 8] = [
-    "terminal",
-    "iterm2",
-    "ghostty",
-    "alacritty",
-    "kitty",
-    "wezterm",
-    "tmux",
-    "screen",
-];
 
 #[cfg(target_os = "macos")]
 const LSOF: &str = "/usr/sbin/lsof";
@@ -43,21 +33,12 @@ impl Proc {
         self.command.rsplit('/').next().unwrap_or(&self.command)
     }
 
-    fn protected(&self) -> bool {
+    pub(super) fn protected(&self) -> bool {
         NOT_WRITERS.contains(&self.name())
             || OTHER_TOOLS.contains(&self.name())
             || self.command.contains("/claude/")
             || self.command.contains("/claude-code/")
             || self.command.contains("Notchling.app")
-    }
-
-    fn shared(&self) -> bool {
-        let name = self.name().to_ascii_lowercase();
-        self.command.contains(".app/Contents/")
-            || SHARED.iter().any(|word| {
-                name.strip_prefix(word)
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', ':', ' ']))
-            })
     }
 }
 
@@ -183,7 +164,7 @@ fn group_is_ours(
         .then(|| members.iter().map(|p| p.pid).collect())
 }
 
-fn target_of(proc: &Proc) -> Target {
+pub(super) fn target_of(proc: &Proc) -> Target {
     Target {
         pid: proc.pid,
         started: proc.started.clone(),
@@ -247,93 +228,6 @@ fn names_of(path: &str) -> Vec<String> {
     names
 }
 
-fn kept(live: &[&Proc], by_pid: &HashMap<i32, &Proc>, scope: &Scope) -> HashSet<i32> {
-    let mut kept = HashSet::new();
-    let starts = live
-        .iter()
-        .filter(|p| p.protected() || p.name().to_ascii_lowercase().starts_with("notchling"))
-        .map(|p| p.pid)
-        .chain([scope.own_pid, scope.owner]);
-    for start in starts {
-        let mut at = start;
-        for _ in 0..DEPTH {
-            if at <= 1 || !kept.insert(at) {
-                break;
-            }
-            let Some(proc) = by_pid.get(&at) else {
-                break;
-            };
-            at = proc.ppid;
-        }
-    }
-    kept
-}
-
-fn below_writer(by_pid: &HashMap<i32, &Proc>, writing: &HashSet<i32>, pid: i32) -> bool {
-    let mut at = pid;
-    for _ in 0..DEPTH {
-        let Some(proc) = by_pid.get(&at) else {
-            return false;
-        };
-        if proc.ppid <= 1 || proc.ppid == at {
-            return false;
-        }
-        if writing.contains(&proc.ppid) {
-            return true;
-        }
-        at = proc.ppid;
-    }
-    false
-}
-
-pub fn orphan_targets(writers: &[i32], procs: &[Proc], scope: &Scope) -> Vec<Target> {
-    let live: Vec<&Proc> = procs.iter().filter(|p| !p.zombie).collect();
-    let by_pid: HashMap<i32, &Proc> = live.iter().map(|p| (p.pid, *p)).collect();
-    let writing: HashSet<i32> = writers
-        .iter()
-        .copied()
-        .filter(|pid| by_pid.contains_key(pid))
-        .collect();
-    let kept = kept(&live, &by_pid, scope);
-    let fits = |p: &Proc| {
-        p.pid > 1
-            && p.pid != scope.own_pid
-            && p.pid != scope.owner
-            && !p.protected()
-            && !p.shared()
-            && !kept.contains(&p.pid)
-            && (writing.contains(&p.pid) || below_writer(&by_pid, &writing, p.pid))
-            && (p.ppid == 1 || by_pid.get(&p.ppid).is_some_and(|up| up.pgid == p.pgid))
-            && live
-                .iter()
-                .filter(|c| c.ppid == p.pid)
-                .all(|c| writing.contains(&c.pid) || c.pgid == p.pgid)
-    };
-    let mut pgids: Vec<i32> = writing
-        .iter()
-        .filter_map(|pid| by_pid.get(pid))
-        .map(|p| p.pgid)
-        .collect();
-    pgids.sort_unstable();
-    pgids.dedup();
-    let mut targets: Vec<Target> = Vec::new();
-    for pgid in pgids {
-        if pgid <= 1 || pgid == scope.own_pgid || pgid == scope.own_pid || pgid == scope.owner {
-            continue;
-        }
-        let mut members = live.iter().filter(|p| p.pgid == pgid);
-        if members.all(|p| fits(p)) {
-            targets.extend(
-                live.iter()
-                    .filter(|p| p.pgid == pgid && writing.contains(&p.pid))
-                    .map(|p| target_of(p)),
-            );
-        }
-    }
-    targets.sort_by_key(|t| t.pid);
-    targets
-}
-
 pub fn writers_of_many(paths: &[String]) -> HashMap<String, Vec<i32>> {
     let wanted: Vec<(String, Vec<String>)> = paths
         .iter()
@@ -379,11 +273,28 @@ pub fn process_table() -> Option<Vec<Proc>> {
     (out.status.success() && !procs.is_empty()).then_some(procs)
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub targets: usize,
     pub killed: usize,
     pub survivors: usize,
+    pub left: Vec<i32>,
+}
+
+impl Outcome {
+    pub fn stopped(&self) -> bool {
+        self.survivors == 0 && self.left.is_empty()
+    }
+}
+
+pub fn left_after(mut read: impl FnMut() -> Vec<i32>, waited: bool, until: Instant) -> Vec<i32> {
+    loop {
+        let left = read();
+        if left.is_empty() || !waited || Instant::now() >= until {
+            return left;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn here(table: &[Proc], target: &Target) -> bool {
@@ -460,6 +371,7 @@ pub fn execute(plan: &Plan, scope: &Scope, grace: Duration) -> Outcome {
             targets: all.len(),
             killed: 0,
             survivors: all.len(),
+            left: Vec::new(),
         };
     };
     let left = all.iter().filter(|t| here(&table, t)).count();
@@ -474,6 +386,7 @@ pub fn execute(plan: &Plan, scope: &Scope, grace: Duration) -> Outcome {
         targets: all.len(),
         killed: left,
         survivors,
+        left: Vec::new(),
     }
 }
 
@@ -546,7 +459,9 @@ pub fn stop_shell_in(
         own_pid,
         own_pgid,
     };
-    let writers = writers_of(&path.to_string_lossy());
+    let text = path.to_string_lossy();
+    let until = Instant::now() + grace;
+    let writers = writers_of(&text);
     if writers.is_empty() {
         return Ok(Outcome::default());
     }
@@ -555,10 +470,13 @@ pub fn stop_shell_in(
             targets: writers.len(),
             killed: 0,
             survivors: writers.len(),
+            left: writers,
         });
     };
     let found = stop_plan(&writers, &table, &scope, request.orphans);
-    Ok(execute(&found, &scope, grace))
+    let outcome = execute(&found, &scope, grace);
+    let left = left_after(|| writers_of(&text), !found.is_empty(), until);
+    Ok(Outcome { left, ..outcome })
 }
 
 pub fn stop_plan(writers: &[i32], procs: &[Proc], scope: &Scope, orphans: bool) -> Plan {

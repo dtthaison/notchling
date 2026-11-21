@@ -1,4 +1,5 @@
 use crate::contract::{self, Failure};
+use crate::shells_ops::SOME_LEFT;
 use notchling_local_api::{ops, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -117,16 +118,42 @@ pub fn run(args: &[String]) -> i32 {
                 Ok(r) => r,
                 Err(f) => return f.report(json),
             };
-            if json {
-                print_json(&reply);
-            } else if reply["stopped"] == json!(true) {
-                println!("Stopped {id}.");
-            } else {
-                println!("{id} had already ended.");
+            match stop_reply(id, &reply) {
+                Ok(text) => {
+                    if json {
+                        print_json(&reply);
+                    } else {
+                        println!("{text}");
+                    }
+                    contract::OK
+                }
+                Err(failure) if json => {
+                    println!("{}", failure.to_value_with(reply));
+                    failure.exit
+                }
+                Err(failure) => failure.report(false),
             }
-            contract::OK
         }
     }
+}
+
+pub fn stop_reply(id: &str, reply: &Value) -> Result<String, Failure> {
+    if reply["reason"] == json!(SOME_LEFT) {
+        let left = reply["left"].as_array().map_or(0, Vec::len);
+        return Err(Failure::new(
+            contract::FAILED,
+            SOME_LEFT,
+            format!(
+                "{id} is still running: {left} of its processes didn't end. Ask the agent, or end them in Terminal."
+            ),
+        )
+        .with_op(ops::SHELLS_STOP));
+    }
+    Ok(if reply["stopped"] == json!(true) {
+        format!("Stopped {id}.")
+    } else {
+        format!("{id} had already ended.")
+    })
 }
 
 #[cfg(test)]

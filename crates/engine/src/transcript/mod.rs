@@ -18,6 +18,7 @@ pub mod scan;
 pub mod sent;
 pub mod shells;
 pub mod shells_guard;
+mod shells_orphans;
 pub mod shells_stop;
 pub mod shells_stuck;
 pub mod snapshot;

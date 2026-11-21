@@ -53,6 +53,7 @@ pub struct ShellRow {
     pub running: bool,
     pub mark: Mark,
     pub output_path: String,
+    pub left_behind: bool,
     pub shape: shells_stuck::Shape,
 }
 

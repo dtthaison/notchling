@@ -194,6 +194,7 @@
     "expired",
     "withdrawn",
     "already_answered",
+    "some_left",
     "failed",
     "internal",
     "other"

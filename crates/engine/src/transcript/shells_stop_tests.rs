@@ -620,6 +620,47 @@ fn a_protected_member_or_our_own_pid_refuses_the_group() {
 }
 
 #[test]
+fn a_writer_still_there_after_the_grace_is_left_and_the_shell_is_not_stopped() {
+    let until = Instant::now() + Duration::from_millis(300);
+    let left = left_after(|| vec![640], true, until);
+    assert_eq!(left, [640]);
+    let outcome = Outcome {
+        targets: 1,
+        killed: 1,
+        survivors: 0,
+        left,
+    };
+    assert!(!outcome.stopped());
+}
+
+#[test]
+fn writers_that_end_within_the_grace_are_not_left() {
+    let mut reads = vec![vec![], vec![641], vec![640, 641]];
+    let until = Instant::now() + Duration::from_secs(5);
+    assert!(left_after(|| reads.pop().unwrap_or_default(), true, until).is_empty());
+    assert!(Outcome {
+        targets: 2,
+        ..Outcome::default()
+    }
+    .stopped());
+}
+
+#[test]
+fn with_nothing_signalled_the_writers_are_read_once_and_left() {
+    let mut reads = 0;
+    let until = Instant::now() + Duration::from_secs(5);
+    let left = left_after(
+        || {
+            reads += 1;
+            vec![710]
+        },
+        false,
+        until,
+    );
+    assert_eq!((left, reads), (vec![710], 1));
+}
+
+#[test]
 fn ps_runs_in_the_c_locale() {
     assert!(ps()
         .get_envs()
@@ -702,10 +743,7 @@ mod orphaned {
         let after = writers_of(text);
         reap(&before);
         let outcome = outcome.expect("allowed");
-        assert!(
-            outcome.targets >= 2 && outcome.survivors == 0,
-            "{outcome:?}"
-        );
+        assert!(outcome.targets >= 2 && outcome.stopped(), "{outcome:?}");
         assert!(after.is_empty(), "{after:?}");
     }
 
@@ -750,9 +788,13 @@ mod orphaned {
         let uid = shells_guard::current_uid();
         let outcome = stop_shell_in(&request(&output, None, true), &[root], uid, GRACE);
         let alive = kid.try_wait().expect("wait").is_none();
+        let pid = kid.id() as i32;
         let _ = kid.kill();
         let _ = kid.wait();
-        assert_eq!(outcome.expect("allowed").targets, 0);
+        let outcome = outcome.expect("allowed");
+        assert_eq!(outcome.targets, 0);
+        assert!(outcome.left.contains(&pid), "{outcome:?}");
+        assert!(!outcome.stopped());
         assert!(alive);
     }
 }
