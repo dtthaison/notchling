@@ -2,6 +2,7 @@ use super::model::{
     new_id, AnswerOn, AppliedBy, Consent, New, Refusal, State, IDEM_MS, KEEP_CLOSED_MS,
     OPENED_MIN_MS,
 };
+use super::kinds::{SECRET_REQUEST, SETTING};
 use super::rules;
 use crate::store;
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -51,11 +52,17 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Consent> {
     let state: String = r.get(17)?;
     let answer_on: String = r.get(18)?;
     let applied_by: String = r.get(19)?;
+    let kind: String = r.get(1)?;
+    let change = json_of(r, 3)?;
+    let request = match json_of(r, 28)? {
+        Value::Null => legacy_request(&kind, &change),
+        request => request,
+    };
     Ok(Consent {
         id: r.get(0)?,
-        kind: r.get(1)?,
+        kind,
         target: r.get(2)?,
-        change: json_of(r, 3)?,
+        change,
         facts: json_of(r, 4)?,
         parts: json_opt(r, 5)?,
         parts_allowed: json_opt(r, 6)?,
@@ -80,9 +87,19 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Consent> {
         used_op_id: r.get(25)?,
         result: json_opt(r, 26)?,
         closed_ms: r.get(27)?,
-        request: json_of(r, 28)?,
+        request,
         extended: r.get::<_, i64>(29)? != 0,
     })
+}
+
+fn legacy_request(kind: &str, change: &Value) -> Value {
+    match kind {
+        SETTING => serde_json::json!({"op": "settings.set", "key": change.get("key"),
+                                      "value": change.get("after")}),
+        SECRET_REQUEST => serde_json::json!({"op": "vault.request",
+                                             "request": change.get("request")}),
+        _ => Value::Null,
+    }
 }
 
 fn fetch(db: &Connection, id: &str) -> Result<Option<Consent>, String> {
@@ -341,14 +358,6 @@ impl ConsentStore {
         let from = fetch(&db, id)?;
         let Some(from) = from else {
             return Ok(None);
-        };
-        let to = if from.state.open()
-            && from.expires_ms <= now
-            && !matches!(to, State::Cancelled | State::Withdrawn | State::Expired)
-        {
-            State::Expired
-        } else {
-            to
         };
         if !from.state.next(to) {
             return Ok(None);

@@ -35,7 +35,7 @@ pub fn check(new: &New, now: i64, rows: &[Consent]) -> Result<(), Refusal> {
         r.state == State::Denied
             && r.kind == new.kind
             && r.target == new.target
-            && (!session_bucket || r.bucket() == bucket)
+            && (!session_bucket || !r.in_session() || r.bucket() == bucket)
     };
     if let Some(after) = rows
         .iter()

@@ -266,14 +266,80 @@ fn a_restart_expires_what_ended_while_the_daemon_was_down() {
 }
 
 #[test]
-fn a_late_finish_of_an_open_request_ends_it_as_expired() {
+fn a_finish_after_the_end_records_what_the_action_did() {
     let store = ConsentStore::in_memory_for_tests();
     let id = store.insert(&new("s1", "k1"), 0).unwrap().row().id.clone();
+    assert!(store
+        .finish(&id, State::Applied, None, DEFAULT_EXPIRY_MS + 1)
+        .unwrap()
+        .is_none());
+    store
+        .answer(&id, State::Applying, "mac", None, 1_000)
+        .unwrap();
     let done = store
         .finish(&id, State::Applied, None, DEFAULT_EXPIRY_MS + 1)
         .unwrap()
         .unwrap();
-    assert_eq!(done.state, State::Expired);
+    assert_eq!(done.state, State::Applied);
+}
+
+const BEFORE_THE_REQUEST_COLUMN: &str = "CREATE TABLE consents (
+    n INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+    target TEXT NOT NULL, change TEXT NOT NULL, facts TEXT NOT NULL, parts TEXT,
+    parts_allowed TEXT, reason TEXT, session TEXT, tool TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0, root TEXT, folder TEXT, organization TEXT,
+    pid INTEGER NOT NULL, pid_start INTEGER, idem_key TEXT, state TEXT NOT NULL,
+    answer_on TEXT NOT NULL, applied_by TEXT NOT NULL, created_ms INTEGER NOT NULL,
+    expires_ms INTEGER NOT NULL, answered_ms INTEGER, by TEXT, used_ms INTEGER,
+    used_op_id TEXT, result TEXT, closed_ms INTEGER);
+INSERT INTO consents (id, kind, target, change, facts, session, tool, verified, root, pid,
+    idem_key, state, answer_on, applied_by, created_ms, expires_ms)
+VALUES ('c-old-setting', 'setting', 'k1', '{\"key\":\"k1\",\"before\":\"a\",\"after\":\"b\"}',
+    '[]', 's1', 'claude', 1, 'Terminal', 7, 'key-1', 'waiting', 'mac_or_phone', 'daemon',
+    1000, 901000),
+    ('c-old-secret', 'secret_request', 'npm',
+    '{\"name\":\"npm\",\"request\":{\"name\":\"npm\",\"url\":\"https://npmjs.com\"}}',
+    '[]', 's1', 'claude', 1, 'Terminal', 7, 'key-2', 'waiting', 'mac', 'app', 1000, 901000);";
+
+#[test]
+fn a_retry_of_a_request_saved_before_the_request_column_returns_it() {
+    let tmp = TempDir::new("consent-prefix");
+    let dir = tmp.root().to_path_buf();
+    {
+        let db = rusqlite::Connection::open(store::db_path(&dir)).unwrap();
+        store::migrate(&db).unwrap();
+        db.execute_batch(&format!("DROP TABLE consents; {BEFORE_THE_REQUEST_COLUMN}"))
+            .unwrap();
+    }
+    let store = ConsentStore::open(&dir).unwrap();
+    let mut setting = new("s1", "k1");
+    setting.idem_key = Some("key-1".to_string());
+    let again = store.insert(&setting, 2_000).unwrap();
+    assert!(
+        matches!(&again, Opened::Same(r) if r.id == "c-old-setting"),
+        "{again:?}"
+    );
+    let mut secret = app_applied(new("s1", "npm"));
+    secret.kind = "secret_request".to_string();
+    secret.idem_key = Some("key-2".to_string());
+    secret.request = json!({"op": "vault.request",
+        "request": {"name": "npm", "url": "https://npmjs.com"}});
+    let again = store.insert(&secret, 2_000).unwrap();
+    assert!(
+        matches!(&again, Opened::Same(r) if r.id == "c-old-secret"),
+        "{again:?}"
+    );
+}
+
+#[test]
+fn a_row_an_older_build_wrote_with_no_request_still_matches_its_retry() {
+    let store = ConsentStore::in_memory_for_tests();
+    let mut asked = new("s1", "k1");
+    asked.idem_key = Some("key-1".to_string());
+    let id = store.insert(&asked, 1_000).unwrap().row().id.clone();
+    store.run_sql_for_tests("UPDATE consents SET request = 'null'");
+    let again = store.insert(&asked, 2_000).unwrap();
+    assert!(matches!(&again, Opened::Same(r) if r.id == id), "{again:?}");
 }
 
 #[test]

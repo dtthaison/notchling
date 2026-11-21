@@ -178,3 +178,20 @@ fn a_deny_cools_the_same_ask_for_every_unverified_caller_and_for_a_session_that_
     store.insert(&stranger("cli:forked", "k2"), 3_000).unwrap();
     store.insert(&new("s2", "k1"), 3_000).unwrap();
 }
+
+#[test]
+fn a_deny_of_an_unverified_ask_cools_the_same_ask_for_a_verified_session() {
+    let store = ConsentStore::in_memory_for_tests();
+    let id = store
+        .insert(&stranger("cli:child", "k1"), 1_000)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    store
+        .answer(&id, State::Denied, "mac", None, 2_000)
+        .unwrap();
+    let after = busy(store.insert(&new("s1", "k1"), 3_000));
+    assert!(after > 0 && after <= COOLDOWN_MS);
+    store.insert(&new("s1", "k2"), 3_000).unwrap();
+}

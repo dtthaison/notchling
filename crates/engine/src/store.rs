@@ -101,7 +101,7 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|e| e.to_string())?;
     if version >= SCHEMA {
-        return Ok(());
+        return add_missing_columns(db);
     }
     retry_busy(|| {
         db.execute_batch(
@@ -243,17 +243,21 @@ fn add_missing_columns(db: &Connection) -> Result<(), String> {
         let mut query = db
             .prepare(&format!("PRAGMA table_info({table})"))
             .map_err(|e| e.to_string())?;
-        let present = query
+        let names = query
             .query_map([], |r| r.get::<_, String>(1))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-            .iter()
-            .any(|name| name == column);
+            .map_err(|e| e.to_string())?;
         drop(query);
-        if !present {
+        if names.is_empty() || names.iter().any(|name| name == column) {
+            continue;
+        }
+        match retry_busy(|| {
             db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {kind}"))
-                .map_err(|e| e.to_string())?;
+        }) {
+            Ok(()) => {}
+            Err(e) if e.contains("duplicate column") => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(())
