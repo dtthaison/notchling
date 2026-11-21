@@ -1,5 +1,6 @@
-use crate::agent_named::AgentNames;
+use crate::agent_named::{lazy_label, AgentNames};
 use crate::late_emit::LateSalt;
+use notchling_engine::activity::ActivityRow;
 use notchling_engine::ask::evidence::{command_hash, output_hash};
 use notchling_events::field::FieldValue;
 use notchling_events::ids::new_op_id;
@@ -252,4 +253,54 @@ fn an_unverified_session_claim_is_never_looked_up() {
     let events = run(&main, &[claimed]);
     assert_eq!(text(&events[0], "asker").as_deref(), Some("unknown"));
     assert_eq!(text(&events[0], "agent"), None);
+}
+
+fn called_row(identity: &AgentIdentity) -> ActivityRow {
+    let mut row = ActivityRow::blank(1, AT_MS, "agent.called");
+    row.actor_tier = Some("agent".to_owned());
+    row.actor_session = identity.session.clone();
+    row.f = json!({
+        "op": "settings.set",
+        "tool": identity.tool.name(),
+        "verified": identity.verified,
+        "cmd_hash": identity.cmd_hash,
+        "out_hash": identity.out_hash,
+    })
+    .to_string();
+    row
+}
+
+#[test]
+fn the_lazy_lookup_gives_the_same_answer_as_the_eager_one() {
+    let (_dir, main) = fixture("lazy");
+    let sessions = Arc::new(Mutex::new(
+        json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]),
+    ));
+    let lazy = lazy_label(salt(), sessions);
+    let eager = call(AgentTool::Claude, Some("ba1000001"), None);
+    let events = run(&main, &[eager.clone()]);
+    let row = called_row(&eager.identity);
+    let (asker, agent) = lazy(&row).expect("a label");
+    assert_eq!(Some(asker), text(&events[0], "asker"));
+    assert_eq!(agent, text(&events[0], "agent"));
+    let main_call = call(AgentTool::Claude, Some("bmain0001"), None);
+    assert_eq!(lazy(&called_row(&main_call.identity)).unwrap().0, "main");
+}
+
+#[test]
+fn the_lazy_lookup_gives_nothing_for_what_cannot_be_resolved() {
+    let (_dir, main) = fixture("lazy-none");
+    let sessions = Arc::new(Mutex::new(
+        json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]),
+    ));
+    let lazy = lazy_label(salt(), sessions);
+    let mut unverified = call(AgentTool::Claude, Some("ba1000001"), None);
+    unverified.identity.verified = false;
+    assert!(lazy(&called_row(&unverified.identity)).is_none());
+    let shell = call(AgentTool::Shell, Some("ba1000001"), None);
+    assert!(lazy(&called_row(&shell.identity)).is_none());
+    let no_evidence = call(AgentTool::Claude, None, None);
+    assert!(lazy(&called_row(&no_evidence.identity)).is_none());
+    let unseen = call(AgentTool::Claude, Some("bnothere9"), None);
+    assert!(lazy(&called_row(&unseen.identity)).is_none());
 }

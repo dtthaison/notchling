@@ -1,20 +1,51 @@
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
-use notchling_engine::activity::{self, EventsDb, ImportFiles, Query};
+use notchling_engine::activity::{self, ActivityRow, EventsDb, ImportFiles, Query};
 use notchling_local_api::{ops, ApiError, Caller, OpSpec};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, PoisonError};
 
 pub type Names = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
 
+pub type LabelFn = Arc<dyn Fn(&ActivityRow) -> Option<(String, Option<String>)> + Send + Sync>;
+
 pub struct ActivityOps {
     db: Arc<Mutex<EventsDb>>,
     names: Names,
+    lazy: Option<LabelFn>,
+}
+
+pub fn session_names(sessions: Arc<Mutex<Value>>) -> Names {
+    Arc::new(move |kind, id| {
+        if kind != "session" {
+            return None;
+        }
+        let list = sessions.lock().unwrap_or_else(PoisonError::into_inner);
+        list.as_array()?
+            .iter()
+            .find(|row| {
+                ["id", "resumeSessionId"]
+                    .iter()
+                    .any(|key| row.get(key).and_then(Value::as_str) == Some(id))
+            })
+            .and_then(|row| row.get("name").and_then(Value::as_str))
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    })
 }
 
 impl ActivityOps {
     pub fn new(db: Arc<Mutex<EventsDb>>, names: Names) -> ActivityOps {
-        ActivityOps { db, names }
+        ActivityOps {
+            db,
+            names,
+            lazy: None,
+        }
+    }
+
+    pub fn with_lazy(mut self, lazy: LabelFn) -> ActivityOps {
+        self.lazy = Some(lazy);
+        self
     }
 
     pub fn for_daemon(layout: &Layout) -> ActivityOps {
@@ -43,8 +74,14 @@ impl OpGroup for ActivityOps {
         match op {
             ops::ACTIVITY_LIST => {
                 let query = Query::from_args(args).map_err(ApiError::bad_request)?;
-                let db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
-                Ok(activity::list(&db, &query, &*self.names))
+                let rows = {
+                    let db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
+                    activity::fetch(&db, &query)
+                };
+                Ok(match &self.lazy {
+                    Some(lazy) => activity::reply_with(&rows, &query, &*self.names, &**lazy),
+                    None => activity::reply(&rows, &query, &*self.names),
+                })
             }
             other => Err(ApiError::internal(format!("{other} has no handler"))),
         }

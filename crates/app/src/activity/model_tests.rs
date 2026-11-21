@@ -280,6 +280,26 @@ fn agent_row(kind: &str, tool: &str, verified: bool, agent: Option<&str>) -> Val
 }
 
 #[test]
+fn an_agent_row_shows_the_name_of_the_session_it_came_from() {
+    let mut value = agent_row("acted", "claude", true, Some("main"));
+    value["session_name"] = json!("Fix the parser");
+    let line = Entry::parse(&value).expect("a row").line();
+    assert!(line.contains("Fix the parser"), "{line}");
+    assert!(line.contains("claude"), "{line}");
+    let mut unverified = agent_row("acted", "claude", false, None);
+    unverified["session_name"] = json!("Fix the parser");
+    let line = Entry::parse(&unverified).expect("a row").line();
+    assert!(
+        line.contains("Fix the parser") && line.contains("not verified"),
+        "{line}"
+    );
+    let plain = Entry::parse(&agent_row("acted", "claude", true, None))
+        .expect("a row")
+        .line();
+    assert!(!plain.contains(" in "), "{plain}");
+}
+
+#[test]
 fn the_agents_chip_keeps_every_row_an_agent_made_next_to_the_other_chips() {
     let mut m = ActivityModel::default();
     m.finish(Ok(reply(json!([

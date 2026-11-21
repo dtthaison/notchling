@@ -300,14 +300,40 @@ fn named_by_op(rows: &[ActivityRow]) -> HashMap<String, Value> {
         .collect()
 }
 
-fn add_agent(out: &mut Value, row: &ActivityRow, named: &HashMap<String, Value>) {
+pub type LabelLookup<'a> = &'a dyn Fn(&ActivityRow) -> Option<(String, Option<String>)>;
+
+pub const LAZY_MAX: usize = 25;
+
+fn add_agent(
+    out: &mut Value,
+    row: &ActivityRow,
+    named: &HashMap<String, Value>,
+    names: &dyn Fn(&str, &str) -> Option<String>,
+    lazy: LabelLookup<'_>,
+    budget: &mut usize,
+) {
     let f = row.fields();
     if let Some(tool) = text(&f, "tool") {
         out["tool"] = json!(tool);
     }
     out["verified"] = json!(f.get("verified").and_then(Value::as_bool).unwrap_or(false));
-    if let Some(agent) = row.op_id.as_ref().and_then(|id| named.get(id)) {
+    let stored = row.op_id.as_ref().and_then(|id| named.get(id));
+    let settled = stored.is_some_and(|agent| agent["as"] != "unknown");
+    let found = if settled || *budget == 0 {
+        None
+    } else {
+        *budget -= 1;
+        lazy(row).map(|(asker, id)| json!({"as": asker, "id": id}))
+    };
+    if let Some(agent) = found.as_ref().or(stored) {
         out["agent"] = agent.clone();
+    }
+    if let Some(name) = row
+        .actor_session
+        .as_deref()
+        .and_then(|id| names("session", id))
+    {
+        out["session_name"] = json!(clean(&name, 60));
     }
 }
 
@@ -315,6 +341,15 @@ pub fn reply(
     rows: &[ActivityRow],
     q: &Query,
     names: &dyn Fn(&str, &str) -> Option<String>,
+) -> Value {
+    reply_with(rows, q, names, &|_| None)
+}
+
+pub fn reply_with(
+    rows: &[ActivityRow],
+    q: &Query,
+    names: &dyn Fn(&str, &str) -> Option<String>,
+    lazy: LabelLookup<'_>,
 ) -> Value {
     let named = named_by_op(rows);
     let mut picked: Vec<&ActivityRow> = rows
@@ -330,12 +365,13 @@ pub fn reply(
         .collect();
     picked.sort_by_key(|row| std::cmp::Reverse((row.ts, row.seq)));
     picked.truncate(q.limit);
+    let mut budget = LAZY_MAX;
     let mut shown: Vec<Value> = picked
         .iter()
         .map(|row| {
             let mut out = row_json(row, names);
             if row.kind == "agent.called" {
-                add_agent(&mut out, row, &named);
+                add_agent(&mut out, row, &named, names, lazy, &mut budget);
             }
             out
         })
@@ -352,8 +388,18 @@ pub fn reply(
 }
 
 pub fn list(db: &EventsDb, q: &Query, names: &dyn Fn(&str, &str) -> Option<String>) -> Value {
-    match db.list(&q.db_query()) {
-        Ok(rows) => reply(&rows, q, names),
-        Err(_) => json!({"rows": [], "truncated": false}),
-    }
+    list_with(db, q, names, &|_| None)
+}
+
+pub fn fetch(db: &EventsDb, q: &Query) -> Vec<ActivityRow> {
+    db.list(&q.db_query()).unwrap_or_default()
+}
+
+pub fn list_with(
+    db: &EventsDb,
+    q: &Query,
+    names: &dyn Fn(&str, &str) -> Option<String>,
+    lazy: LabelLookup<'_>,
+) -> Value {
+    reply_with(&fetch(db, q), q, names, lazy)
 }

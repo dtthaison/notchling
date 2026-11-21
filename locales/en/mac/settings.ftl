@@ -505,6 +505,9 @@ settings-activity-from-agent = { $tool }
 # Who did it, for a row an agent made when its transcript names the agent. $tool is the tool and $agent is the agent's kind, main or subagent.
 settings-activity-from-agent-as = { $tool }, { $agent } (as its transcript says)
 
+# Added to who did it for an agent's row when the session's name is known. $place is who did it and $session is the session's name.
+settings-activity-in-session = { $place } in { $session }
+
 # Added to who did it when Notchling can't vouch for the agent. $place is who did it.
 settings-activity-not-verified = { $place }, not verified
 

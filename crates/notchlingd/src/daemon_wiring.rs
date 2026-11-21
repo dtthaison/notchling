@@ -891,6 +891,7 @@ impl Wired {
             &self.names,
             &self.events,
         );
+        let activity_sessions = sessions.clone();
         let ops = Ops::with_acting(sessions, self.acting.clone())
             .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
@@ -940,10 +941,16 @@ impl Wired {
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {
             Some((db, log)) => ops
-                .with_group(Arc::new(ActivityOps::new(
-                    db.clone(),
-                    Arc::new(|_, _| None),
-                )))
+                .with_group(Arc::new(
+                    ActivityOps::new(
+                        db.clone(),
+                        crate::activity_ops::session_names(activity_sessions.clone()),
+                    )
+                    .with_lazy(crate::agent_named::lazy_label(
+                        self.salt.clone(),
+                        activity_sessions,
+                    )),
+                ))
                 .with_group(log.clone()),
             None => ops.with_group(Arc::new(ActivityOps::for_daemon(layout))),
         }

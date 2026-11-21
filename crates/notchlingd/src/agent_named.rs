@@ -165,6 +165,26 @@ fn work(
     }
 }
 
+pub fn lazy_label(salt: LateSalt, sessions: Arc<Mutex<Value>>) -> crate::activity_ops::LabelFn {
+    Arc::new(move |row| {
+        let f = row.fields();
+        let text = |key: &str| f.get(key).and_then(Value::as_str).map(str::to_owned);
+        let mut who = AgentIdentity::shell();
+        who.tool = text("tool")
+            .and_then(|name| AgentTool::from_name(&name))
+            .unwrap_or(AgentTool::Unknown);
+        who.verified = f.get("verified").and_then(Value::as_bool) == Some(true);
+        who.session = row.actor_session.clone();
+        who.cmd_hash = text("cmd_hash");
+        who.out_hash = text("out_hash");
+        if !can_resolve_later(&who) {
+            return None;
+        }
+        let label = label_for(&who, row.ts, &salt, &sessions);
+        (label.asker != AskerKind::Unknown).then(|| (label.asker.name().to_owned(), label.agent))
+    })
+}
+
 fn can_resolve_later(who: &AgentIdentity) -> bool {
     who.tool == AgentTool::Claude
         && who.verified

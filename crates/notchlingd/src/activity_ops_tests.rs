@@ -1,9 +1,11 @@
-use crate::activity_ops::ActivityOps;
+use crate::activity_ops::{session_names, ActivityOps, LabelFn};
 use crate::layout::Layout;
 use crate::limits_ops_tests::TempDir;
 use crate::op_group::OpGroup;
+use notchling_engine::activity::{ActivityRow, EventsDb};
 use notchling_local_api::{ops, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::json;
+use std::sync::{Arc, Mutex};
 
 fn app() -> Caller {
     Caller {
@@ -123,4 +125,49 @@ fn rows_inserted_into_events_db_are_served_with_the_names_closure() {
         .call(&app(), ops::ACTIVITY_LIST, &json!({"groups": ["secrets"]}))
         .unwrap();
     assert_eq!(none["rows"], json!([]));
+}
+
+fn agent_called(op_id: &str) -> ActivityRow {
+    let mut row = ActivityRow::blank(1, 5_000, "agent.called");
+    row.grp = "agents".to_owned();
+    row.actor_tier = Some("agent".to_owned());
+    row.actor_session = Some("sess-1".to_owned());
+    row.op_id = Some(op_id.to_owned());
+    row.f = json!({"op": "settings.set", "tool": "claude", "verified": true, "result": "ok"})
+        .to_string();
+    row
+}
+
+#[test]
+fn an_agent_row_gets_its_label_and_its_session_name_at_read_time() {
+    let db = Arc::new(Mutex::new(EventsDb::memory().unwrap()));
+    db.lock().unwrap().insert(&[agent_called("op-1")]).unwrap();
+    let sessions = Arc::new(Mutex::new(
+        json!([{"id": "sess-1", "name": "Fix the parser"}]),
+    ));
+    let lazy: LabelFn = Arc::new(|row| {
+        assert_eq!(row.actor_session.as_deref(), Some("sess-1"));
+        Some(("subagent".to_owned(), Some("a1".to_owned())))
+    });
+    let activity = ActivityOps::new(db, session_names(sessions)).with_lazy(lazy);
+    let reply = activity
+        .call(&app(), ops::ACTIVITY_LIST, &json!({"kinds": ["agents"]}))
+        .unwrap();
+    let row = &reply["rows"][0];
+    assert_eq!(row["agent"]["as"], "subagent");
+    assert_eq!(row["agent"]["id"], "a1");
+    assert_eq!(row["session_name"], "Fix the parser");
+}
+
+#[test]
+fn without_a_lookup_or_a_known_session_the_row_has_neither() {
+    let db = Arc::new(Mutex::new(EventsDb::memory().unwrap()));
+    db.lock().unwrap().insert(&[agent_called("op-1")]).unwrap();
+    let sessions = Arc::new(Mutex::new(json!([{"id": "other", "name": "Other"}])));
+    let activity = ActivityOps::new(db, session_names(sessions));
+    let reply = activity
+        .call(&app(), ops::ACTIVITY_LIST, &json!({}))
+        .unwrap();
+    assert!(reply["rows"][0].get("agent").is_none());
+    assert!(reply["rows"][0].get("session_name").is_none());
 }

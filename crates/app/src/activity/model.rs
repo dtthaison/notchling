@@ -77,6 +77,7 @@ pub struct Entry {
     pub tool: Option<String>,
     pub verified: bool,
     pub agent_as: Option<String>,
+    pub session_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,6 +129,7 @@ impl Entry {
                 .and_then(Value::as_str)
                 .filter(|a| matches!(*a, "main" | "subagent"))
                 .map(str::to_owned),
+            session_name: text("session_name").filter(|n| !n.is_empty()),
         })
     }
 
@@ -170,6 +172,10 @@ impl Entry {
         let place = match &self.agent_as {
             Some(agent) => t::settings::activity_from_agent_as(tool, agent),
             None => t::settings::activity_from_agent(tool),
+        };
+        let place = match &self.session_name {
+            Some(session) => t::settings::activity_in_session(&place, session),
+            None => place,
         };
         if self.verified {
             place
