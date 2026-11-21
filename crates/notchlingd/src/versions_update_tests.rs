@@ -61,10 +61,10 @@ fn claude_bin(rig: &Rig) -> String {
 }
 
 #[test]
-fn update_and_latest_are_app_tier() {
+fn update_is_app_tier_and_latest_an_agent_read() {
     let rig = rig("update-tier");
     assert_eq!(rig.ops.spec(ops::VERSIONS_UPDATE_LOCAL), Some(OpSpec::APP));
-    assert_eq!(rig.ops.spec(ops::VERSIONS_LATEST), Some(OpSpec::APP));
+    assert_eq!(rig.ops.spec(ops::VERSIONS_LATEST), Some(OpSpec::AGENT_READ));
     let e = rig.ops.call(
         &agent(),
         ops::VERSIONS_UPDATE_LOCAL,

@@ -39,11 +39,11 @@ fn role<'a>(reply: &'a Value, name: &str) -> &'a Value {
 }
 
 #[test]
-fn catalog_roles_is_a_quiet_app_read() {
+fn catalog_roles_is_an_agent_read() {
     let tmp = TempDir::new("roles-spec");
     assert_eq!(
         service(&tmp).spec(ops::CATALOG_ROLES),
-        Some(OpSpec::APP_QUIET)
+        Some(OpSpec::AGENT_READ)
     );
 }
 

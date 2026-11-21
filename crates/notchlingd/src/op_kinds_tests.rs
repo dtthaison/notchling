@@ -35,7 +35,22 @@ fn rig(tag: &str) -> (Root, Wired, Ops) {
     (Root(root), wired, ops)
 }
 
-const OWN_QUIET: [&str; 13] = [
+const READS_BY_AGENTS: [&str; 8] = [
+    ops::INBOX_MINE,
+    ops::ACCOUNTS_SUMMARY,
+    ops::LIMITS_SUMMARY,
+    ops::ORGANIZATIONS_MINE,
+    ops::CATALOG_ROLES,
+    ops::AWAKE_STATE,
+    ops::VERSIONS_WORKERS,
+    ops::VERSIONS_LATEST,
+];
+
+const OWN_QUIET: [&str; 17] = [
+    ops::INBOX_MINE,
+    ops::ACCOUNTS_SUMMARY,
+    ops::LIMITS_SUMMARY,
+    ops::ORGANIZATIONS_MINE,
     ops::ORGANIZATIONS_LIST,
     ops::ORGANIZATIONS_FOLDERS_PREVIEW,
     ops::CATALOG_ROLES,
@@ -255,7 +270,8 @@ fn own_quiet_ops_are_quiet() {
     let (_root, wired, ops) = rig("own");
     for op in OWN_QUIET {
         assert_eq!(home(op), OpHome::Quiet, "{op}");
-        assert_eq!(ops.spec(op), Some(OpSpec::APP_QUIET), "{op}");
+        let want = if READS_BY_AGENTS.contains(&op) { OpSpec::AGENT_READ } else { OpSpec::APP_QUIET };
+        assert_eq!(ops.spec(op), Some(want), "{op}");
     }
     wired.close();
 }
@@ -265,7 +281,8 @@ fn quiet_reads_match_quiet_ops_rs() {
     let (_root, wired, ops) = rig("reads");
     for op in QUIET_READS {
         assert_eq!(home(op), OpHome::Quiet, "{op}");
-        assert_eq!(ops.spec(op), Some(OpSpec::APP_QUIET), "{op}");
+        let want = if READS_BY_AGENTS.contains(&op) { OpSpec::AGENT_READ } else { OpSpec::APP_QUIET };
+        assert_eq!(ops.spec(op), Some(want), "{op}");
     }
     wired.close();
 }

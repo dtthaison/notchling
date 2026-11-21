@@ -27,6 +27,15 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling consent <id> [--wait] [--timeout <seconds>] [--json]` | `consent.get` (agent) | none | 0 1 2 3 4 5 6 124 |
 | `notchling consents [--json]` | `consent.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling consent cancel <id> [--json]` | `consent.cancel` (agent, acts) | none | 0 1 2 3 4 |
+| `notchling inbox [--json] [--socket <path>]` | `inbox.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling accounts [--json] [--socket <path>]` | `accounts.summary` (agent) | none | 0 1 2 3 4 |
+| `notchling limits [--tool <claude|codex|agy> [--pool <name>]] [--json] [--socket <path>]` | `limits.summary` (agent) | none | 0 1 2 3 4 |
+| `notchling orgs [--json] [--socket <path>]` | `organizations.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling search <words> [--kind pages|sessions] [--since <seconds>] [--json] [--socket <path>]` | `search.query` (agent) | none | 0 1 2 3 4 |
+| `notchling switches [--json] [--socket <path>]` | `settings.switches` (agent) | none | 0 1 2 3 4 |
+| `notchling awake [on|off] [--json] [--socket <path>]` | `awake.state` (agent) | none | 0 1 2 3 4 |
+| `notchling versions [--latest] [--workers] [--json] [--socket <path>]` | `versions.get` (agent), `versions.latest` (agent), `versions.workers` (agent) | none | 0 1 2 3 4 |
+| `notchling roles [--json] [--socket <path>]` | `catalog.roles` (agent) | none | 0 1 2 3 4 |
 | `notchling session reload <id|self> [--after-turn] [--json]` | `session.reload` (agent, acts) | own_free | 0 1 2 3 4 |
 | `notchling cluster status [--json]` | `cluster.status` (agent) | none | 0 1 2 3 4 |
 | `notchling cluster join --token-stdin [--json]` | `cluster.join` (agent, acts) | none | 0 1 2 3 4 |
@@ -42,7 +51,6 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | Op | Feature | Phase |
 | --- | --- | --- |
 | `events.subscribe` | Follow events | 2 |
-| `search.query` | Search pages and sessions | 2 |
 | `inbox.list` | Read the Inbox | 2 |
 | `accounts.list` | Read accounts | 2 |
 | `providers.list` | Read providers | 2 |
@@ -52,17 +60,11 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `limits.set_mode` | Change the limit mode | 2 |
 | `cost.summary` | Read the cost summary | 2 |
 | `organizations.list` | Read the organization | 2 |
-| `settings.switches` | Read the switches | 2 |
 | `settings.get_acting` | Read the switches | 2 |
-| `awake.state` | Read Keep Awake | 2 |
-| `versions.get` | Read tool versions | 2 |
-| `versions.latest` | Read the newest versions | 2 |
-| `versions.workers` | Read worker versions | 2 |
 | `versions.check` | Check tool versions | 2 |
 | `outbox.list` | Read queued messages | 2 |
 | `activity.list` | Read the session's activity | 2 |
 | `prompts.list` | Read pending prompts | 2 |
-| `catalog.roles` | Read the role table | 2 |
 | `catalog.get` | Read the model catalog | 2 |
 | `log.verify` | Verify the log chain | 2 |
 | `settings.set_acting` | Switch Act on Sessions on | 3 |

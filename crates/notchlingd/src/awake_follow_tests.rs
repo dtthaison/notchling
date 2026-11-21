@@ -230,7 +230,7 @@ fn awake_state_answers_what_is_held_now_to_the_app_and_is_a_quiet_read() {
         FirstScan::open(),
         Duration::ZERO,
     );
-    assert_eq!(ops.spec(ops::AWAKE_STATE), Some(OpSpec::APP_QUIET));
+    assert_eq!(ops.spec(ops::AWAKE_STATE), Some(OpSpec::AGENT_READ));
     let ask = || {
         ops.call(&app_caller(), ops::AWAKE_STATE, &json!({}))
             .unwrap()
