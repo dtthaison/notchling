@@ -204,7 +204,7 @@ pub const KEYS: &[KeySpec] = &[
     key("dismissed", K::Dict, D::Empty, true, "Done rows cleared in the notch: agent id to time (seconds)")
         .never("Cleared notch rows", "Done rows cleared from the notch", "the app's own record"),
     key("hiddenAgents", K::Dict, D::Empty, true, "Agents hidden in the notch: agent id to the group they were hidden in")
-        .free("Hidden notch agents", "Agents hidden in the notch", "it only hides a row in the notch"),
+        .never("Hidden notch agents", "Agents hidden in the notch", "an agent could hide its own row"),
     key("accounts", K::Json, D::None, true, "Saved Claude Code accounts (JSON of AccountStore's list)")
         .never("Claude Code accounts", "The saved Claude Code accounts", "logins: only the Accounts window changes them"),
     key("untrackedCostAccount", K::Any, D::None, true, "Only in the migration list; nothing in the code reads it")
@@ -242,7 +242,7 @@ pub const KEYS: &[KeySpec] = &[
     key("chatProjectFolders", K::StringList, D::Empty, false, "Recent folders for New Session (at most 30)")
         .never("Recent folders", "Recent folders New Session offers", "the app's own history of where sessions start"),
     key("newSessionChoice", K::String, D::None, false, "The account last picked in New Session")
-        .ask("New Session account", "The account New Session picked last", "it decides which login a new session runs under"),
+        .never("New Session account", "The account New Session picked last", "it holds a raw account id and decides which login a new session runs under"),
     key("chatOpen", K::Bool, D::Bool(false), false, "The Chat window was open at quit")
         .never("Chat open at quit", "The Chat window was open at quit", "the app's own record"),
     key("chatSelection", K::String, D::None, false, "The session selected in Chat")

@@ -500,7 +500,7 @@ Steps 4 and 5: what an agent may read without asking, and a way to follow events
 
 `watch` follows new **scoped topics**: `mine.consents`, `mine.asks`, `mine.jobs` (phase 5), `mine.sessions` (phase 4), and the public `settings.changed` and `settings.switch`. The hub delivers a scoped event only to subscribers whose verified session owns it; an unverified caller gets the public ones only. `watch` reconnects like `ask` and exits 0 on `--until` or `--count`, 124 at `--timeout`.
 
-**Settings classes.** `hiddenAgents` moves from Never to Free (it hides a row in the notch); `newSessionChoice` from Never to Ask (it picks the account a new session uses). Ask accepts verified Codex and Antigravity sessions the daemon started, now that identity names them.
+**Settings classes.** `hiddenAgents` and `newSessionChoice` stay Never (decided 2026-11-21: an agent could hide its own row, and `newSessionChoice` holds a raw account id and decides which login a new session runs under). Ask accepts verified Codex and Antigravity sessions the daemon started, now that identity names them.
 
 **Consent class.** None: every op here is a read or a Free key.
 
@@ -707,7 +707,7 @@ Still open; the recommendation is what the plan builds unless you say otherwise:
 
 8. **Settings asks and vault requests fold into the one request; vault approvals keep their own flow and Always Allow.** Recommendation: **yes**.
 9. **The organization comes from the session's folder; a caller in no verified session has none, reads nothing organization-scoped, and can't request organization-scoped actions.** Recommendation: **yes**.
-10. **`hiddenAgents` becomes Free and `newSessionChoice` Ask.** Recommendation: **yes**.
+10. **`hiddenAgents` and `newSessionChoice` stay Never.** Decided 2026-11-21, against the earlier recommendation of Free and Ask.
 11. **Phase 1 changes existing tests** (exit codes, settings asks), which the zone sends to you. Recommendation: **yes**, reviewed as one change.
 12. **Is turning `cluster` off a request, not free, on a node with no app attached?** There no app can turn it back on until the daemon restarts, so an agent could strand a headless Worker until someone reaches it. The bridge needs no exception: with it off, no phone can give a yes, and the Mac shows Turn On. Recommendation: **yes, for `cluster` on a node with no app attached only**; everywhere else off stays free, as decided.
 13. **A phone may Allow only settings asks and stops, until pairing has an anchor an agent can't write.** Revision 1 also let a phone allow sessions and dispatch without secrets; the builder check showed that a forged device could then run code on every machine in the organization. Recommendation: **yes**.
