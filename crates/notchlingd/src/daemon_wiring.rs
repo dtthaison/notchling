@@ -2,7 +2,7 @@ use crate::account_history::DbSwitches;
 use crate::accounts_ops::AccountsOps;
 use crate::acting::{Acting, ACTING_OFF};
 use crate::acting_ops::{ActingOps, Room};
-use crate::activity_ops::ActivityOps;
+use crate::activity_ops::{self, ActivityOps};
 use crate::agent_named::AgentNames;
 use crate::agy_ops::AgyOps;
 use crate::agy_sidecar_ops::AgySidecarOps;
@@ -530,11 +530,13 @@ impl Wired {
             .with_reply_screen_file(layout.state_dir().join("reply-screen.txt"))
             .with_events(events.clone()),
         );
-        let codex = Arc::new(CodexOps::for_daemon(
+        let launches = Launches::default();
+        let codex = Arc::new(CodexOps::for_daemon_with(
             layout,
             acting_switch,
             room.clone(),
             &claude,
+            &launches,
         ));
         acting.attach_codex(codex.clone());
         let inbox = InboxOps::new(layout.data_dir.clone(), room.clone())
@@ -564,10 +566,11 @@ impl Wired {
         let worker = crate::ask_wiring::worker_in(node_slot.clone());
         let ask =
             crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox, worker);
-        let agy = Arc::new(AgyOps::for_daemon(
+        let agy = Arc::new(AgyOps::for_daemon_with(
             layout,
             acting.acting_switch(),
             room.clone(),
+            &launches,
         ));
         acting.attach_agy(agy.clone());
         let postmen = postmen_for(&outbox, &acting, layout, &codex, &agy);
@@ -830,7 +833,7 @@ impl Wired {
             awake,
             events: late,
             salt,
-            launches: Launches::default(),
+            launches,
             names: OnceLock::new(),
             history,
             log: OnceLock::new(),
@@ -891,8 +894,7 @@ impl Wired {
             &self.names,
             &self.events,
         );
-        let activity_sessions = sessions.clone();
-        let ops = Ops::with_acting(sessions, self.acting.clone())
+        let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
             .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
@@ -941,16 +943,7 @@ impl Wired {
             .with_first_scan(first_scan, first_wait);
         match self.log.get() {
             Some((db, log)) => ops
-                .with_group(Arc::new(
-                    ActivityOps::new(
-                        db.clone(),
-                        crate::activity_ops::session_names(activity_sessions.clone()),
-                    )
-                    .with_lazy(crate::agent_named::lazy_label(
-                        self.salt.clone(),
-                        activity_sessions,
-                    )),
-                ))
+                .with_group(Arc::new(activity_ops::for_log(db, &sessions, &self.salt)))
                 .with_group(log.clone()),
             None => ops.with_group(Arc::new(ActivityOps::for_daemon(layout))),
         }

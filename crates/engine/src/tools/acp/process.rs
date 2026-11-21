@@ -23,6 +23,9 @@ pub trait Killer: Send + Sync {
 pub trait ToolProcess: Send {
     fn write_line(&mut self, line: &str) -> io::Result<()>;
     fn killer(&self) -> Arc<dyn Killer>;
+    fn pid(&self) -> Option<u32> {
+        None
+    }
 }
 
 pub struct Spawned {
@@ -219,6 +222,10 @@ impl ToolProcess for RealProcess {
 
     fn killer(&self) -> Arc<dyn Killer> {
         Arc::new(ChildKiller(self.child.clone()))
+    }
+
+    fn pid(&self) -> Option<u32> {
+        Some(self.child.lock().unwrap_or_else(|e| e.into_inner()).id())
     }
 }
 

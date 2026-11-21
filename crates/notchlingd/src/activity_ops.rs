@@ -1,3 +1,4 @@
+use crate::late_emit::LateSalt;
 use crate::layout::Layout;
 use crate::op_group::OpGroup;
 use notchling_engine::activity::{self, ActivityRow, EventsDb, ImportFiles, Query};
@@ -32,6 +33,16 @@ pub fn session_names(sessions: Arc<Mutex<Value>>) -> Names {
             .filter(|name| !name.is_empty())
             .map(str::to_owned)
     })
+}
+
+pub fn for_log(
+    db: &Arc<Mutex<EventsDb>>,
+    sessions: &Arc<Mutex<Value>>,
+    salt: &LateSalt,
+) -> ActivityOps {
+    ActivityOps::new(db.clone(), session_names(sessions.clone())).with_lazy(
+        crate::agent_named::lazy_label(salt.clone(), sessions.clone()),
+    )
 }
 
 impl ActivityOps {

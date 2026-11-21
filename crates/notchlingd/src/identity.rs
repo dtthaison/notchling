@@ -38,7 +38,7 @@ impl Launches {
             .remove(&(pid, started));
     }
 
-    fn find(&self, pid: u32, started: Option<u64>) -> Option<(AgentTool, String)> {
+    pub(crate) fn find(&self, pid: u32, started: Option<u64>) -> Option<(AgentTool, String)> {
         let rows = self.rows.lock().unwrap_or_else(PoisonError::into_inner);
         rows.get(&(pid, started?)).cloned()
     }

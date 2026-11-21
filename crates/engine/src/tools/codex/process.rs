@@ -32,6 +32,9 @@ pub trait ToolProcess: Send + Sync {
     fn kill(&self) {
         self.terminate();
     }
+    fn pid(&self) -> Option<u32> {
+        None
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,6 +197,10 @@ struct RealProcess {
 }
 
 impl ToolProcess for RealProcess {
+    fn pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+
     fn next(&self) -> Next {
         let mut exit = self.exit.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(info) = *exit {

@@ -148,6 +148,7 @@ pub mod inbox_ops;
 pub mod install_ops;
 pub mod late_emit;
 pub mod late_reply;
+pub mod launch_spawn;
 pub mod layout;
 pub mod limits_ops;
 pub mod limits_sources;
