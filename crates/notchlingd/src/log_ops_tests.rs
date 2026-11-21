@@ -21,7 +21,7 @@ fn caller(tier: Tier) -> Caller {
 fn specs_follow_the_tiers() {
     let wired = wire(rig("logops-spec"));
     let log = LogOps::new(wired.audit.clone(), wired.checker.clone());
-    assert_eq!(log.spec(ops::LOG_VERIFY), Some(OpSpec::AGENT));
+    assert_eq!(log.spec(ops::LOG_VERIFY), Some(OpSpec::AGENT_READ));
     assert_eq!(log.spec(ops::LOG_CHAIN_START), Some(OpSpec::APP));
     assert_eq!(log.spec("log.other"), None);
 }

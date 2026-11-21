@@ -309,7 +309,7 @@ fn every_acting_op_is_app_tier_and_refused_while_off() {
         ops::SESSION_QUESTION,
         ops::HOOK_REQUEST,
     ] {
-        assert_eq!(s.ops.spec(op), Some(OpSpec::AGENT), "{op}");
+        assert_eq!(s.ops.spec(op), Some(OpSpec::AGENT_READ), "{op}");
     }
     assert_eq!(s.ops.spec("git.status"), None);
 }

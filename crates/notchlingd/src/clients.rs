@@ -136,7 +136,7 @@ mod tests {
 
         impl Handler for Recorder {
             fn spec(&self, op: &str) -> Option<OpSpec> {
-                (op == ops::SESSIONS_LIST).then_some(OpSpec::AGENT)
+                (op == ops::SESSIONS_LIST).then_some(OpSpec::AGENT_READ)
             }
 
             fn call(&self, _: &Caller, _: &str, args: &Value) -> Result<Value, ApiError> {

@@ -165,7 +165,7 @@ fn ids(reply: &Value) -> Vec<String> {
 #[test]
 fn catalog_get_is_agent_tier_and_read_only() {
     let r = rig("spec", false, &live_login(None));
-    assert_eq!(r.service.spec(ops::CATALOG_GET), Some(OpSpec::AGENT));
+    assert_eq!(r.service.spec(ops::CATALOG_GET), Some(OpSpec::AGENT_READ));
     assert_eq!(r.service.spec("catalog.set"), None);
     assert!(r.service.topics().contains(&"tools"));
 }

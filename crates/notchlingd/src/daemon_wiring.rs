@@ -25,6 +25,8 @@ use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{listed_folders, live_folders, GitOps};
 use crate::inbox_ops::InboxOps;
 use crate::install_ops::{InstallOps, InstallSetup};
+use crate::agent_named::AgentNames;
+use crate::identity::{Identifier, Launches};
 use crate::late_emit::{Events, LateEmit, LateSalt};
 use crate::layout::Layout;
 use crate::limits_ops::LimitsOps;
@@ -61,9 +63,11 @@ use notchling_engine::limits::renew::ClaudeRenewer;
 use notchling_engine::outbox::OutboxStore;
 use notchling_engine::versions::mac::Roots as VersionRoots;
 use notchling_engine::versions::Version;
+use notchling_events::kinds::choices::AgentTool;
 use notchling_events::{Emit, Salt};
 use notchling_local_api::{
-    ops, topics, ApiError, Caller, ClientKind, ErrorCode, Handler, OpHome, OpSpec, Tier,
+    ops, topics, AgentCall, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, Handler,
+    OpHome, OpSpec, Tier,
 };
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -87,6 +91,8 @@ pub struct Ops {
     topic_list: Vec<&'static str>,
     first: Arc<FirstScan>,
     first_wait: Duration,
+    identity: Option<Arc<Identifier>>,
+    names: Option<Arc<AgentNames>>,
 }
 
 impl Ops {
@@ -108,7 +114,15 @@ impl Ops {
             topic_list: vec![topics::SESSIONS],
             first: FirstScan::open(),
             first_wait: FIRST_LIST_WAIT,
+            identity: None,
+            names: None,
         }
+    }
+
+    pub fn with_identity(mut self, identity: Arc<Identifier>, names: Arc<AgentNames>) -> Ops {
+        self.identity = Some(identity);
+        self.names = Some(names);
+        self
     }
 
     pub fn with_acting(sessions: Arc<Mutex<Value>>, acting: Arc<ActingOps>) -> Ops {
@@ -312,8 +326,22 @@ impl Handler for Ops {
         quiet_ops::loud(op, args)
     }
 
-    fn session_of(&self, pid: u32) -> Option<String> {
-        self.acting.as_ref().and_then(|a| a.session_of(pid))
+    fn identity_of(&self, pid: u32) -> AgentIdentity {
+        if let Some(identity) = &self.identity {
+            return identity.identify(pid);
+        }
+        let mut who = AgentIdentity::shell();
+        who.session = self.acting.as_ref().and_then(|a| a.session_of(pid));
+        if who.session.is_some() {
+            who.tool = AgentTool::Claude;
+        }
+        who
+    }
+
+    fn agent_called(&self, call: &AgentCall) {
+        if let Some(names) = &self.names {
+            names.enqueue(call, now_ms());
+        }
     }
 
     fn home(&self, op: &str) -> OpHome {
@@ -326,7 +354,7 @@ impl Handler for Ops {
 
     fn spec(&self, op: &str) -> Option<OpSpec> {
         let spec = match op {
-            ops::SESSIONS_LIST => Some(OpSpec::AGENT),
+            ops::SESSIONS_LIST => Some(OpSpec::AGENT_READ),
             op => self
                 .pages
                 .as_ref()
@@ -482,6 +510,8 @@ pub struct Wired {
     pub awake: Arc<AwakeLoop>,
     pub events: Arc<LateEmit>,
     pub salt: LateSalt,
+    pub launches: Launches,
+    pub names: OnceLock<Arc<AgentNames>>,
     history: Arc<DbSwitches>,
     log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
     pub wake: Arc<WakeLoop>,
@@ -839,6 +869,8 @@ impl Wired {
             awake,
             events: late,
             salt,
+            launches: Launches::default(),
+            names: OnceLock::new(),
             history,
             log: OnceLock::new(),
             wake,
@@ -890,7 +922,32 @@ impl Wired {
                 .map(|v| v.is_array() || v.is_object() || v.is_null())
                 .unwrap_or(false)
         }));
+        let home = PathBuf::from(home_of(&layout.roots()));
+        let names = self
+            .names
+            .get_or_init(|| {
+                Arc::new(AgentNames::spawn(
+                    self.events.clone(),
+                    self.salt.clone(),
+                    sessions.clone(),
+                ))
+            })
+            .clone();
+        let identity = Arc::new(
+            Identifier::new(
+                layout.roots(),
+                Arc::new(crate::vault_caller::SystemProcesses),
+                sessions.clone(),
+                self.salt.clone(),
+                self.launches.clone(),
+            )
+            .with_organizations(
+                notchling_engine::organizations::Organizations::new(&layout.data_dir)
+                    .with_home(&home),
+            ),
+        );
         let ops = Ops::with_acting(sessions, self.acting.clone())
+            .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
             .with_agy(self.agy.clone())
@@ -966,6 +1023,9 @@ impl Wired {
     }
 
     pub fn close(&self) {
+        if let Some(names) = self.names.get() {
+            names.close();
+        }
         self.ask.close();
         self.outbox_notice.close();
         self.postmen.stop();

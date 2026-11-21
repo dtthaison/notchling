@@ -12,7 +12,7 @@ struct Daemon {
 impl Handler for Daemon {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT),
+            ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT_READ),
             ops::VAULT_PENDING | ops::AWAKE_STATE => Some(OpSpec::APP),
             _ => None,
         }
@@ -121,7 +121,7 @@ fn a_daemon_that_does_not_know_the_op_leaves_the_cup_empty() {
     impl Handler for Old {
         fn spec(&self, op: &str) -> Option<OpSpec> {
             match op {
-                ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT),
+                ops::SETTINGS_SWITCHES => Some(OpSpec::AGENT_READ),
                 ops::VAULT_PENDING => Some(OpSpec::APP),
                 _ => None,
             }

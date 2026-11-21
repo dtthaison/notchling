@@ -4,6 +4,7 @@ use crate::presence::Presence;
 use crate::tier::Allowlist;
 use crate::transport::{self, Listener};
 use crate::wire::{ApiError, ClientKind, DaemonStatus, Tier};
+use notchling_events::kinds::choices::AgentTool;
 use notchling_events::{Emit, Event};
 use serde_json::{Map, Value};
 use std::io;
@@ -18,29 +19,65 @@ pub struct OpSpec {
     pub tier: Tier,
     pub approval: bool,
     pub quiet_ok: bool,
+    pub acts: bool,
+    pub hook: bool,
 }
 
 impl OpSpec {
-    pub const AGENT: OpSpec = OpSpec {
-        tier: Tier::Agent,
-        approval: false,
-        quiet_ok: false,
-    };
-    pub const APP: OpSpec = OpSpec {
-        tier: Tier::App,
-        approval: false,
-        quiet_ok: false,
-    };
-    pub const APP_QUIET: OpSpec = OpSpec {
-        tier: Tier::App,
-        approval: false,
-        quiet_ok: true,
-    };
-    pub const APPROVAL: OpSpec = OpSpec {
-        tier: Tier::Agent,
-        approval: true,
-        quiet_ok: false,
-    };
+    const fn of(tier: Tier, approval: bool, quiet_ok: bool, acts: bool, hook: bool) -> OpSpec {
+        OpSpec {
+            tier,
+            approval,
+            quiet_ok,
+            acts,
+            hook,
+        }
+    }
+
+    pub const AGENT_READ: OpSpec = OpSpec::of(Tier::Agent, false, false, false, false);
+    pub const AGENT_ACTS: OpSpec = OpSpec::of(Tier::Agent, false, false, true, false);
+    pub const AGENT_HOOK: OpSpec = OpSpec::of(Tier::Agent, false, false, false, true);
+    pub const APP: OpSpec = OpSpec::of(Tier::App, false, false, false, false);
+    pub const APP_QUIET: OpSpec = OpSpec::of(Tier::App, false, true, false, false);
+    pub const APPROVAL: OpSpec = OpSpec::of(Tier::Agent, true, false, true, false);
+
+    pub fn records_agent_call(&self) -> bool {
+        self.tier == Tier::Agent && self.acts
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentIdentity {
+    pub tool: AgentTool,
+    pub session: Option<String>,
+    pub verified: bool,
+    pub root: Option<String>,
+    pub folder: Option<String>,
+    pub organization: Option<String>,
+    pub cmd_hash: Option<String>,
+    pub out_hash: Option<String>,
+}
+
+impl AgentIdentity {
+    pub fn shell() -> AgentIdentity {
+        AgentIdentity {
+            tool: AgentTool::Shell,
+            session: None,
+            verified: false,
+            root: None,
+            folder: None,
+            organization: None,
+            cmd_hash: None,
+            out_hash: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentCall {
+    pub scope: notchling_events::scope::Scope,
+    pub identity: AgentIdentity,
+    pub pid: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,9 +101,10 @@ pub trait Handler: Send + Sync + 'static {
     fn loud(&self, _op: &str, _args: &Value) -> bool {
         false
     }
-    fn session_of(&self, _pid: u32) -> Option<String> {
-        None
+    fn identity_of(&self, _pid: u32) -> AgentIdentity {
+        AgentIdentity::shell()
     }
+    fn agent_called(&self, _call: &AgentCall) {}
     fn home(&self, _op: &str) -> OpHome {
         OpHome::Called
     }

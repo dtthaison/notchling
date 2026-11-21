@@ -17,7 +17,7 @@ impl Handler for Acting {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             "session.reply" | "session.stop" => Some(OpSpec::APP),
-            "slow" | "read" => Some(OpSpec::AGENT),
+            "slow" | "read" => Some(OpSpec::AGENT_READ),
             "peek" | "peek.fail" | "peek.loud" => Some(OpSpec::APP_QUIET),
             _ => None,
         }

@@ -308,10 +308,9 @@ impl ActingOps {
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SET_ACTING | ops::PROMPTS_LIST => Some(OpSpec::APP),
-            ops::SETTINGS_GET_ACTING
-            | ops::SESSION_QUESTION
-            | ops::HOOK_REQUEST
-            | ops::SESSION_RELOAD => Some(OpSpec::AGENT),
+            ops::SETTINGS_GET_ACTING => Some(OpSpec::AGENT_READ),
+            ops::SESSION_QUESTION | ops::SESSION_RELOAD => Some(OpSpec::AGENT_ACTS),
+            ops::HOOK_REQUEST => Some(OpSpec::AGENT_HOOK),
             ops::SESSION_SHELL_OUTPUT
             | ops::SESSION_DIALOG
             | ops::SESSION_CHROME

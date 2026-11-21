@@ -55,7 +55,7 @@ fn status_is_agent_tier() {
     let agent = [ops::CLUSTER_STATUS, ops::CLUSTER_JOIN];
     for op in CLUSTER_OPS {
         let want = if agent.contains(&op) {
-            OpSpec::AGENT
+            OpSpec::AGENT_READ
         } else {
             OpSpec::APP
         };

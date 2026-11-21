@@ -442,7 +442,7 @@ fn tiers() {
     let (_tmp, _flag, _room, ops) = rig();
     assert_eq!(ops.spec(LIMITS_STATUS), Some(OpSpec::APP));
     assert_eq!(ops.spec(LIMITS_SET_MODE), Some(OpSpec::APP));
-    assert_eq!(ops.spec(COST_SUMMARY), Some(OpSpec::AGENT));
+    assert_eq!(ops.spec(COST_SUMMARY), Some(OpSpec::AGENT_READ));
     assert_eq!(ops.spec("limits.switch"), None);
 }
 

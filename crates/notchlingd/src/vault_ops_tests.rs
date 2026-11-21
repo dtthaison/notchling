@@ -187,7 +187,7 @@ pub(super) fn err(result: Result<Value, ApiError>) -> ApiError {
 fn the_tiers_of_each_op() {
     let s = setup("tiers", false);
     for op in [ops::VAULT_FIND, ops::VAULT_USE, ops::VAULT_REQUEST] {
-        assert_eq!(s.ops.spec(op), Some(OpSpec::AGENT), "{op}");
+        assert_eq!(s.ops.spec(op), Some(OpSpec::AGENT_READ), "{op}");
     }
     for op in [
         ops::VAULT_LIST,

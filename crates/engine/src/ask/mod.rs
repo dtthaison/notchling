@@ -1,4 +1,5 @@
 mod branch;
+pub mod evidence;
 mod find;
 mod inbox_item;
 mod model;
@@ -8,7 +9,7 @@ mod store;
 mod words;
 
 pub use branch::branch;
-pub use find::{candidates, delegate_tool, find, Asking, Candidate, Source};
+pub use find::{candidates, delegate_tool, find, find_by_evidence, Asking, Candidate, Source};
 pub use inbox_item::{action_for, choice_of, item, job_label};
 pub use model::{
     new_id, AskState, Asker, By, Found, Mode, New, OpenError, Row, CHOICE_LABEL_CHARS,

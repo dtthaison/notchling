@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn every_m2_op_is_agent_tier_and_nothing_else_exists() {
         let ops = Ops::new(Arc::new(Mutex::new(json!([]))));
-        assert_eq!(ops.spec(ops::SESSIONS_LIST), Some(OpSpec::AGENT));
+        assert_eq!(ops.spec(ops::SESSIONS_LIST), Some(OpSpec::AGENT_READ));
         assert_eq!(ops.spec("approval.answer"), None);
         assert_eq!(ops.spec("settings.set"), None);
         assert_eq!(ops.topics(), &["sessions"]);

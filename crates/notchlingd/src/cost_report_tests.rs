@@ -157,7 +157,7 @@ fn the_report_op_reads_transcripts_and_ranks_what_to_change() {
     let tmp = Tmp::new("e2e");
     fixture(&tmp);
     let ops = ops_for(&tmp);
-    assert_eq!(ops.spec(COST_REPORT), Some(OpSpec::AGENT));
+    assert_eq!(ops.spec(COST_REPORT), Some(OpSpec::AGENT_READ));
     let reply = ops.report(&json!({})).expect("report");
     assert_eq!(reply["complete"], true);
     assert_eq!(reply["report"]["days"], 14);

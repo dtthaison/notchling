@@ -107,7 +107,7 @@ impl PagesOps {
     }
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
-        PAGES_OPS.contains(&op).then_some(OpSpec::AGENT)
+        PAGES_OPS.contains(&op).then_some(OpSpec::AGENT_READ)
     }
 
     pub fn call(&self, op: &str, args: &Value) -> Result<Value, ApiError> {

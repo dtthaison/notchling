@@ -106,7 +106,7 @@ fn the_ops_are_agent_tier_reads() {
     for op in [ops::SEARCH_QUERY, ops::PAGES_LIST, ops::PAGES_FIND] {
         assert_eq!(
             ops_.spec(op),
-            Some(notchling_local_api::OpSpec::AGENT),
+            Some(notchling_local_api::OpSpec::AGENT_READ),
             "{op}"
         );
     }

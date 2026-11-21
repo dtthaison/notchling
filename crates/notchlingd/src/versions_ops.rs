@@ -660,7 +660,7 @@ impl VersionsOps {
 impl OpGroup for VersionsOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::VERSIONS_GET => Some(OpSpec::AGENT),
+            ops::VERSIONS_GET => Some(OpSpec::AGENT_READ),
             ops::VERSIONS_WORKERS => Some(OpSpec::APP),
             ops::VERSIONS_CHECK => Some(OpSpec::APP),
             ops::VERSIONS_LATEST => Some(OpSpec::APP),

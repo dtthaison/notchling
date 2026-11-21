@@ -384,7 +384,11 @@ impl ModelsOps {
 
 impl OpGroup for ModelsOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        MODELS_OPS.contains(&op).then_some(OpSpec::AGENT)
+        match op {
+            ops::MODELS_CHECK => Some(OpSpec::AGENT_READ),
+            ops::MODELS_UPDATE => Some(OpSpec::AGENT_ACTS),
+            _ => None,
+        }
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {

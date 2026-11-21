@@ -559,7 +559,11 @@ pub fn unknown(key: &str) -> String {
 
 impl OpGroup for SettingsOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
-        SETTINGS_OPS.contains(&op).then_some(OpSpec::AGENT)
+        match op {
+            ops::SETTINGS_SET => Some(OpSpec::AGENT_ACTS),
+            op if SETTINGS_OPS.contains(&op) => Some(OpSpec::AGENT_READ),
+            _ => None,
+        }
     }
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {

@@ -442,7 +442,7 @@ impl OpGroup for CostProfileOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::COST_PROFILE_GET | ops::COST_SETUP_PLAN | ops::COST_SETUP_CHECK => {
-                Some(OpSpec::AGENT)
+                Some(OpSpec::AGENT_READ)
             }
             _ if COST_PROFILE_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,

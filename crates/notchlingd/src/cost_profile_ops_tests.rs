@@ -108,7 +108,7 @@ fn reads_are_agent_tier_and_writes_are_app_tier() {
         ops::COST_SETUP_PLAN,
         ops::COST_SETUP_CHECK,
     ] {
-        assert_eq!(r.ops.spec(op), Some(OpSpec::AGENT), "{op}");
+        assert_eq!(r.ops.spec(op), Some(OpSpec::AGENT_READ), "{op}");
     }
     for op in [
         ops::COST_PROFILE_SET,

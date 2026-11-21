@@ -101,7 +101,7 @@ fn row(reply: &Value, tool: &str) -> Value {
 #[test]
 fn get_is_agent_tier() {
     let rig = rig("versions-tier");
-    assert_eq!(rig.ops.spec(ops::VERSIONS_GET), Some(OpSpec::AGENT));
+    assert_eq!(rig.ops.spec(ops::VERSIONS_GET), Some(OpSpec::AGENT_READ));
     let reply = get(&rig, json!({}));
     assert_eq!(reply["tools"].as_array().unwrap().len(), 4);
     assert_eq!(rig.ops.spec(ops::SESSIONS_LIST), None);

@@ -20,11 +20,11 @@ struct TestHandler;
 impl Handler for TestHandler {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            "echo" => Some(OpSpec::AGENT),
+            "echo" => Some(OpSpec::AGENT_READ),
             "settings.set" => Some(OpSpec::APP),
             "test.needsApproval" => Some(OpSpec::APPROVAL),
-            "test.panic" => Some(OpSpec::AGENT),
-            "test.extras" => Some(OpSpec::AGENT),
+            "test.panic" => Some(OpSpec::AGENT_READ),
+            "test.extras" => Some(OpSpec::AGENT_READ),
             _ => None,
         }
     }
@@ -325,7 +325,10 @@ fn approval_is_needed_while_no_app_is_attached() {
     }
     assert_eq!(
         summary(&run.sink),
-        vec![("api.refused".to_owned(), "test.needsApproval".to_owned())]
+        vec![
+            ("api.refused".to_owned(), "test.needsApproval".to_owned()),
+            ("agent.called".to_owned(), "test.needsApproval".to_owned()),
+        ]
     );
     assert_eq!(
         field_text(&run.sink.events()[0], "why").as_deref(),

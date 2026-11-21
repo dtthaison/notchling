@@ -72,7 +72,7 @@ fn system_watch(folders: Vec<PathBuf>) -> Option<Subscription> {
     Some(Subscription::new(rx, Box::new(watcher)))
 }
 
-fn tail_text(path: &Path) -> Option<String> {
+pub(crate) fn tail_text(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
     file.seek(SeekFrom::Start(len.saturating_sub(FIND_TAIL_BYTES)))

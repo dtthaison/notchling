@@ -230,7 +230,7 @@ impl AgyOps {
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            SESSIONS => Some(OpSpec::AGENT),
+            SESSIONS => Some(OpSpec::AGENT_READ),
             op if READ_OPS.contains(&op) || ACTING_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }

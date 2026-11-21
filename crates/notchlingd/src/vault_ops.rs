@@ -201,7 +201,8 @@ impl VaultOps {
 
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::VAULT_FIND | ops::VAULT_USE | ops::VAULT_REQUEST => Some(OpSpec::AGENT),
+            ops::VAULT_FIND => Some(OpSpec::AGENT_READ),
+            ops::VAULT_USE | ops::VAULT_REQUEST => Some(OpSpec::AGENT_ACTS),
             op if VAULT_OPS.contains(&op) => Some(OpSpec::APP),
             _ => None,
         }

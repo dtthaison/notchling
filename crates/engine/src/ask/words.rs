@@ -85,7 +85,7 @@ pub fn simple_commands(command: &str) -> Option<Vec<Vec<String>>> {
     Some(out)
 }
 
-fn is_notchling(program: &str) -> bool {
+pub(super) fn is_notchling(program: &str) -> bool {
     program
         .rsplit(['/', '\\'])
         .next()

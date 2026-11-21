@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Kind {
+    Agents,
     Refused,
     Failed,
     Acted,
@@ -14,7 +15,8 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 6] = [
+    pub const ALL: [Kind; 7] = [
+        Kind::Agents,
         Kind::Refused,
         Kind::Failed,
         Kind::Acted,
@@ -25,6 +27,7 @@ impl Kind {
 
     pub fn wire(self) -> &'static str {
         match self {
+            Kind::Agents => "agents",
             Kind::Refused => "refused",
             Kind::Failed => "failed",
             Kind::Acted => "acted",
@@ -40,6 +43,7 @@ impl Kind {
 
     pub fn label(self) -> &'static str {
         match self {
+            Kind::Agents => t::settings::activity_kind_agents(),
             Kind::Refused => t::settings::activity_kind_refused(),
             Kind::Failed => t::settings::activity_kind_failed(),
             Kind::Acted => t::settings::activity_kind_acted(),
@@ -69,6 +73,10 @@ pub struct Entry {
     pub seq: Option<u64>,
     pub audit_n: Option<u64>,
     pub spooled: bool,
+    pub by_agent: bool,
+    pub tool: Option<String>,
+    pub verified: bool,
+    pub agent_as: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +120,14 @@ impl Entry {
             seq: value.get("seq").and_then(Value::as_u64),
             audit_n: value.get("audit_n").and_then(Value::as_u64),
             spooled: value.get("spooled").and_then(Value::as_bool) == Some(true),
+            by_agent: value.get("by_agent").and_then(Value::as_bool) == Some(true),
+            tool: text("tool"),
+            verified: value.get("verified").and_then(Value::as_bool) == Some(true),
+            agent_as: value
+                .pointer("/agent/as")
+                .and_then(Value::as_str)
+                .filter(|a| matches!(*a, "main" | "subagent"))
+                .map(str::to_owned),
         })
     }
 
@@ -147,10 +163,25 @@ impl Entry {
         })
     }
 
+    fn who_text(&self) -> String {
+        let Some(tool) = &self.tool else {
+            return self.who.clone();
+        };
+        let place = match &self.agent_as {
+            Some(agent) => t::settings::activity_from_agent_as(tool, agent),
+            None => t::settings::activity_from_agent(tool),
+        };
+        if self.verified {
+            place
+        } else {
+            t::settings::activity_not_verified(&place)
+        }
+    }
+
     pub fn line(&self) -> String {
         let place = match self.source.as_str() {
             "phone" => t::settings::activity_from_phone(&self.who),
-            _ => self.who.clone(),
+            _ => self.who_text(),
         };
         match &self.detail {
             Some(detail) => t::settings::activity_line_detail(&place, &self.result, detail),
@@ -265,14 +296,24 @@ impl ActivityModel {
     }
 
     pub fn count(&self, kind: Kind) -> usize {
-        self.entries.iter().filter(|e| e.kind == kind).count()
+        self.entries
+            .iter()
+            .filter(|e| match kind {
+                Kind::Agents => e.by_agent,
+                kind => e.kind == kind,
+            })
+            .count()
     }
 
     pub fn visible(&self) -> Vec<&Entry> {
         let needle = self.search.trim();
         self.entries
             .iter()
-            .filter(|e| self.kinds.is_empty() || self.kinds.contains(&e.kind))
+            .filter(|e| {
+                self.kinds.is_empty()
+                    || self.kinds.contains(&e.kind)
+                    || (e.by_agent && self.kinds.contains(&Kind::Agents))
+            })
             .filter(|e| needle.is_empty() || e.matches(needle))
             .collect()
     }

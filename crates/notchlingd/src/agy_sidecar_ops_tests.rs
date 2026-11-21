@@ -246,7 +246,7 @@ fn only_a_hook_client_that_antigravity_started_may_use_the_sidecar_ops() {
         let (kind, _) = code(imposter.call(&sidecar(), op, args));
         assert_eq!(kind, ErrorCode::Forbidden, "{op}");
     }
-    assert_eq!(r.ops.spec(ops::AGY_SIDECAR_TAKE), Some(OpSpec::AGENT));
+    assert_eq!(r.ops.spec(ops::AGY_SIDECAR_TAKE), Some(OpSpec::AGENT_READ));
     assert_eq!(r.ops.spec(ops::AGY_SIDECAR_SETUP), Some(OpSpec::APP));
     assert_eq!(r.ops.spec(ops::AGY_SEND), None);
 }

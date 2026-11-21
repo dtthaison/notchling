@@ -1,5 +1,6 @@
+use super::evidence::{command_hash, output_hash, Evidence};
 use super::model::{Asker, Found, FIND_MAX_FILES, FIND_WINDOW_MS};
-use super::words::{same_command, simple_commands};
+use super::words::{is_notchling, same_command, simple_commands};
 use crate::sessions::iso::parse_iso_ms;
 use crate::transcript::{shells, subagents};
 use serde_json::Value;
@@ -84,12 +85,47 @@ pub fn find(
     let tails: Vec<Option<String>> = candidates.iter().map(|c| tail(&c.path)).collect();
     if let Some(stdout) = asking.stdout {
         let wanted = canon(stdout);
-        let hits = hits(&tails, |text| background_hit(text, &wanted));
+        let hits = hits(&tails, |text| background_hit(text, &|path| canon(path) == wanted));
         if let Some(found) = decide(candidates, &hits) {
             return Some(found);
         }
     }
-    let hits = hits(&tails, |text| command_hit(text, asking));
+    let hits = hits(&tails, |text| {
+        command_hit(text, asking.opened_ms, asking.claimed, &|command| {
+            runs(command, asking.argv)
+        })
+    });
+    decide(candidates, &hits)
+}
+
+pub fn find_by_evidence(
+    evidence: &Evidence,
+    candidates: &[Candidate],
+    tail: impl Fn(&Path) -> Option<String>,
+) -> Option<Found> {
+    let tails: Vec<Option<String>> = candidates.iter().map(|c| tail(&c.path)).collect();
+    if let Some(wanted) = evidence.out_hash {
+        let hits = hits(&tails, |text| {
+            background_hit(text, &|path| {
+                output_hash(evidence.salt, path) == wanted
+            })
+        });
+        if let Some(found) = decide(candidates, &hits) {
+            return Some(found);
+        }
+    }
+    let wanted = evidence.cmd_hash?;
+    let none = HashSet::new();
+    let hits = hits(&tails, |text| {
+        command_hit(text, evidence.opened_ms, &none, &|command| {
+            simple_commands(command).is_some_and(|all| {
+                all.iter().any(|words| {
+                    words.first().is_some_and(|w| is_notchling(w))
+                        && command_hash(evidence.salt, words).as_deref() == Some(wanted)
+                })
+            })
+        })
+    });
     decide(candidates, &hits)
 }
 
@@ -185,7 +221,7 @@ fn result_text(part: &Value) -> String {
     }
 }
 
-fn background_hit(tail: &str, wanted: &Path) -> Option<String> {
+fn background_hit(tail: &str, wanted: &dyn Fn(&Path) -> bool) -> Option<String> {
     let mut hit = None;
     for line in parsed(tail, "Output is being written to") {
         for part in parts(&line) {
@@ -195,7 +231,7 @@ fn background_hit(tail: &str, wanted: &Path) -> Option<String> {
             let Some(launch) = shells::launch(&result_text(part)) else {
                 continue;
             };
-            if canon(Path::new(&launch.path)) == wanted {
+            if wanted(Path::new(&launch.path)) {
                 hit = part
                     .get("tool_use_id")
                     .and_then(Value::as_str)
@@ -206,7 +242,12 @@ fn background_hit(tail: &str, wanted: &Path) -> Option<String> {
     hit
 }
 
-fn command_hit(tail: &str, asking: &Asking) -> Option<String> {
+fn command_hit(
+    tail: &str,
+    opened_ms: i64,
+    claimed: &HashSet<String>,
+    matches: &dyn Fn(&str) -> bool,
+) -> Option<String> {
     let mut best: Option<(i64, String)> = None;
     for line in parsed(tail, "tool_use") {
         let Some(stamp) = line
@@ -216,7 +257,7 @@ fn command_hit(tail: &str, asking: &Asking) -> Option<String> {
         else {
             continue;
         };
-        if stamp > asking.opened_ms || asking.opened_ms - stamp > FIND_WINDOW_MS {
+        if stamp > opened_ms || opened_ms - stamp > FIND_WINDOW_MS {
             continue;
         }
         for part in parts(&line) {
@@ -231,7 +272,7 @@ fn command_hit(tail: &str, asking: &Asking) -> Option<String> {
             let Some(command) = part.pointer("/input/command").and_then(Value::as_str) else {
                 continue;
             };
-            if asking.claimed.contains(id) || !runs(command, asking.argv) {
+            if claimed.contains(id) || !matches(command) {
                 continue;
             }
             if best.as_ref().is_none_or(|(newest, _)| stamp >= *newest) {

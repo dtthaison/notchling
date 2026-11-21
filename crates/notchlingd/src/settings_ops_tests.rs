@@ -109,7 +109,7 @@ fn entry<'a>(list: &'a Value, key: &str) -> &'a Value {
 fn every_op_is_agent_tier_on_the_settings_topic() {
     let r = rig("spec", ASK_WAIT);
     for op in SETTINGS_OPS {
-        assert_eq!(r.ops.spec(op), Some(OpSpec::AGENT), "{op}");
+        assert_eq!(r.ops.spec(op), Some(OpSpec::AGENT_READ), "{op}");
     }
     assert_eq!(r.ops.spec(ops::SETTINGS_SET_SWITCH), None);
     assert_eq!(r.ops.topics(), &[topics::SETTINGS]);

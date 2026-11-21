@@ -29,34 +29,23 @@ impl CallerSession {
     }
 }
 
-pub fn claude_binaries(home: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    (
-        vec![
-            notchling_engine::control::launcher::claude_path(home),
-            home.join(".local").join("bin").join("claude"),
-            PathBuf::from("/usr/local/bin/claude"),
-            PathBuf::from("/opt/homebrew/bin/claude"),
-        ],
-        vec![
-            home.join(".local").join("share").join("claude"),
-            home.join(".claude").join("local"),
-        ],
-    )
+pub fn claude_install_folders(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".local").join("share").join("claude"),
+        home.join(".claude").join("local"),
+        PathBuf::from("/opt/homebrew/Caskroom/claude-code"),
+        PathBuf::from("/usr/local/Caskroom/claude-code"),
+    ]
 }
 
 pub fn is_claude_binary(procs: &dyn Processes, pid: u32, home: &Path) -> bool {
     let Some(exe) = procs.exe(pid).and_then(|e| procs.resolve(&e)) else {
         return false;
     };
-    let (files, folders) = claude_binaries(home);
-    files
+    claude_install_folders(home)
         .iter()
         .filter_map(|f| procs.resolve(f))
-        .any(|f| f == exe)
-        || folders
-            .iter()
-            .filter_map(|f| procs.resolve(f))
-            .any(|f| exe.starts_with(&f))
+        .any(|f| exe.starts_with(&f))
 }
 
 pub fn trusted_in(

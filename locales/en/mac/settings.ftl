@@ -454,6 +454,9 @@ settings-capability-gap = Not built yet
 
 ## Activity page
 
+# Filter chip and tag on the Activity page: calls that agents made.
+settings-activity-kind-agents = Agents
+
 # Filter chip and tag on the Activity page: an operation that was refused.
 settings-activity-kind-refused = Refused
 
@@ -495,6 +498,15 @@ settings-activity-no-match = Nothing matches
 
 # Who did it, for a row that came from the phone. $who is the phone's name.
 settings-activity-from-phone = { $who } (phone)
+
+# Who did it, for a row an agent made. $tool is the tool, for example claude or codex.
+settings-activity-from-agent = { $tool }
+
+# Who did it, for a row an agent made when its transcript names the agent. $tool is the tool and $agent is the agent's kind, main or subagent.
+settings-activity-from-agent-as = { $tool }, { $agent } (as its transcript says)
+
+# Added to who did it when Notchling can't vouch for the agent. $place is who did it.
+settings-activity-not-verified = { $place }, not verified
 
 # Second line of a row. $who is who asked and $result what came of it.
 settings-activity-line = { $who } · { $result }
