@@ -1,8 +1,9 @@
 use super::*;
 use crate::acting_ops_tests::FakeRoom;
 use crate::inbox_ops_tests::item;
-use crate::limits_ops_tests::{rig as limits_rig, TempDir, NOW};
+use crate::limits_ops_tests::{rig as limits_rig, Claude, NoJobs, TempDir, NOW};
 use crate::switches::{SwitchFlag, ACCOUNTS, ACCOUNTS_OFF};
+use notchling_engine::limits::mode::{LimitMode, CLAUDE};
 use notchling_engine::providers::{
     AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, ProviderAccount,
     ProviderRegistry, ProviderState,
@@ -106,7 +107,22 @@ fn rig(tag: &str) -> Rig {
 }
 
 fn rig_with(tag: &str, registry: ProviderRegistry) -> Rig {
-    let (limits_tmp, _flag, room, limits) = limits_rig();
+    rig_seen(tag, registry, None)
+}
+
+fn rig_seen(tag: &str, registry: ProviderRegistry, claude_at: Option<f64>) -> Rig {
+    let (limits_tmp, flag, room, limits) = limits_rig();
+    if let Some(percent) = claude_at {
+        let claude = Arc::new(Claude::default());
+        *claude.me.lock().unwrap() = percent;
+        limits
+            .config()
+            .set_mode(&CLAUDE, LimitMode::Notify)
+            .unwrap();
+        limits.set_claude(claude, Arc::new(NoJobs));
+        flag.set(true);
+        assert!(limits.tick_at(NOW));
+    }
     let tmp = TempDir::new(tag);
     let home = tmp.path("home");
     let work_dir = home.join("work");
@@ -436,4 +452,125 @@ fn a_shell_with_planted_accounts_still_gets_nothing_from_any_read() {
             assert!(!text.contains("personal"), "{op}: {text}");
         }
     }
+}
+
+fn claude_registry(active: &str, needs_login: bool) -> ProviderRegistry {
+    let mut registry = ProviderRegistry::new();
+    let mut me = ProviderAccount::new("me", "me@mine.test", None);
+    me.needs_login = needs_login;
+    let state = ProviderState {
+        accounts: vec![me, ProviderAccount::new("other", "other@mine.test", None)],
+        active_id: Some(active.into()),
+        ..ProviderState::default()
+    };
+    registry.register(Arc::new(Planted {
+        id: ProviderId::CLAUDE_CODE,
+        state,
+    }));
+    registry
+}
+
+fn claude_limits(rig: &Rig) -> Value {
+    let _bound = bind_identity(Some(who(true, "s2", Some("personal"))));
+    read(rig, ops::LIMITS_SUMMARY, json!({"tool": "claude"}))["tool"].clone()
+}
+
+#[test]
+fn claude_with_no_reading_yet_is_usable_for_its_own_organization() {
+    let rig = rig_seen("claude-none", claude_registry("me", false), None);
+    let tool = claude_limits(&rig);
+    assert_eq!(tool["usable"], json!(true), "{tool}");
+    assert_eq!(tool["reason"], Value::Null, "{tool}");
+}
+
+#[test]
+fn claude_uses_the_reading_of_the_active_account_only() {
+    let seen = rig_seen("claude-same", claude_registry("me", false), Some(99.0));
+    let tool = claude_limits(&seen);
+    assert_eq!(tool["usable"], json!(false), "{tool}");
+    assert_eq!(tool["reason"], json!("pool_full"), "{tool}");
+
+    let switched = rig_seen(
+        "claude-switched",
+        claude_registry("other", false),
+        Some(99.0),
+    );
+    let tool = claude_limits(&switched);
+    assert_eq!(
+        tool["usable"],
+        json!(true),
+        "the old account's windows: {tool}"
+    );
+    assert_eq!(tool["pools"], json!([]), "{tool}");
+}
+
+#[test]
+fn a_signed_out_claude_account_is_not_usable_with_or_without_a_reading() {
+    for (tag, seen) in [("claude-out-seen", Some(10.0)), ("claude-out-none", None)] {
+        let rig = rig_seen(tag, claude_registry("me", true), seen);
+        let tool = claude_limits(&rig);
+        assert_eq!(tool["usable"], json!(false), "{tag}: {tool}");
+        assert_eq!(tool["reason"], json!("signed_out"), "{tag}: {tool}");
+    }
+}
+
+#[test]
+fn a_pool_matches_by_exact_name_first_then_by_one_substring_and_never_by_two() {
+    let pools = json!({"usable": true, "reason": null, "pools": [
+        {"name": "Gemini Flash", "usable": true, "reason": null},
+        {"name": "Gemini", "usable": false, "reason": "pool_full"},
+        {"name": "Claude and GPT", "usable": true, "reason": null},
+    ]});
+    assert_eq!(pick_pool(&pools, "gemini")["reason"], json!("pool_full"));
+    assert_eq!(pick_pool(&pools, "GEMINI")["name"], json!("Gemini"));
+    assert_eq!(pick_pool(&pools, "claude")["name"], json!("Claude and GPT"));
+    let two = json!({"pools": [{"name": "Gemini Flash"}, {"name": "Gemini Pro"}]});
+    assert_eq!(pick_pool(&two, "gemini")["reason"], json!("ambiguous_pool"));
+    assert_eq!(pick_pool(&two, "gemini")["usable"], json!(false));
+    assert_eq!(pick_pool(&pools, "nope")["reason"], json!("unknown_pool"));
+}
+
+#[test]
+fn a_pool_of_a_tool_with_no_pools_gives_the_tools_own_verdict() {
+    let none_yet = json!({"usable": true, "reason": null, "pools": []});
+    let verdict = pick_pool(&none_yet, "claude");
+    assert_eq!(verdict["usable"], json!(true));
+    assert_eq!(verdict["reason"], Value::Null);
+    let theirs = json!({"usable": null, "reason": "other_organization", "pools": []});
+    let verdict = pick_pool(&theirs, "claude");
+    assert_eq!(verdict["usable"], json!(false));
+    assert_eq!(verdict["reason"], json!("other_organization"));
+}
+
+#[test]
+fn limits_with_a_pool_passes_the_reason_through_for_a_shell_or_another_organization() {
+    let rig = rig_with("pool-through", planted_registry());
+    assign_work(&rig);
+    let args = json!({"tool": "agy", "pool": "claude"});
+    let bound = bind_identity(Some(who(true, "s1", Some(&rig.work))));
+    let reply = read(&rig, ops::LIMITS_SUMMARY, args.clone());
+    assert_eq!(
+        reply["pool"]["reason"],
+        json!("other_organization"),
+        "{reply}"
+    );
+    drop(bound);
+    let _bound = bind_identity(None);
+    let reply = read(&rig, ops::LIMITS_SUMMARY, args);
+    assert_eq!(reply["pool"]["reason"], json!("no_session"), "{reply}");
+    assert_eq!(reply["tool"]["reason"], json!("no_session"), "{reply}");
+}
+
+#[test]
+fn a_row_with_an_empty_folder_is_dropped_and_never_placed_in_personal() {
+    let mut reply = json!({
+        "pages": [{"title": "unplaced", "folder": ""}, {"title": "placed", "folder": "/a"}],
+        "sessions": [{"title": "unplaced", "folder": "", "modified": 1.0}],
+    });
+    scope_search(&mut reply, Some("personal"), &json!({}), &|_| {
+        "personal".into()
+    });
+    assert_eq!(reply["pages"].as_array().unwrap().len(), 1);
+    assert_eq!(reply["pages"][0]["title"], json!("placed"));
+    assert_eq!(reply["sessions"], json!([]));
 }

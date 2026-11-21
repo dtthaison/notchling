@@ -239,10 +239,10 @@ pub fn readiness(quota: Option<&Quota>, tool: Tool, now: f64) -> Ready {
     } else if !quota.signed_in {
         Some("signed_out")
     } else {
-        match (tool, quota.reached) {
-            (Tool::Codex, Some(Reached::Credits)) => Some("credits_out"),
-            (Tool::Codex, Some(Reached::Limit)) => Some("limit_reached"),
-            _ => None,
+        match quota.reached {
+            Some(Reached::Credits) => Some("credits_out"),
+            Some(Reached::Limit) => Some("limit_reached"),
+            None => None,
         }
     };
     let pools: Vec<PoolReady> = quota
@@ -270,7 +270,12 @@ pub fn readiness_of_windows(
     now: f64,
 ) -> Ready {
     let Some(fetched) = fetched else {
-        return readiness(None, Tool::Agy, now);
+        let mut ready = readiness(None, Tool::Agy, now);
+        if !signed_in {
+            ready.usable = false;
+            ready.reason = Some("signed_out");
+        }
+        return ready;
     };
     let quota = Quota {
         fetched,

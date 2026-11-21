@@ -320,3 +320,25 @@ fn readiness_says_stale_and_signed_out() {
         Some("signed_out")
     );
 }
+
+#[test]
+fn a_reached_credit_or_limit_counts_for_every_tool() {
+    for (reached, reason) in [
+        (Reached::Credits, "credits_out"),
+        (Reached::Limit, "limit_reached"),
+    ] {
+        let mut q = card();
+        q.reached = Some(reached);
+        let ready = readiness(Some(&q), Tool::Agy, NOW);
+        assert!(!ready.usable);
+        assert_eq!(ready.reason, Some(reason));
+    }
+}
+
+#[test]
+fn a_signed_out_account_with_no_reading_is_not_usable() {
+    let ready = readiness_of_windows(None, false, Vec::new(), NOW);
+    assert!(!ready.usable);
+    assert_eq!(ready.reason, Some("signed_out"));
+    assert!(readiness_of_windows(None, true, Vec::new(), NOW).usable);
+}

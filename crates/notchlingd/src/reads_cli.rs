@@ -23,6 +23,10 @@ fn takes_value(name: &str, flag: &str) -> bool {
     )
 }
 
+fn is_value(v: &str) -> bool {
+    !v.is_empty() && !v.starts_with("--")
+}
+
 fn parse(name: &str, args: &[String]) -> Result<Parsed, String> {
     let mut out = Parsed {
         socket: None,
@@ -34,11 +38,11 @@ fn parse(name: &str, args: &[String]) -> Result<Parsed, String> {
         match arg.as_str() {
             "--json" => {}
             "--socket" => match rest.next() {
-                Some(p) if !p.is_empty() => out.socket = Some(PathBuf::from(p)),
+                Some(p) if is_value(p) => out.socket = Some(PathBuf::from(p)),
                 _ => return Err("--socket needs a value".into()),
             },
             flag if takes_value(name, flag) => match rest.next() {
-                Some(v) if !v.is_empty() => out.flags.push((flag.to_string(), Some(v.clone()))),
+                Some(v) if is_value(v) => out.flags.push((flag.to_string(), Some(v.clone()))),
                 _ => return Err(format!("{flag} needs a value")),
             },
             "--latest" | "--workers" if name == "versions" => out.flags.push((arg.clone(), None)),
@@ -82,12 +86,74 @@ fn tool_name(tool: &str) -> Option<&'static str> {
     }
 }
 
+fn check(name: &str, p: &Parsed) -> Result<Value, Failure> {
+    match name {
+        "limits" => {
+            let mut query = json!({});
+            if let Some(tool) = flag(p, "--tool") {
+                let Some(tool) = tool_name(tool) else {
+                    return Err(Failure::usage("--tool is claude, codex or agy"));
+                };
+                query["tool"] = json!(tool);
+            }
+            if let Some(pool) = flag(p, "--pool") {
+                if flag(p, "--tool").is_none() {
+                    return Err(Failure::usage("--pool needs --tool"));
+                }
+                query["pool"] = json!(pool);
+            }
+            Ok(query)
+        }
+        "search" => {
+            let mut query = json!({"text": p.words.join(" ")});
+            if let Some(kind) = flag(p, "--kind") {
+                if !matches!(kind, "pages" | "sessions") {
+                    return Err(Failure::usage("--kind is pages or sessions"));
+                }
+                query["kind"] = json!(kind);
+            }
+            if let Some(since) = flag(p, "--since") {
+                match since.parse::<f64>() {
+                    Ok(s) if s.is_finite() && s >= 0.0 => query["since"] = json!(s),
+                    _ => return Err(Failure::usage("--since takes seconds")),
+                }
+            }
+            Ok(query)
+        }
+        "awake" => match p.words.as_slice() {
+            [] => Ok(json!({})),
+            [word] if word == "on" || word == "off" => Ok(json!({"mode": word})),
+            _ => Err(Failure::usage("awake takes on or off")),
+        },
+        _ => Ok(json!({})),
+    }
+}
+
+fn awake_set(word: &str, p: &Parsed, json: bool) -> Vec<String> {
+    let mut set = vec!["set".to_string(), "mode".to_string(), word.to_string()];
+    if let Some(socket) = &p.socket {
+        set.push("--socket".into());
+        set.push(socket.display().to_string());
+    }
+    if json {
+        set.push("--json".into());
+    }
+    set
+}
+
 pub fn run(name: &str, args: &[String]) -> i32 {
     let json = contract::wants_json(args);
     let p = match parse(name, args) {
         Ok(p) => p,
         Err(message) => return Failure::usage(message).report(json),
     };
+    let query = match check(name, &p) {
+        Ok(q) => q,
+        Err(failure) => return failure.report(json),
+    };
+    if let Some(word) = query["mode"].as_str() {
+        return crate::settings_cli::run(&awake_set(word, &p, json));
+    }
     let mut client = match contract::connect(p.socket.as_deref()) {
         Ok(c) => c,
         Err(failure) => return failure.report(json),
@@ -99,25 +165,10 @@ pub fn run(name: &str, args: &[String]) -> i32 {
         "accounts" => ask(ops::ACCOUNTS_SUMMARY, json!({})),
         "orgs" => ask(ops::ORGANIZATIONS_MINE, json!({})),
         "roles" => ask(ops::CATALOG_ROLES, json!({})),
-        "limits" => return limits(&p, json, &mut ask),
-        "search" => {
-            let mut query = json!({"text": p.words.join(" ")});
-            if let Some(kind) = flag(&p, "--kind") {
-                if !matches!(kind, "pages" | "sessions") {
-                    return Failure::usage("--kind is pages or sessions").report(json);
-                }
-                query["kind"] = json!(kind);
-            }
-            if let Some(since) = flag(&p, "--since") {
-                match since.parse::<f64>() {
-                    Ok(s) => query["since"] = json!(s),
-                    Err(_) => return Failure::usage("--since takes seconds").report(json),
-                }
-            }
-            ask(ops::SEARCH_QUERY, query)
-        }
+        "limits" => return limits(query, json, &mut ask),
+        "search" => ask(ops::SEARCH_QUERY, query),
         "switches" => switches(&mut ask),
-        "awake" => return awake(&p, json, &mut ask, args),
+        "awake" => ask(ops::AWAKE_STATE, json!({})),
         "versions" => versions(&p, &mut ask),
         _ => return Failure::usage(format!("unknown command: {name}")).report(json),
     };
@@ -153,38 +204,7 @@ fn versions(p: &Parsed, ask: &mut Ask<'_>) -> Result<Value, Failure> {
     Ok(out)
 }
 
-fn awake(p: &Parsed, json: bool, ask: &mut Ask<'_>, args: &[String]) -> i32 {
-    match p.words.as_slice() {
-        [] => match ask(ops::AWAKE_STATE, json!({})) {
-            Ok(value) => {
-                show(&value);
-                contract::OK
-            }
-            Err(failure) => failure.report(json),
-        },
-        [word] if word == "on" || word == "off" => {
-            let mut set = vec!["set".to_string(), "mode".to_string(), word.clone()];
-            set.extend(args.iter().filter(|a| a.as_str() != word).cloned());
-            crate::settings_cli::run(&set)
-        }
-        _ => Failure::usage("awake takes on or off").report(json),
-    }
-}
-
-fn limits(p: &Parsed, json: bool, ask: &mut Ask<'_>) -> i32 {
-    let mut query = json!({});
-    if let Some(tool) = flag(p, "--tool") {
-        let Some(tool) = tool_name(tool) else {
-            return Failure::usage("--tool is claude, codex or agy").report(json);
-        };
-        query["tool"] = json!(tool);
-    }
-    if let Some(pool) = flag(p, "--pool") {
-        if flag(p, "--tool").is_none() {
-            return Failure::usage("--pool needs --tool").report(json);
-        }
-        query["pool"] = json!(pool);
-    }
+fn limits(query: Value, json: bool, ask: &mut Ask<'_>) -> i32 {
     let reply = match ask(ops::LIMITS_SUMMARY, query.clone()) {
         Ok(r) => r,
         Err(failure) => return failure.report(json),
@@ -213,3 +233,7 @@ fn limits(p: &Parsed, json: bool, ask: &mut Ask<'_>) -> i32 {
         .with_op(ops::LIMITS_SUMMARY)
         .report_with(json, &verdict)
 }
+
+#[cfg(test)]
+#[path = "reads_cli_tests.rs"]
+mod tests;

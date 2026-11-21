@@ -204,10 +204,21 @@ impl ReadsOps {
                 .and_then(|(_, s)| s.active_id.clone())
         };
         let mut tools = serde_json::Map::new();
-        let claude = self.limits.claude_observed();
-        let claude_active = claude.as_ref().and_then(|o| o.active_id.clone());
-        let ready = if self.active_in(Kind::Claude, claude_active.as_deref(), &org) {
-            let seen = claude.unwrap_or_default();
+        let claude_account = states
+            .iter()
+            .find(|(p, _)| p == ProviderId::CLAUDE_CODE)
+            .and_then(|(_, s)| {
+                let id = s.active_id.clone()?;
+                let needs_login = s.accounts.iter().any(|a| a.id == id && a.needs_login);
+                Some((id, needs_login))
+            })
+            .filter(|(id, _)| self.active_in(Kind::Claude, Some(id), &org));
+        let ready = claude_account.map(|(id, needs_login)| {
+            let seen = self
+                .limits
+                .claude_observed()
+                .filter(|o| o.active_id.as_deref() == Some(id.as_str()))
+                .unwrap_or_default();
             let windows = seen
                 .windows
                 .iter()
@@ -217,15 +228,8 @@ impl ReadsOps {
                     resets_at: *resets_at,
                 })
                 .collect();
-            Some(quota::readiness_of_windows(
-                seen.checked,
-                true,
-                windows,
-                now,
-            ))
-        } else {
-            None
-        };
+            quota::readiness_of_windows(seen.checked, !needs_login, windows, now)
+        });
         tools.insert("claude".into(), self.tool_value(ready));
         for (tool, kind, provider) in [
             (Tool::Codex, Kind::Codex, ProviderId::CODEX),
@@ -294,6 +298,7 @@ pub fn scope_search(
     let keep = |row: &Value| {
         row.get("folder")
             .and_then(Value::as_str)
+            .filter(|f| !f.is_empty())
             .is_some_and(|f| folder_org(f) == org)
     };
     let pages: Vec<Value> = reply["pages"]
@@ -314,6 +319,34 @@ pub fn scope_search(
     reply["pages"] = json!(pages);
     reply["sessions"] = json!(sessions);
     reply["organization"] = json!(org);
+}
+
+pub fn no_session_search(args: &Value) -> Value {
+    let mut reply = json!({});
+    scope_search(&mut reply, None, args, &|_| String::new());
+    reply
+}
+
+fn pick_pool(tool: &Value, wanted: &str) -> Value {
+    let pools = tool["pools"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let named = |p: &Value| p["name"].as_str().map(str::to_lowercase);
+    let wanted = wanted.to_lowercase();
+    if let Some(hit) = pools.iter().find(|p| named(p).is_some_and(|n| n == wanted)) {
+        return hit.clone();
+    }
+    let near: Vec<&Value> = pools
+        .iter()
+        .filter(|p| named(p).is_some_and(|n| n.contains(&wanted)))
+        .collect();
+    match near.as_slice() {
+        [one] => (*one).clone(),
+        [] if pools.is_empty() => json!({
+            "usable": tool["usable"].as_bool().unwrap_or(false),
+            "reason": tool["reason"],
+        }),
+        [] => json!({"usable": false, "reason": "unknown_pool"}),
+        _ => json!({"usable": false, "reason": "ambiguous_pool"}),
+    }
 }
 
 impl ReadsOps {
@@ -339,25 +372,15 @@ impl OpGroup for ReadsOps {
                 let mut reply = self.limits(caller);
                 if let Some(tool) = args.get("tool").and_then(Value::as_str) {
                     let found = reply["tools"][tool].clone();
-                    reply["tool"] = if found.is_null() {
+                    reply["tool"] = if reply["reason"] == json!("no_session") {
+                        json!({"usable": false, "reason": "no_session"})
+                    } else if found.is_null() {
                         json!({"usable": false, "reason": "unknown_tool"})
                     } else {
                         found
                     };
                     if let Some(pool) = args.get("pool").and_then(Value::as_str) {
-                        let wanted = pool.to_lowercase();
-                        let hit = reply["tool"]["pools"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .find(|p| {
-                                p["name"]
-                                    .as_str()
-                                    .is_some_and(|n| n.to_lowercase().contains(&wanted))
-                            })
-                            .cloned();
-                        reply["pool"] = hit
-                            .unwrap_or_else(|| json!({"usable": false, "reason": "unknown_pool"}));
+                        reply["pool"] = pick_pool(&reply["tool"], pool);
                     }
                 }
                 Ok(reply)

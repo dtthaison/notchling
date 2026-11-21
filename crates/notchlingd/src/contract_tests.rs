@@ -58,6 +58,10 @@ fn json_is_a_flag_only_where_a_flag_can_stand() {
         "codex", "--model", "m", "--json", "--", "p"
     ])));
     assert!(!wants_json(&a(&["codex", "--model", "--json", "--", "p"])));
+    for flag in ["--kind", "--tool", "--pool", "--since"] {
+        assert!(!wants_json(&a(&["search", flag, "--json"])), "{flag}");
+        assert!(wants_json(&a(&["search", flag, "x", "--json"])), "{flag}");
+    }
 }
 
 #[test]

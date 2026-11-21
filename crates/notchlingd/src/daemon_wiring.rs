@@ -363,16 +363,21 @@ impl Handler for Ops {
             return agy.call(op, args);
         }
         if let Some(pages) = self.pages.as_ref().filter(|p| p.spec(op).is_some()) {
-            let mut reply = pages.call(op, args)?;
             if op == ops::SEARCH_QUERY && caller.tier != Tier::App {
-                if let Some(reads) = &self.reads {
-                    let org = reads.search_org(caller);
-                    crate::reads_ops::scope_search(&mut reply, org.as_deref(), args, &|f| {
-                        reads.folder_org(f)
-                    });
-                }
+                let Some((reads, org)) = self
+                    .reads
+                    .as_ref()
+                    .and_then(|r| r.search_org(caller).map(|org| (r, org)))
+                else {
+                    return Ok(crate::reads_ops::no_session_search(args));
+                };
+                let mut reply = pages.call(op, args)?;
+                crate::reads_ops::scope_search(&mut reply, Some(&org), args, &|f| {
+                    reads.folder_org(f)
+                });
+                return Ok(reply);
             }
-            return Ok(reply);
+            return pages.call(op, args);
         }
         if let Some(group) = self.group(op) {
             return group.call(caller, op, args);

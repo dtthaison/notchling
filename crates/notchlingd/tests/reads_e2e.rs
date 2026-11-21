@@ -81,3 +81,25 @@ fn the_public_reads_work_for_a_shell() {
     let (code, out, _) = run(&root, &home, &["awake", "maybe", "--json"]);
     assert_eq!(code, 2, "{out}");
 }
+
+#[test]
+fn a_bad_argument_exits_2_even_with_no_daemon_and_a_good_one_says_not_running() {
+    let dir = scratch("reads-e2e-nodaemon");
+    let root = dir.0.join("root");
+    let home = home(&dir.0);
+
+    for args in [
+        vec!["limits", "--tool", "nope"],
+        vec!["limits", "--pool", "x"],
+        vec!["limits", "--tool", "--json"],
+        vec!["awake", "maybe"],
+        vec!["search", "x", "--since", "NaN"],
+        vec!["search", "x", "--kind", "folders"],
+    ] {
+        let (code, out, err) = notchling(&root, &home, &args);
+        assert_eq!(code, 2, "{args:?} {out} {err}");
+    }
+
+    let (code, out, err) = notchling(&root, &home, &["limits", "--json"]);
+    assert_eq!(code, 3, "{out} {err}");
+}
