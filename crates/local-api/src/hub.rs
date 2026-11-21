@@ -10,6 +10,7 @@ struct Entry {
     kind: Option<ClientKind>,
     tier: Tier,
     topics: Vec<String>,
+    owner: Option<String>,
     tx: SyncSender<Vec<u8>>,
     stream: Stream,
 }
@@ -33,6 +34,7 @@ impl Hub {
                 kind: None,
                 tier,
                 topics: Vec::new(),
+                owner: None,
                 tx,
                 stream,
             },
@@ -47,8 +49,11 @@ impl Hub {
         }
     }
 
-    pub(crate) fn subscribe(&self, id: u64, topics: &[String]) {
+    pub(crate) fn subscribe(&self, id: u64, topics: &[String], owner: Option<&str>) {
         if let Some(entry) = self.entries().get_mut(&id) {
+            if let Some(owner) = owner {
+                entry.owner = Some(owner.to_string());
+            }
             for topic in topics {
                 if !entry.topics.contains(topic) {
                     entry.topics.push(topic.clone());
@@ -104,6 +109,30 @@ impl Hub {
         let mut dropped = Vec::new();
         for (id, entry) in entries.iter() {
             if !entry.topics.iter().any(|t| t == topic) {
+                continue;
+            }
+            if topic.starts_with(crate::wire::topics::MINE_PREFIX) {
+                continue;
+            }
+            match entry.tx.try_send(line.to_vec()) {
+                Ok(()) => sent += 1,
+                Err(_) => dropped.push(*id),
+            }
+        }
+        for id in dropped {
+            if let Some(entry) = entries.remove(&id) {
+                let _ = entry.stream.shutdown(Shutdown::Both);
+            }
+        }
+        sent
+    }
+
+    pub(crate) fn publish_to(&self, owner: &str, topic: &str, line: &[u8]) -> usize {
+        let mut entries = self.entries();
+        let mut sent = 0;
+        let mut dropped = Vec::new();
+        for (id, entry) in entries.iter() {
+            if entry.owner.as_deref() != Some(owner) || !entry.topics.iter().any(|t| t == topic) {
                 continue;
             }
             match entry.tx.try_send(line.to_vec()) {
