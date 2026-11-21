@@ -87,7 +87,23 @@ fn a_caller_in_no_verified_session_counts_against_its_root_app() {
     ));
     let mut elsewhere = second.clone();
     elsewhere.root = Some("Cursor".to_string());
-    store.insert(&elsewhere, 2_000).unwrap();
+    assert!(matches!(
+        store.insert(&elsewhere, 2_000),
+        Err(Refusal::Busy { .. })
+    ));
+}
+
+#[test]
+fn every_unverified_caller_shares_one_bucket_whatever_app_path_it_shows() {
+    let store = ConsentStore::in_memory_for_tests();
+    store
+        .insert(&stranger("/tmp/A.app/Contents/MacOS/helper:1", "k1"), 1_000)
+        .unwrap();
+    assert!(matches!(
+        store.insert(&stranger("/tmp/A.app/Contents/MacOS/helper:2", "k2"), 2_000),
+        Err(Refusal::Busy { .. })
+    ));
+    store.insert(&new("s1", "k3"), 2_000).unwrap();
 }
 
 #[test]
@@ -125,22 +141,9 @@ fn stranger(root: &str, target: &str) -> New {
 }
 
 #[test]
-fn unverified_callers_share_a_cap_so_a_fresh_root_each_time_gains_nothing() {
-    let store = ConsentStore::in_memory_for_tests();
-    for n in 0..UNVERIFIED_WAITING {
-        store
-            .insert(&stranger(&format!("cli:{n}"), &format!("k{n}")), 1_000)
-            .unwrap();
-    }
-    let after = busy(store.insert(&stranger("cli:fresh", "other"), 2_000));
-    assert!(after > 0);
-    store.insert(&new("s1", "from-a-session"), 2_000).unwrap();
-}
-
-#[test]
 fn unverified_callers_share_an_hourly_cap_across_roots() {
     let store = ConsentStore::in_memory_for_tests();
-    for n in 0..UNVERIFIED_PER_HOUR {
+    for n in 0..ROOT_PER_HOUR {
         let id = store
             .insert(
                 &stranger(&format!("cli:{n}"), &format!("k{n}")),
@@ -162,7 +165,7 @@ fn unverified_callers_share_an_hourly_cap_across_roots() {
 }
 
 #[test]
-fn a_deny_cools_the_same_ask_for_every_unverified_caller_and_for_a_session_that_forks_away() {
+fn a_deny_for_a_session_cools_only_that_session() {
     let store = ConsentStore::in_memory_for_tests();
     let id = store
         .insert(&new("s1", "k1"), 1_000)
@@ -173,14 +176,14 @@ fn a_deny_cools_the_same_ask_for_every_unverified_caller_and_for_a_session_that_
     store
         .answer(&id, State::Denied, "mac", None, 2_000)
         .unwrap();
-    let after = busy(store.insert(&stranger("cli:forked", "k1"), 3_000));
+    let after = busy(store.insert(&new("s1", "k1"), 3_000));
     assert!(after > 0 && after <= COOLDOWN_MS);
-    store.insert(&stranger("cli:forked", "k2"), 3_000).unwrap();
     store.insert(&new("s2", "k1"), 3_000).unwrap();
+    store.insert(&stranger("cli:forked", "k1"), 3_000).unwrap();
 }
 
 #[test]
-fn a_deny_of_an_unverified_ask_cools_the_same_ask_for_a_verified_session() {
+fn a_deny_of_an_unverified_ask_cools_only_unverified_callers() {
     let store = ConsentStore::in_memory_for_tests();
     let id = store
         .insert(&stranger("cli:child", "k1"), 1_000)
@@ -191,7 +194,7 @@ fn a_deny_of_an_unverified_ask_cools_the_same_ask_for_a_verified_session() {
     store
         .answer(&id, State::Denied, "mac", None, 2_000)
         .unwrap();
-    let after = busy(store.insert(&new("s1", "k1"), 3_000));
+    let after = busy(store.insert(&stranger("cli:other", "k1"), 3_000));
     assert!(after > 0 && after <= COOLDOWN_MS);
-    store.insert(&new("s1", "k2"), 3_000).unwrap();
+    store.insert(&new("s1", "k1"), 3_000).unwrap();
 }

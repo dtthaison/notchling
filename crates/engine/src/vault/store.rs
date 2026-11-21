@@ -206,13 +206,51 @@ impl VaultStore {
         still: &dyn Fn(Option<&VaultEntry>) -> bool,
     ) -> Result<Saved, VaultError> {
         let _held = self.lock();
-        let generation = self.generation();
         let index = self.index.read()?;
         let id = entry.id();
         if !still(index.iter().find(|e| e.id() == id)) {
             return Err(VaultError::Changed);
         }
-        if let Some(problem) = list::problem(entry, &index, old) {
+        self.save_held(entry, value, old, now, &index)
+    }
+
+    pub fn save_replacing(
+        &self,
+        entry: &VaultEntry,
+        value: Option<VaultValue>,
+        replacing: Option<&str>,
+        now: &str,
+        still: &dyn Fn(Option<&VaultEntry>) -> bool,
+    ) -> Result<(Saved, Option<VaultEntry>), VaultError> {
+        let _held = self.lock();
+        let index = self.index.read()?;
+        let id = entry.id();
+        if !still(index.iter().find(|e| e.id() == id)) {
+            return Err(VaultError::Changed);
+        }
+        let old = match replacing {
+            Some(name) => {
+                let old_id = name.to_lowercase();
+                let found = index.iter().find(|e| e.id() == old_id).cloned();
+                Some(found.ok_or_else(|| VaultError::NoSuchSecret(name.to_string()))?)
+            }
+            None => None,
+        };
+        let saved = self.save_held(entry, value, old.as_ref(), now, &index)?;
+        Ok((saved, old))
+    }
+
+    fn save_held(
+        &self,
+        entry: &VaultEntry,
+        value: Option<VaultValue>,
+        old: Option<&VaultEntry>,
+        now: &str,
+        index: &[VaultEntry],
+    ) -> Result<Saved, VaultError> {
+        let generation = self.generation();
+        let id = entry.id();
+        if let Some(problem) = list::problem(entry, index, old) {
             return Err(VaultError::Problem(problem));
         }
         let mut values = self.load(generation)?;

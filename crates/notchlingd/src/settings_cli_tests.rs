@@ -225,3 +225,19 @@ fn the_common_flags_are_read_and_sent_in_the_consent_object() {
     assert_eq!(sent[0]["consent"]["expiresInMs"], 600_000);
     assert_eq!(sent[0]["consent"]["key"], "k1");
 }
+
+#[test]
+fn the_last_part_of_a_wait_is_asked_in_milliseconds_not_as_zero_seconds() {
+    let mut sent: Vec<Value> = Vec::new();
+    let mut call = |op: &str, ask: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
+        let (args, timeout) = ask(Duration::from_millis(400));
+        sent.push(args);
+        assert!(timeout > Duration::from_millis(400));
+        match op {
+            "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
+            _ => Err(ClientError::Closed),
+        }
+    };
+    set(&mut call, ("theme", "dark"), &Flags::default(), true).unwrap();
+    assert_eq!(sent[1]["waitMs"], 400, "{}", sent[1]);
+}

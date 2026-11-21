@@ -11,6 +11,7 @@ pub const CLUSTER_SCHEMA: u32 = 1;
 pub const LINUX_CLAUDE_PROVEN: bool = false;
 pub const RESUME_PROOF_RECORDED: bool = false;
 pub const FEATURE_DISPATCH: &str = "dispatch";
+pub const FEATURE_INBOX_CONSENT: &str = "inbox-consent";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Versions {

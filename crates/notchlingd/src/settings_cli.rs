@@ -334,10 +334,10 @@ fn set(
     let end = Instant::now() + flags.timeout;
     let mut last = first;
     let ask = |left: Duration| {
-        let slice = POLL.min(left.as_secs());
+        let ms = contract::wait_slice(left, POLL * 1000);
         (
-            json!({"id": id, "wait": slice}),
-            CALL_TIMEOUT + Duration::from_secs(slice),
+            json!({"id": id, "wait": ms / 1000, "waitMs": ms}),
+            CALL_TIMEOUT + Duration::from_millis(ms),
         )
     };
     while Instant::now() < end {

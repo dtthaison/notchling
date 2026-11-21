@@ -1,7 +1,7 @@
 use super::model::{
     Consent, New, Refusal, State, COOLDOWN_MS, HOUR_MS, LONG_ALL, LONG_EXPIRY_MS, LONG_PER_SESSION,
-    OPENED_PER_HOUR, ROOT_MAX_EXPIRY_MS, ROOT_PER_HOUR, ROOT_WAITING, UNVERIFIED_PER_HOUR,
-    UNVERIFIED_WAITING, WAITING_ALL, WAITING_PER_SESSION,
+    OPENED_PER_HOUR, ROOT_MAX_EXPIRY_MS, ROOT_PER_HOUR, ROOT_WAITING, WAITING_ALL,
+    WAITING_PER_SESSION,
 };
 
 pub const BAD_EXPIRY: &str = "expiresIn takes 1 minute to 12 hours.";
@@ -35,7 +35,7 @@ pub fn check(new: &New, now: i64, rows: &[Consent]) -> Result<(), Refusal> {
         r.state == State::Denied
             && r.kind == new.kind
             && r.target == new.target
-            && (!session_bucket || !r.in_session() || r.bucket() == bucket)
+            && r.bucket() == bucket
     };
     if let Some(after) = rows
         .iter()
@@ -65,23 +65,6 @@ pub fn check(new: &New, now: i64, rows: &[Consent]) -> Result<(), Refusal> {
             .min()
             .unwrap_or(now);
         return Err(busy(soonest - now));
-    }
-    if !session_bucket {
-        let unverified: Vec<&Consent> = rows.iter().filter(|r| !r.in_session()).collect();
-        let open: Vec<&&Consent> = unverified.iter().filter(|r| waiting(r)).collect();
-        if open.len() >= UNVERIFIED_WAITING {
-            let soonest = open.iter().map(|r| r.expires_ms).min().unwrap_or(now);
-            return Err(busy(soonest - now));
-        }
-        let recent: Vec<i64> = unverified
-            .iter()
-            .map(|r| r.created_ms)
-            .filter(|at| *at > now - HOUR_MS)
-            .collect();
-        if recent.len() >= UNVERIFIED_PER_HOUR {
-            let oldest = recent.iter().copied().min().unwrap_or(now);
-            return Err(busy(oldest + HOUR_MS - now));
-        }
     }
     let hourly = if session_bucket {
         OPENED_PER_HOUR

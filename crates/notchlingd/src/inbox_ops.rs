@@ -383,6 +383,15 @@ impl InboxOps {
         inner.send(changes);
     }
 
+    pub fn withdraw(&self, id: &str) {
+        let now = (self.clock)();
+        let mut inner = lock(&self.inner);
+        let changes: Vec<Change> = inner.book.withdraw(id, now).into_iter().collect();
+        inner.responders.remove(id);
+        inner.note(&changes);
+        inner.send(changes);
+    }
+
     pub fn remove(&self, id: &str) {
         let mut inner = lock(&self.inner);
         let changes: Vec<Change> = inner.book.remove(id).into_iter().collect();

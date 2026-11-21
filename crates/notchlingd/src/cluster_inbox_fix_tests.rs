@@ -240,6 +240,7 @@ impl Net for Blocked {
             name: "m5".to_string(),
             online: true,
             keeps: true,
+            consent: false,
         }]
     }
 
@@ -374,4 +375,38 @@ fn a_consent_item_reaches_an_older_peer_as_a_notice_in_a_sync_and_in_a_change() 
         .items()
         .iter()
         .all(|i| i.kind == notchling_engine::inbox::Kind::Consent));
+}
+
+#[test]
+fn a_consent_item_reaches_a_peer_that_knows_the_kind_as_consent() {
+    let fabric = quartet();
+    fabric.knows_consent.lock().unwrap().insert(node(5));
+    let worker = fabric.machine(&node(9));
+    worker
+        .rig
+        .ops
+        .raise(consent_item("c"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    worker
+        .rig
+        .ops
+        .raise(consent_item("d"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    let kinds = kinds_sent(&fabric, &node(5));
+    assert!(kinds.len() >= 2, "{kinds:?}");
+    assert!(kinds.iter().all(|k| k == "consent"), "{kinds:?}");
+}
+
+#[test]
+fn a_member_knows_the_consent_kind_only_when_its_versions_say_so() {
+    use notchling_engine::cluster::versions::FEATURE_INBOX_CONSENT;
+    let knows = json!({"versions": {"features": ["dispatch", FEATURE_INBOX_CONSENT]}});
+    assert!(crate::cluster_inbox::knows_consent(&knows));
+    for older in [
+        json!({"versions": {"features": ["dispatch"]}}),
+        json!({"versions": {}}),
+        json!({}),
+    ] {
+        assert!(!crate::cluster_inbox::knows_consent(&older), "{older}");
+    }
 }

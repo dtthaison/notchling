@@ -196,8 +196,7 @@ impl ConsentStore {
                 &[key, &(now - IDEM_MS)],
             )
             .map_err(Refusal::Db)?;
-            let bucket = new.bucket();
-            if let Some(first) = seen.into_iter().find(|r| r.bucket() == bucket) {
+            if let Some(first) = seen.into_iter().find(|r| new.owns_key_of(r)) {
                 if first.kind == new.kind
                     && first.target == new.target
                     && first.request == new.request

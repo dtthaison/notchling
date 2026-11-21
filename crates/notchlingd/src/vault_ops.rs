@@ -446,7 +446,7 @@ impl VaultOps {
                 consent.now() < row.expires_ms
                     && match (existing, current) {
                         (false, None) => true,
-                        (true, Some(now)) => revision.as_ref().is_none_or(|r| *r == now.updated),
+                        (true, Some(now)) => revision.as_deref() == Some(now.updated.as_str()),
                         _ => false,
                     }
             }
@@ -457,37 +457,26 @@ impl VaultOps {
                 consent.finish_use(row, outcome);
             }
         };
-        let old = match replacing {
-            Some(name) => match self.store.entry(&name) {
-                Ok(Some(old)) => Some(old),
-                Ok(None) => {
-                    let why = format!("There's no secret named {name}.");
-                    ended(Err(why.clone()));
-                    return Err(failed(why));
+        let (saved, old) =
+            match self
+                .store
+                .save_replacing(&entry, value, replacing.as_deref(), &now_iso(), &still)
+            {
+                Ok(done) => done,
+                Err(
+                    notchling_engine::vault::VaultError::Changed
+                    | notchling_engine::vault::VaultError::NoSuchSecret(_),
+                ) if used.is_some() => {
+                    if let Some((consent, row)) = &used {
+                        consent.withdraw_use(row);
+                    }
+                    return Err(drifted());
                 }
                 Err(e) => {
                     ended(Err(e.to_string()));
                     return Err(failed(e.to_string()));
                 }
-            },
-            None => None,
-        };
-        let saved = match self
-            .store
-            .save_checked(&entry, value, old.as_ref(), &now_iso(), &still)
-        {
-            Ok(saved) => saved,
-            Err(notchling_engine::vault::VaultError::Changed) => {
-                if let Some((consent, row)) = &used {
-                    consent.withdraw_use(row);
-                }
-                return Err(drifted());
-            }
-            Err(e) => {
-                ended(Err(e.to_string()));
-                return Err(failed(e.to_string()));
-            }
-        };
+            };
         let mut names = vec![saved.entry.name.as_str()];
         if let Some(old) = old.as_ref().filter(|o| o.id() != saved.entry.id()) {
             names.push(old.name.as_str());
@@ -504,12 +493,12 @@ impl VaultOps {
         row: &notchling_engine::consent::Consent,
         replacing: Option<&str>,
     ) -> Result<(bool, Option<String>), ApiError> {
-        if replacing.is_some_and(|name| name != row.target) {
-            return Err(drifted());
-        }
         let Some(existing) = row.change.get("existing").and_then(Value::as_bool) else {
             return Err(drifted());
         };
+        if replacing.is_some() != existing || replacing.is_some_and(|name| name != row.target) {
+            return Err(drifted());
+        }
         let current = self
             .store
             .entry(&row.target)
@@ -521,7 +510,7 @@ impl VaultOps {
             .map(str::to_string);
         match (existing, current) {
             (false, None) => Ok((existing, revision)),
-            (true, Some(now)) if revision.as_ref().is_none_or(|r| *r == now.updated) => {
+            (true, Some(now)) if revision.as_deref() == Some(now.updated.as_str()) => {
                 Ok((existing, revision))
             }
             _ => Err(drifted()),

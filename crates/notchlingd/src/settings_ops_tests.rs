@@ -703,3 +703,24 @@ fn unknown_key_is_hashed() {
     assert_eq!(text(&events[0], "key_hash").unwrap().len(), 16);
     assert!(!format!("{:?}", r.sink.events()).contains("my-private-key"));
 }
+
+#[test]
+fn asked_waits_in_milliseconds_when_given_wait_ms() {
+    let r = rig("wait-ms");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "continueAfterSleep", json!(false));
+    let started = std::time::Instant::now();
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_ASKED,
+            json!({"id": id, "wait": 0, "waitMs": 300}),
+        )
+        .unwrap();
+    assert_eq!(reply["state"], "waiting");
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(250) && took < Duration::from_secs(5),
+        "{took:?}"
+    );
+}

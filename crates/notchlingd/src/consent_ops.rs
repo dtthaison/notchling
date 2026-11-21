@@ -339,6 +339,7 @@ impl ConsentOps {
                 inbox.resolve(&id, ItemState::Answered, Some(ActionId::Deny), by)
             }
             ConsentThen::Expired => inbox.resolve(&id, ItemState::Expired, None, None),
+            ConsentThen::Withdrawn => inbox.withdraw(&id),
             _ => inbox.resolve(&id, ItemState::Withdrawn, None, None),
         }
     }

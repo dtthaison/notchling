@@ -564,12 +564,14 @@ impl SettingsOps {
         let id = args
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| bad("settings.asked takes {id, wait?: seconds}"))?;
-        let wait = args
-            .get("wait")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .min(MAX_CALL_WAIT);
+            .ok_or_else(|| bad("settings.asked takes {id, wait?: seconds, waitMs?}"))?;
+        let most = Duration::from_secs(MAX_CALL_WAIT);
+        let wait = match args.get("waitMs").and_then(Value::as_u64) {
+            Some(ms) => Duration::from_millis(ms).min(most),
+            None => {
+                Duration::from_secs(args.get("wait").and_then(Value::as_u64).unwrap_or(0)).min(most)
+            }
+        };
         let consent = self
             .consent
             .as_ref()
@@ -582,9 +584,7 @@ impl SettingsOps {
         if seen.kind != SETTING {
             return Err(gone());
         }
-        let row = consent
-            .wait_for(id, Duration::from_secs(wait))
-            .ok_or_else(gone)?;
+        let row = consent.wait_for(id, wait).ok_or_else(gone)?;
         Ok(ask_view(consent, &row))
     }
 }

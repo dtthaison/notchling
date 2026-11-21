@@ -187,27 +187,25 @@ fn the_same_key_for_a_different_request_is_refused() {
 }
 
 #[test]
-fn an_unverified_caller_meets_the_cooldown_a_verified_denial_left() {
+fn an_unverified_caller_is_not_cooled_by_a_verified_denial() {
     let r = rig("cooldown");
     let row = r.open(1, SETTING, "limitMode");
     assert!(r.consent.deny_by_app(&row.id));
-    let forked = r
-        .consent
+    r.consent
         .open(&at(3), opening(SETTING, "limitMode", None))
-        .err()
         .unwrap();
-    assert_eq!(forked.data.unwrap()["reason"], "busy");
 }
 
 #[test]
-fn unverified_callers_share_one_waiting_cap_whatever_their_root() {
+fn unverified_callers_share_one_waiting_slot_whatever_their_root() {
     let r = rig("shared-cap");
-    for n in 0..notchling_engine::consent::UNVERIFIED_WAITING {
-        let _bound = notchling_local_api::bind_identity(Some(shell(&format!("root{n}"))));
-        let row = opening(SETTING, &format!("target{n}"), None);
-        r.consent.open(&at(3), row).unwrap();
+    {
+        let _bound = notchling_local_api::bind_identity(Some(shell("root0")));
+        r.consent
+            .open(&at(3), opening(SETTING, "target0", None))
+            .unwrap();
     }
-    let _bound = notchling_local_api::bind_identity(Some(shell("another-root")));
+    let _bound = notchling_local_api::bind_identity(Some(shell("/tmp/A.app/Contents/MacOS/sh:9")));
     let over = r
         .consent
         .open(&at(3), opening(SETTING, "one-more", None))
@@ -294,4 +292,33 @@ fn an_app_tier_caller_that_is_not_the_app_sees_only_what_an_agent_sees() {
             .len(),
         1
     );
+}
+
+struct Stale;
+
+impl Handler for Stale {
+    fn recheck(&self, _: &Consent) -> Result<(), String> {
+        Err("changed".into())
+    }
+
+    fn apply(&self, _: &Consent, _: Option<Answerer>, _: Option<&str>) -> Result<Value, String> {
+        Ok(json!({"applied": true}))
+    }
+}
+
+#[test]
+fn an_allowed_request_withdrawn_before_it_applies_shows_withdrawn_in_the_inbox() {
+    let r = rig("allowed-withdrawn");
+    r.consent.register(SETTING, Arc::new(Stale));
+    let row = r.open(1, SETTING, "limitMode");
+    let item = item_id_for(&r.inbox, &row.id);
+    assert!(
+        r.inbox
+            .decide(&item, ActionId::Allow, "mac")
+            .unwrap()
+            .answered
+    );
+    r.eventually_state(&row.id, "withdrawn");
+    let shown = r.eventually_item(&row.id, "withdrawn");
+    assert_eq!(shown["state"], "withdrawn", "{shown}");
 }

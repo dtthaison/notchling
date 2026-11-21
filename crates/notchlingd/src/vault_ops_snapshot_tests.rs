@@ -156,3 +156,83 @@ fn a_retry_of_a_closed_request_shows_no_card_again() {
     assert_eq!(again["request"]["id"], json!(id));
     assert_eq!(shown(), before);
 }
+
+fn legacy_copy(s: &super::tests::Setup, id: &str) -> String {
+    let shown = row(s, id);
+    let mut change = shown.change.clone();
+    change.as_object_mut().unwrap().remove("revision");
+    let copy = notchling_engine::consent::New {
+        kind: shown.kind.clone(),
+        target: shown.target.clone(),
+        change,
+        facts: shown.facts.clone(),
+        parts: None,
+        reason: None,
+        session: Some("s-legacy".into()),
+        tool: shown.tool.clone(),
+        verified: true,
+        root: None,
+        folder: None,
+        organization: None,
+        pid: 1,
+        pid_start: Some(1),
+        idem_key: None,
+        request: shown.request.clone(),
+        answer_on: shown.answer_on,
+        applied_by: shown.applied_by,
+        expires_in_ms: 600_000,
+    };
+    s.consent
+        .store()
+        .insert(&copy, s.consent.now())
+        .unwrap()
+        .row()
+        .id
+        .clone()
+}
+
+fn stored(s: &super::tests::Setup, name: &str) -> String {
+    s.ops.store.entry(name).unwrap().unwrap().updated
+}
+
+#[test]
+fn a_request_for_an_existing_secret_with_no_recorded_revision_is_withdrawn() {
+    let s = setup("snap-legacy", true);
+    seed(&s, false);
+    let (reply, _) = ask(&s, json!({"name": "gh", "note": "later"}));
+    let id = reply["request"]["id"].as_str().unwrap().to_string();
+    assert_eq!(row(&s, &id).change["existing"], true);
+    let old = legacy_copy(&s, &id);
+    assert!(row(&s, &old).change.get("revision").is_none());
+    let before = stored(&s, "gh");
+    let e = err(save_for(&s, &old, "gh", json!({"replacing": "gh"})));
+    assert_eq!(
+        (e.code, e.data.unwrap()["reason"].clone()),
+        (ErrorCode::Forbidden, json!("needs_consent"))
+    );
+    assert_eq!(ended(&s, &old)["state"], "withdrawn");
+    assert_eq!(stored(&s, "gh"), before);
+}
+
+#[test]
+fn a_save_for_an_existing_secret_that_does_not_replace_it_is_withdrawn() {
+    let s = setup("snap-not-replacing", true);
+    seed(&s, false);
+    let (reply, _) = ask(&s, json!({"name": "gh", "note": "later"}));
+    let id = reply["request"]["id"].as_str().unwrap().to_string();
+    let e = err(save_for(&s, &id, "gh", json!({})));
+    assert_eq!(e.code, ErrorCode::Forbidden);
+    assert_eq!(ended(&s, &id)["state"], "withdrawn");
+}
+
+#[test]
+fn a_save_for_a_new_secret_that_claims_to_replace_it_is_withdrawn() {
+    let s = setup("snap-false-replacing", true);
+    let (reply, _) = ask(&s, json!({"name": "npm"}));
+    let id = reply["request"]["id"].as_str().unwrap().to_string();
+    assert_eq!(row(&s, &id).change["existing"], false);
+    let e = err(save_for(&s, &id, "npm", json!({"replacing": "npm"})));
+    assert_eq!(e.code, ErrorCode::Forbidden);
+    assert_eq!(ended(&s, &id)["state"], "withdrawn");
+    assert!(s.ops.store.entry("npm").unwrap().is_none());
+}

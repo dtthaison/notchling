@@ -176,6 +176,8 @@ struct Scripted {
     sends: Vec<Result<Value, ClientError>>,
     renews: Vec<Result<(), ClientError>>,
     sent: Vec<(Value, Duration)>,
+    renew_takes: Duration,
+    renewed_within: Vec<Duration>,
 }
 
 impl Link for Scripted {
@@ -188,7 +190,9 @@ impl Link for Scripted {
         }
     }
 
-    fn renew(&mut self) -> Result<(), ClientError> {
+    fn renew(&mut self, within: Duration) -> Result<(), ClientError> {
+        self.renewed_within.push(within);
+        std::thread::sleep(self.renew_takes);
         if self.renews.is_empty() {
             Err(ClientError::Closed)
         } else {
@@ -205,6 +209,8 @@ fn scripted(
         sends,
         renews,
         sent: Vec::new(),
+        renew_takes: Duration::ZERO,
+        renewed_within: Vec::new(),
     }
 }
 
@@ -291,4 +297,38 @@ fn only_a_lost_link_is_transient() {
     ] {
         assert!(!transient(&e), "{e}");
     }
+}
+
+#[test]
+fn a_reconnect_that_ends_past_the_deadline_sends_nothing_more() {
+    let mut link = scripted(
+        vec![Err(ClientError::Closed), Ok(json!({"state": "waiting"}))],
+        vec![Ok(())],
+    );
+    link.renew_takes = Duration::from_millis(80);
+    let end = Instant::now() + Duration::from_millis(40);
+    let got = through_restart(&mut link, "consent.get", &left_ms, end, &tiny);
+    assert!(matches!(got, Err(ClientError::Closed)), "{got:?}");
+    assert_eq!(link.sent.len(), 1);
+    assert!(link
+        .renewed_within
+        .iter()
+        .all(|w| *w <= Duration::from_millis(40)));
+}
+
+#[test]
+fn a_lost_link_at_the_deadline_is_a_lost_daemon_whatever_its_kind() {
+    for e in [
+        ClientError::Closed,
+        ClientError::Io(std::io::ErrorKind::BrokenPipe.into()),
+        ClientError::Io(std::io::ErrorKind::UnexpectedEof.into()),
+    ] {
+        let failure = restart_failure("consent.get", e);
+        assert!(lost(&failure), "{}", failure.reason);
+        assert_eq!(failure.op.as_deref(), Some("consent.get"));
+    }
+    assert!(!lost(&restart_failure(
+        "consent.get",
+        ClientError::Io(std::io::ErrorKind::PermissionDenied.into())
+    )));
 }

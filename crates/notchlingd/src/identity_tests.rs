@@ -498,7 +498,7 @@ fn a_tree_exactly_as_deep_as_the_limit_is_rooted_and_one_more_is_not() {
 }
 
 #[test]
-fn a_root_that_is_no_app_bundle_shares_the_unrooted_bucket_however_often_it_is_new() {
+fn a_root_that_is_no_app_bundle_is_named_as_it_is_and_stays_unverified() {
     let h = home("rotating", &[]);
     for (start, exe) in [(42, "/bin/sh"), (43, "/bin/sh"), (44, "/tmp/x/nohup")] {
         let mut t = Table::default();
@@ -513,6 +513,7 @@ fn a_root_that_is_no_app_bundle_shares_the_unrooted_bucket_however_often_it_is_n
             Launches::default(),
             71,
         );
-        assert_eq!(who.root.as_deref(), Some("unrooted"), "{exe} {start}");
+        assert_eq!(who.root, Some(format!("{exe}:{start}")));
+        assert!(!who.verified && who.session.is_none());
     }
 }

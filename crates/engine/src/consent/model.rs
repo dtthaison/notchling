@@ -18,8 +18,6 @@ pub const ROOT_WAITING: usize = 1;
 pub const ROOT_PER_HOUR: usize = 3;
 pub const ROOT_MAX_EXPIRY_MS: i64 = 15 * 60_000;
 pub const HOUR_MS: i64 = 3_600_000;
-pub const UNVERIFIED_WAITING: usize = 3;
-pub const UNVERIFIED_PER_HOUR: usize = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -179,7 +177,7 @@ pub struct Consent {
 
 impl Consent {
     pub fn bucket(&self) -> String {
-        bucket_of(self.verified, self.session.as_deref(), self.root.as_deref())
+        bucket_of(self.verified, self.session.as_deref())
     }
 
     pub fn in_session(&self) -> bool {
@@ -187,10 +185,12 @@ impl Consent {
     }
 }
 
-pub fn bucket_of(verified: bool, session: Option<&str>, root: Option<&str>) -> String {
+pub const UNVERIFIED_BUCKET: &str = "unverified";
+
+pub fn bucket_of(verified: bool, session: Option<&str>) -> String {
     match (verified, session) {
         (true, Some(session)) => format!("session:{session}"),
-        _ => format!("root:{}", root.unwrap_or("unrooted")),
+        _ => UNVERIFIED_BUCKET.to_string(),
     }
 }
 
@@ -219,7 +219,18 @@ pub struct New {
 
 impl New {
     pub fn bucket(&self) -> String {
-        bucket_of(self.verified, self.session.as_deref(), self.root.as_deref())
+        bucket_of(self.verified, self.session.as_deref())
+    }
+
+    pub fn owns_key_of(&self, row: &Consent) -> bool {
+        if self.verified && self.session.is_some() {
+            return row.in_session() && row.bucket() == self.bucket();
+        }
+        !row.in_session()
+            && self.pid != 0
+            && self.pid_start.is_some()
+            && row.pid == self.pid
+            && row.pid_start == self.pid_start
     }
 }
 

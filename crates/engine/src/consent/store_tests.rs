@@ -410,3 +410,92 @@ fn a_version_nine_database_opens_as_ten_and_keeps_every_row() {
         (Some("settings.set"), false)
     );
 }
+
+fn unverified(pid: u32, pid_start: Option<u64>, root: &str) -> New {
+    let mut asked = new("none", "k1");
+    asked.verified = false;
+    asked.session = None;
+    asked.root = Some(root.to_string());
+    asked.pid = pid;
+    asked.pid_start = pid_start;
+    asked.expires_in_ms = 60_000;
+    asked.idem_key = Some("key-1".to_string());
+    asked
+}
+
+#[test]
+fn an_unverified_key_belongs_to_its_own_process_and_not_to_the_shared_bucket() {
+    let store = ConsentStore::in_memory_for_tests();
+    let first = unverified(7, Some(70), "unrooted");
+    let id = store.insert(&first, 1_000).unwrap().row().id.clone();
+    store
+        .answer(&id, State::Applying, "mac", None, 1_500)
+        .unwrap();
+    store.finish(&id, State::Applied, None, 1_600).unwrap();
+    let again = store.insert(&first, 2_000).unwrap();
+    assert!(matches!(&again, Opened::Same(r) if r.id == id), "{again:?}");
+    let mut changed = first.clone();
+    changed.request = json!({"op": "settings.set", "key": "k1", "value": "z"});
+    assert_eq!(store.insert(&changed, 2_000), Err(Refusal::KeyReused));
+    for other in [
+        unverified(8, Some(70), "unrooted"),
+        unverified(7, Some(71), "unrooted"),
+    ] {
+        let mut other = other;
+        other.request = json!({"op": "settings.set", "key": "k1", "value": "z"});
+        let opened = store.insert(&other, 2_000).unwrap();
+        assert!(
+            matches!(&opened, Opened::Fresh(r) if r.id != id),
+            "{opened:?}"
+        );
+        let other_id = opened.row().id.clone();
+        store
+            .answer(&other_id, State::Applying, "mac", None, 2_100)
+            .unwrap();
+        store
+            .finish(&other_id, State::Applied, None, 2_200)
+            .unwrap();
+    }
+}
+
+#[test]
+fn an_unverified_caller_with_no_start_time_owns_no_key() {
+    let store = ConsentStore::in_memory_for_tests();
+    let first = unverified(7, None, "unrooted");
+    let id = store.insert(&first, 1_000).unwrap().row().id.clone();
+    store
+        .answer(&id, State::Applying, "mac", None, 1_500)
+        .unwrap();
+    store.finish(&id, State::Applied, None, 1_600).unwrap();
+    let again = store.insert(&first, 2_000).unwrap();
+    assert!(
+        matches!(&again, Opened::Fresh(r) if r.id != id),
+        "{again:?}"
+    );
+}
+
+#[test]
+fn a_session_key_is_not_matched_by_an_unverified_caller_in_the_same_process() {
+    let store = ConsentStore::in_memory_for_tests();
+    let mut session = new("s1", "k1");
+    session.idem_key = Some("key-1".to_string());
+    let id = store.insert(&session, 1_000).unwrap().row().id.clone();
+    let opened = store
+        .insert(&unverified(7, Some(70), "unrooted"), 2_000)
+        .unwrap();
+    assert!(
+        matches!(&opened, Opened::Fresh(r) if r.id != id),
+        "{opened:?}"
+    );
+}
+
+#[test]
+fn a_row_written_under_an_old_root_still_matches_its_own_process() {
+    let store = ConsentStore::in_memory_for_tests();
+    let old = unverified(7, Some(70), "/bin/sh:70");
+    let id = store.insert(&old, 1_000).unwrap().row().id.clone();
+    let again = store
+        .insert(&unverified(7, Some(70), "unrooted"), 2_000)
+        .unwrap();
+    assert!(matches!(&again, Opened::Same(r) if r.id == id), "{again:?}");
+}

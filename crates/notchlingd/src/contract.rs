@@ -382,7 +382,7 @@ pub fn transient(e: &ClientError) -> bool {
 
 pub trait Link {
     fn send(&mut self, op: &str, args: Value, timeout: Duration) -> Result<Value, ClientError>;
-    fn renew(&mut self) -> Result<(), ClientError>;
+    fn renew(&mut self, within: Duration) -> Result<(), ClientError>;
 }
 
 pub struct Socket<'a> {
@@ -396,9 +396,14 @@ impl Link for Socket<'_> {
         self.client.call(op, args)
     }
 
-    fn renew(&mut self) -> Result<(), ClientError> {
+    fn renew(&mut self, within: Duration) -> Result<(), ClientError> {
         let layout = Layout::from_env(self.path).ok_or(ClientError::Unsupported)?;
-        *self.client = Client::connect(&layout.socket, ClientKind::Cli, env!("CARGO_PKG_VERSION"))?;
+        *self.client = Client::connect_with_timeout(
+            &layout.socket,
+            ClientKind::Cli,
+            env!("CARGO_PKG_VERSION"),
+            within.max(Duration::from_millis(1)),
+        )?;
         Ok(())
     }
 }
@@ -412,29 +417,39 @@ pub fn through_restart(
     end: Instant,
     pause: &dyn Fn(usize) -> Duration,
 ) -> Result<Value, ClientError> {
+    let left = || end.saturating_duration_since(Instant::now());
+    let (args, timeout) = ask(left());
+    let mut lost = match link.send(op, args, timeout) {
+        Err(e) if transient(&e) => e,
+        other => return other,
+    };
     let mut step = 0;
     loop {
-        let (args, timeout) = ask(end.saturating_duration_since(Instant::now()));
-        let mut lost = match link.send(op, args, timeout) {
+        if left().is_zero() {
+            return Err(lost);
+        }
+        std::thread::sleep(pause(step).min(left()));
+        step += 1;
+        if left().is_zero() {
+            return Err(lost);
+        }
+        match link.renew(left()) {
+            Ok(()) => {}
+            Err(e) if transient(&e) => {
+                lost = e;
+                continue;
+            }
+            Err(ClientError::Timeout) if left().is_zero() => return Err(lost),
+            Err(e) => return Err(e),
+        }
+        if left().is_zero() {
+            return Err(lost);
+        }
+        let (args, timeout) = ask(left());
+        lost = match link.send(op, args, timeout) {
             Err(e) if transient(&e) => e,
             other => return other,
         };
-        loop {
-            let left = end.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(lost);
-            }
-            std::thread::sleep(pause(step).min(left));
-            step += 1;
-            if Instant::now() >= end {
-                return Err(lost);
-            }
-            match link.renew() {
-                Ok(()) => break,
-                Err(e) if transient(&e) => lost = e,
-                Err(e) => return Err(e),
-            }
-        }
     }
 }
 
@@ -449,7 +464,14 @@ pub fn call_through_restart(
         client,
         path: socket,
     };
-    through_restart(&mut link, op, ask, end, &pause).map_err(|e| Failure::from_client(Some(op), e))
+    through_restart(&mut link, op, ask, end, &pause).map_err(|e| restart_failure(op, e))
+}
+
+pub fn restart_failure(op: &str, e: ClientError) -> Failure {
+    if transient(&e) {
+        return Failure::not_running().with_op(op);
+    }
+    Failure::from_client(Some(op), e)
 }
 
 pub fn wait_slice(left: Duration, most_ms: u64) -> u64 {

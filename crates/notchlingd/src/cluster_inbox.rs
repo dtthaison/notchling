@@ -1,6 +1,7 @@
 use crate::cluster_node::{ClusterNode, LocalCalls};
 use crate::inbox_mirrors::{Home, InboxLink, Refusal};
 use crate::inbox_ops::InboxOps;
+use notchling_engine::cluster::versions::FEATURE_INBOX_CONSENT;
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{LocalCmd, NodeId};
 use notchling_engine::inbox::{ActionId, Change, Item, Kind};
@@ -36,6 +37,7 @@ pub struct Peer {
     pub name: String,
     pub online: bool,
     pub keeps: bool,
+    pub consent: bool,
 }
 
 pub trait Net: Send + Sync {
@@ -112,6 +114,7 @@ impl Net for NodeNet {
                     online: flag(m, "online"),
                     keeps: flag(m, "canBeMaster")
                         || m.get("role").and_then(Value::as_str) == Some("home"),
+                    consent: knows_consent(m),
                     id,
                 })
             })
@@ -363,19 +366,30 @@ fn coalesced(changes: Vec<Change>) -> Vec<Change> {
         .collect()
 }
 
-fn shown_to_peers(item: &Item) -> Item {
+pub(crate) fn knows_consent(member: &Value) -> bool {
+    member
+        .pointer("/versions/features")
+        .and_then(Value::as_array)
+        .is_some_and(|features| {
+            features
+                .iter()
+                .any(|f| f.as_str() == Some(FEATURE_INBOX_CONSENT))
+        })
+}
+
+fn shown_to_peers(item: &Item, knows: bool) -> Item {
     let mut shown = item.clone();
     shown.open = None;
-    if shown.kind == Kind::Consent {
+    if shown.kind == Kind::Consent && !knows {
         shown.kind = Kind::Notice;
     }
     shown
 }
 
-fn event_of(change: &Change) -> Value {
+fn event_of(change: &Change, knows: bool) -> Value {
     match change {
         Change::Raised(item) | Change::Updated(item) => {
-            json!({"event": "changed", "item": shown_to_peers(item)})
+            json!({"event": "changed", "item": shown_to_peers(item, knows)})
         }
         Change::Removed(id) => json!({"event": "removed", "id": id}),
     }
@@ -428,8 +442,13 @@ impl Outbox {
             .collect()
     }
 
-    fn sync_to(&self, target: &NodeId) -> Result<(), ApiError> {
-        let items: Vec<Item> = self.inbox.own_open().iter().map(shown_to_peers).collect();
+    fn sync_to(&self, target: &NodeId, knows: bool) -> Result<(), ApiError> {
+        let items: Vec<Item> = self
+            .inbox
+            .own_open()
+            .iter()
+            .map(|item| shown_to_peers(item, knows))
+            .collect();
         let args = json!({"event": "sync", "items": items});
         self.net
             .call(target, NODE_INBOX, args, OriginTier::Node, FORWARD_WAIT)
@@ -473,12 +492,20 @@ impl Outbox {
             coalesced(std::mem::take(&mut queue.changes))
         };
         let ready: BTreeSet<NodeId> = lock(&self.queue).synced.keys().cloned().collect();
+        let knowing: BTreeSet<NodeId> = self
+            .net
+            .peers()
+            .into_iter()
+            .filter(|p| p.consent)
+            .map(|p| p.id)
+            .collect();
         for target in &targets {
+            let knows = knowing.contains(target);
             if lock(&self.queue).held_off.contains_key(target) {
                 continue;
             }
             if !ready.contains(target) {
-                let result = self.sync_to(target);
+                let result = self.sync_to(target, knows);
                 self.settle(target, result.is_ok(), now);
                 continue;
             }
@@ -486,7 +513,7 @@ impl Outbox {
                 let sent = self.net.call(
                     target,
                     NODE_INBOX,
-                    event_of(change),
+                    event_of(change, knows),
                     OriginTier::Node,
                     FORWARD_WAIT,
                 );
