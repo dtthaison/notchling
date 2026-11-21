@@ -3,7 +3,10 @@ use crate::acting_ops_tests::FakeRoom;
 use crate::inbox_ops_tests::item;
 use crate::limits_ops_tests::{rig as limits_rig, TempDir, NOW};
 use crate::switches::{SwitchFlag, ACCOUNTS, ACCOUNTS_OFF};
-use notchling_engine::providers::ProviderRegistry;
+use notchling_engine::providers::{
+    AccountError, AccountProvider, AddProgress, AddStarted, Capabilities, ProviderAccount,
+    ProviderRegistry, ProviderState,
+};
 use notchling_local_api::{bind_identity, ClientKind};
 
 fn caller() -> Caller {
@@ -23,14 +26,82 @@ fn who(verified: bool, session: &str, org: Option<&str>) -> AgentIdentity {
     who
 }
 
+struct Planted {
+    id: &'static str,
+    state: ProviderState,
+}
+
+impl AccountProvider for Planted {
+    fn id(&self) -> ProviderId {
+        ProviderId::new(self.id)
+    }
+    fn title(&self) -> &'static str {
+        "Planted"
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::ADD_ACCOUNT
+    }
+    fn state(&self) -> ProviderState {
+        self.state.clone()
+    }
+    fn sync(&self, _force: bool) {}
+    fn switch_to(&self, _id: &str) -> Result<(), AccountError> {
+        Ok(())
+    }
+    fn begin_add(&self) -> Result<AddStarted, AccountError> {
+        Ok(AddStarted::default())
+    }
+    fn poll_add(&self) -> AddProgress {
+        AddProgress::Idle
+    }
+    fn cancel_add(&self) {}
+    fn remove(&self, _id: &str) {}
+    fn switch_failure_title(&self) -> &'static str {
+        "Couldn't switch"
+    }
+}
+
+fn planted_registry() -> ProviderRegistry {
+    let mut registry = ProviderRegistry::new();
+    let mut claude = ProviderState::default();
+    claude.accounts = vec![
+        ProviderAccount::new("acc-work", "alice@work-corp.com", Some("max")),
+        ProviderAccount::new("acc-far", "bob@far-secret.com", Some("pro")),
+    ];
+    claude.active_id = Some("acc-work".into());
+    claude.sign_in_url = Some("https://login.example/TOKEN-SECRET".into());
+    registry.register(Arc::new(Planted {
+        id: ProviderId::CLAUDE_CODE,
+        state: claude,
+    }));
+    let mut codex = ProviderState::default();
+    codex.accounts = vec![ProviderAccount::new(
+        "cdx-far",
+        "carol@far-secret.com",
+        None,
+    )];
+    codex.active_id = Some("cdx-far".into());
+    registry.register(Arc::new(Planted {
+        id: ProviderId::CODEX,
+        state: codex,
+    }));
+    registry
+}
+
 struct Rig {
     _tmp: TempDir,
     _limits_tmp: TempDir,
     work: String,
+    work_dir: String,
+    other_dir: String,
     ops: ReadsOps,
 }
 
 fn rig(tag: &str) -> Rig {
+    rig_with(tag, ProviderRegistry::new())
+}
+
+fn rig_with(tag: &str, registry: ProviderRegistry) -> Rig {
     let (limits_tmp, _flag, room, limits) = limits_rig();
     let tmp = TempDir::new(tag);
     let home = tmp.path("home");
@@ -63,7 +134,7 @@ fn rig(tag: &str) -> Rig {
     }
     let providers = Arc::new(ProvidersOps::new(
         SwitchFlag::off(ACCOUNTS, ACCOUNTS_OFF),
-        ProviderRegistry::new(),
+        registry,
         room,
     ));
     let ops = ReadsOps::new(
@@ -76,10 +147,16 @@ fn rig(tag: &str) -> Rig {
         tmp.path("quota"),
         Arc::new(|| NOW),
     );
+    let (work_dir, other_dir) = (
+        work_dir.display().to_string(),
+        other_dir.display().to_string(),
+    );
     Rig {
         _tmp: tmp,
         _limits_tmp: limits_tmp,
         work,
+        work_dir,
+        other_dir,
         ops,
     }
 }
@@ -201,4 +278,158 @@ fn accounts_and_limits_answer_for_a_verified_session() {
     assert!(reply["tool"].get("usable").is_some());
     let reply = read(&rig, ops::LIMITS_SUMMARY, json!({"tool": "nope"}));
     assert_eq!(reply["tool"]["reason"], json!("unknown_tool"));
+}
+
+const PLANTED_OF_WORK: [&str; 6] = [
+    "alice@work-corp.com",
+    "work-corp",
+    "acc-work",
+    "OWN-",
+    "MATE-",
+    "TOKEN-SECRET",
+];
+
+const PLANTED_OF_FAR: [&str; 8] = [
+    "bob@far-secret.com",
+    "carol@far-secret.com",
+    "far-secret",
+    "acc-far",
+    "cdx-far",
+    "FAR-",
+    "TOKEN-SECRET",
+    "bob@",
+];
+
+fn assign_work(rig: &Rig) {
+    let data = rig._tmp.path("data");
+    notchling_engine::store::put_doc(
+        &data,
+        Kind::Claude.doc(),
+        r#"[{"id":"acc-work"},{"id":"acc-far"}]"#,
+    )
+    .unwrap();
+    Organizations::new(&data)
+        .with_home(&rig._tmp.path("home"))
+        .set_organization(Kind::Claude, "acc-work", &rig.work)
+        .unwrap();
+}
+
+fn every_read(rig: &Rig) -> Vec<(&'static str, String)> {
+    let mut all = Vec::new();
+    for op in READ_OPS {
+        all.push((op, read(rig, op, json!({})).to_string()));
+    }
+    for tool in ["claude", "codex", "agy"] {
+        all.push((
+            "limits.summary",
+            read(rig, ops::LIMITS_SUMMARY, json!({"tool": tool, "pool": "x"})).to_string(),
+        ));
+    }
+    all
+}
+
+#[test]
+fn a_planted_email_token_folder_and_inbox_text_of_another_organization_appear_in_no_reply() {
+    let rig = rig_with("planted-far", planted_registry());
+    assign_work(&rig);
+    let _bound = bind_identity(Some(who(true, "s1", Some(&rig.work))));
+    let mut seen_account = false;
+    for (op, text) in every_read(&rig) {
+        for planted in PLANTED_OF_FAR {
+            assert!(!text.contains(planted), "{op} leaked {planted}: {text}");
+        }
+        assert!(
+            !text.contains(&rig.other_dir),
+            "{op} leaked a folder: {text}"
+        );
+        seen_account |= text.contains("a***@w***.com");
+    }
+    assert!(seen_account, "the caller's own masked account is shown");
+}
+
+#[test]
+fn a_planted_email_token_folder_and_inbox_text_of_the_first_organization_appear_in_no_other_reply()
+{
+    let rig = rig_with("planted-work", planted_registry());
+    assign_work(&rig);
+    let _bound = bind_identity(Some(who(true, "s2", Some("personal"))));
+    for (op, text) in every_read(&rig) {
+        for planted in PLANTED_OF_WORK {
+            assert!(!text.contains(planted), "{op} leaked {planted}: {text}");
+        }
+        assert!(
+            !text.contains(&rig.work_dir),
+            "{op} leaked a folder: {text}"
+        );
+        assert!(
+            !text.contains("Work"),
+            "{op} leaked the organization name: {text}"
+        );
+    }
+}
+
+#[test]
+fn another_sessions_inbox_text_in_the_same_organization_is_a_title_only() {
+    let rig = rig("inbox-mate");
+    let _bound = bind_identity(Some(who(true, "s3", Some(&rig.work))));
+    let text = read(&rig, ops::INBOX_MINE, json!({})).to_string();
+    assert!(text.contains("MATE-DETAIL-SECRET"));
+    assert!(!text.contains("OWN-DETAIL"), "{text}");
+    assert!(text.contains("OWN-TITLE"));
+}
+
+#[test]
+fn a_planted_search_row_of_another_organization_or_for_a_shell_is_dropped() {
+    let rig = rig("search-planted");
+    let reply = || {
+        json!({
+            "pages": [
+                {"title": "mine page", "folder": format!("{}/x", rig.work_dir)},
+                {"title": "far page bob@far-secret.com TOKEN-SECRET", "folder": format!("{}/y", rig.other_dir)},
+            ],
+            "sessions": [
+                {"title": "mine", "folder": format!("{}/x", rig.work_dir), "modified": 1.0},
+                {"title": "far session FAR-DETAIL-SECRET", "folder": format!("{}/y", rig.other_dir), "modified": 1.0},
+            ],
+        })
+    };
+    let org_of = |f: &str| rig.ops.folder_org(f);
+    let bound = bind_identity(Some(who(true, "s1", Some(&rig.work))));
+    let mut mine = reply();
+    let org = rig.ops.search_org(&caller());
+    assert_eq!(org.as_deref(), Some(rig.work.as_str()));
+    scope_search(&mut mine, org.as_deref(), &json!({}), &org_of);
+    let text = mine.to_string();
+    assert!(text.contains("mine page"));
+    for planted in ["far-secret", "TOKEN-SECRET", "FAR-"] {
+        assert!(!text.contains(planted), "{planted}");
+    }
+    drop(bound);
+    for identity in [None, Some(who(false, "s1", Some(&rig.work)))] {
+        let _bound = bind_identity(identity);
+        let mut shell = reply();
+        let org = rig.ops.search_org(&caller());
+        assert_eq!(org, None);
+        scope_search(&mut shell, org.as_deref(), &json!({}), &org_of);
+        assert_eq!(shell["reason"], json!("no_session"));
+        let text = shell.to_string();
+        for planted in ["mine page", "far-secret", "personal"] {
+            assert!(!text.contains(planted), "{planted}");
+        }
+    }
+}
+
+#[test]
+fn a_shell_with_planted_accounts_still_gets_nothing_from_any_read() {
+    let rig = rig_with("planted-shell", planted_registry());
+    for identity in [None, Some(who(false, "s1", Some("personal")))] {
+        let _bound = bind_identity(identity);
+        for (op, text) in every_read(&rig) {
+            assert!(text.contains("no_session"), "{op}: {text}");
+            for planted in PLANTED_OF_FAR.iter().chain(PLANTED_OF_WORK.iter()) {
+                assert!(!text.contains(planted), "{op} leaked {planted}: {text}");
+            }
+            assert!(!text.contains("personal"), "{op}: {text}");
+        }
+    }
 }

@@ -43,7 +43,7 @@ fn limits_for_a_tool_exits_1_for_a_shell_with_the_reason_in_the_error() {
     let (code, out, _) = run(&root, &home, &["limits", "--tool", "codex", "--json"]);
     assert_eq!(code, 1, "{out}");
     assert_eq!(out["error"]["code"], "failed");
-    assert_eq!(out["error"]["result"]["reason"], "no_session");
+    assert_eq!(out["result"]["reason"], "no_session");
 
     let (code, out, _) = run(&root, &home, &["limits", "--tool", "nope", "--json"]);
     assert_eq!(code, 2, "{out}");
@@ -61,7 +61,9 @@ fn the_public_reads_work_for_a_shell() {
 
     let (code, out, err) = run(&root, &home, &["switches", "--json"]);
     assert_eq!(code, 0, "{out} {err}");
-    for name in ["acting", "bridge", "accounts", "vault", "install", "cluster"] {
+    for name in [
+        "acting", "bridge", "accounts", "vault", "install", "cluster",
+    ] {
         assert!(out.get(name).is_some(), "{name} in {out}");
     }
 

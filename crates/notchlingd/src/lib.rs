@@ -113,8 +113,6 @@ pub mod codex_fence;
 pub mod codex_ops;
 pub mod commands;
 pub mod consent_cli;
-pub mod reads_ops;
-pub mod reads_cli;
 mod consent_events;
 pub mod consent_ops;
 #[cfg(test)]
@@ -204,6 +202,8 @@ pub mod providers_daemon;
 mod providers_gate;
 pub mod providers_ops;
 pub mod quiet_ops;
+pub mod reads_cli;
+pub mod reads_ops;
 pub mod reload_cli;
 pub mod reload_ops;
 mod reply_attempts;

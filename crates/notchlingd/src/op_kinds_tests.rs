@@ -270,7 +270,11 @@ fn own_quiet_ops_are_quiet() {
     let (_root, wired, ops) = rig("own");
     for op in OWN_QUIET {
         assert_eq!(home(op), OpHome::Quiet, "{op}");
-        let want = if READS_BY_AGENTS.contains(&op) { OpSpec::AGENT_READ } else { OpSpec::APP_QUIET };
+        let want = if READS_BY_AGENTS.contains(&op) {
+            OpSpec::AGENT_READ
+        } else {
+            OpSpec::APP_QUIET
+        };
         assert_eq!(ops.spec(op), Some(want), "{op}");
     }
     wired.close();
@@ -281,7 +285,11 @@ fn quiet_reads_match_quiet_ops_rs() {
     let (_root, wired, ops) = rig("reads");
     for op in QUIET_READS {
         assert_eq!(home(op), OpHome::Quiet, "{op}");
-        let want = if READS_BY_AGENTS.contains(&op) { OpSpec::AGENT_READ } else { OpSpec::APP_QUIET };
+        let want = if READS_BY_AGENTS.contains(&op) {
+            OpSpec::AGENT_READ
+        } else {
+            OpSpec::APP_QUIET
+        };
         assert_eq!(ops.spec(op), Some(want), "{op}");
     }
     wired.close();

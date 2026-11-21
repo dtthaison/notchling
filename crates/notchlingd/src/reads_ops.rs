@@ -7,9 +7,7 @@ use notchling_engine::delegate::quota::{self, Ready, Window};
 use notchling_engine::inbox::Item;
 use notchling_engine::organizations::{Kind, Organizations, PERSONAL_ID};
 use notchling_engine::providers::ProviderId;
-use notchling_local_api::{
-    bound_identity, ops, AgentIdentity, ApiError, Caller, OpSpec, Tier,
-};
+use notchling_local_api::{bound_identity, ops, AgentIdentity, ApiError, Caller, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -146,7 +144,11 @@ impl ReadsOps {
                 own.push(own_item(&item));
                 continue;
             }
-            let theirs = item.source.session.as_deref().and_then(|s| self.org_of_session(s));
+            let theirs = item
+                .source
+                .session
+                .as_deref()
+                .and_then(|s| self.org_of_session(s));
             if theirs.as_deref() == Some(org.as_str()) {
                 same.push(short_item(&item));
             } else {
@@ -215,7 +217,12 @@ impl ReadsOps {
                     resets_at: *resets_at,
                 })
                 .collect();
-            Some(quota::readiness_of_windows(seen.checked, true, windows, now))
+            Some(quota::readiness_of_windows(
+                seen.checked,
+                true,
+                windows,
+                now,
+            ))
         } else {
             None
         };
@@ -332,16 +339,25 @@ impl OpGroup for ReadsOps {
                 let mut reply = self.limits(caller);
                 if let Some(tool) = args.get("tool").and_then(Value::as_str) {
                     let found = reply["tools"][tool].clone();
-                    reply["tool"] = if found.is_null() { json!({"usable": false, "reason": "unknown_tool"}) } else { found };
+                    reply["tool"] = if found.is_null() {
+                        json!({"usable": false, "reason": "unknown_tool"})
+                    } else {
+                        found
+                    };
                     if let Some(pool) = args.get("pool").and_then(Value::as_str) {
                         let wanted = pool.to_lowercase();
                         let hit = reply["tool"]["pools"]
                             .as_array()
                             .into_iter()
                             .flatten()
-                            .find(|p| p["name"].as_str().is_some_and(|n| n.to_lowercase().contains(&wanted)))
+                            .find(|p| {
+                                p["name"]
+                                    .as_str()
+                                    .is_some_and(|n| n.to_lowercase().contains(&wanted))
+                            })
                             .cloned();
-                        reply["pool"] = hit.unwrap_or_else(|| json!({"usable": false, "reason": "unknown_pool"}));
+                        reply["pool"] = hit
+                            .unwrap_or_else(|| json!({"usable": false, "reason": "unknown_pool"}));
                     }
                 }
                 Ok(reply)
