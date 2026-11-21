@@ -102,16 +102,6 @@ impl ReadsOps {
         }
     }
 
-    fn folder_of(&self, session: &str) -> Option<String> {
-        let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        list.as_array()?
-            .iter()
-            .find(|row| row.get("id").and_then(Value::as_str) == Some(session))
-            .and_then(|row| row.get("cwd").and_then(Value::as_str))
-            .filter(|cwd| !cwd.is_empty())
-            .map(str::to_string)
-    }
-
     fn org_of_folder(&self, folder: &str) -> String {
         self.orgs
             .view()
@@ -119,8 +109,14 @@ impl ReadsOps {
             .organization
     }
 
-    fn org_of_session(&self, session: &str) -> Option<String> {
-        Some(self.org_of_folder(&self.folder_of(session)?))
+    fn org_placing(&self, other: &str) -> Option<String> {
+        let folders = {
+            let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+            crate::identity::folders_naming(&list, other)
+        };
+        let mut orgs = folders.iter().map(|f| self.org_of_folder(f));
+        let first = orgs.next()?;
+        orgs.all(|o| o == first).then_some(first)
     }
 
     fn mine(&self, caller: &Caller) -> Option<(String, Option<String>)> {
@@ -148,7 +144,7 @@ impl ReadsOps {
                 .source
                 .session
                 .as_deref()
-                .and_then(|s| self.org_of_session(s));
+                .and_then(|s| self.org_placing(s));
             if theirs.as_deref() == Some(org.as_str()) {
                 same.push(short_item(&item));
             } else {

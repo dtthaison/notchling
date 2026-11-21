@@ -279,6 +279,23 @@ fn another_organizations_session_sees_none_of_the_first_ones_text() {
 }
 
 #[test]
+fn a_session_a_running_job_resumed_in_another_organization_is_not_shown_to_the_first() {
+    let rig = rig("inbox-resumed");
+    let job = json!({
+        "id": "job-3", "resumeSessionId": "s3", "cwd": format!("{}/y", rig.other_dir),
+        "target": {"job": "j3"}, "group": "working", "label": "Working",
+    });
+    if let Some(rows) = rig.ops.sessions.lock().unwrap().as_array_mut() {
+        rows.push(job);
+    }
+    let _bound = bind_identity(Some(who(true, "s1", Some(&rig.work))));
+    let reply = read(&rig, ops::INBOX_MINE, json!({}));
+    assert_eq!(reply["organization"], json!([]));
+    assert_eq!(reply["otherOrganizations"], json!(2));
+    assert!(!reply.to_string().contains("MATE-"));
+}
+
+#[test]
 fn organizations_mine_names_only_the_callers_and_counts_the_rest() {
     let rig = rig("orgs");
     let _bound = bind_identity(Some(who(true, "s1", Some(&rig.work))));
