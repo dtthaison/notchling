@@ -3,6 +3,7 @@ use notchling_local_api::{ApiError, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::{json, Map, Value};
 use std::io::Write;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub const OK: i32 = 0;
 pub const FAILED: i32 = 1;
@@ -345,6 +346,43 @@ pub fn call(client: &mut Client, op: &str, args: Value) -> Result<Value, Failure
     client
         .call(op, args)
         .map_err(|e| Failure::from_client(Some(op), e))
+}
+
+const RECONNECT_MS: [u64; 4] = [1_000, 2_000, 5_000, 10_000];
+
+pub fn pause_ms(step: usize) -> u64 {
+    RECONNECT_MS[step.min(RECONNECT_MS.len() - 1)]
+}
+
+pub fn lost(failure: &Failure) -> bool {
+    failure.reason == "not_running"
+}
+
+pub fn call_through_restart(
+    client: &mut Client,
+    (socket, timeout): (Option<&Path>, Duration),
+    op: &str,
+    args: &Value,
+    end: Instant,
+) -> Result<Value, Failure> {
+    let mut step = 0;
+    loop {
+        match call(client, op, args.clone()) {
+            Err(failure) if lost(&failure) => {
+                let left = end.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return Err(failure);
+                }
+                std::thread::sleep(Duration::from_millis(pause_ms(step)).min(left));
+                step += 1;
+                if let Ok(mut fresh) = connect(socket) {
+                    fresh.set_timeout(timeout);
+                    *client = fresh;
+                }
+            }
+            other => return other,
+        }
+    }
 }
 
 pub fn pretty(value: &Value) -> String {

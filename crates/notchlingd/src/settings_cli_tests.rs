@@ -113,6 +113,18 @@ fn a_withdrawn_request_says_withdrawn_and_a_failed_one_says_failed() {
 }
 
 #[test]
+fn the_failure_carries_the_request_row_not_the_ask_wrapper() {
+    let reply = json!({"key": "theme", "value": "dark", "state": "denied", "message": "m",
+                       "request": {"id": "c1", "kind": "setting", "state": "denied"}});
+    let (code, text) = outcome(&reply);
+    let failure = failure_of(&reply, code, text);
+    assert_eq!(
+        failure.request,
+        Some(json!({"id": "c1", "kind": "setting", "state": "denied"}))
+    );
+}
+
+#[test]
 fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
     let mut calls: Vec<String> = Vec::new();
     let mut call = |op: &str, _: Value, _: Duration| -> Result<Value, ClientError> {

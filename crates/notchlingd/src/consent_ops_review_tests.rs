@@ -152,7 +152,12 @@ fn a_retry_after_the_answer_returns_the_original_and_notes_it_used() {
     first.key = Some("k1".into());
     let row = r.consent.open(&at(1), first).unwrap().row().clone();
     let item = item_id_for(&r.inbox, &row.id);
-    assert!(r.inbox.decide(&item, ActionId::Allow, "mac").unwrap().answered);
+    assert!(
+        r.inbox
+            .decide(&item, ActionId::Allow, "mac")
+            .unwrap()
+            .answered
+    );
     r.eventually_state(&row.id, "applied");
     scope::take_consent();
     let mut again = opening(SETTING, "limitMode", None);

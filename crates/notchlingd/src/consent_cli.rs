@@ -162,7 +162,8 @@ pub fn run(args: &[String], list: bool) -> i32 {
                     reply["state"].as_str().unwrap_or("closed")
                 ))
                 .with_op(ops::CONSENT_CANCEL);
-                failure.request = Some(reply);
+                failure.request =
+                    contract::call(&mut client, ops::CONSENT_GET, json!({"id": id})).ok();
                 return failure.report(json);
             }
             if json {
@@ -184,10 +185,16 @@ pub fn run(args: &[String], list: bool) -> i32 {
                 } else {
                     0
                 };
-                request = match contract::call(
+                let until = if parsed.wait { end } else { Instant::now() };
+                request = match contract::call_through_restart(
                     &mut client,
+                    (
+                        parsed.socket.as_deref(),
+                        CALL_TIMEOUT + Duration::from_millis(POLL_MS),
+                    ),
                     ops::CONSENT_GET,
-                    json!({"id": id, "waitMs": wait_ms}),
+                    &json!({"id": id, "waitMs": wait_ms}),
+                    until,
                 ) {
                     Ok(r) => r,
                     Err(f) => return f.report(json),

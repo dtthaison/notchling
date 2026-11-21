@@ -551,6 +551,9 @@ mod vault_events;
 #[path = "vault_ops_admin_tests.rs"]
 mod admin_tests;
 #[cfg(test)]
+#[path = "vault_ops_consent_tests.rs"]
+mod consent_tests;
+#[cfg(test)]
 #[path = "vault_ops_events_tests.rs"]
 mod events_tests;
 #[cfg(test)]
@@ -559,9 +562,6 @@ mod pending_tests;
 #[cfg(test)]
 #[path = "vault_release_tests.rs"]
 mod release_tests;
-#[cfg(test)]
-#[path = "vault_ops_consent_tests.rs"]
-mod consent_tests;
 #[cfg(test)]
 #[path = "vault_ops_tests.rs"]
 mod tests;

@@ -273,7 +273,13 @@ fn failure_of(reply: &Value, code: i32, text: String) -> Failure {
     let mut failure = Failure::new(code, reason, message)
         .with_op(ops::SETTINGS_SET)
         .with_human(text);
-    failure.request = Some(reply.clone());
+    failure.request = Some(
+        reply
+            .get("request")
+            .filter(|r| r.is_object())
+            .cloned()
+            .unwrap_or_else(|| reply.clone()),
+    );
     failure
 }
 
@@ -351,9 +357,30 @@ pub fn run(args: &[String]) -> i32 {
         Ok(c) => c,
         Err(failure) => return failure.report(json),
     };
+    let socket = parsed.socket.clone();
     let mut call = |op: &str, args: Value, timeout: Duration| {
         client.set_timeout(timeout);
-        client.call(op, args)
+        let end = Instant::now()
+            + if op == ops::SETTINGS_ASKED {
+                timeout
+            } else {
+                Duration::ZERO
+            };
+        let mut step = 0;
+        loop {
+            match client.call(op, args.clone()) {
+                Err(ClientError::Closed | ClientError::NotRunning(_)) if Instant::now() < end => {
+                    let left = end.saturating_duration_since(Instant::now());
+                    std::thread::sleep(Duration::from_millis(contract::pause_ms(step)).min(left));
+                    step += 1;
+                    if let Ok(mut fresh) = contract::connect(socket.as_deref()) {
+                        fresh.set_timeout(timeout);
+                        client = fresh;
+                    }
+                }
+                other => return other,
+            }
+        }
     };
     let plain = |reply: Result<Value, ClientError>, op: &'static str| reply.map_err(|e| (op, e));
     let reply = match &parsed.sub {

@@ -287,7 +287,10 @@ impl VaultOps {
         let request: VaultRequest = serde_json::from_value(request.clone()).ok()?;
         let saved = self.store.entry(&request.name).ok()?;
         let (entry, changes) = match &saved {
-            Some(saved) => (saved.prefilled(&request), PrefillChanges::of(saved, &request)),
+            Some(saved) => (
+                saved.prefilled(&request),
+                PrefillChanges::of(saved, &request),
+            ),
             None => (
                 VaultEntry::from_request(&request),
                 PrefillChanges::default(),

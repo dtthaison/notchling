@@ -197,8 +197,8 @@ impl ConsentStore {
         )
         .map_err(Refusal::Db)?;
         rules::check(new, now, &recent)?;
-        let id = make_id()
-            .ok_or_else(|| Refusal::Db("no randomness for a request id".to_string()))?;
+        let id =
+            make_id().ok_or_else(|| Refusal::Db("no randomness for a request id".to_string()))?;
         tx.execute(
             "INSERT INTO consents (id, kind, target, change, facts, parts, reason, session, tool,
                  verified, root, folder, organization, pid, pid_start, idem_key, state, answer_on,

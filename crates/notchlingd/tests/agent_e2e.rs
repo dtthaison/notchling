@@ -62,7 +62,7 @@ fn an_agent_opens_checks_and_withdraws_a_request_with_no_app_attached() {
     let id = request["id"].as_str().unwrap().to_string();
     assert!(id.starts_with('c') && id.len() == 33, "{id}");
     assert_eq!(request["state"], "waiting");
-    assert_eq!(request["request"]["kind"], "setting");
+    assert_eq!(request["kind"], "setting");
 
     let (code, out, err) = run(&root, &home, &["consent", &id, "--json"]);
     assert_eq!(code, 6, "{out} {err}");

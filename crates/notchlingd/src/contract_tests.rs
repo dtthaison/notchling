@@ -125,6 +125,21 @@ fn trouble_reaching_the_daemon_is_exit_three() {
 }
 
 #[test]
+fn a_lost_daemon_is_retried_with_a_growing_pause_and_nothing_else_is() {
+    assert!(lost(&Failure::not_running()));
+    for failure in [
+        Failure::failed("x"),
+        Failure::new(NOT_RUNNING, "old_daemon", OLD_DAEMON),
+        Failure::new(NOT_RUNNING, "untrusted_daemon", "x"),
+        Failure::new(DENIED, "denied", "x"),
+    ] {
+        assert!(!lost(&failure), "{}", failure.reason);
+    }
+    let pauses: Vec<u64> = (0..6).map(pause_ms).collect();
+    assert_eq!(pauses, [1_000, 2_000, 5_000, 10_000, 10_000, 10_000]);
+}
+
+#[test]
 fn the_message_never_quotes_a_value_and_the_line_ends_with_the_name() {
     let f = Failure::from_client(None, ClientError::Protocol("secret-token".into()));
     assert!(!f.to_value().to_string().contains("secret-token"));

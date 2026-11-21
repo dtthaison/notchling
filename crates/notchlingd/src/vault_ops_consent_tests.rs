@@ -24,7 +24,10 @@ fn a_save_is_refused_when_the_secret_appeared_after_the_card_was_shown() {
         )
         .unwrap();
     let e = err(save_with(&s, &event, json!({})));
-    assert_eq!((e.code, e.data.unwrap()["reason"].clone()), (ErrorCode::Forbidden, json!("needs_consent")));
+    assert_eq!(
+        (e.code, e.data.unwrap()["reason"].clone()),
+        (ErrorCode::Forbidden, json!("needs_consent"))
+    );
     let id = event["id"].as_str().unwrap();
     assert_eq!(ended(&s, id)["state"], "withdrawn");
 }
@@ -40,7 +43,10 @@ fn a_save_is_refused_when_the_secret_it_would_replace_went_away() {
         .unwrap();
     let e = err(save_with(&s, &event, json!({"replacing": "gh"})));
     assert_eq!(e.code, ErrorCode::Forbidden);
-    assert_eq!(ended(&s, event["id"].as_str().unwrap())["state"], "withdrawn");
+    assert_eq!(
+        ended(&s, event["id"].as_str().unwrap())["state"],
+        "withdrawn"
+    );
 }
 
 #[test]
@@ -55,18 +61,33 @@ fn a_save_that_replaces_another_name_is_refused() {
         .call(&app(), ops::VAULT_LIST, &json!({}))
         .unwrap()
         .to_string();
-    assert!(kept.contains("\"gh\"") && !kept.contains("\"npm\""), "{kept}");
-    assert_eq!(ended(&s, event["id"].as_str().unwrap())["state"], "withdrawn");
+    assert!(
+        kept.contains("\"gh\"") && !kept.contains("\"npm\""),
+        "{kept}"
+    );
+    assert_eq!(
+        ended(&s, event["id"].as_str().unwrap())["state"],
+        "withdrawn"
+    );
 }
 
 #[test]
 fn an_agent_never_reads_the_entry_a_request_found_or_the_changes_it_would_make() {
     let s = setup("consent-redact", true);
     seed(&s, false);
-    let (reply, event) = ask(&s, json!({"name": "gh", "url": "https://api.github-cdn.io"}));
+    let (reply, event) = ask(
+        &s,
+        json!({"name": "gh", "url": "https://api.github-cdn.io"}),
+    );
     assert_eq!(event["existing"], true);
     let shown = reply["request"].to_string();
-    for hidden in ["api.github.com", "GH_TOKEN", "hostChange", "\"existing\"", "revision"] {
+    for hidden in [
+        "api.github.com",
+        "GH_TOKEN",
+        "hostChange",
+        "\"existing\"",
+        "revision",
+    ] {
         assert!(!shown.contains(hidden), "{hidden} in {shown}");
     }
     let id = event["id"].as_str().unwrap();

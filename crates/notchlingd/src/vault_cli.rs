@@ -70,20 +70,14 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
 pub fn parse_request_flags(
     args: &[String],
 ) -> Result<(VaultRequest, Option<PathBuf>, Flags), String> {
-    let lead = args.iter().take_while(|a| *a == "--json").count();
-    let args = &args[lead..];
-    let Some(name) = args.first().filter(|a| !a.starts_with("--")) else {
-        return Err(REQUEST_USAGE.to_string());
-    };
-    let mut request = VaultRequest {
-        name: name.clone(),
-        ..VaultRequest::default()
-    };
+    let mut name: Option<String> = None;
+    let mut request = VaultRequest::default();
     let mut socket = None;
     let mut flags = Flags::default();
-    let mut rest = args[1..].iter();
+    let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         match flag.as_str() {
+            "--help" | "-h" => return Err(REQUEST_USAGE.to_string()),
             "--json" => continue,
             "--wait" => {
                 flags.wait = true;
@@ -98,6 +92,13 @@ pub fn parse_request_flags(
                 continue;
             }
             _ => {}
+        }
+        if !flag.starts_with("--") {
+            if name.is_some() {
+                return Err(format!("Unexpected {flag}.\n{REQUEST_USAGE}"));
+            }
+            name = Some(flag.clone());
+            continue;
         }
         let value = rest.next().cloned();
         let seconds = |value: &Option<String>| -> Result<u64, String> {
@@ -143,6 +144,10 @@ pub fn parse_request_flags(
             None => return Err(REQUEST_USAGE.to_string()),
         }
     }
+    let Some(name) = name else {
+        return Err(REQUEST_USAGE.to_string());
+    };
+    request.name = name;
     if request
         .kind
         .as_deref()
@@ -388,10 +393,15 @@ pub fn secret_request(args: &[String]) -> i32 {
             break;
         }
         let slice = POLL_MS.min(u64::try_from(left.as_millis()).unwrap_or(POLL_MS));
-        request = match contract::call(
+        request = match contract::call_through_restart(
             &mut client,
+            (
+                socket.as_deref(),
+                CALL_WAIT + Duration::from_millis(POLL_MS),
+            ),
             ops::CONSENT_GET,
-            json!({"id": id, "waitMs": slice}),
+            &json!({"id": id, "waitMs": slice}),
+            end,
         ) {
             Ok(reply) => reply,
             Err(failure) => return failure.report(json),
