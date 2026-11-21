@@ -10,6 +10,7 @@ use notchling_local_api::{AgentCall, AgentIdentity};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const MAIN: &str = include_str!("../../engine/tests/fixtures/ask/main.jsonl");
 const A1: &str = include_str!("../../engine/tests/fixtures/ask/subagents/agent-a1.jsonl");
@@ -174,4 +175,81 @@ fn a_transcript_gone_gives_unknown() {
         run(&main, &[call(AgentTool::Claude, Some("ba1000001"), None)])
     };
     assert_eq!(text(&events[0], "asker").as_deref(), Some("unknown"));
+}
+
+fn waiting_names(
+    main: &Path,
+    retries: Vec<Duration>,
+) -> (AgentNames, Arc<MemorySink>, Arc<Mutex<serde_json::Value>>) {
+    let sink = Arc::new(MemorySink::new());
+    let sessions = Arc::new(Mutex::new(
+        json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]),
+    ));
+    let names = AgentNames::spawn_with(sink.clone(), salt(), sessions.clone(), retries);
+    (names, sink, sessions)
+}
+
+fn wait_for(sink: &MemorySink, count: usize) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while sink.events().len() < count && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_label_not_in_the_transcript_yet_is_found_on_a_retry_not_stamped_unknown() {
+    let (_dir, main) = fixture("retry");
+    let late = main.with_file_name("late.jsonl");
+    let (names, sink, sessions) = waiting_names(&late, vec![Duration::from_millis(250); 4]);
+    names.enqueue(&call(AgentTool::Claude, Some("ba1000001"), None), AT_MS);
+    std::thread::sleep(Duration::from_millis(80));
+    assert!(sink.events().is_empty());
+    *sessions.lock().unwrap() = json!([{"id": SESSION, "transcriptPath": main.to_string_lossy()}]);
+    wait_for(&sink, 1);
+    let events = sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(text(&events[0], "asker").as_deref(), Some("subagent"));
+    assert_eq!(text(&events[0], "agent").as_deref(), Some("a1"));
+    names.close();
+    assert_eq!(sink.events().len(), 1);
+}
+
+#[test]
+fn a_call_that_never_resolves_is_unknown_once_after_its_retries() {
+    let (_dir, main) = fixture("exhaust");
+    let gone = main.with_file_name("gone.jsonl");
+    let (names, sink, _) = waiting_names(&gone, vec![Duration::from_millis(15); 2]);
+    names.enqueue(&call(AgentTool::Claude, Some("ba1000001"), None), AT_MS);
+    wait_for(&sink, 1);
+    std::thread::sleep(Duration::from_millis(120));
+    let events = sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(text(&events[0], "asker").as_deref(), Some("unknown"));
+    names.close();
+}
+
+#[test]
+fn closing_settles_the_calls_still_waiting_without_waiting_for_the_delays() {
+    let (_dir, main) = fixture("close");
+    let gone = main.with_file_name("gone.jsonl");
+    let (names, sink, _) = waiting_names(&gone, vec![Duration::from_secs(60)]);
+    names.enqueue(&call(AgentTool::Claude, Some("ba1000001"), None), AT_MS);
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(sink.events().is_empty());
+    let started = Instant::now();
+    names.close();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let events = sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(text(&events[0], "asker").as_deref(), Some("unknown"));
+}
+
+#[test]
+fn an_unverified_session_claim_is_never_looked_up() {
+    let (_dir, main) = fixture("unverified");
+    let mut claimed = call(AgentTool::Claude, Some("ba1000001"), None);
+    claimed.identity.verified = false;
+    let events = run(&main, &[claimed]);
+    assert_eq!(text(&events[0], "asker").as_deref(), Some("unknown"));
+    assert_eq!(text(&events[0], "agent"), None);
 }

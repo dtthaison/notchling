@@ -24,7 +24,7 @@ impl Handler for Probe {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             "act.ok" | "act.fail" | "act.refuse" | "act.pending" | "act.fake" | "act.own"
-            | "act.used" => Some(OpSpec::AGENT_ACTS),
+            | "act.used" | "act.panic" => Some(OpSpec::AGENT_ACTS),
             "read.ok" | "read.fail" => Some(OpSpec::AGENT_READ),
             "hook.x" => Some(OpSpec::AGENT_HOOK),
             "app.act" => Some(OpSpec::APP),
@@ -42,6 +42,7 @@ impl Handler for Probe {
             "act.fake",
             "act.own",
             "act.used",
+            "act.panic",
             "read.ok",
             "read.fail",
             "hook.x",
@@ -67,6 +68,7 @@ impl Handler for Probe {
     fn call(&self, _caller: &Caller, op: &str, _args: &Value) -> Result<Value, ApiError> {
         match op {
             "act.fail" | "read.fail" => Err(ApiError::new(ErrorCode::Failed, "broke")),
+            "act.panic" => panic!("a handler bug"),
             "act.refuse" => Err(ApiError::new(ErrorCode::Forbidden, "off")),
             "act.pending" => {
                 scope::note_consent("req-1", ConsentNote::Pending);
@@ -165,6 +167,18 @@ fn an_acting_call_records_one_line_whether_it_works_is_refused_or_fails() {
     assert_eq!(field_text(&calls[0], "op").as_deref(), Some("act.ok"));
     assert_eq!(field_text(&calls[0], "tool").as_deref(), Some("claude"));
     assert_eq!(field_text(&calls[2], "code").as_deref(), Some("failed"));
+}
+
+#[test]
+fn an_acting_call_whose_handler_panics_is_still_recorded_as_failed() {
+    let run = start(Allowlist::empty());
+    let mut agent = connect(&run);
+    assert!(agent.call("act.panic", json!({})).is_err());
+    assert_eq!(results(&run), ["failed"]);
+    let calls = agent_calls(&run);
+    assert_eq!(field_text(&calls[0], "op").as_deref(), Some("act.panic"));
+    assert_eq!(field_text(&calls[0], "code").as_deref(), Some("failed"));
+    assert_eq!(run.probe.named.lock().unwrap().len(), 1);
 }
 
 #[test]

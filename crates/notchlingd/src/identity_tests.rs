@@ -133,7 +133,7 @@ fn an_install_under_the_install_folders_is_verified() {
     assert!(who.verified);
     assert_eq!(who.session.as_deref(), Some("sess-a"));
     assert_eq!(who.folder.as_deref(), Some("/work/app"));
-    assert_eq!(who.root.as_deref(), Some("Terminal:42"));
+    assert_eq!(who.root.as_deref(), Some("/System/Terminal:42"));
     assert!(who.cmd_hash.is_some());
     assert_eq!(who.cmd_hash.as_deref().map(str::len), Some(32));
     assert!(who.out_hash.is_none());
@@ -174,6 +174,57 @@ fn a_planted_session_file_for_a_shell_is_not_verified() {
     );
     assert!(!who.verified);
     assert!(who.organization.is_none());
+    assert!(who.session.is_none());
+    assert!(who.folder.is_none());
+}
+
+#[test]
+fn a_planted_file_for_a_shell_never_lends_its_session_or_folder_to_a_delegate_or_a_name() {
+    let h = home("planted-more", &[(700, "sess-planted")]);
+    let mut t = lineage(Path::new("/bin/zsh"));
+    t.exes.insert(700, PathBuf::from("/bin/zsh"));
+    t.names.remove(&800);
+    t.exes
+        .insert(800, PathBuf::from("/Applications/Notchling.app/notchling"));
+    t.argvs.insert(
+        800,
+        vec!["notchling".into(), "delegate".into(), "agy".into()],
+    );
+    let who = identify(
+        &h,
+        t,
+        rows("sess-planted", "/work"),
+        Launches::default(),
+        900,
+    );
+    assert_eq!(who.tool, AgentTool::Antigravity);
+    assert!(!who.verified);
+    assert!(who.session.is_none());
+    assert!(who.folder.is_none());
+    assert!(who.organization.is_none());
+}
+
+#[test]
+fn a_planted_file_on_the_way_up_does_not_hide_the_real_session_above_it() {
+    let h = home(
+        "planted-above",
+        &[(800, "sess-planted"), (700, "sess-real")],
+    );
+    let exe = h.0.join(".local/share/claude/versions/2.1.0/claude");
+    let mut t = lineage(Path::new("/bin/zsh"));
+    t.names.remove(&800);
+    t.exes.insert(700, exe);
+    let who = identify(
+        &h,
+        t,
+        rows("sess-real", "/work/real"),
+        Launches::default(),
+        900,
+    );
+    assert!(who.verified);
+    assert_eq!(who.tool, AgentTool::Claude);
+    assert_eq!(who.session.as_deref(), Some("sess-real"));
+    assert_eq!(who.folder.as_deref(), Some("/work/real"));
 }
 
 #[test]
@@ -190,7 +241,7 @@ fn a_shell_is_a_shell_with_no_session_and_its_root_app() {
     );
     assert_eq!(who.tool, AgentTool::Shell);
     assert!(who.session.is_none() && !who.verified);
-    assert_eq!(who.root.as_deref(), Some("Terminal:42"));
+    assert_eq!(who.root.as_deref(), Some("/System/Terminal:42"));
 }
 
 #[test]
@@ -269,4 +320,113 @@ fn the_organization_comes_from_the_session_folder_and_only_for_a_verified_sessio
         900,
     );
     assert!(unverified.organization.is_none());
+}
+
+#[test]
+fn a_delegate_under_a_session_the_daemon_started_is_the_delegated_tool_with_that_session() {
+    let h = home("deleg-launched", &[]);
+    let mut t = lineage(Path::new("/bin/zsh"));
+    t.names.remove(&800);
+    t.starts.insert(600, 42);
+    t.starts.insert(700, 5_000);
+    t.exes
+        .insert(800, PathBuf::from("/Applications/Notchling.app/notchling"));
+    t.argvs.insert(
+        800,
+        vec!["notchling".into(), "delegate".into(), "agy".into()],
+    );
+    let launches = Launches::default();
+    launches.register(700, 5_000, AgentTool::Codex, "codex-sess");
+    let who = identify(&h, t, rows("codex-sess", "/work"), launches, 900);
+    assert_eq!(who.tool, AgentTool::Antigravity);
+    assert_eq!(who.session.as_deref(), Some("codex-sess"));
+    assert!(who.verified);
+}
+
+#[test]
+fn a_delegate_run_through_a_link_to_this_binary_is_that_tool() {
+    let h = home("deleg-link", &[(700, "sess-l")]);
+    let exe = h.0.join(".local/share/claude/versions/2.1.0/claude");
+    let mut t = lineage(Path::new("/bin/zsh"));
+    t.names.remove(&800);
+    t.exes.insert(700, exe);
+    t.exes
+        .insert(800, PathBuf::from("/usr/local/bin/notchling"));
+    t.links.insert(
+        PathBuf::from("/usr/local/bin/notchling"),
+        PathBuf::from("/Applications/Notchling.app/notchling"),
+    );
+    t.argvs.insert(
+        800,
+        vec!["notchling".into(), "delegate".into(), "codex".into()],
+    );
+    let who = identify(&h, t, rows("sess-l", "/work"), Launches::default(), 900);
+    assert_eq!(who.tool, AgentTool::Codex);
+    assert_eq!(who.session.as_deref(), Some("sess-l"));
+    assert!(who.verified);
+}
+
+#[test]
+fn the_root_app_is_found_however_deep_the_tree_is_and_is_named_by_its_path() {
+    let h = home("deep", &[]);
+    let mut t = Table::default();
+    let top = 50u32;
+    t.parents.insert(top, 1);
+    t.exes.insert(top, PathBuf::from("/System/Terminal"));
+    t.starts.insert(top, 42);
+    for pid in 51..=90u32 {
+        t.parents.insert(pid, pid - 1);
+    }
+    let who = identify(
+        &h,
+        t.clone(),
+        Arc::new(Mutex::new(json!([]))),
+        Launches::default(),
+        90,
+    );
+    assert_eq!(who.root.as_deref(), Some("/System/Terminal:42"));
+    let mut other = t;
+    other.exes.insert(top, PathBuf::from("/tmp/Terminal"));
+    let who = identify(
+        &h,
+        other,
+        Arc::new(Mutex::new(json!([]))),
+        Launches::default(),
+        90,
+    );
+    assert_eq!(who.root.as_deref(), Some("/tmp/Terminal:42"));
+}
+
+#[test]
+fn a_tree_that_loops_or_never_ends_shares_one_root() {
+    let h = home("loop", &[]);
+    let mut t = Table::default();
+    t.parents.insert(10, 11);
+    t.parents.insert(11, 12);
+    t.parents.insert(12, 11);
+    let who = identify(
+        &h,
+        t,
+        Arc::new(Mutex::new(json!([]))),
+        Launches::default(),
+        10,
+    );
+    assert_eq!(who.root.as_deref(), Some("unrooted"));
+}
+
+#[test]
+fn home_is_the_one_the_engine_names_even_when_the_claude_folder_has_no_parent() {
+    let h = home("home", &[]);
+    let roots = Roots {
+        main_dir: PathBuf::from("/"),
+        lanes_file: h.0.join("data/lanes.json"),
+    };
+    let id = Identifier::new(
+        roots,
+        Arc::new(Table::default()),
+        Arc::new(Mutex::new(json!([]))),
+        salt(),
+        Launches::default(),
+    );
+    assert_eq!(id.home(), Path::new("/"));
 }

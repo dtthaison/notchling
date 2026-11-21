@@ -4,6 +4,9 @@ use crate::daemon::FirstScan;
 use crate::daemon_wiring::{Ops, Wired};
 use crate::layout::Layout;
 use crate::limits_ops::COST_SUMMARY;
+use crate::log_audit_tests::rig as rig_log;
+use crate::log_checks_tests::wire;
+use crate::log_ops::LogOps;
 use crate::op_kinds::known_ops;
 use notchling_local_api::{ops, Handler, OpSpec, Tier};
 use serde_json::json;
@@ -30,11 +33,15 @@ fn rig() -> (Root, Ops) {
         Arc::new(FakeRoom::default()),
         (0, 0),
     );
-    let ops = wired.ops(&layout, sessions, FirstScan::open(), Duration::ZERO);
+    let logged = wire(rig_log("classes-log"));
+    let log = LogOps::new(logged.audit.clone(), logged.checker.clone());
+    let ops = wired
+        .ops(&layout, sessions, FirstScan::open(), Duration::ZERO)
+        .with_group(Arc::new(log));
     (Root(root), ops)
 }
 
-const READS: [&str; 22] = [
+const READS: [&str; 23] = [
     ops::SESSIONS_LIST,
     ops::SETTINGS_LIST,
     ops::SETTINGS_GET,
@@ -55,6 +62,7 @@ const READS: [&str; 22] = [
     ops::ASK_WAIT,
     ops::ASK_MINE,
     ops::VAULT_FIND,
+    ops::LOG_VERIFY,
     COST_SUMMARY,
     COST_REPORT,
 ];

@@ -52,11 +52,7 @@ pub fn trusted_in(
     roots: Roots,
     procs: Arc<dyn Processes>,
 ) -> Arc<dyn Fn(u32) -> Option<String> + Send + Sync> {
-    let home = roots
-        .main_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
+    let home = PathBuf::from(notchling_engine::control::session::home_of(&roots));
     let finder = CallerSession::new(roots, procs.clone());
     Arc::new(move |pid| {
         finder
@@ -71,6 +67,15 @@ pub(crate) fn find_session(
     parent_of: &dyn Fn(u32) -> Option<u32>,
     pid: u32,
 ) -> Option<SessionHit> {
+    find_session_where(roots, parent_of, pid, &|_| true)
+}
+
+pub(crate) fn find_session_where(
+    roots: &Roots,
+    parent_of: &dyn Fn(u32) -> Option<u32>,
+    pid: u32,
+    accept: &dyn Fn(u32) -> bool,
+) -> Option<SessionHit> {
     let lanes = config_dirs(roots);
     let mut chain = Vec::new();
     let mut next = parent_of(pid);
@@ -81,7 +86,7 @@ pub(crate) fn find_session(
             let file = lane.dir.join("sessions").join(format!("{p}.json"));
             session_id_in(&file).map(|id| (id, lane.dir.clone()))
         });
-        if let Some((session_id, config_dir)) = found {
+        if let Some((session_id, config_dir)) = found.filter(|_| accept(p)) {
             return Some(SessionHit {
                 session_id,
                 claude_pid: p,

@@ -1,8 +1,9 @@
-use crate::caller_session::{find_session, is_claude_binary, LINEAGE_DEPTH};
+use crate::caller_session::{find_session_where, is_claude_binary, LINEAGE_DEPTH};
 use crate::late_emit::LateSalt;
 use crate::vault_caller::Processes;
 use notchling_engine::ask::delegate_tool;
 use notchling_engine::ask::evidence::{command_hash, output_hash};
+use notchling_engine::control::session::home_of;
 use notchling_engine::organizations::Organizations;
 use notchling_engine::sessions::Roots;
 use notchling_events::kinds::choices::AgentTool;
@@ -11,6 +12,9 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+
+const ROOT_DEPTH: usize = 4096;
+const UNROOTED: &str = "unrooted";
 
 type LaunchRows = HashMap<(u32, u64), (AgentTool, String)>;
 
@@ -59,11 +63,7 @@ impl Identifier {
         salt: LateSalt,
         launches: Launches,
     ) -> Identifier {
-        let home = roots
-            .main_dir
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
+        let home = PathBuf::from(home_of(&roots));
         Identifier {
             roots,
             procs,
@@ -74,6 +74,11 @@ impl Identifier {
             launches,
             own_exe: std::env::current_exe().unwrap_or_default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn home(&self) -> &Path {
+        &self.home
     }
 
     pub fn with_organizations(mut self, organizations: Organizations) -> Identifier {
@@ -88,26 +93,28 @@ impl Identifier {
 
     pub fn identify(&self, pid: u32) -> AgentIdentity {
         let chain = self.chain(pid);
-        let hit = find_session(&self.roots, &|p| self.procs.parent(p), pid);
-        let claude_ok = hit
-            .as_ref()
-            .is_some_and(|h| is_claude_binary(self.procs.as_ref(), h.claude_pid, &self.home));
+        let hit = find_session_where(&self.roots, &|p| self.procs.parent(p), pid, &|p| {
+            is_claude_binary(self.procs.as_ref(), p, &self.home)
+        });
         let mut who = AgentIdentity::shell();
-        who.root = self.root_of(&chain);
-        if let Some((tool, session)) = self.launched(&chain) {
-            who.tool = tool;
-            who.session = Some(session);
-            who.verified = true;
-        } else if let Some(tool) = self.delegated(&chain) {
-            who.tool = tool;
-            who.session = hit.as_ref().map(|h| h.session_id.clone());
-            who.verified = claude_ok;
-        } else if let Some(hit) = &hit {
-            who.tool = AgentTool::Claude;
-            who.session = Some(hit.session_id.clone());
-            who.verified = claude_ok;
-        } else {
-            who.tool = self.tool_by_name(&chain);
+        who.root = self.root_of(pid);
+        match (self.launched(&chain), self.delegated(&chain), hit) {
+            (Some((tool, session)), delegated, _) => {
+                who.tool = delegated.unwrap_or(tool);
+                who.session = Some(session);
+                who.verified = true;
+            }
+            (None, Some(tool), hit) => {
+                who.tool = tool;
+                who.verified = hit.is_some();
+                who.session = hit.map(|h| h.session_id);
+            }
+            (None, None, Some(hit)) => {
+                who.tool = AgentTool::Claude;
+                who.session = Some(hit.session_id);
+                who.verified = true;
+            }
+            (None, None, None) => who.tool = self.tool_by_name(&chain),
         }
         if let Some(session) = who.session.as_deref() {
             who.folder = self.folder_of(session);
@@ -144,15 +151,30 @@ impl Identifier {
         chain
     }
 
-    fn root_of(&self, chain: &[u32]) -> Option<String> {
-        let top = *chain.last()?;
-        let name = self
+    fn root_of(&self, pid: u32) -> Option<String> {
+        let mut seen = HashSet::from([pid]);
+        let mut top = pid;
+        let mut reached = false;
+        for _ in 0..ROOT_DEPTH {
+            match self.procs.parent(top).filter(|p| *p > 1) {
+                None => {
+                    reached = true;
+                    break;
+                }
+                Some(p) if seen.insert(p) => top = p,
+                Some(_) => break,
+            }
+        }
+        if !reached {
+            return Some(UNROOTED.to_owned());
+        }
+        let exe = self
             .procs
             .exe(top)
             .or_else(|| self.procs.name(top).map(PathBuf::from))?;
-        let file = name.file_name()?.to_string_lossy().into_owned();
+        let exe = self.procs.resolve(&exe).unwrap_or(exe);
         let started = self.procs.start_time(top).unwrap_or(0);
-        Some(format!("{file}:{started}"))
+        Some(format!("{}:{started}", exe.to_string_lossy()))
     }
 
     fn launched(&self, chain: &[u32]) -> Option<(AgentTool, String)> {

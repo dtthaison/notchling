@@ -420,7 +420,19 @@ impl Session {
         };
         let started = Instant::now();
         let _ = scope::take_consent();
-        let (result, more) = handler.call_with_extras(&caller, op, args);
+        let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handler.call_with_extras(&caller, op, args)
+        }));
+        let (result, more) = match called {
+            Ok(done) => done,
+            Err(panic) => {
+                if spec.records_agent_call() {
+                    let failed = Err(ApiError::new(ErrorCode::Failed, "the handler failed"));
+                    self.record_agent_call(op, args, &failed, started);
+                }
+                std::panic::resume_unwind(panic);
+            }
+        };
         *extras = more;
         if spec.records_agent_call() {
             self.record_agent_call(op, args, &result, started);
