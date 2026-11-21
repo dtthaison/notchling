@@ -1368,6 +1368,28 @@ Agents read and change Notchling's settings ([decision 0020](decisions/0020-agen
 
 A write goes to `notchling.db` (the limit keys `limitMode`, `codexLimitMode`, `antigravityLimitMode` and `limitSwitchAt` first to the daemon's `LimitConfig`, as `limits.set_mode` does), then out on `settings` as `settings.changed {key, value, by: "agent" | "app", ask?: id}`, set or not. The app reads the key back from the store on that event, so an older event never undoes a newer write. The Settings sheet writes the store itself and applies its own change in place; it doesn't go through this op, so it isn't on the topic. Every `settings.set` from the agent tier is a `settings.agent` event (committed to the Audit before the write) with result `set`, `asked`, `allowed`, `denied`, `expired`, `withdrawn`, `failed`, `refused`, `bad_value`, `unknown_key`, `no_app` or `full`, and the key (a hash for an unknown key), the value's length and its hash, never the value. Reads are not recorded.
 
+## `shells_ops.rs`
+
+A session's own background shells (`shells.mine`, `shells.stop`; the Details Panel's rows and Stop use the same engine code, `engine/src/transcript/shells.rs`, `shells_stuck.rs`, `shells_stop.rs`). The session is the caller's verified one (`bound_identity`); a caller the daemon can't tie to a session gets `forbidden` with reason `no_session`, and no op takes another session's shells.
+
+| Op | Tier | Args | Reply |
+| --- | --- | --- | --- |
+| `shells.mine` | agent | `{}` | `{shells: [shell, ...]}`, newest first |
+| `shells.stop` | agent, acts | `{id}` | `{id, stopped, state: "ended", killed}`; `stopped` is false when nothing was writing the shell's file any more |
+
+A shell is `{id, command, title, state: "running" or "ended", status, runningSecs, stuck, stuckReason, output}`. `status` is `running` or the way it ended (`completed`, `stopped`, `ended`, ...). `runningSecs` comes from the launch time in the transcript and is null for an ended shell. `stuck` is true for a running shell whose `pgrep -f` pattern also matches its own command line (`stuckReason: "matches_itself"`, at any age) or whose command is a `while`/`until` loop over `pgrep` and `sleep` that has run over 30 minutes (`"long_wait_loop"`).
+
+`shells.stop` ends only the processes holding the shell's output file open for writing (the same `lsof` answer the Details Panel uses) and, when no `claude`, `node` or Notchling process is in it, their whole process group: SIGTERM, then SIGKILL after 3 s for what is still alive. Processes named `claude`, `node` or `Notchling` are never signalled, and neither is the daemon's own group. It is recorded in `agent.called`; `shells.mine` is not.
+
+Errors: `forbidden` reason `no_session` for an unverified caller; `bad_request` with reason `other_session` for an id this session doesn't have (so another session's shell can't be named); `bad_request` when `id` is missing; `failed` when a process survives SIGKILL.
+
+The `notchling` commands (`shells_cli.rs`). Exit codes as the table in the design: 0, 1, 2, 3, 4.
+
+| Command | Op | Notes |
+| --- | --- | --- |
+| `notchling shells [--json]` | `shells.mine` | One line per shell: `id  status  running-time  stuck  command`. |
+| `notchling shells stop <id> [--json]` | `shells.stop` | Prints `Stopped <id>.` or `<id> had already ended.` |
+
 ## `tailscale_ops.rs`
 
 The one op that changes which Tailscale network this Mac is on. It is app tier only: an agent or the `notchling` command line gets `forbidden`, and the group checks the caller's tier again itself. The app sends it only from the Switch Network button, after a confirm that says the other network drops. Nothing switches by itself.

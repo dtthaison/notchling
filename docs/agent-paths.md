@@ -27,6 +27,8 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling consent <id> [--wait] [--timeout <seconds>] [--json]` | `consent.get` (agent) | none | 0 1 2 3 4 5 6 124 |
 | `notchling consents [--json]` | `consent.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling consent cancel <id> [--json]` | `consent.cancel` (agent, acts) | none | 0 1 2 3 4 |
+| `notchling shells [--json] [--socket <path>]` | `shells.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling shells stop <id> [--json] [--socket <path>]` | `shells.stop` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling session reload <id|self> [--after-turn] [--json]` | `session.reload` (agent, acts) | own_free | 0 1 2 3 4 |
 | `notchling cluster status [--json]` | `cluster.status` (agent) | none | 0 1 2 3 4 |
 | `notchling cluster join --token-stdin [--json]` | `cluster.join` (agent, acts) | none | 0 1 2 3 4 |

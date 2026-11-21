@@ -38,8 +38,16 @@ fn a_writer_and_its_process_group_are_the_targets() {
 fn claude_node_and_notchling_are_never_targets() {
     let procs = vec![
         proc(10, 10, "/usr/local/bin/node"),
-        proc(11, 11, "/Applications/Notchling.app/Contents/MacOS/Notchling"),
-        proc(12, 12, "/Users/me/.local/share/claude/versions/2.1.0/claude"),
+        proc(
+            11,
+            11,
+            "/Applications/Notchling.app/Contents/MacOS/Notchling",
+        ),
+        proc(
+            12,
+            12,
+            "/Users/me/.local/share/claude/versions/2.1.0/claude",
+        ),
         proc(13, 13, "/Users/me/bin/claude"),
     ];
     assert!(plan(&[10, 11, 12, 13], &procs, 9000, 9000).is_empty());

@@ -182,6 +182,9 @@ pub mod ops {
     pub const ASK_DISMISS: &str = "ask.dismiss";
     pub const ASK_LIST: &str = "ask.list";
 
+    pub const SHELLS_MINE: &str = "shells.mine";
+    pub const SHELLS_STOP: &str = "shells.stop";
+
     pub const CONSENT_GET: &str = "consent.get";
     pub const CONSENT_MINE: &str = "consent.mine";
     pub const CONSENT_CANCEL: &str = "consent.cancel";

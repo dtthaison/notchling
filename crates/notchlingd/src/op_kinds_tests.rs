@@ -51,7 +51,7 @@ const OWN_QUIET: [&str; 13] = [
     ops::CONSENT_LIST,
 ];
 
-const NEVER_QUIET: [&str; 141] = [
+const NEVER_QUIET: [&str; 143] = [
     ops::ORGANIZATIONS_CREATE,
     ops::ORGANIZATIONS_RENAME,
     ops::ORGANIZATIONS_COLOR_SET,
@@ -193,6 +193,8 @@ const NEVER_QUIET: [&str; 141] = [
     ops::CONSENT_CANCEL,
     ops::CONSENT_ANSWER,
     ops::CONSENT_OPENED,
+    ops::SHELLS_MINE,
+    ops::SHELLS_STOP,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 3] = ["limits.set_mode", "cost.summary", "cost.report"];

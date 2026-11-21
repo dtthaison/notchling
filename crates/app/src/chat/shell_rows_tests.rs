@@ -50,9 +50,13 @@ fn only_a_running_row_can_look_stuck() {
     let looping = "while pgrep -f worker-name; do sleep 5; done";
     let mut c = Conversation::default();
     c.shells.push(shell("b1", looping, Some(1000.0)));
-    c.shells.push(shell("b2", "pgrep vite; sleep 1", Some(1000.0)));
     c.shells
-        .push(shell("b3", "while pgrep vite; do sleep 5; done", Some(1000.0)));
+        .push(shell("b2", "pgrep vite; sleep 1", Some(1000.0)));
+    c.shells.push(shell(
+        "b3",
+        "while pgrep vite; do sleep 5; done",
+        Some(1000.0),
+    ));
     let rows = shell_rows(&c, None, &one);
     let by = |id: &str| rows.iter().find(|r| r.id == id).unwrap();
     assert_eq!(stuck_of(by("b1"), 1010), Some(Stuck::Itself));

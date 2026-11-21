@@ -1,0 +1,181 @@
+use crate::op_group::OpGroup;
+use notchling_engine::sessions::{config_dirs, Roots};
+use notchling_engine::transcript::conversation;
+use notchling_engine::transcript::locate::find_transcript;
+use notchling_engine::transcript::model::{BackgroundShell, Conversation};
+use notchling_engine::transcript::shells::{self, ShellState};
+use notchling_engine::transcript::shells_stop::{self, Outcome, GRACE};
+use notchling_engine::transcript::shells_stuck;
+use notchling_local_api::{
+    bound_identity, ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec,
+};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use std::time::Duration;
+
+pub type Writers = Arc<dyn Fn(&str) -> Vec<i32> + Send + Sync>;
+pub type Stopper = Arc<dyn Fn(&str, Duration) -> Outcome + Send + Sync>;
+pub type Now = Arc<dyn Fn() -> f64 + Send + Sync>;
+pub type Who = Arc<dyn Fn(&Caller) -> AgentIdentity + Send + Sync>;
+
+pub struct ShellsOps {
+    roots: Roots,
+    writers: Writers,
+    stopper: Stopper,
+    now: Now,
+    who: Option<Who>,
+}
+
+fn clock() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+fn forbidden_no_session() -> ApiError {
+    ApiError::new(
+        ErrorCode::Forbidden,
+        "Notchling can't tell which session this is.",
+    )
+    .with_reason("no_session")
+}
+
+fn not_here() -> ApiError {
+    ApiError::bad_request("No shell with that id in this session.").with_reason("other_session")
+}
+
+impl ShellsOps {
+    pub fn new(roots: Roots) -> ShellsOps {
+        ShellsOps {
+            roots,
+            writers: Arc::new(|path| shells_stop::writers_of(path)),
+            stopper: Arc::new(|path, grace| shells_stop::stop_output(path, grace)),
+            now: Arc::new(clock),
+            who: None,
+        }
+    }
+
+    pub fn with_seams(
+        mut self,
+        writers: Writers,
+        stopper: Stopper,
+        now: Now,
+        who: Option<Who>,
+    ) -> ShellsOps {
+        self.writers = writers;
+        self.stopper = stopper;
+        self.now = now;
+        self.who = who;
+        self
+    }
+
+    fn session_of(&self, caller: &Caller) -> Result<(String, Option<String>), ApiError> {
+        let who = bound_identity()
+            .or_else(|| self.who.as_ref().map(|who| who(caller)))
+            .unwrap_or_else(AgentIdentity::shell);
+        match (who.verified, who.session) {
+            (true, Some(session)) => Ok((session, who.folder)),
+            _ => Err(forbidden_no_session()),
+        }
+    }
+
+    fn conversation_of(&self, session: &str, folder: Option<&str>) -> Option<Conversation> {
+        config_dirs(&self.roots)
+            .iter()
+            .find_map(|lane| {
+                let projects = lane.dir.join("projects");
+                find_transcript(
+                    &projects.to_string_lossy(),
+                    session,
+                    folder.unwrap_or_default(),
+                )
+            })
+            .map(|path| conversation::read(&path))
+    }
+
+    fn row(&self, shell: &BackgroundShell, c: &Conversation) -> Value {
+        let state = shells::state(shell, &c.finished_agents, &|p| (self.writers)(p));
+        let (running, status) = match &state {
+            ShellState::Running => (true, "running".to_string()),
+            ShellState::Ended(how) => (false, how.clone()),
+        };
+        let secs = running
+            .then(|| shells_stuck::running_secs(shell.started, (self.now)()))
+            .flatten();
+        let stuck = running
+            .then(|| shells_stuck::looks_stuck(&shell.command, secs))
+            .flatten();
+        json!({
+            "id": shell.id,
+            "command": shell.command,
+            "title": shell.title,
+            "state": if running { "running" } else { "ended" },
+            "status": status,
+            "runningSecs": secs,
+            "stuck": stuck.is_some(),
+            "stuckReason": stuck.map(|s| s.code()),
+            "output": shell.output_path,
+        })
+    }
+
+    fn mine(&self, caller: &Caller) -> Result<Value, ApiError> {
+        let (session, folder) = self.session_of(caller)?;
+        let Some(c) = self.conversation_of(&session, folder.as_deref()) else {
+            return Ok(json!({"shells": []}));
+        };
+        let rows: Vec<Value> = c.shells.iter().rev().map(|s| self.row(s, &c)).collect();
+        Ok(json!({"shells": rows}))
+    }
+
+    fn stop(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| ApiError::bad_request("shells.stop takes {\"id\": \"<shell id>\"}"))?;
+        let (session, folder) = self.session_of(caller)?;
+        let c = self
+            .conversation_of(&session, folder.as_deref())
+            .ok_or_else(not_here)?;
+        let shell = c.shells.iter().find(|s| s.id == id).ok_or_else(not_here)?;
+        if c.finished_agents.contains_key(&shell.id) || shell.output_path.is_empty() {
+            return Ok(json!({"id": id, "stopped": false, "state": "ended"}));
+        }
+        let outcome = (self.stopper)(&shell.output_path, GRACE);
+        if outcome.survivors > 0 {
+            return Err(ApiError::new(
+                ErrorCode::Failed,
+                "The shell's processes didn't end.",
+            ));
+        }
+        Ok(json!({
+            "id": id,
+            "stopped": outcome.targets > 0,
+            "state": "ended",
+            "killed": outcome.killed,
+        }))
+    }
+}
+
+impl OpGroup for ShellsOps {
+    fn spec(&self, op: &str) -> Option<OpSpec> {
+        match op {
+            ops::SHELLS_MINE => Some(OpSpec::AGENT_READ),
+            ops::SHELLS_STOP => Some(OpSpec::AGENT_ACTS),
+            _ => None,
+        }
+    }
+
+    fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        match op {
+            ops::SHELLS_MINE => self.mine(caller),
+            ops::SHELLS_STOP => self.stop(caller, args),
+            _ => Err(ApiError::internal(format!("{op} has no handler"))),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "shells_ops_tests.rs"]
+mod tests;

@@ -92,6 +92,9 @@ pub enum Command {
     Consents {
         args: Vec<String>,
     },
+    Shells {
+        args: Vec<String>,
+    },
     Version,
     Help {
         json: bool,
@@ -252,6 +255,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "consents" => {
             return Ok(Command::Consents {
+                args: args.collect(),
+            })
+        }
+        "shells" => {
+            return Ok(Command::Shells {
                 args: args.collect(),
             })
         }

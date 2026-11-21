@@ -85,7 +85,7 @@ fn read_word(text: &str) -> Option<(String, &str)> {
             _ => word.push(c),
         }
     }
-    (!word.is_empty()).then(|| (word, ""))
+    (!word.is_empty()).then_some((word, ""))
 }
 
 pub fn pgrep_patterns(command: &str) -> Vec<String> {

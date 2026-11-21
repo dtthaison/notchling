@@ -870,6 +870,7 @@ impl Wired {
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
             .with_group(Arc::new(capabilities_ops::CapabilitiesOps::wired(self)))
+            .with_group(Arc::new(crate::shells_ops::ShellsOps::new(layout.roots())))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())

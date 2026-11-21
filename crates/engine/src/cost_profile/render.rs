@@ -100,8 +100,10 @@ fn kept_section(profile: &Profile) -> String {
     out
 }
 
+const PGREP_LINE: &str = "- Never wait with a `pgrep -f` or `sleep` loop: it matches its own command line and never ends. Use the background command's notification, `caffeinate -w <pid>`, or `notchling shells` to see and stop a stuck one.";
+
 fn wait_line(habits: &Habits, features: Features) -> String {
-    if features.wait {
+    let first = if features.wait {
         format!(
             "- To wait, use `notchling wait` (CI, a shell, a file, a port, a session); never poll. A builder waits at most {} s; for longer, it hands back.",
             habits.wait_secs
@@ -111,7 +113,8 @@ fn wait_line(habits: &Habits, features: Features) -> String {
             "- Never poll with `sleep` loops: run long commands in the background and wait for their notification. A builder waits at most {} s; for longer, it hands back.",
             habits.wait_secs
         )
-    }
+    };
+    format!("{first}\n{PGREP_LINE}")
 }
 
 pub fn claude_rule(profile: &Profile, avail: &Available, features: Features) -> String {

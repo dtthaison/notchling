@@ -173,6 +173,8 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::ASK_ANSWER, Home::Kind("session.ask")),
     (ops::ASK_DISMISS, Home::Kind("session.ask")),
     (ops::ASK_LIST, Home::Called),
+    (ops::SHELLS_MINE, Home::Quiet),
+    (ops::SHELLS_STOP, Home::Called),
     (ops::CONSENT_GET, Home::Quiet),
     (ops::CONSENT_MINE, Home::Quiet),
     (ops::CONSENT_CANCEL, Home::Called),

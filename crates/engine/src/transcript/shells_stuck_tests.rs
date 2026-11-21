@@ -1,6 +1,7 @@
 use super::*;
 
-const SELF_LOOP: &str = "while pgrep -f cargo-build-worker > /dev/null; do sleep 5; done; echo done";
+const SELF_LOOP: &str =
+    "while pgrep -f cargo-build-worker > /dev/null; do sleep 5; done; echo done";
 const QUOTED: &str = "while pgrep -f \"npm run dev\"; do sleep 10; done";
 const BRACKET: &str = "while pgrep -f '[c]argo-build-worker'; do sleep 5; done";
 const WRAPPED: &str = "bash -c 'until ! pgrep -fl vite; do sleep 2; done && echo ok'";

@@ -527,7 +527,10 @@ fn stop_link(
     div()
         .id(SharedString::from(format!("shell-stop-{index}")))
         .cursor_pointer()
-        .child(label(t::chat::shell_stop(), TypeRole::Meta, Ink::AccentText, a).line_height(px(ROW_LINE)))
+        .child(
+            label(t::chat::shell_stop(), TypeRole::Meta, Ink::AccentText, a)
+                .line_height(px(ROW_LINE)),
+        )
         .on_click(move |_, _, cx| {
             chat.update(cx, |this, cx| this.stop_shell(&path, cx)).ok();
         })
