@@ -142,6 +142,11 @@ pub const VALUE_FLAGS: &[&str] = &[
     "--for",
     "--key",
     "--expires-in",
+    "--topic",
+    "--until",
+    "--count",
+    "--since",
+    "--limit",
 ];
 
 pub fn wants_json(args: &[String]) -> bool {

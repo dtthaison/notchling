@@ -92,6 +92,14 @@ impl AskOps {
                 notchling_local_api::topics::ASK_REMOVED,
                 &json!({"id": row.id, "session": row.session}),
             );
+            if let Some(owner) = row.session_id.as_deref() {
+                self.room.publish_to(
+                    owner,
+                    notchling_local_api::topics::MINE_ASKS,
+                    notchling_local_api::topics::ASK_REMOVED,
+                    &json!({"id": row.id, "state": "removed"}),
+                );
+            }
         }
     }
 

@@ -62,5 +62,6 @@ pub struct DbQuery {
     pub kinds: Vec<String>,
     pub groups: Vec<String>,
     pub session: Option<String>,
+    pub involving: Option<String>,
     pub limit: usize,
 }

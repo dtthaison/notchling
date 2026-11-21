@@ -12,7 +12,8 @@ use notchling_engine::inbox::{ActionId, Item, State as ItemState};
 use notchling_events::kinds::choices::{Answerer, ConsentThen};
 use notchling_events::scope::{self, ConsentNote};
 use notchling_local_api::{
-    bound_identity, ops, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier,
+    bound_identity, ops, topics, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec,
+    Tier,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -295,6 +296,7 @@ impl ConsentOps {
                 return Err(failed(LOG_DOWN));
             }
             self.raise(&row);
+            self.tell(&row);
             self.wake();
         }
         Ok(opened)
@@ -414,7 +416,17 @@ impl ConsentOps {
             emit(self.events.as_ref(), row, then, self.now());
         }
         self.close_item(row, then);
+        self.tell(row);
         self.wake();
+    }
+
+    fn tell(&self, row: &Consent) {
+        let Some(owner) = row.session.as_deref().filter(|_| row.in_session()) else {
+            return;
+        };
+        let data = json!({"request": self.project(row, true), "state": row.state.as_str()});
+        self.room
+            .publish_to(owner, topics::MINE_CONSENTS, topics::CONSENT_CHANGED, &data);
     }
 
     fn settle(&self, id: &str) {
@@ -677,6 +689,7 @@ impl ConsentOps {
             .ok_or_else(|| failed(NO_SUCH))?;
         if row.state == State::Opened && was == State::Waiting {
             emit(self.events.as_ref(), &row, ConsentThen::Opened, self.now());
+            self.tell(&row);
             self.wake();
         }
         Ok(json!({"state": row.state.as_str()}))

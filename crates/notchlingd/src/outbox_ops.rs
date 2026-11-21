@@ -6,7 +6,7 @@ use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use crate::outbox_anchor::{count_anchored, message_of};
 use crate::outbox_courier::live_files;
-use crate::outbox_rows::{keeps_note, position_of, positions, reply_via, wire};
+use crate::outbox_rows::{keeps_note, position_of, positions, receipt, reply_via, wire};
 use crate::outbox_settle::Settle;
 use notchling_engine::cluster::Qualified;
 use notchling_engine::contract::Tool as RowTool;
@@ -23,7 +23,9 @@ use notchling_events::field::Count;
 use notchling_events::kinds::agents::{OutboxThen, SessionOutbox};
 use notchling_events::spec::Outcome;
 use notchling_events::{scope, Event, Ref, Session};
-use notchling_local_api::{ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{
+    bound_identity, ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -619,6 +621,43 @@ impl OutboxOps {
         Ok(Value::Array(rows))
     }
 
+    fn mine(&self, args: &Value) -> Result<Value, ApiError> {
+        let Some(session) = bound_identity()
+            .filter(|who| who.verified)
+            .and_then(|who| who.session)
+        else {
+            return Ok(json!({"rows": [], "others": {"messages": 0, "sessions": 0}, "reason": "no_session"}));
+        };
+        let key = self.key_of(&session);
+        let all = self.store.list(None).map_err(|_| save_failed())?;
+        let (own, rest): (Vec<Row>, Vec<Row>) = all.into_iter().partition(|row| row.session == key);
+        let mut others: Vec<&str> = rest.iter().map(|row| row.session.as_str()).collect();
+        others.sort_unstable();
+        others.dedup();
+        let receipts = args.get("receipts").and_then(Value::as_bool) == Some(true);
+        let notes = lock(&self.notes).clone();
+        let shown = lock(&self.shown).clone();
+        let rows: Vec<Value> = own
+            .iter()
+            .zip(positions(&own))
+            .map(|(row, position)| {
+                if receipts {
+                    return receipt(row);
+                }
+                wire(
+                    row,
+                    position,
+                    notes.get(&row.id).map(String::as_str),
+                    shown.get(&row.id).copied(),
+                )
+            })
+            .collect();
+        Ok(json!({
+            "rows": rows,
+            "others": {"messages": rest.len(), "sessions": others.len()},
+        }))
+    }
+
     fn remote_rows(&self, asked: Option<&str>) -> Vec<Value> {
         if asked.is_some_and(|s| Qualified::parse(s).is_none()) {
             return Vec::new();
@@ -812,6 +851,9 @@ pub(crate) fn via_of(caller: &Caller, args: &Value) -> Via {
 
 impl OpGroup for OutboxOps {
     fn spec(&self, op: &str) -> Option<OpSpec> {
+        if op == ops::OUTBOX_MINE {
+            return Some(OpSpec::AGENT_READ);
+        }
         matches!(
             op,
             ops::SESSION_SEND
@@ -828,6 +870,9 @@ impl OpGroup for OutboxOps {
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         if op == ops::OUTBOX_LIST {
             return self.list(args);
+        }
+        if op == ops::OUTBOX_MINE {
+            return self.mine(args);
         }
         if !self.acting.is_on() {
             return Err(forbidden(ACTING_OFF));

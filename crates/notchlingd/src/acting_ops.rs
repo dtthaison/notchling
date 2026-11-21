@@ -24,7 +24,9 @@ use notchling_engine::terminal::input_box;
 use notchling_events::kinds::agents::{AnswerKind, PromptKind};
 use notchling_events::kinds::choices::DoneOrFailed;
 use notchling_events::{Ref, Session};
-use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
+use notchling_local_api::{
+    bound_identity, ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -65,6 +67,7 @@ pub const TOPICS: [&str; 2] = [topics::PROMPTS, topics::SETTINGS];
 
 pub trait Room: Send + Sync {
     fn publish(&self, topic: &str, event: &str, data: &Value);
+    fn publish_to(&self, _owner: &str, _topic: &str, _event: &str, _data: &Value) {}
     fn can_answer(&self) -> bool;
     fn can_follow(&self, topic: &str) -> bool;
     fn can_answer_prompts(&self) -> bool {
@@ -305,6 +308,30 @@ impl ActingOps {
         &self.prompts
     }
 
+    fn prompts_mine(&self) -> Value {
+        let Some(session) = bound_identity()
+            .filter(|who| who.verified)
+            .and_then(|who| who.session)
+        else {
+            return json!({"rows": [], "reason": "no_session"});
+        };
+        let mut list: Vec<Value> = self
+            .prompts
+            .list()
+            .iter()
+            .filter(|prompt| prompt.session_id == session)
+            .map(Prompt::to_json)
+            .collect();
+        if let Some(agy) = self.agy.get() {
+            list.extend(
+                agy.prompts()
+                    .into_iter()
+                    .filter(|p| p["sessionId"].as_str() == Some(session.as_str())),
+            );
+        }
+        json!({"rows": fit_list(list)})
+    }
+
     pub fn prompt_session(&self, id: &str) -> Option<String> {
         self.prompts.get(id).map(|prompt| prompt.session_id)
     }
@@ -318,7 +345,7 @@ impl ActingOps {
     pub fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
             ops::SETTINGS_SET_ACTING | ops::PROMPTS_LIST => Some(OpSpec::APP),
-            ops::SETTINGS_GET_ACTING => Some(OpSpec::AGENT_READ),
+            ops::SETTINGS_GET_ACTING | ops::PROMPTS_MINE => Some(OpSpec::AGENT_READ),
             ops::SESSION_QUESTION | ops::SESSION_RELOAD => Some(OpSpec::AGENT_ACTS),
             ops::HOOK_REQUEST => Some(OpSpec::AGENT_HOOK),
             ops::SESSION_SHELL_OUTPUT
@@ -348,6 +375,7 @@ impl ActingOps {
                 }
                 Ok(Value::Array(fit_list(list)))
             }
+            ops::PROMPTS_MINE => Ok(self.prompts_mine()),
             ops::SESSION_QUESTION => self.question(caller, args),
             ops::SESSION_SHELL_OUTPUT => self.shell_output(caller, args),
             ops::SESSION_DIALOG => self.dialog(caller, args),

@@ -92,6 +92,13 @@ pub enum Command {
     Consents {
         args: Vec<String>,
     },
+    Watch {
+        args: Vec<String>,
+    },
+    Mine {
+        read: crate::mine_cli::Read,
+        args: Vec<String>,
+    },
     Version,
     Help {
         json: bool,
@@ -254,6 +261,23 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
             return Ok(Command::Consents {
                 args: args.collect(),
             })
+        }
+        "watch" => {
+            return Ok(Command::Watch {
+                args: args.collect(),
+            })
+        }
+        "outbox" | "receipts" | "activity" | "prompts" => {
+            let read = match first.as_str() {
+                "outbox" => crate::mine_cli::Read::Outbox,
+                "receipts" => crate::mine_cli::Read::Receipts,
+                "activity" => crate::mine_cli::Read::Activity,
+                _ => crate::mine_cli::Read::Prompts,
+            };
+            return Ok(Command::Mine {
+                read,
+                args: args.collect(),
+            });
         }
         _ => {}
     }

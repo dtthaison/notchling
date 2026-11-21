@@ -222,6 +222,13 @@ impl EventsDb {
             args.push(Sql::Text(session.clone()));
             clauses.push(format!("session = ?{}", args.len()));
         }
+        if let Some(who) = &q.involving {
+            args.push(Sql::Text(who.clone()));
+            clauses.push(format!(
+                "(session = ?{n} OR (session IS NULL AND actor_session = ?{n}))",
+                n = args.len()
+            ));
+        }
         for (column, values) in [("kind", &q.kinds), ("grp", &q.groups)] {
             if values.is_empty() {
                 continue;

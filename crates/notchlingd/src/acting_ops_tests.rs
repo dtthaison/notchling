@@ -15,6 +15,7 @@ use std::time::Duration;
 #[derive(Default)]
 pub(crate) struct FakeRoom {
     pub events: Mutex<Vec<(String, Value)>>,
+    pub scoped: Mutex<Vec<(String, String, String, Value)>>,
     pub app: AtomicBool,
     pub following: Mutex<Vec<String>>,
     pub followers: crate::cluster_forward::PromptFollowers,
@@ -39,6 +40,14 @@ impl Room for FakeRoom {
         self.followers
             .relay(crate::acting_ops::now_ms(), topic, event, data);
     }
+    fn publish_to(&self, owner: &str, topic: &str, event: &str, data: &Value) {
+        self.scoped.lock().unwrap().push((
+            owner.to_owned(),
+            topic.to_owned(),
+            event.to_owned(),
+            data.clone(),
+        ));
+    }
     fn can_answer(&self) -> bool {
         self.app.load(Ordering::SeqCst)
     }
@@ -48,6 +57,16 @@ impl Room for FakeRoom {
 }
 
 impl FakeRoom {
+    pub(crate) fn scoped_to(&self, owner: &str, topic: &str) -> Vec<(String, Value)> {
+        self.scoped
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(o, t, _, _)| o == owner && t == topic)
+            .map(|(_, _, e, d)| (e.clone(), d.clone()))
+            .collect()
+    }
+
     pub(crate) fn named(&self, name: &str) -> Vec<Value> {
         let events = self.events.lock().unwrap();
         events
