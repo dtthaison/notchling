@@ -102,8 +102,10 @@ fn identify(
 }
 
 fn lineage(claude_exe: &Path) -> Table {
-    let mut t = Table::default();
-    t.parents = HashMap::from([(900, 800), (800, 700), (700, 600), (600, 1)]);
+    let mut t = Table {
+        parents: HashMap::from([(900, 800), (800, 700), (700, 600), (600, 1)]),
+        ..Table::default()
+    };
     t.exes.insert(800, claude_exe.to_path_buf());
     t.names.insert(800, "claude".into());
     t.names.insert(600, "Terminal".into());

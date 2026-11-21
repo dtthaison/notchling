@@ -12,9 +12,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+type LaunchRows = HashMap<(u32, u64), (AgentTool, String)>;
+
 #[derive(Clone, Default)]
 pub struct Launches {
-    rows: Arc<Mutex<HashMap<(u32, u64), (AgentTool, String)>>>,
+    rows: Arc<Mutex<LaunchRows>>,
 }
 
 impl Launches {
