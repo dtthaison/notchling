@@ -151,6 +151,75 @@ log_choice! {
 }
 
 log_choice! {
+    pub enum ConsentThen {
+        Asked = "asked",
+        Refused = "refused",
+        Opened = "opened",
+        Allowed = "allowed",
+        Denied = "denied",
+        Expired = "expired",
+        Cancelled = "cancelled",
+        Withdrawn = "withdrawn",
+        Applied = "applied",
+        Failed = "failed",
+        Restored = "restored",
+        HandedOver = "handed_over",
+    }
+}
+
+log_choice! {
+    pub enum ConsentKind {
+        Setting = "setting",
+        SecretRequest = "secret_request",
+        Switch = "switch",
+        Session = "session",
+        SessionStop = "session_stop",
+        Dispatch = "dispatch",
+        Job = "job",
+        JobStop = "job_stop",
+        Cluster = "cluster",
+        Account = "account",
+        Machine = "machine",
+        Install = "install",
+        CostProfile = "cost_profile",
+        Update = "update",
+    }
+}
+
+log_choice! {
+    pub enum ConsentAction {
+        ClusterCreate = "cluster_create",
+        ClusterInvite = "cluster_invite",
+        ClusterRemove = "cluster_remove",
+        ClusterMain = "cluster_main",
+        ClusterFailover = "cluster_failover",
+        ClusterMoveHome = "cluster_move_home",
+        ClusterAllow = "cluster_allow",
+        AccountSwitch = "account_switch",
+        AccountAdd = "account_add",
+        AccountRemove = "account_remove",
+        AccountMoveAll = "account_move_all",
+        MachineAdd = "machine_add",
+        MachineFix = "machine_fix",
+        MachineUpdate = "machine_update",
+        MachineRemove = "machine_remove",
+        TailscaleNetwork = "tailscale_network",
+        InstallSetUp = "install_set_up",
+        CostSet = "cost_set",
+        CostApply = "cost_apply",
+        CostUndo = "cost_undo",
+        ToolUpdate = "tool_update",
+    }
+}
+
+log_choice! {
+    pub enum ConsentAnswerOn {
+        Mac = "mac",
+        MacOrPhone = "mac_or_phone",
+    }
+}
+
+log_choice! {
     pub enum AskerKind {
         Main = "main",
         Subagent = "subagent",

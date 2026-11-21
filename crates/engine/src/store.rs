@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 pub const DB_NAME: &str = "notchling.db";
 
-const SCHEMA: i64 = 9;
+const SCHEMA: i64 = 10;
 
 const BUSY: Duration = Duration::from_secs(5);
 
@@ -176,7 +176,40 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              closed_ms INTEGER
          );
          CREATE INDEX IF NOT EXISTS asks_session ON asks(session, n);
-         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);",
+         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);
+         CREATE TABLE IF NOT EXISTS consents (
+             n INTEGER PRIMARY KEY AUTOINCREMENT,
+             id TEXT NOT NULL UNIQUE,
+             kind TEXT NOT NULL,
+             target TEXT NOT NULL,
+             change TEXT NOT NULL,
+             facts TEXT NOT NULL,
+             parts TEXT,
+             parts_allowed TEXT,
+             reason TEXT,
+             session TEXT,
+             tool TEXT NOT NULL,
+             verified INTEGER NOT NULL DEFAULT 0,
+             root TEXT,
+             folder TEXT,
+             organization TEXT,
+             pid INTEGER NOT NULL,
+             pid_start INTEGER,
+             idem_key TEXT,
+             state TEXT NOT NULL,
+             answer_on TEXT NOT NULL,
+             applied_by TEXT NOT NULL,
+             created_ms INTEGER NOT NULL,
+             expires_ms INTEGER NOT NULL,
+             answered_ms INTEGER,
+             by TEXT,
+             used_ms INTEGER,
+             used_op_id TEXT,
+             result TEXT,
+             closed_ms INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS consents_state ON consents(state);
+         CREATE INDEX IF NOT EXISTS consents_session ON consents(session, n);",
         )
     })?;
     let finished = add_missing_columns(db).and_then(|()| {

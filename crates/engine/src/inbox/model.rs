@@ -21,6 +21,7 @@ pub enum Kind {
     PrimaryBack,
     SessionWaits,
     Question,
+    Consent,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

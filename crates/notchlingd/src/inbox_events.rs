@@ -22,7 +22,8 @@ fn kind_of(kind: Kind) -> ItemKind {
         | Kind::NoPrimary
         | Kind::PrimaryBack
         | Kind::SessionWaits
-        | Kind::Question => ItemKind::Notice,
+        | Kind::Question
+        | Kind::Consent => ItemKind::Notice,
         Kind::SettingChange => ItemKind::SettingChange,
     }
 }

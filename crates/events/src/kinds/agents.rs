@@ -1,9 +1,12 @@
 use super::choices::{
-    AgentResult, AgentTool, Answerer, AskMode, AskThen, AskerKind, DoneOrFailed, FailWhy, ToolName,
+    AgentResult, AgentTool, Answerer, AskMode, AskThen, AskerKind, ConsentAction, ConsentAnswerOn,
+    ConsentKind, ConsentThen, DoneOrFailed, FailWhy, SwitchName, ToolName,
 };
+use super::settings::SettingKey;
 use crate::field::{Count, ErrorCode, Hex, Millis, Op, Tokens, Tool, Version};
 use crate::field_ref::{
-    Account, Agent, Consent, Device, Folder, Model, Organization, Page, Ref, Session,
+    Account, Agent, Consent, Device, Folder, Job, Lane, Machine, Model, Organization, Page, Ref,
+    Secret, Session,
 };
 use crate::spec::{AgentsRead, Durability, Group, Level, Lock, Proc};
 
@@ -415,6 +418,40 @@ kinds! {
             organization: Option<Ref<Organization>>,
             cmd_hash: Option<Hex>,
             out_hash: Option<Hex>,
+        }
+    }
+    AgentConsent = "agent.consent", kv 1 {
+        title: "Requests for Your Yes",
+        records: "An agent's request for your yes and what happened to it: asked, answered, applied or ended. The agent's reason is never recorded.",
+        why: "Shows what an agent asked you to allow, who answered, and what it did with the yes.",
+        default: On,
+        lock: Lock::Always("Requests for the user's yes are part of the audit trail."),
+        sinks: AUDIT | ACTIVITY,
+        durability: Durability::CommitFromAgent,
+        level: Level::Info,
+        emitters: &[Proc::Daemon],
+        agents_read: AgentsRead::Own,
+        keep_days: 0,
+        fields {
+            consent: Ref<Consent>,
+            then: ConsentThen,
+            kind: ConsentKind,
+            by: Option<Answerer>,
+            answer_on: ConsentAnswerOn,
+            switch: Option<SwitchName>,
+            key: Option<SettingKey>,
+            secret: Option<Ref<Secret>>,
+            session: Option<Ref<Session>>,
+            machine: Option<Ref<Machine>>,
+            account: Option<Ref<Account>>,
+            lane: Option<Ref<Lane>>,
+            job: Option<Ref<Job>>,
+            action: Option<ConsentAction>,
+            tool: AgentTool,
+            reason_chars: Count,
+            parts: Count,
+            parts_allowed: Count,
+            waited: Millis,
         }
     }
     AgentNamed = "agent.named", kv 1 {
