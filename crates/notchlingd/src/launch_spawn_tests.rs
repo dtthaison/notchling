@@ -122,6 +122,10 @@ fn a_resumed_codex_session_is_registered_at_once_and_forgotten_when_the_process_
         launches.find(700, Some(STARTED)),
         Some((AgentTool::Codex, "thread-9".to_owned()))
     );
+    assert_eq!(
+        launches.record(700, Some(STARTED)).and_then(|r| r.2),
+        Some("/work".to_owned())
+    );
     drop(process);
     assert_eq!(launches.find(700, Some(STARTED)), None);
 }
@@ -235,6 +239,10 @@ fn a_new_antigravity_session_is_registered_from_its_answer_and_forgotten_when_it
     assert_eq!(
         launches.find(700, Some(STARTED)),
         Some((AgentTool::Antigravity, "agy-1".to_owned()))
+    );
+    assert_eq!(
+        launches.record(700, Some(STARTED)).and_then(|r| r.2),
+        Some("/work".to_owned())
     );
     tx.send(Output::Closed(None)).unwrap();
     assert!(matches!(spawned.output.recv().unwrap(), Output::Closed(_)));

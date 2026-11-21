@@ -277,7 +277,7 @@ fn a_process_under_a_session_the_daemon_started_is_that_tool_and_verified() {
     t.names.remove(&800);
     t.starts.insert(700, 5_000);
     let launches = Launches::default();
-    launches.register(700, 5_000, AgentTool::Codex, "codex-sess");
+    launches.register(700, 5_000, AgentTool::Codex, "codex-sess", None);
     let who = identify(
         &h,
         t.clone(),
@@ -345,7 +345,7 @@ fn a_delegate_under_a_session_the_daemon_started_is_the_delegated_tool_with_that
         vec!["notchling".into(), "delegate".into(), "agy".into()],
     );
     let launches = Launches::default();
-    launches.register(700, 5_000, AgentTool::Codex, "codex-sess");
+    launches.register(700, 5_000, AgentTool::Codex, "codex-sess", None);
     let who = identify(&h, t, rows("codex-sess", "/work"), launches, 900);
     assert_eq!(who.tool, AgentTool::Antigravity);
     assert_eq!(who.session.as_deref(), Some("codex-sess"));
@@ -547,7 +547,7 @@ fn the_owner_is_the_claude_process_of_the_callers_own_session() {
 fn a_launched_sessions_owner_is_the_launched_process() {
     let h = home("owner-launch", &[]);
     let launches = Launches::default();
-    launches.register(700, 5_000, AgentTool::Claude, "sess-l");
+    launches.register(700, 5_000, AgentTool::Claude, "sess-l", None);
     let mut t = lineage(Path::new("/bin/zsh"));
     t.starts.insert(700, 5_000);
     assert_eq!(

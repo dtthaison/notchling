@@ -36,10 +36,17 @@ struct Mark {
     tool: AgentTool,
     pid: u32,
     started: u64,
+    folder: String,
 }
 
 impl Mark {
-    fn of(launches: &Launches, tool: AgentTool, pid: Option<u32>, probe: Probe) -> Option<Mark> {
+    fn of(
+        launches: &Launches,
+        tool: AgentTool,
+        pid: Option<u32>,
+        probe: Probe,
+        folder: &str,
+    ) -> Option<Mark> {
         let spawned_ms = (probe.now_ms)();
         let pid = pid?;
         if (probe.started_ms)(pid)? > spawned_ms {
@@ -50,12 +57,18 @@ impl Mark {
             tool,
             pid,
             started: (probe.start_of)(pid)?,
+            folder: folder.to_owned(),
         })
     }
 
     fn register(&self, session: &str) {
-        self.launches
-            .register(self.pid, self.started, self.tool, session);
+        self.launches.register(
+            self.pid,
+            self.started,
+            self.tool,
+            session,
+            Some(&self.folder),
+        );
     }
 
     fn forget(&self) {
@@ -105,8 +118,13 @@ pub(crate) fn resumed(spec: &TurnSpec) -> Option<&str> {
 impl ToolSpawner for CodexLaunches {
     fn spawn(&self, spec: &TurnSpec) -> Result<Arc<dyn ToolProcess>, SpawnError> {
         let process = self.inner.spawn(spec)?;
-        let Some(mark) = Mark::of(&self.launches, AgentTool::Codex, process.pid(), self.probe)
-        else {
+        let Some(mark) = Mark::of(
+            &self.launches,
+            AgentTool::Codex,
+            process.pid(),
+            self.probe,
+            &spec.cwd,
+        ) else {
             return Ok(process);
         };
         if let Some(session) = resumed(spec) {
@@ -193,6 +211,7 @@ impl Spawner for AcpLaunches {
             AgentTool::Antigravity,
             spawned.process.pid(),
             self.probe,
+            folder,
         ) else {
             return Ok(spawned);
         };

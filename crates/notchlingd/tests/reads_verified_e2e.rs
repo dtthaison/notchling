@@ -37,7 +37,7 @@ fn reads_helper_runs_commands_as_the_session_process() {
 }
 
 fn as_session(root: &Path, home: &Path, steps: &[&[&str]]) -> Vec<Value> {
-    as_session_in(root, home, steps, None)
+    as_session_in(root, home, steps, None, true)
 }
 
 fn as_session_in(
@@ -45,6 +45,7 @@ fn as_session_in(
     home: &Path,
     steps: &[&[&str]],
     live_folder: Option<&Path>,
+    job: bool,
 ) -> Vec<Value> {
     let claude_dir = root.join(".local/share/claude/versions/1");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -67,14 +68,15 @@ fn as_session_in(
         .unwrap();
     let sessions = root.join("claude/sessions");
     std::fs::create_dir_all(&sessions).unwrap();
-    let file = match live_folder {
-        Some(_) => json!({"sessionId": SESSION, "pid": parent.id()}),
-        None => json!({
+    let file = if job {
+        json!({
             "sessionId": SESSION,
             "pid": parent.id(),
             "cwd": root.join("launch").to_string_lossy(),
             "jobId": "j1",
-        }),
+        })
+    } else {
+        json!({"sessionId": SESSION, "pid": parent.id()})
     };
     std::fs::write(
         sessions.join(format!("{}.json", parent.id())),
@@ -198,6 +200,17 @@ fn a_live_session_with_no_row_and_no_file_folder_reads_by_its_process_folder() {
     let live = dir.0.join("work/app");
     std::fs::create_dir_all(&live).unwrap();
     let _daemon = Daemon::start(&root, &home);
-    let steps = as_session_in(&root, &home, READS, Some(&live));
+    let steps = as_session_in(&root, &home, READS, Some(&live), false);
+    assert_answered_for_the_session(&steps, &acme, false);
+}
+
+#[test]
+fn a_live_job_the_list_lacks_reads_by_its_process_folder_not_its_launch_folder() {
+    let (dir, root, home, acme) = a_live_background_session("reads-verified-job-proc", false);
+    std::fs::remove_dir_all(root.join("claude/jobs/j1")).unwrap();
+    let live = dir.0.join("work/app");
+    std::fs::create_dir_all(&live).unwrap();
+    let _daemon = Daemon::start(&root, &home);
+    let steps = as_session_in(&root, &home, READS, Some(&live), true);
     assert_answered_for_the_session(&steps, &acme, false);
 }

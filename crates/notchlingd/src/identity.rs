@@ -1,4 +1,4 @@
-use crate::caller_session::{find_session_where, is_claude_binary, LINEAGE_DEPTH};
+use crate::caller_session::{find_session_where, is_claude_binary, SessionHit, LINEAGE_DEPTH};
 use crate::late_emit::LateSalt;
 use crate::vault_caller::Processes;
 use notchling_engine::ask::delegate_tool;
@@ -16,19 +16,34 @@ use std::sync::{Arc, Mutex, PoisonError};
 const ROOT_DEPTH: usize = 4096;
 const UNROOTED: &str = "unrooted";
 
-type LaunchRows = HashMap<(u32, u64), (AgentTool, String)>;
+type LaunchRows = HashMap<(u32, u64), (AgentTool, String, Option<String>)>;
 
 #[derive(Clone, Default)]
 pub struct Launches {
     rows: Arc<Mutex<LaunchRows>>,
 }
 
+struct Launched {
+    pid: u32,
+    tool: AgentTool,
+    session: String,
+    folder: Option<String>,
+}
+
 impl Launches {
-    pub fn register(&self, pid: u32, started: u64, tool: AgentTool, session: &str) {
+    pub fn register(
+        &self,
+        pid: u32,
+        started: u64,
+        tool: AgentTool,
+        session: &str,
+        folder: Option<&str>,
+    ) {
+        let folder = folder.filter(|f| !f.is_empty()).map(str::to_owned);
         self.rows
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert((pid, started), (tool, session.to_string()));
+            .insert((pid, started), (tool, session.to_string(), folder));
     }
 
     pub fn forget(&self, pid: u32, started: u64) {
@@ -39,6 +54,15 @@ impl Launches {
     }
 
     pub(crate) fn find(&self, pid: u32, started: Option<u64>) -> Option<(AgentTool, String)> {
+        self.record(pid, started)
+            .map(|(tool, session, _)| (tool, session))
+    }
+
+    pub(crate) fn record(
+        &self,
+        pid: u32,
+        started: Option<u64>,
+    ) -> Option<(AgentTool, String, Option<String>)> {
         let rows = self.rows.lock().unwrap_or_else(PoisonError::into_inner);
         rows.get(&(pid, started?)).cloned()
     }
@@ -98,35 +122,26 @@ impl Identifier {
         });
         let mut who = AgentIdentity::shell();
         who.root = self.root_of(pid);
-        let own = hit.clone();
         match (self.launched(&chain), self.delegated(&chain), hit) {
-            (Some((tool, session)), delegated, _) => {
-                who.tool = delegated.unwrap_or(tool);
-                who.session = Some(session);
+            (Some(launch), delegated, _) => {
+                who.tool = delegated.unwrap_or(launch.tool);
+                who.session = Some(launch.session);
                 who.verified = true;
+                who.folder = launch.folder.or_else(|| self.live_folder(launch.pid));
             }
             (None, Some(tool), hit) => {
                 who.tool = tool;
                 who.verified = hit.is_some();
+                who.folder = hit.as_ref().and_then(|h| self.folder_of(h));
                 who.session = hit.map(|h| h.session_id);
             }
             (None, None, Some(hit)) => {
                 who.tool = AgentTool::Claude;
+                who.folder = self.folder_of(&hit);
                 who.session = Some(hit.session_id);
                 who.verified = true;
             }
             (None, None, None) => who.tool = self.tool_by_name(&chain),
-        }
-        if let Some(session) = who.session.as_deref() {
-            let own = own.filter(|h| h.session_id == session);
-            let job = own.as_ref().and_then(|h| h.job_id.as_deref());
-            who.folder = self
-                .folder_of(session, job)
-                .or_else(|| own.as_ref().and_then(|h| h.cwd.clone()))
-                .or_else(|| {
-                    let live = self.procs.cwd(own.as_ref()?.claude_pid)?;
-                    Some(live.to_string_lossy().into_owned()).filter(|f| !f.is_empty())
-                });
         }
         if who.verified {
             who.organization = self.organization_of(who.folder.as_deref());
@@ -201,10 +216,16 @@ impl Identifier {
         Some(format!("{}:{started}", exe.to_string_lossy()))
     }
 
-    fn launched(&self, chain: &[u32]) -> Option<(AgentTool, String)> {
-        chain
-            .iter()
-            .find_map(|p| self.launches.find(*p, self.procs.start_time(*p)))
+    fn launched(&self, chain: &[u32]) -> Option<Launched> {
+        chain.iter().find_map(|p| {
+            let (tool, session, folder) = self.launches.record(*p, self.procs.start_time(*p))?;
+            Some(Launched {
+                pid: *p,
+                tool,
+                session,
+                folder,
+            })
+        })
     }
 
     fn delegated(&self, chain: &[u32]) -> Option<AgentTool> {
@@ -242,9 +263,19 @@ impl Identifier {
         AgentTool::Shell
     }
 
-    fn folder_of(&self, session: &str, job: Option<&str>) -> Option<String> {
-        let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        folder_in(&list, session, job)
+    fn folder_of(&self, hit: &SessionHit) -> Option<String> {
+        let listed = {
+            let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+            folder_in(&list, &hit.session_id, hit.job_id.as_deref())
+        };
+        listed
+            .or_else(|| hit.cwd.clone().filter(|_| hit.job_id.is_none()))
+            .or_else(|| self.live_folder(hit.claude_pid))
+    }
+
+    fn live_folder(&self, pid: u32) -> Option<String> {
+        let live = self.procs.cwd(pid)?;
+        Some(live.to_string_lossy().into_owned()).filter(|f| !f.is_empty())
     }
 
     fn organization_of(&self, folder: Option<&str>) -> Option<String> {
@@ -257,39 +288,62 @@ impl Identifier {
     }
 }
 
+fn text(row: &Value, key: &str) -> Option<String> {
+    row.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn cwd(row: &Value) -> Option<String> {
+    text(row, "cwd").filter(|c| !c.is_empty())
+}
+
+fn running(row: &Value) -> bool {
+    row.pointer("/target/job").is_some()
+        && match row.get("group").and_then(Value::as_str) {
+            Some("working" | "needsInput") => true,
+            Some("completed") => row.get("label").and_then(Value::as_str) == Some("Idle"),
+            _ => false,
+        }
+}
+
+fn names(row: &Value, session: &str) -> bool {
+    text(row, "id").as_deref() == Some(session)
+        || text(row, "resumeSessionId").as_deref() == Some(session)
+}
+
 pub(crate) fn folder_in(list: &Value, session: &str, job: Option<&str>) -> Option<String> {
     let rows = list.as_array()?;
-    let text = |row: &Value, key: &str| row.get(key).and_then(Value::as_str).map(str::to_owned);
-    let cwd = |row: &Value| text(row, "cwd").filter(|c| !c.is_empty());
-    let running = |row: &Value| {
-        row.pointer("/target/job").is_some()
-            && match row.get("group").and_then(Value::as_str) {
-                Some("working" | "needsInput") => true,
-                Some("completed") => row.get("label").and_then(Value::as_str) == Some("Idle"),
-                _ => false,
-            }
-    };
-    job.and_then(|job| {
-        rows.iter().find_map(|row| {
-            (row.pointer("/target/job").and_then(Value::as_str) == Some(job))
+    if let Some(job) = job {
+        return rows.iter().find_map(|row| {
+            (row.pointer("/target/job").and_then(Value::as_str) == Some(job) && names(row, session))
                 .then(|| cwd(row))
                 .flatten()
-        })
-    })
-    .or_else(|| {
-        rows.iter().find_map(|row| {
+        });
+    }
+    rows.iter()
+        .find_map(|row| {
             (text(row, "id").as_deref() == Some(session))
                 .then(|| cwd(row))
                 .flatten()
         })
-    })
-    .or_else(|| {
-        let mut resumed = rows
-            .iter()
-            .filter(|row| running(row) && text(row, "resumeSessionId").as_deref() == Some(session));
-        let only = resumed.next()?;
-        resumed.next().is_none().then(|| cwd(only)).flatten()
-    })
+        .or_else(|| {
+            let mut resumed = rows
+                .iter()
+                .filter(|row| {
+                    running(row) && text(row, "resumeSessionId").as_deref() == Some(session)
+                })
+                .filter_map(cwd);
+            let only = resumed.next()?;
+            resumed.next().is_none().then_some(only)
+        })
+}
+
+pub(crate) fn folders_naming(list: &Value, session: &str) -> Vec<String> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| names(row, session))
+        .filter_map(cwd)
+        .collect()
 }
 
 pub fn for_daemon(
@@ -332,3 +386,7 @@ mod job_tests;
 #[cfg(test)]
 #[path = "identity_folder_tests.rs"]
 mod folder_tests;
+
+#[cfg(test)]
+#[path = "identity_launch_tests.rs"]
+mod launch_tests;
