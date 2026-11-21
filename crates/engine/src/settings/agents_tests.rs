@@ -39,7 +39,6 @@ fn switches_logins_and_sandbox_permissions_are_never_an_agents() {
         "claudeDesktopAccounts",
         "debugAccessCertsFile",
         "vaultReminderSent",
-        "newSessionChoice",
     ] {
         assert_eq!(spec(name).map(|k| k.access), Some(Access::Never), "{name}");
     }
@@ -57,7 +56,10 @@ fn switches_logins_and_sandbox_permissions_are_never_an_agents() {
 
 #[test]
 fn only_plain_values_are_free_or_asked() {
-    for k in KEYS.iter().filter(|k| k.access.shown()) {
+    for k in KEYS
+        .iter()
+        .filter(|k| k.access.shown() && k.name != "hiddenAgents")
+    {
         assert!(
             matches!(k.kind, Kind::Bool | Kind::Int | Kind::Double | Kind::String),
             "{} is {:?}: an agent can't sensibly write it",
@@ -69,6 +71,15 @@ fn only_plain_values_are_free_or_asked() {
     assert_eq!(spec("limitMode").map(|k| k.access), Some(Access::Ask));
     assert_eq!(Access::Unset.as_str(), "never");
     assert!(!Access::Unset.shown() && !Access::Never.shown());
+}
+
+#[test]
+fn hidden_agents_is_free_and_the_new_session_account_is_asked() {
+    assert_eq!(spec("hiddenAgents").map(|k| k.access), Some(Access::Free));
+    assert_eq!(
+        spec("newSessionChoice").map(|k| k.access),
+        Some(Access::Ask)
+    );
 }
 
 #[test]
