@@ -175,9 +175,7 @@ fn send_closed(cx: &mut App, id: String, feed: Arc<SwitchFeed>, vault: Arc<Vault
         let sent = id.clone();
         let result = cx
             .background_executor()
-            .spawn(async move {
-                vault.answer(&switches, &sent, Decision::Deny)
-            })
+            .spawn(async move { vault.answer(&switches, &sent, Decision::Deny) })
             .await;
         match result {
             Ok(()) => feed.resolve(&id),

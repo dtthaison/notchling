@@ -238,9 +238,15 @@ fn a_view_without_an_id_or_an_end_is_no_card() {
 
 #[test]
 fn the_vault_switch_or_its_entries_moving_refreshes_the_cards() {
-    assert!(!vault_moved(None, (0, false)), "the first look moves nothing");
+    assert!(
+        !vault_moved(None, (0, false)),
+        "the first look moves nothing"
+    );
     assert!(!vault_moved(Some((3, true)), (3, true)));
-    assert!(vault_moved(Some((3, false)), (3, true)), "the switch turned on");
+    assert!(
+        vault_moved(Some((3, false)), (3, true)),
+        "the switch turned on"
+    );
     assert!(vault_moved(Some((3, true)), (4, true)), "the vault changed");
 }
 
@@ -255,5 +261,8 @@ fn the_card_blocks_a_secret_only_while_the_vault_is_off_and_follows_it_back_on()
     assert!(on.blocked.is_none() && on.allow.enabled());
     e.vault_on = false;
     let setting = ConsentCard::build(&setting(), &e).expect("card");
-    assert!(setting.blocked.is_none(), "a setting never waits on the Vault");
+    assert!(
+        setting.blocked.is_none(),
+        "a setting never waits on the Vault"
+    );
 }

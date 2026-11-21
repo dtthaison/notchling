@@ -35,10 +35,7 @@ fn a_request_that_is_no_longer_waiting_is_expired_or_withdrawn_by_its_state() {
 fn a_changed_entry_is_told_apart_from_a_request_that_ended_while_saving() {
     assert_eq!(refusal(&drifted(), Some("opened")), Some(Refusal::Changed));
     assert_eq!(refusal(&drifted(), None), Some(Refusal::Changed));
-    assert_eq!(
-        refusal(&drifted(), Some("expired")),
-        Some(Refusal::Expired)
-    );
+    assert_eq!(refusal(&drifted(), Some("expired")), Some(Refusal::Expired));
     assert_eq!(
         refusal(&drifted(), Some("cancelled")),
         Some(Refusal::Withdrawn)

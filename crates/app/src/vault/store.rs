@@ -41,7 +41,7 @@ fn message(e: &ClientError) -> String {
 
 struct Failed {
     line: String,
-    api: Option<ApiError>,
+    api: Option<Box<ApiError>>,
 }
 
 impl Failed {
@@ -195,7 +195,7 @@ impl Vault {
             Failed {
                 line,
                 api: match e {
-                    ClientError::Api(api) => Some(api),
+                    ClientError::Api(api) => Some(Box::new(api)),
                     _ => None,
                 },
             }
@@ -282,9 +282,7 @@ impl Vault {
                 Ok(())
             }
             Err(Failed { line, api: None }) => Err(Failure::Other(line)),
-            Err(Failed {
-                api: Some(api), ..
-            }) => {
+            Err(Failed { api: Some(api), .. }) => {
                 let state = wants_state(&api)
                     .then(|| self.consent_state(switches, consent))
                     .flatten();
