@@ -49,8 +49,8 @@ impl ShellsOps {
     pub fn new(roots: Roots) -> ShellsOps {
         ShellsOps {
             roots,
-            writers: Arc::new(|path| shells_stop::writers_of(path)),
-            stopper: Arc::new(|path, grace| shells_stop::stop_output(path, grace)),
+            writers: Arc::new(shells_stop::writers_of),
+            stopper: Arc::new(shells_stop::stop_output),
             now: Arc::new(clock),
             who: None,
         }
