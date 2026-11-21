@@ -72,7 +72,7 @@ fn a_secret_request_names_the_secret_and_the_folder() {
 fn every_kind_shows_the_folder_from_the_row() {
     let card = ConsentCard::build(&setting(), &env()).expect("card");
     let labels: Vec<&str> = card.details.iter().map(|d| d.label.as_str()).collect();
-    assert_eq!(labels, vec!["Asked by", "Folder", "Covers"]);
+    assert_eq!(labels, vec!["Asked by", "Folder", "Organization", "Covers"]);
     assert_eq!(card.details[1].value, "/Users/maker/work/notchling");
     let mut none = setting();
     none.as_object_mut().unwrap().remove("folder");
