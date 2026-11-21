@@ -1,5 +1,6 @@
 use crate::acting_ops::Room;
 use crate::commands::{command_of, INTERNAL, PLANNED, USER_ONLY};
+use crate::daemon_wiring::Wired;
 use crate::op_group::OpGroup;
 use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec, Tier, API_VERSION};
 use serde_json::{json, Value};
@@ -64,6 +65,29 @@ impl CapabilitiesOps {
             session_of,
             room,
         }
+    }
+
+    pub fn wired(wired: &Wired) -> CapabilitiesOps {
+        let acting = &wired.acting;
+        let switched: Switched = {
+            let (acting, bridge, switches) =
+                (acting.clone(), wired.bridge.clone(), wired.switches.clone());
+            Arc::new(move |name: &str| match name {
+                "acting" => acting.is_on(),
+                "bridge" => bridge.is_on(),
+                other => switches.get(other).is_some_and(|flag| flag.is_on()),
+            })
+        };
+        let session_of: Sessioned = {
+            let acting = acting.clone();
+            Arc::new(move |pid| acting.session_of(pid))
+        };
+        CapabilitiesOps::new(
+            env!("CARGO_PKG_VERSION"),
+            switched,
+            session_of,
+            acting.room.clone(),
+        )
     }
 
     fn answer(&self, caller: &Caller) -> Value {

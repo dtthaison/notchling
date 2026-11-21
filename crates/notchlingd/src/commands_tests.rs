@@ -144,6 +144,22 @@ fn the_help_json_has_the_shape_agents_read() {
     assert!(help["userOnly"][0]["why"].is_string());
 }
 
+fn one_per_line(value: &Value) -> String {
+    let parts: Vec<String> = value
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(key, part)| match part {
+            Value::Array(items) if !items.is_empty() => {
+                let lines: Vec<String> = items.iter().map(|item| format!("    {item}")).collect();
+                format!("  \"{key}\": [\n{}\n  ]", lines.join(",\n"))
+            }
+            other => format!("  \"{key}\": {other}"),
+        })
+        .collect();
+    format!("{{\n{}\n}}\n", parts.join(",\n"))
+}
+
 fn table(rows: Vec<Vec<String>>, head: &[&str]) -> String {
     let mut out = format!(
         "| {} |\n| {} |\n",
@@ -233,10 +249,7 @@ fn markdown() -> String {
 
 #[test]
 fn the_golden_files_match_the_registry() {
-    let json = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&registry_value()).unwrap()
-    );
+    let json = one_per_line(&registry_value());
     golden(
         root().join("crates/notchlingd/tests/golden/agent-paths.json"),
         json,

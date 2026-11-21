@@ -124,8 +124,12 @@ fn status_json_is_the_daemons_status_and_the_text_is_unchanged() {
 
     let (code, out, err) = run(&root, &["status", "--json"]);
     assert_eq!(code, 3);
-    assert!(out.is_empty(), "{out}");
-    assert!(err.contains("the daemon isn't running"), "{err}");
+    assert!(err.is_empty(), "{err}");
+    let error = json_of(&out)["error"].clone();
+    assert_eq!(
+        (error["exit"].as_i64(), error["reason"].as_str()),
+        (Some(3), Some("not_running"))
+    );
 
     let _daemon = start_daemon(&root);
     let (code, out, err) = run(&root, &["status", "--json"]);
@@ -179,7 +183,7 @@ fn pages_and_page_json_with_and_without_a_daemon() {
 
         let (code, out, err) = run(root, &["page", "no such page", "--json"]);
         assert_eq!(code, 1);
-        assert_eq!(err, "No saved page matches \"no such page\".\n");
+        assert_eq!(err, "");
         assert_eq!(json_of(&out)["pages"], json!([]));
     };
     check(&root);
@@ -198,14 +202,17 @@ fn secrets_json_keeps_the_exit_codes_and_prints_no_value() {
     std::fs::create_dir_all(root.join("claude")).unwrap();
 
     let (code, out, err) = run(&root, &["secrets", "--json"]);
-    assert_eq!(code, 2);
-    assert!(out.is_empty(), "{out}");
-    assert!(err.contains("Notchling isn't running"), "{err}");
+    assert_eq!(code, 3);
+    assert!(err.is_empty(), "{err}");
+    assert_eq!(json_of(&out)["error"]["reason"], "not_running");
 
     let _daemon = start_daemon(&root);
     let (code, out, err) = run(&root, &["secrets", "github", "--json"]);
-    assert_eq!((code, err.trim()), (2, OFF));
-    assert!(out.is_empty(), "{out}");
+    assert_eq!((code, err.as_str()), (4, ""));
+    let error = json_of(&out)["error"].clone();
+    assert_eq!(error["message"], OFF);
+    assert_eq!(error["reason"], "switch_off");
+    assert_eq!(error["switch"], "vault");
     assert!(!root.join("notchling/vault.json").exists());
 }
 
@@ -267,17 +274,22 @@ fn delegate_models_for_names_the_model_to_use() {
         r#"{"models":[{"slug":"gpt-5-sol","priority":1,"visibility":"list"}]}"#,
     )
     .unwrap();
-    let (code, out, _) = run(&root, &["delegate-models", "--for", "review-final"]);
+    let (code, out, err) = run(&root, &["delegate-models", "--for", "review-final"]);
     assert_eq!(
-        (code, out.as_str()),
-        (1, "no model for review-final; run delegate-models\n")
+        (code, out.as_str(), err.as_str()),
+        (
+            1,
+            "",
+            "no model for review-final; run delegate-models (failed)\n"
+        )
     );
 
-    let (code, out, _) = run(&root, &["delegate-models", "--for", "poetry"]);
+    let (code, out, err) = run(&root, &["delegate-models", "--for", "poetry"]);
     assert_eq!(code, 1);
+    assert!(out.is_empty(), "{out}");
     assert!(
-        out.starts_with("no model marked for poetry; run delegate-models"),
-        "{out}"
+        err.starts_with("no model marked for poetry; run delegate-models"),
+        "{err}"
     );
 
     let (code, out, _) = run(&root, &["delegate-models", "codex"]);

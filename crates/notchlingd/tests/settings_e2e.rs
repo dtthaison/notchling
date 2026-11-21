@@ -135,7 +135,8 @@ fn an_agent_reads_and_changes_settings_through_the_command_line() {
     assert!(out.contains("Agents may change it."), "{out}");
 
     let (code, out, err) = run(root, &["settings", "set", "switch.acting", "on"]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 4);
+    assert!(err.trim_end().ends_with("(refused)"), "{err}");
     assert!(out.is_empty());
     assert!(
         err.contains("is a switch: only the user turns it on or off"),
@@ -143,18 +144,21 @@ fn an_agent_reads_and_changes_settings_through_the_command_line() {
     );
 
     let (code, _, err) = run(root, &["settings", "set", "codexNetwork", "true"]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 4);
     assert!(err.contains("can't be changed by an agent"), "{err}");
 
     let (code, _, err) = run(root, &["settings", "set", "showPet", "maybe"]);
-    assert_eq!((code, err.as_str()), (1, "showPet takes true or false.\n"));
+    assert_eq!(
+        (code, err.as_str()),
+        (2, "showPet takes true or false. (bad_request)\n")
+    );
 
     let (code, _, err) = run(root, &["settings", "get", "theme"]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 2);
     assert!(err.starts_with("No setting named theme."), "{err}");
 
     let (code, _, err) = run(root, &["settings", "set", "limitMode", "off"]);
-    assert_eq!(code, 3, "an ask with no app open to answer it: {err}");
+    assert_eq!(code, 4, "an ask with no app open to answer it: {err}");
     assert!(err.contains("the app isn't open"), "{err}");
     assert_eq!(stored(root, "limitMode"), None);
 
@@ -188,10 +192,10 @@ fn an_agent_reads_and_changes_settings_through_the_command_line() {
 fn with_no_daemon_the_command_says_notchling_isnt_running() {
     let dir = scratch("settings-e2e-off");
     let (code, out, err) = run(&dir.0, &["settings", "list"]);
-    assert_eq!(code, 2);
+    assert_eq!(code, 3);
     assert!(out.is_empty());
     assert_eq!(
         err,
-        "Notchling isn't running. Ask the user to open it, then try again.\n"
+        "Notchling isn't running. Ask the user to open it, then try again. (not_running)\n"
     );
 }

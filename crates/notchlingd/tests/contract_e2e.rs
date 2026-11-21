@@ -7,7 +7,6 @@ use notchling_local_api::{ClientError, ClientKind};
 use serde_json::{json, Value};
 
 fn only_json(text: &str) -> Value {
-    assert_eq!(text.trim_end().lines().count(), 1, "one value only: {text}");
     serde_json::from_str(text).unwrap_or_else(|e| panic!("not JSON ({e}): {text}"))
 }
 

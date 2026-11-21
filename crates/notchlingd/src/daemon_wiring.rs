@@ -47,7 +47,7 @@ use crate::tailscale_ops::TailscaleOps;
 use crate::vault_ops::VaultOps;
 use crate::versions_ops::{AuditRecorder, VersionsOps};
 use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
-use crate::{op_kinds, quiet_ops};
+use crate::{capabilities_ops, op_kinds, quiet_ops};
 use notchling_engine::accounts::codex::login::idle_for_auto_switch;
 use notchling_engine::accounts::desktop::ClaudeName;
 use notchling_engine::activity::EventsDb;
@@ -894,28 +894,6 @@ impl Wired {
                 .map(|v| v.is_array() || v.is_object() || v.is_null())
                 .unwrap_or(false)
         }));
-        let switched: crate::capabilities_ops::Switched = {
-            let (acting, bridge, switches) = (
-                self.acting.clone(),
-                self.bridge.clone(),
-                self.switches.clone(),
-            );
-            Arc::new(move |name: &str| match name {
-                "acting" => acting.is_on(),
-                "bridge" => bridge.is_on(),
-                other => switches.get(other).is_some_and(|flag| flag.is_on()),
-            })
-        };
-        let sessioned: crate::capabilities_ops::Sessioned = {
-            let acting = self.acting.clone();
-            Arc::new(move |pid| acting.session_of(pid))
-        };
-        let capabilities = crate::capabilities_ops::CapabilitiesOps::new(
-            env!("CARGO_PKG_VERSION"),
-            switched,
-            sessioned,
-            self.acting.room.clone(),
-        );
         let ops = Ops::with_acting(sessions, self.acting.clone())
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
@@ -928,7 +906,7 @@ impl Wired {
                 SwitchOps::new(self.switches.clone(), self.acting.room.clone())
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
-            .with_group(Arc::new(capabilities))
+            .with_group(Arc::new(capabilities_ops::CapabilitiesOps::wired(self)))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())
