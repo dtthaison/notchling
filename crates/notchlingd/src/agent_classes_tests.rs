@@ -41,7 +41,7 @@ fn rig() -> (Root, Ops) {
     (Root(root), ops)
 }
 
-const READS: [&str; 23] = [
+const READS: [&str; 24] = [
     ops::SESSIONS_LIST,
     ops::SETTINGS_LIST,
     ops::SETTINGS_GET,
@@ -63,6 +63,7 @@ const READS: [&str; 23] = [
     ops::ASK_MINE,
     ops::VAULT_FIND,
     ops::LOG_VERIFY,
+    ops::DAEMON_CAPABILITIES,
     COST_SUMMARY,
     COST_REPORT,
 ];
