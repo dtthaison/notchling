@@ -137,6 +137,21 @@ impl Identifier {
         who
     }
 
+    pub fn owner_pid(&self, pid: u32, session: &str) -> Option<u32> {
+        let launched = self.chain(pid).into_iter().find(|p| {
+            self.launches
+                .find(*p, self.procs.start_time(*p))
+                .is_some_and(|(_, launched)| launched == session)
+        });
+        launched.or_else(|| {
+            find_session_where(&self.roots, &|p| self.procs.parent(p), pid, &|p| {
+                is_claude_binary(self.procs.as_ref(), p, &self.home)
+            })
+            .filter(|hit| hit.session_id == session)
+            .map(|hit| hit.claude_pid)
+        })
+    }
+
     fn chain(&self, pid: u32) -> Vec<u32> {
         let mut seen = HashSet::from([pid]);
         let mut chain = vec![pid];

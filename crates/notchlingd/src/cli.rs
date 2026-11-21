@@ -103,6 +103,9 @@ pub enum Command {
         read: crate::mine_cli::Read,
         args: Vec<String>,
     },
+    Shells {
+        args: Vec<String>,
+    },
     Version,
     Help {
         json: bool,
@@ -288,6 +291,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
                 read,
                 args: args.collect(),
             });
+        }
+        "shells" => {
+            return Ok(Command::Shells {
+                args: args.collect(),
+            })
         }
         _ => {}
     }

@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use notchling_engine::transcript::model::{BackgroundShell, Conversation};
 use notchling_engine::transcript::shells::{self, ShellState};
+use notchling_engine::transcript::shells_stuck::{self, Stuck};
 use notchling_kit::{Icon, Ink, Status};
 
 use super::inspector::{Mark, ShellRow};
@@ -48,20 +49,11 @@ pub fn shell_rows_with_fan(
                         t::chat::status_running().to_owned(),
                         Mark::Spinner,
                     ),
-                    ShellState::Ended(how) => {
-                        let ok = how == "completed";
-                        (
-                            if ok { Status::Done } else { Status::Needs },
-                            capitalized(&how),
-                            if ok {
-                                Mark::Icon(Icon::Done, Ink::Done)
-                            } else {
-                                Mark::Icon(Icon::Failed, Ink::Expired)
-                            },
-                        )
-                    }
+                    ShellState::Ended(how) => ended_look(&how),
                 };
                 ShellRow {
+                    id: shell.id.clone(),
+                    started: shell.started.map(|s| s as i64),
                     title: if shell.title.is_empty() {
                         shell.command.clone()
                     } else {
@@ -73,10 +65,51 @@ pub fn shell_rows_with_fan(
                     running: status == Status::Working,
                     mark,
                     output_path: shell.output_path.clone(),
+                    shape: shells_stuck::shape_of(&shell.command),
                 }
             })
             .collect(),
     )
+}
+
+pub fn ended_look(how: &str) -> (Status, String, Mark) {
+    let ok = how == "completed";
+    (
+        if ok { Status::Done } else { Status::Needs },
+        capitalized(how),
+        if ok {
+            Mark::Icon(Icon::Done, Ink::Done)
+        } else {
+            Mark::Icon(Icon::Failed, Ink::Expired)
+        },
+    )
+}
+
+pub fn running_word(started: Option<i64>, now_s: i64) -> String {
+    let minutes = started
+        .filter(|s| *s > 0)
+        .map_or(0, |s| (now_s - s).max(0) / 60);
+    match minutes {
+        0 => t::chat::status_running().to_owned(),
+        1..=59 => t::chat::shell_running_minutes(minutes),
+        60..=2879 => t::chat::shell_running_hours(minutes / 60, minutes % 60),
+        _ => t::chat::shell_running_days(minutes / 1440, minutes % 1440 / 60),
+    }
+}
+
+pub fn stuck_of(row: &ShellRow, now_s: i64) -> Option<Stuck> {
+    if !row.running {
+        return None;
+    }
+    let running = shells_stuck::running_secs(row.started.map(|s| s as f64), now_s as f64);
+    shells_stuck::stuck_by(row.shape, running)
+}
+
+pub fn stuck_words(stuck: Stuck) -> String {
+    match stuck {
+        Stuck::Itself => t::chat::shell_stuck_itself().to_owned(),
+        Stuck::LongLoop => t::chat::shell_stuck_loop().to_owned(),
+    }
 }
 
 fn running_first(mut rows: Vec<ShellRow>) -> Vec<ShellRow> {
@@ -92,3 +125,7 @@ fn capitalized(word: &str) -> String {
         None => String::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "shell_rows_tests.rs"]
+mod tests;

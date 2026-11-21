@@ -33,6 +33,7 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling prompts [--json]` | `prompts.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling consent cancel <id> [--json]` | `consent.cancel` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling inbox [--json] [--socket <path>]` | `inbox.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling shells [--json] [--socket <path>]` | `shells.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling accounts [--json] [--socket <path>]` | `accounts.summary` (agent) | none | 0 1 2 3 4 |
 | `notchling limits [--tool <claude|codex|agy> [--pool <name>]] [--json] [--socket <path>]` | `limits.summary` (agent) | none | 0 1 2 3 4 |
 | `notchling orgs [--json] [--socket <path>]` | `organizations.mine` (agent) | none | 0 1 2 3 4 |
@@ -41,6 +42,7 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling awake [on|off] [--json] [--socket <path>]` | `awake.state` (agent) | none | 0 1 2 3 4 |
 | `notchling versions [--latest] [--workers] [--json] [--socket <path>]` | `versions.get` (agent), `versions.latest` (agent), `versions.workers` (agent) | none | 0 1 2 3 4 |
 | `notchling roles [--json] [--socket <path>]` | `catalog.roles` (agent) | none | 0 1 2 3 4 |
+| `notchling shells stop <id> [--json] [--socket <path>]` | `shells.stop` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling session reload <id|self> [--after-turn] [--json]` | `session.reload` (agent, acts) | own_free | 0 1 2 3 4 |
 | `notchling cluster status [--json]` | `cluster.status` (agent) | none | 0 1 2 3 4 |
 | `notchling cluster join --token-stdin [--json]` | `cluster.join` (agent, acts) | none | 0 1 2 3 4 |

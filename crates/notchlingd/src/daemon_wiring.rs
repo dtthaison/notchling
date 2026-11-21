@@ -22,7 +22,7 @@ use crate::codex_children::CodexChildren;
 use crate::codex_ops::CodexOps;
 use crate::consent_ops::ConsentOps;
 use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
-use crate::daemon_wiring_setup::{bridge_setup, outbox_ops};
+use crate::daemon_wiring_setup::{bridge_setup, outbox_ops, shells_ops};
 use crate::every_session::{EverySession, CLAUDE};
 use crate::git_ops::{listed_folders, live_folders, GitOps};
 use crate::identity::{Identifier, Launches};
@@ -879,7 +879,7 @@ impl Wired {
             &self.events,
         );
         let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
-            .with_identity(identity, names)
+            .with_identity(identity.clone(), names)
             .with_bridge(self.bridge.clone())
             .with_codex(self.codex.clone())
             .with_agy(self.agy.clone())
@@ -892,6 +892,7 @@ impl Wired {
                     .with_events(Events::new(self.events.clone(), self.salt.clone())),
             ))
             .with_group(Arc::new(capabilities_ops::CapabilitiesOps::wired(self)))
+            .with_group(shells_ops(layout, identity))
             .with_group(self.accounts.clone())
             .with_group(self.install.clone())
             .with_group(self.models.clone())

@@ -1,9 +1,11 @@
 use crate::acting_ops::{ActingOps, Room};
 use crate::bridge_backend::APPROVAL_WAIT;
 use crate::bridge_ops::BridgeSetup;
+use crate::identity::Identifier;
 use crate::late_emit::Events;
 use crate::layout::Layout;
 use crate::outbox_ops::OutboxOps;
+use crate::shells_ops::ShellsOps;
 use notchling_engine::control::session::home_of;
 use notchling_engine::outbox::OutboxStore;
 use serde_json::Value;
@@ -53,4 +55,12 @@ pub(crate) fn outbox_ops(
     } else {
         ops.without_store()
     }
+}
+
+pub(crate) fn shells_ops(layout: &Layout, identity: Arc<Identifier>) -> Arc<ShellsOps> {
+    Arc::new(
+        ShellsOps::new(layout.roots()).with_owner(Arc::new(move |caller, session| {
+            caller.pid.and_then(|pid| identity.owner_pid(pid, session))
+        })),
+    )
 }

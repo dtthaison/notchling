@@ -216,6 +216,8 @@ mod sessions_args;
 pub mod settings_cli;
 pub mod settings_ops;
 pub mod shell_jobs;
+pub mod shells_cli;
+pub mod shells_ops;
 pub mod signals;
 pub mod snap_copy;
 pub mod snap_db;
@@ -577,6 +579,7 @@ pub fn run(command: Command) -> i32 {
         Command::Read { name, args } => reads_cli::run(&name, &args),
         Command::Watch { args } => watch_cli::run(&args),
         Command::Mine { read, args } => mine_cli::run(read, &args),
+        Command::Shells { args } => shells_cli::run(&args),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Session { args } => match args.first().map(String::as_str) {
             Some("reload") => reload_cli::run(&args),

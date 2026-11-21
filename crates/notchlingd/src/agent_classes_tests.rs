@@ -41,7 +41,7 @@ fn rig() -> (Root, Ops) {
     (Root(root), ops)
 }
 
-const READS: [&str; 37] = [
+const READS: [&str; 38] = [
     ops::SESSIONS_LIST,
     ops::SETTINGS_LIST,
     ops::SETTINGS_GET,
@@ -77,11 +77,12 @@ const READS: [&str; 37] = [
     ops::OUTBOX_MINE,
     ops::ACTIVITY_MINE,
     ops::PROMPTS_MINE,
+    ops::SHELLS_MINE,
     COST_SUMMARY,
     COST_REPORT,
 ];
 
-const ACTS: [&str; 11] = [
+const ACTS: [&str; 12] = [
     ops::SETTINGS_SET,
     ops::MODELS_UPDATE,
     ops::CLUSTER_JOIN,
@@ -93,6 +94,7 @@ const ACTS: [&str; 11] = [
     ops::VAULT_USE,
     ops::VAULT_REQUEST,
     ops::CONSENT_CANCEL,
+    ops::SHELLS_STOP,
 ];
 
 const HOOKS: [&str; 4] = [

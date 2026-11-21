@@ -518,6 +518,15 @@ chat-status-running = Running
 chat-status-failed = Failed
 chat-status-stopped = Stopped
 chat-status-not-running = Not running
+# A running background shell command, with how long it has run. $n is whole minutes, $hours and $days are whole hours and days.
+chat-shell-running-minutes = Running { NUMBER($n) } min
+chat-shell-running-hours = Running { NUMBER($hours) } h { NUMBER($minutes) } min
+chat-shell-running-days = Running { NUMBER($days) } d { NUMBER($hours) } h
+# The button under a running shell command that ends the processes writing its output.
+chat-shell-stop = Stop
+# The hint under a running shell command that is probably waiting for nothing.
+chat-shell-stuck-itself = Looks stuck: it waits for a process that is itself
+chat-shell-stuck-loop = Looks stuck: a wait loop that has run over 30 min
 
 ## Details Panel, Git
 
