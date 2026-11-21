@@ -441,7 +441,7 @@ impl ConsentOps {
             self.end(&row, State::Failed, None, ConsentThen::Failed);
             return;
         };
-        if let Err(_why) = handler.recheck(&row) {
+        if handler.recheck(&row).is_err() || self.now() >= row.expires_ms {
             self.end(&row, State::Withdrawn, None, ConsentThen::Withdrawn);
             return;
         }
@@ -549,7 +549,7 @@ impl ConsentOps {
             .get(id)
             .map_err(failed)?
             .ok_or_else(|| failed(NO_SUCH))?;
-        if caller.tier == Tier::Agent && !self.may_see(caller, &row) {
+        if Self::app_only(caller).is_err() && !self.may_see(caller, &row) {
             return Err(forbidden(OTHER_SESSION, "other_session"));
         }
         Ok(row)
@@ -584,7 +584,7 @@ impl ConsentOps {
             self.wait_for(&row.id, Duration::from_millis(wait))
                 .unwrap_or(row)
         };
-        Ok(self.project(&row, caller.tier == Tier::Agent))
+        Ok(self.project(&row, Self::app_only(caller).is_err()))
     }
 
     pub fn project(&self, row: &Consent, agent: bool) -> Value {
@@ -752,7 +752,7 @@ impl ConsentOps {
 
     pub fn pending_for(&self, caller: &Caller, kind: &str, target: &str) -> Vec<Consent> {
         let rows = self.waiting_for(kind, target);
-        if caller.tier == Tier::App {
+        if Self::app_only(caller).is_ok() {
             return rows;
         }
         let who = self.who(caller);

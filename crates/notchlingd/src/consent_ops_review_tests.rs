@@ -228,3 +228,67 @@ fn the_view_names_the_folder_and_root_the_request_came_from() {
     assert_eq!(seen["folder"], "/w/app");
     assert_eq!(seen["root"], "Terminal");
 }
+
+struct LateCheck {
+    clock: Arc<AtomicI64>,
+    to: i64,
+    hits: Arc<AtomicUsize>,
+}
+
+impl Handler for LateCheck {
+    fn recheck(&self, _: &Consent) -> Result<(), String> {
+        self.clock.store(self.to, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn apply(&self, _: &Consent, _: Option<Answerer>, _: Option<&str>) -> Result<Value, String> {
+        self.hits.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({"applied": true}))
+    }
+}
+
+#[test]
+fn an_end_that_passes_after_the_audit_commit_withdraws_before_the_change() {
+    let r = rig("late-commit");
+    let hits = Arc::new(AtomicUsize::new(0));
+    let row = r.open(1, SETTING, "limitMode");
+    r.consent.register(
+        SETTING,
+        Arc::new(LateCheck {
+            clock: r.clock.clone(),
+            to: row.expires_ms + 1,
+            hits: hits.clone(),
+        }),
+    );
+    let now = r.clock.load(Ordering::SeqCst);
+    r.store
+        .answer(&row.id, State::Applying, "mac", None, now)
+        .unwrap();
+    r.consent.apply(r.store.get(&row.id).unwrap().unwrap());
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    assert_eq!(r.state(&row.id), "withdrawn");
+}
+
+#[test]
+fn an_app_tier_caller_that_is_not_the_app_sees_only_what_an_agent_sees() {
+    let r = rig("app-tier-cli");
+    let row = r.open(1, SETTING, "limitMode");
+    for client in [ClientKind::Cli, ClientKind::Hook, ClientKind::Node] {
+        let caller = Caller {
+            pid: Some(2),
+            ..from(client)
+        };
+        let err = r
+            .consent
+            .call(&caller, ops::CONSENT_GET, &json!({"id": row.id}))
+            .unwrap_err();
+        assert_eq!(err.data.unwrap()["reason"], "other_session", "{client:?}");
+        assert!(r.consent.pending_for(&caller, SETTING, "limitMode").is_empty());
+    }
+    assert_eq!(
+        r.consent
+            .pending_for(&app_caller(), SETTING, "limitMode")
+            .len(),
+        1
+    );
+}
