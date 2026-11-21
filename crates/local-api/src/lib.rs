@@ -1,3 +1,4 @@
+mod bound;
 pub mod client;
 mod conn;
 pub mod framing;
@@ -12,6 +13,8 @@ pub mod tier;
 pub mod transport;
 pub mod wire;
 
+#[cfg(test)]
+mod bound_tests;
 #[cfg(test)]
 mod presence_tests;
 #[cfg(test)]
@@ -28,6 +31,7 @@ mod server_tests;
 #[cfg(test)]
 pub(crate) mod testutil;
 
+pub use bound::{bind as bind_identity, bound_identity, Bound};
 pub use client::{server_trusted, Client, ClientError, ConnectOptions, CALL_TIMEOUT};
 pub use framing::MAX_LINE;
 pub use server::{

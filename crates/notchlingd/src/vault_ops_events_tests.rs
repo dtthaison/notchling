@@ -136,10 +136,8 @@ fn an_unanswered_approval_expires() {
 #[test]
 fn request_saved_commits() {
     let s = setup("ev-request", true);
-    let (_, event) = ask(
-        &s,
-        json!({"name": "npm", "reason": "to publish", "folder": "/w/app"}),
-    );
+    let _bound = notchling_local_api::bind_identity(Some(in_folder("/w/app")));
+    let (_, event) = ask(&s, json!({"name": "npm", "reason": "to publish"}));
     s.ops
         .call(
             &app(),
@@ -157,6 +155,39 @@ fn request_saved_commits() {
     assert_eq!(s.sink.commits(), 1);
     assert!(!format!("{:?}", s.sink.events()).contains("fake-npm-0003"));
     assert!(!format!("{:?}", s.consent_sink.events()).contains("fake-npm-0003"));
+}
+
+fn in_folder(folder: &str) -> notchling_local_api::AgentIdentity {
+    notchling_local_api::AgentIdentity {
+        folder: Some(folder.to_string()),
+        ..crate::consent_testkit::shell("Terminal")
+    }
+}
+
+#[test]
+fn the_folder_and_the_verified_flag_are_computed_by_the_daemon() {
+    let s = setup("ev-request-folder", true);
+    let _bound = notchling_local_api::bind_identity(Some(in_folder("/w/real")));
+    let (reply, event) = ask(
+        &s,
+        json!({"name": "npm", "folder": "/w/forged", "verified": true}),
+    );
+    assert_ne!(event["verified"], json!(true));
+    let shown = format!("{reply}");
+    assert!(!shown.contains("/w/forged"), "{shown}");
+    s.ops
+        .call(
+            &app(),
+            ops::VAULT_REQUEST_CANCEL,
+            &json!({"id": event["id"]}),
+        )
+        .unwrap();
+    ended(&s, event["id"].as_str().unwrap());
+    let asked = until(|| {
+        let found = of(&s.sink, "vault.secret_requested");
+        (!found.is_empty()).then_some(found)
+    });
+    assert_eq!(text(&asked[0], "folder").as_deref(), Some("/w/real"));
 }
 
 #[test]

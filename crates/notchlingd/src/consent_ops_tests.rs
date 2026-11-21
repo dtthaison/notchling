@@ -93,6 +93,7 @@ fn opening(kind: &'static str, target: &str, reason: Option<&str>) -> Opening {
         change: json!({"key": target, "title": target, "before": 1, "after": 2, "text": false,
                        "name": target}),
         facts: json!([{"line": "consent-test", "args": {"target": target}}]),
+        request: json!({"op": "test", "target": target}),
         reason: reason.map(str::to_string),
         expires_in_ms: None,
         key: None,

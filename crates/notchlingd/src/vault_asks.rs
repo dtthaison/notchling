@@ -128,6 +128,18 @@ impl VaultOps {
     }
 
     pub(super) fn request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        let dry = args.get("dryRun").and_then(Value::as_bool) == Some(true);
+        match self.request_inner(caller, args, dry) {
+            Err(e) if dry => Ok(json!({
+                "dryRun": true, "op": ops::VAULT_REQUEST, "would": "refuse",
+                "change": {"name": args.get("name")}, "request": null,
+                "error": crate::contract::Failure::from_api(Some(ops::VAULT_REQUEST), e)
+                    .to_value()["error"].clone()})),
+            other => other,
+        }
+    }
+
+    fn request_inner(&self, caller: &Caller, args: &Value, dry: bool) -> Result<Value, ApiError> {
         let name = text(args, "name", MAX_SHORT)?.unwrap_or_default();
         if !valid_name(&name) {
             return Err(ApiError::bad_request(
@@ -138,7 +150,6 @@ impl VaultOps {
         if kind.as_deref().is_some_and(|k| Kind::parse(k).is_none()) {
             return Err(ApiError::bad_request("kind is token or login."));
         }
-        let folder = text(args, "folder", MAX_SHORT)?.unwrap_or_default();
         let expires = text(args, "expires", MAX_SHORT)?;
         if expires
             .as_deref()
@@ -162,10 +173,19 @@ impl VaultOps {
             expires,
             reason: None,
         };
-        let existing = self
-            .store
-            .entry(&request.name)
-            .map_err(|e| failed(e.to_string()))?;
+        let vault_on = self.switch.is_on();
+        let existing = if vault_on {
+            self.store
+                .entry(&request.name)
+                .map_err(|e| failed(e.to_string()))?
+        } else {
+            None
+        };
+        let known = if vault_on {
+            json!(existing.is_some())
+        } else {
+            Value::Null
+        };
         let (entry, changes) = match &existing {
             Some(saved) => (
                 saved.prefilled(&request),
@@ -176,25 +196,27 @@ impl VaultOps {
                 PrefillChanges::default(),
             ),
         };
+        let folder = consent.who(caller).folder.unwrap_or_default();
         let verified = crate::vault_caller::verified(self.processes.as_ref(), caller, &folder);
         let opening = Opening {
             kind: SECRET_REQUEST,
             target: request.name.clone(),
             change: json!({"name": request.name, "folder": folder, "request": request,
-                           "entry": entry_json(&entry), "existing": existing.is_some(),
+                           "entry": entry_json(&entry), "existing": known,
+                           "revision": existing.as_ref().map(|e| e.updated.clone()),
                            "changes": changes, "verified": verified}),
             facts: json!([{"line": "consent-secret-request",
-                           "args": {"name": request.name, "update": existing.is_some(),
-                                    "vaultOn": self.switch.is_on()}}]),
+                           "args": {"name": request.name, "update": known}}]),
+            request: json!({"op": ops::VAULT_REQUEST, "request": request}),
             reason,
             expires_in_ms,
             key,
         };
-        if args.get("dryRun").and_then(Value::as_bool) == Some(true) {
+        if dry {
             let would = consent.would(&opening)?;
             return Ok(
                 json!({"dryRun": true, "op": ops::VAULT_REQUEST, "would": "ask",
-                             "change": {"name": request.name, "update": existing.is_some()},
+                             "change": {"name": request.name, "update": known},
                              "request": would, "error": null}),
             );
         }
@@ -204,10 +226,10 @@ impl VaultOps {
             self.room.publish(
                 topics::VAULT,
                 topics::VAULT_REQUEST_PENDING,
-                &request_event(&row),
+                &self.request_event(&row),
             );
         }
-        Ok(json!({"state": row.state.as_str(), "request": consent_view(&row)}))
+        Ok(json!({"state": row.state.as_str(), "request": consent.project(&row, true)}))
     }
 
     pub(super) fn cancel(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -221,35 +243,62 @@ impl VaultOps {
     }
 
     pub(super) fn pending(&self) -> Value {
+        let now = self.consent.get().map_or(0, |c| c.now());
         let requests: Vec<Value> = self
             .consent
             .get()
             .map(|c| c.store().open_rows().unwrap_or_default())
             .unwrap_or_default()
             .iter()
-            .filter(|r| r.kind == SECRET_REQUEST && r.state.open())
-            .map(request_event)
+            .filter(|r| r.kind == SECRET_REQUEST && r.state.open() && r.expires_ms > now)
+            .map(|r| self.request_event(r))
             .collect();
         json!({"approvals": self.approvals.pending(), "requests": requests})
     }
-}
 
-pub(super) fn request_event(row: &notchling_engine::consent::Consent) -> Value {
-    let mut request = row.change.get("request").cloned().unwrap_or(Value::Null);
-    if let (Some(reason), Some(map)) = (&row.reason, request.as_object_mut()) {
-        map.insert("reason".into(), json!(reason));
+    pub(super) fn request_event(&self, row: &notchling_engine::consent::Consent) -> Value {
+        let mut request = row.change.get("request").cloned().unwrap_or(Value::Null);
+        if let (Some(reason), Some(map)) = (&row.reason, request.as_object_mut()) {
+            map.insert("reason".into(), json!(reason));
+        }
+        let unknown = row.change.get("existing").is_none_or(Value::is_null);
+        let live = if unknown && self.switch.is_on() {
+            self.live_prefill(&request)
+        } else {
+            None
+        };
+        let (entry, existing, changes) = live.unwrap_or_else(|| {
+            (
+                row.change.get("entry").cloned().unwrap_or(Value::Null),
+                row.change.get("existing").cloned().unwrap_or(Value::Null),
+                row.change.get("changes").cloned().unwrap_or(Value::Null),
+            )
+        });
+        let mut event = json!({"id": row.id, "request": request,
+            "entry": entry, "existing": existing, "changes": changes,
+            "verified": row.change.get("verified")});
+        if let Some(session) = &row.session {
+            event["session"] = json!(session);
+        }
+        event
     }
-    let mut event = json!({"id": row.id, "request": request,
-        "entry": row.change.get("entry"), "existing": row.change.get("existing"),
-        "changes": row.change.get("changes"), "verified": row.change.get("verified")});
-    if let Some(session) = &row.session {
-        event["session"] = json!(session);
-    }
-    event
-}
 
-pub(super) fn consent_view(row: &notchling_engine::consent::Consent) -> Value {
-    crate::consent_wire::view(row)
+    fn live_prefill(&self, request: &Value) -> Option<(Value, Value, Value)> {
+        let request: VaultRequest = serde_json::from_value(request.clone()).ok()?;
+        let saved = self.store.entry(&request.name).ok()?;
+        let (entry, changes) = match &saved {
+            Some(saved) => (saved.prefilled(&request), PrefillChanges::of(saved, &request)),
+            None => (
+                VaultEntry::from_request(&request),
+                PrefillChanges::default(),
+            ),
+        };
+        Some((
+            entry_json(&entry),
+            json!(saved.is_some()),
+            serde_json::to_value(changes).ok()?,
+        ))
+    }
 }
 
 pub(super) struct SecretHandler {
@@ -257,6 +306,26 @@ pub(super) struct SecretHandler {
 }
 
 impl crate::consent_ops::Handler for SecretHandler {
+    fn shape(&self, _row: &notchling_engine::consent::Consent, view: &mut Value, agent: bool) {
+        let Some(ops) = self.ops.upgrade() else {
+            return;
+        };
+        let on = ops.switch.is_on();
+        let facts = view.get_mut("facts").and_then(Value::as_array_mut);
+        for fact in facts.into_iter().flatten() {
+            if let Some(args) = fact.get_mut("args").and_then(Value::as_object_mut) {
+                args.insert("vaultOn".into(), json!(on));
+            }
+        }
+        if agent {
+            if let Some(change) = view.get_mut("change").and_then(Value::as_object_mut) {
+                for key in ["entry", "existing", "changes", "revision", "verified"] {
+                    change.remove(key);
+                }
+            }
+        }
+    }
+
     fn ended(
         &self,
         row: &notchling_engine::consent::Consent,

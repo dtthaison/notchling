@@ -42,6 +42,12 @@ pub(crate) fn view(row: &Consent) -> Value {
     if let Some(organization) = &row.organization {
         out.insert("organization".into(), json!(organization));
     }
+    if let Some(folder) = &row.folder {
+        out.insert("folder".into(), json!(folder));
+    }
+    if let Some(root) = &row.root {
+        out.insert("root".into(), json!(root));
+    }
     out.insert("scope".into(), Value::Object(scope));
     if let Some(result) = &row.result {
         out.insert("result".into(), result.clone());

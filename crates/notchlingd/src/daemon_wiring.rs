@@ -856,9 +856,6 @@ impl Wired {
             &self.names,
             &self.events,
         );
-        let known = identity.clone();
-        self.consent
-            .bind_identity(Arc::new(move |pid| known.identify(pid)));
         let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
             .with_identity(identity, names)
             .with_bridge(self.bridge.clone())
