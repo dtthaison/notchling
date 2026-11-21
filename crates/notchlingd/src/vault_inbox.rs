@@ -40,35 +40,6 @@ impl Responder for ApprovalResponder {
     }
 }
 
-struct RequestResponder {
-    requests: Arc<Waiters<Answered<Option<VaultEntry>>>>,
-    ticket: String,
-}
-
-impl RequestResponder {
-    fn give(&self, action: ActionId, by: Answerer, device: Option<String>) -> bool {
-        action == ActionId::Cancel
-            && self.requests.answer(
-                &self.ticket,
-                Answered {
-                    value: None,
-                    by,
-                    device,
-                },
-            )
-    }
-}
-
-impl Responder for RequestResponder {
-    fn answered(&self, _item: &Item, action: ActionId) -> bool {
-        self.give(action, Answerer::Mac, None)
-    }
-
-    fn answered_by(&self, _item: &Item, action: ActionId, by: &str) -> bool {
-        self.give(action, answerer(by), device_now())
-    }
-}
-
 pub(super) struct Raised {
     inbox: Option<Arc<InboxOps>>,
     id: String,
@@ -136,10 +107,6 @@ fn approval_item_id(ticket: &str) -> String {
     format!("vault-approval:{ticket}")
 }
 
-fn request_item_id(ticket: &str) -> String {
-    format!("vault-request:{ticket}")
-}
-
 pub(super) fn action_of(decision: Decision) -> ActionId {
     match decision {
         Decision::Once => ActionId::AllowOnce,
@@ -184,33 +151,6 @@ impl VaultOps {
         raised.open = Some(json!({"vault_approval": ticket}));
         let responder = ApprovalResponder {
             approvals: self.approvals.clone(),
-            ticket: ticket.to_string(),
-        };
-        Raised::new(inbox, inbox.raise(raised, Some(Arc::new(responder))))
-    }
-
-    pub(super) fn raise_request(&self, ticket: &str, request: &VaultRequest) -> Raised {
-        let Some(inbox) = &self.inbox else {
-            return Raised::none();
-        };
-        let detail = request
-            .reason
-            .clone()
-            .or_else(|| request.note.clone())
-            .unwrap_or_default();
-        let mut raised = item(
-            request_item_id(ticket),
-            ItemKind::SecretRequest,
-            format!("Add secret {}", request.name),
-            detail,
-        );
-        raised.actions = vec![
-            action(ActionId::Open, "Open Form", true),
-            action(ActionId::Cancel, "Cancel", false),
-        ];
-        raised.open = Some(json!({"vault_request": ticket}));
-        let responder = RequestResponder {
-            requests: self.requests.clone(),
             ticket: ticket.to_string(),
         };
         Raised::new(inbox, inbox.raise(raised, Some(Arc::new(responder))))

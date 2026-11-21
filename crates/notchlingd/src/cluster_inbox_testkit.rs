@@ -43,6 +43,7 @@ pub(crate) struct Fabric {
     pub failing: Mutex<BTreeSet<NodeId>>,
     pub removed: Mutex<BTreeSet<NodeId>>,
     pub not_keeping: Mutex<BTreeSet<NodeId>>,
+    pub knows_consent: Mutex<BTreeSet<NodeId>>,
     pub attempts: Mutex<Vec<NodeId>>,
     pub sent: Mutex<Vec<(NodeId, NodeId, String, Value)>>,
     pub clock: Arc<AtomicI64>,
@@ -126,6 +127,7 @@ impl Net for Wire {
         let down = self.fabric.down.lock().unwrap().clone();
         let removed = self.fabric.removed.lock().unwrap().clone();
         let not_keeping = self.fabric.not_keeping.lock().unwrap().clone();
+        let knows = self.fabric.knows_consent.lock().unwrap().clone();
         self.fabric
             .machines
             .lock()
@@ -137,6 +139,7 @@ impl Net for Wire {
                 name: m.name.clone(),
                 online: !down.contains(&m.id),
                 keeps: (m.keeps && !not_keeping.contains(&m.id)) || Some(&m.id) == home.as_ref(),
+                consent: knows.contains(&m.id),
             })
             .collect()
     }

@@ -208,6 +208,27 @@
     {"name":"cmd_hash","type":"hex","optional":true,"list":false,"choices":[]},
     {"name":"out_hash","type":"hex","optional":true,"list":false,"choices":[]}
   ]},
+  {"name":"agent.consent","kv":1,"group":"agents","lock":"always","sinks":["audit","activity"],"default":"on","durability":"commit_from_agent","emitters":["daemon"],"retired":false,"fields":[
+    {"name":"consent","type":"ref:consent","optional":false,"list":false,"choices":[]},
+    {"name":"then","type":"choice","optional":false,"list":false,"choices":["asked","refused","opened","allowed","denied","expired","cancelled","withdrawn","applied","failed","restored","handed_over","other"]},
+    {"name":"kind","type":"choice","optional":false,"list":false,"choices":["setting","secret_request","switch","session","session_stop","dispatch","job","job_stop","cluster","account","machine","install","cost_profile","update","other"]},
+    {"name":"by","type":"choice","optional":true,"list":false,"choices":["mac","phone","none","main","other"]},
+    {"name":"answer_on","type":"choice","optional":false,"list":false,"choices":["mac","mac_or_phone","other"]},
+    {"name":"switch","type":"choice","optional":true,"list":false,"choices":["acting","bridge","accounts","vault","install","cluster","other"]},
+    {"name":"key","type":"choice","optional":true,"list":false,"choices":["mode","active","keepDisplayOn","continueAfterSleep","hideNotch","answerFromNotch","keepPages","claudeUseChrome","showPet","replyFromNotch","showLastReply","askedAccessibility","notchWidth","dismissed","hiddenAgents","accounts","untrackedCostAccount","antigravityAccounts","claudeDesktopAccounts","codexAccounts","limitMode","limitSwitchAt","codexLimitMode","antigravityLimitMode","antigravityChannel","antigravityRemoteIn","codexNetwork","migratedFromAwake","chatClosedSessions","chatUsedSessions","chatInspector","codexPicks","chatProjectFolders","newSessionChoice","chatOpen","chatSelection","chatWindowFrame","chatPanels","chatPageWidth","chatHistory","appearance","checkForUpdates","searchShortcut","clusterFailover","costPreset","costPicks","costClaude","costCodex","costAgy","costGuard","costProfileApp","vaultReminderSent","bridgeEnabled","debugAccessCertsFile","unknown","other"]},
+    {"name":"secret","type":"ref:secret","optional":true,"list":false,"choices":[]},
+    {"name":"session","type":"ref:session","optional":true,"list":false,"choices":[]},
+    {"name":"machine","type":"ref:machine","optional":true,"list":false,"choices":[]},
+    {"name":"account","type":"ref:account","optional":true,"list":false,"choices":[]},
+    {"name":"lane","type":"ref:lane","optional":true,"list":false,"choices":[]},
+    {"name":"job","type":"ref:job","optional":true,"list":false,"choices":[]},
+    {"name":"action","type":"choice","optional":true,"list":false,"choices":["cluster_create","cluster_invite","cluster_remove","cluster_main","cluster_failover","cluster_move_home","cluster_allow","account_switch","account_add","account_remove","account_move_all","machine_add","machine_fix","machine_update","machine_remove","tailscale_network","install_set_up","cost_set","cost_apply","cost_undo","tool_update","other"]},
+    {"name":"tool","type":"choice","optional":false,"list":false,"choices":["claude","codex","antigravity","shell","unknown","other"]},
+    {"name":"reason_chars","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"parts","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"parts_allowed","type":"count","optional":false,"list":false,"choices":[]},
+    {"name":"waited","type":"millis","optional":false,"list":false,"choices":[]}
+  ]},
   {"name":"agent.named","kv":1,"group":"agents","lock":"always","sinks":["audit","activity"],"default":"on","durability":"commit_from_agent","emitters":["daemon"],"retired":false,"fields":[
     {"name":"asker","type":"choice","optional":false,"list":false,"choices":["main","subagent","codex","antigravity","unknown","other"]},
     {"name":"agent","type":"ref:agent","optional":true,"list":false,"choices":[]}

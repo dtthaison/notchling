@@ -344,3 +344,30 @@ fn remove_takes_one_item_out_whatever_its_state() {
     let left: Vec<String> = book.items().into_iter().map(|i| i.id).collect();
     assert_eq!(left, vec!["b".to_string()]);
 }
+
+#[test]
+fn an_answered_item_can_still_be_withdrawn_but_an_expired_one_cannot() {
+    let mut book = Book::default();
+    book.raise(item(
+        "a",
+        Kind::Consent,
+        1,
+        &[ActionId::Allow, ActionId::Deny],
+    ));
+    book.raise(item(
+        "b",
+        Kind::Consent,
+        1,
+        &[ActionId::Allow, ActionId::Deny],
+    ));
+    book.answer("a", ActionId::Allow, "mac", 2).unwrap();
+    let change = book.withdraw("a", 3).unwrap();
+    let Change::Updated(withdrawn) = change else {
+        panic!("{change:?}");
+    };
+    assert_eq!(withdrawn.state, State::Withdrawn);
+    assert_eq!(withdrawn.answer, Some(ActionId::Allow));
+    book.resolve("b", State::Expired, None, None, 2);
+    assert!(book.withdraw("b", 3).is_none());
+    assert!(book.withdraw("a", 4).is_none());
+}

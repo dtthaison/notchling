@@ -1,5 +1,5 @@
 use crate::vault_args::Decision;
-use notchling_engine::vault::{VaultEntry, VaultStore};
+use notchling_engine::vault::VaultStore;
 use notchling_events::kinds::choices::Answerer;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -151,7 +151,6 @@ impl<T> Waiters<T> {
 pub(crate) struct OffHook {
     pub(crate) store: Weak<VaultStore>,
     pub(crate) approvals: Weak<Waiters<Answered<Decision>>>,
-    pub(crate) requests: Weak<Waiters<Answered<Option<VaultEntry>>>>,
 }
 
 impl OffHook {
@@ -160,9 +159,6 @@ impl OffHook {
             store.forget();
         }
         if let Some(waiters) = self.approvals.upgrade() {
-            waiters.drain();
-        }
-        if let Some(waiters) = self.requests.upgrade() {
             waiters.drain();
         }
     }

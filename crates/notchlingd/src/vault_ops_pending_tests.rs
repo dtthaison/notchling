@@ -1,4 +1,4 @@
-use super::tests::{agent, app, err, pending_use, seed, setup};
+use super::tests::{app, ask, err, pending_use, seed, setup};
 use super::*;
 use crate::vault_caller::Processes;
 use std::path::{Path, PathBuf};
@@ -51,22 +51,6 @@ fn trusting(session: Option<&'static str>) -> TrustedSession {
     Arc::new(move |_| session.map(str::to_owned))
 }
 
-fn pending_request(
-    s: &super::tests::Setup,
-    args: Value,
-) -> (std::thread::JoinHandle<Result<Value, ApiError>>, Value) {
-    s.room.follows.store(true, Ordering::SeqCst);
-    let ops = s.ops.clone();
-    let asker = std::thread::spawn(move || ops.call(&agent(), ops::VAULT_REQUEST, &args));
-    let request = loop {
-        if let Some(e) = s.room.pending(topics::VAULT_REQUEST_PENDING) {
-            break e;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
-    (asker, request)
-}
-
 fn cancel(s: &super::tests::Setup, request: &Value) {
     s.ops
         .call(
@@ -100,17 +84,15 @@ fn the_pending_events_name_the_asking_session_only_when_it_is_trusted() {
         None,
         Some(trusting(Some("sess-2"))),
     );
-    let (asker, request) = pending_request(&s, json!({"name": "npm", "folder": "/w/app"}));
+    let (_, request) = ask(&s, json!({"name": "npm", "folder": "/w/app"}));
     assert_eq!(request["session"], "sess-2");
-    assert_eq!(request["verified"]["cwd"], "/w/app");
-    assert_eq!(request["verified"]["parents"], json!(["zsh", "claude"]));
+    assert_eq!(request["verified"]["verified"], true);
+    assert_eq!(request["verified"]["session"], "sess-2");
     cancel(&s, &request);
-    assert!(asker.join().unwrap().is_err());
     let s = setup("pending-untrusted", true);
-    let (asker, request) = pending_request(&s, json!({"name": "npm"}));
+    let (_, request) = ask(&s, json!({"name": "npm"}));
     assert!(request.get("session").is_none());
     cancel(&s, &request);
-    assert!(asker.join().unwrap().is_err());
 }
 
 #[test]
@@ -122,20 +104,7 @@ fn a_reconnecting_app_sees_what_waits_for_it() {
     seed(&s, true);
     let (user, approval) = pending_use(&s);
     s.room.follows.store(true, Ordering::SeqCst);
-    let ops = s.ops.clone();
-    let asker = std::thread::spawn(move || {
-        ops.call(
-            &agent(),
-            ops::VAULT_REQUEST,
-            &json!({"name": "npm", "reason": "to publish"}),
-        )
-    });
-    let request = loop {
-        if let Some(e) = s.room.pending(topics::VAULT_REQUEST_PENDING) {
-            break e;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
+    let (_, request) = ask(&s, json!({"name": "npm", "reason": "to publish"}));
     let waiting = s.ops.call(&app(), ops::VAULT_PENDING, &json!({})).unwrap();
     assert_eq!(
         waiting,
@@ -157,7 +126,6 @@ fn a_reconnecting_app_sees_what_waits_for_it() {
         )
         .unwrap();
     assert!(user.join().unwrap().is_err());
-    assert!(asker.join().unwrap().is_err());
     let after = s.ops.call(&app(), ops::VAULT_PENDING, &json!({})).unwrap();
     assert_eq!(after, json!({"approvals": [], "requests": []}));
     s.switch.set(false);

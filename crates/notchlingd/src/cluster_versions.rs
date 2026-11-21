@@ -1,5 +1,7 @@
 use notchling_engine::cluster::build_id::build_id;
-use notchling_engine::cluster::versions::{CLUSTER_SCHEMA, FEATURE_DISPATCH, NODE_PROTO};
+use notchling_engine::cluster::versions::{
+    CLUSTER_SCHEMA, FEATURE_DISPATCH, FEATURE_INBOX_CONSENT, NODE_PROTO,
+};
 use notchling_engine::cluster::Versions;
 use notchling_engine::versions::mac::{detect, Roots};
 use notchling_engine::versions::{IdentityCache, Tool, Version};
@@ -9,7 +11,10 @@ pub fn own() -> Versions {
     Versions {
         notchling: env!("CARGO_PKG_VERSION").to_string(),
         proto: NODE_PROTO,
-        features: vec![FEATURE_DISPATCH.to_string()],
+        features: vec![
+            FEATURE_DISPATCH.to_string(),
+            FEATURE_INBOX_CONSENT.to_string(),
+        ],
         schema: CLUSTER_SCHEMA,
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),

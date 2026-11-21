@@ -112,6 +112,12 @@ pub mod codex_children;
 pub mod codex_fence;
 pub mod codex_ops;
 pub mod commands;
+pub mod consent_cli;
+mod consent_events;
+pub mod consent_ops;
+#[cfg(test)]
+pub(crate) mod consent_testkit;
+mod consent_wire;
 pub mod contract;
 pub mod control_ops;
 pub mod cost_ops;
@@ -123,6 +129,7 @@ pub mod cost_report_text;
 pub mod cost_setup_cli;
 pub mod daemon;
 pub mod daemon_wiring;
+mod daemon_wiring_setup;
 pub mod delegate_cli;
 pub mod every_session;
 pub mod git_args;
@@ -203,7 +210,6 @@ mod reply_screen;
 mod screen_keep;
 pub mod service;
 mod sessions_args;
-pub mod settings_asks;
 pub mod settings_cli;
 pub mod settings_ops;
 pub mod shell_jobs;
@@ -554,6 +560,8 @@ pub fn run(command: Command) -> i32 {
         Command::Secret { args } => vault_cli::secret(&args),
         Command::SecretRequest { args } => vault_cli::secret_request(&args),
         Command::Settings { args } => settings_cli::run(&args),
+        Command::Consent { args } => consent_cli::run(&args, false),
+        Command::Consents { args } => consent_cli::run(&args, true),
         Command::Cluster { args } => cluster_cli::run(&args),
         Command::Session { args } => match args.first().map(String::as_str) {
             Some("reload") => reload_cli::run(&args),

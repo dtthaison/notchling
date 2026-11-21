@@ -1366,7 +1366,7 @@ class InboxItem {
 
   final String id;
 
-  /// secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits, and, for a question an agent asks, question; a phone treats a kind it doesn't know as notice.
+  /// secret_approval, secret_request, limit_notice, action_failed or notice, and, from a cluster, primary_unreachable (and its confirm item, primary-unreachable:N:confirm), no_primary, primary_back and session_waits, for a question an agent asks, question, and, for an agent's request for the user's yes, consent (its actions are by label: allow and deny where a phone may answer, else deny and open); a phone treats a kind it doesn't know as notice.
   final String kind;
   final String title;
   final String detail;

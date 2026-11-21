@@ -11,7 +11,8 @@ fn the_three_commands_parse_and_anything_else_is_usage() {
         Ok(Args {
             sub: Sub::List,
             json: true,
-            socket: None
+            socket: None,
+            flags: Flags::default(),
         })
     );
     assert_eq!(
@@ -112,26 +113,57 @@ fn a_withdrawn_request_says_withdrawn_and_a_failed_one_says_failed() {
 }
 
 #[test]
+fn the_failure_carries_the_request_row_not_the_ask_wrapper() {
+    let reply = json!({"key": "theme", "value": "dark", "state": "denied", "message": "m",
+                       "request": {"id": "c1", "kind": "setting", "state": "denied"}});
+    let (code, text) = outcome(&reply);
+    let failure = failure_of(&reply, code, text);
+    assert_eq!(
+        failure.request,
+        Some(json!({"id": "c1", "kind": "setting", "state": "denied"}))
+    );
+}
+
+#[test]
 fn a_trouble_while_waiting_is_the_op_that_was_waiting() {
     let mut calls: Vec<String> = Vec::new();
-    let mut call = |op: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
+    let mut call = |op: &str, _: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
         calls.push(op.to_string());
         match op {
             "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
             _ => Err(ClientError::Timeout),
         }
     };
-    let got = set(&mut call, "theme", "dark", true);
+    let got = set(&mut call, ("theme", "dark"), &Flags::default(), true);
     let (op, error) = got.unwrap_err();
     assert_eq!(op, ops::SETTINGS_ASKED);
     assert!(matches!(error, ClientError::Timeout));
     assert_eq!(calls, ["settings.set", "settings.asked"]);
 
-    let mut refused = |_: &str, _: Value, _: Duration| -> Result<Value, ClientError> {
+    let mut refused = |_: &str, _: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
         Err(ClientError::Timeout)
     };
-    let (op, _) = set(&mut refused, "theme", "dark", true).unwrap_err();
+    let (op, _) = set(&mut refused, ("theme", "dark"), &Flags::default(), true).unwrap_err();
     assert_eq!(op, ops::SETTINGS_SET);
+}
+
+#[test]
+fn a_daemon_lost_past_the_deadline_returns_the_request_still_waiting() {
+    let mut sent: Vec<Value> = Vec::new();
+    let mut call = |op: &str, ask: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
+        sent.push(ask(Duration::from_secs(90)).0);
+        match op {
+            "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
+            _ => Err(ClientError::Closed),
+        }
+    };
+    let got = set(&mut call, ("theme", "dark"), &Flags::default(), true).unwrap();
+    assert_eq!(
+        (got["state"].as_str(), got["id"].as_str()),
+        (Some("waiting"), Some("r1"))
+    );
+    assert_eq!(sent[0]["wait"], 0);
+    assert_eq!(sent[1]["wait"], POLL);
 }
 
 #[test]
@@ -153,4 +185,59 @@ fn each_outcome_has_its_words_and_exit_code() {
     assert_eq!(outcome(&base("failed")), (contract::FAILED, "m".into()));
     assert_eq!(outcome(&base("withdrawn")), (contract::FAILED, "m".into()));
     assert_eq!(outcome(&base("waiting")).0, contract::PENDING);
+}
+
+#[test]
+fn the_common_flags_are_read_and_sent_in_the_consent_object() {
+    let parsed = parse(&args(&[
+        "set",
+        "limitMode",
+        "off",
+        "--reason",
+        "asked",
+        "--no-wait",
+        "--timeout",
+        "30",
+        "--expires-in",
+        "600",
+        "--key",
+        "k1",
+        "--dry-run",
+    ]))
+    .unwrap();
+    assert_eq!(parsed.flags.reason.as_deref(), Some("asked"));
+    assert!(!parsed.flags.wait && parsed.flags.dry_run);
+    assert_eq!(parsed.flags.timeout, Duration::from_secs(30));
+    assert_eq!(parsed.flags.expires_in, Some(600));
+    assert_eq!(parsed.flags.key.as_deref(), Some("k1"));
+    assert!(parse(&args(&["set", "a", "b", "--timeout", "soon"])).is_err());
+
+    let mut sent: Vec<Value> = Vec::new();
+    let mut call = |_: &str, ask: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
+        sent.push(ask(Duration::ZERO).0);
+        Ok(json!({"state": "waiting", "id": "c1"}))
+    };
+    let got = set(&mut call, ("limitMode", "off"), &parsed.flags, true).unwrap();
+    assert_eq!(got["id"], "c1", "--no-wait returns the first reply at once");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["dryRun"], true);
+    assert_eq!(sent[0]["consent"]["reason"], "asked");
+    assert_eq!(sent[0]["consent"]["expiresInMs"], 600_000);
+    assert_eq!(sent[0]["consent"]["key"], "k1");
+}
+
+#[test]
+fn the_last_part_of_a_wait_is_asked_in_milliseconds_not_as_zero_seconds() {
+    let mut sent: Vec<Value> = Vec::new();
+    let mut call = |op: &str, ask: &contract::Ask<'_>, _: Instant| -> Result<Value, ClientError> {
+        let (args, timeout) = ask(Duration::from_millis(400));
+        sent.push(args);
+        assert!(timeout > Duration::from_millis(400));
+        match op {
+            "settings.set" => Ok(json!({"state": "waiting", "id": "r1"})),
+            _ => Err(ClientError::Closed),
+        }
+    };
+    set(&mut call, ("theme", "dark"), &Flags::default(), true).unwrap();
+    assert_eq!(sent[1]["waitMs"], 400, "{}", sent[1]);
 }

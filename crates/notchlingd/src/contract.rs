@@ -3,6 +3,7 @@ use notchling_local_api::{ApiError, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::{json, Map, Value};
 use std::io::Write;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub const OK: i32 = 0;
 pub const FAILED: i32 = 1;
@@ -345,6 +346,136 @@ pub fn call(client: &mut Client, op: &str, args: Value) -> Result<Value, Failure
     client
         .call(op, args)
         .map_err(|e| Failure::from_client(Some(op), e))
+}
+
+const RECONNECT_MS: [u64; 4] = [1_000, 2_000, 5_000, 10_000];
+
+pub fn pause_ms(step: usize) -> u64 {
+    RECONNECT_MS[step.min(RECONNECT_MS.len() - 1)]
+}
+
+pub fn lost(failure: &Failure) -> bool {
+    failure.reason == "not_running"
+}
+
+pub fn pause(step: usize) -> Duration {
+    Duration::from_millis(pause_ms(step))
+}
+
+pub fn transient(e: &ClientError) -> bool {
+    use std::io::ErrorKind;
+    match e {
+        ClientError::NotRunning(_) | ClientError::Closed => true,
+        ClientError::Io(io) => matches!(
+            io.kind(),
+            ErrorKind::BrokenPipe
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::ConnectionRefused
+                | ErrorKind::NotConnected
+                | ErrorKind::UnexpectedEof
+                | ErrorKind::NotFound
+        ),
+        _ => false,
+    }
+}
+
+pub trait Link {
+    fn send(&mut self, op: &str, args: Value, timeout: Duration) -> Result<Value, ClientError>;
+    fn renew(&mut self, within: Duration) -> Result<(), ClientError>;
+}
+
+pub struct Socket<'a> {
+    pub client: &'a mut Client,
+    pub path: Option<&'a Path>,
+}
+
+impl Link for Socket<'_> {
+    fn send(&mut self, op: &str, args: Value, timeout: Duration) -> Result<Value, ClientError> {
+        self.client.set_timeout(timeout);
+        self.client.call(op, args)
+    }
+
+    fn renew(&mut self, within: Duration) -> Result<(), ClientError> {
+        let layout = Layout::from_env(self.path).ok_or(ClientError::Unsupported)?;
+        *self.client = Client::connect_with_timeout(
+            &layout.socket,
+            ClientKind::Cli,
+            env!("CARGO_PKG_VERSION"),
+            within.max(Duration::from_millis(1)),
+        )?;
+        Ok(())
+    }
+}
+
+pub type Ask<'a> = dyn Fn(Duration) -> (Value, Duration) + 'a;
+
+pub fn through_restart(
+    link: &mut dyn Link,
+    op: &str,
+    ask: &Ask<'_>,
+    end: Instant,
+    pause: &dyn Fn(usize) -> Duration,
+) -> Result<Value, ClientError> {
+    let left = || end.saturating_duration_since(Instant::now());
+    let (args, timeout) = ask(left());
+    let mut lost = match link.send(op, args, timeout) {
+        Err(e) if transient(&e) => e,
+        other => return other,
+    };
+    let mut step = 0;
+    loop {
+        if left().is_zero() {
+            return Err(lost);
+        }
+        std::thread::sleep(pause(step).min(left()));
+        step += 1;
+        if left().is_zero() {
+            return Err(lost);
+        }
+        match link.renew(left()) {
+            Ok(()) => {}
+            Err(e) if transient(&e) => {
+                lost = e;
+                continue;
+            }
+            Err(ClientError::Timeout) if left().is_zero() => return Err(lost),
+            Err(e) => return Err(e),
+        }
+        if left().is_zero() {
+            return Err(lost);
+        }
+        let (args, timeout) = ask(left());
+        lost = match link.send(op, args, timeout) {
+            Err(e) if transient(&e) => e,
+            other => return other,
+        };
+    }
+}
+
+pub fn call_through_restart(
+    client: &mut Client,
+    socket: Option<&Path>,
+    op: &str,
+    ask: &Ask<'_>,
+    end: Instant,
+) -> Result<Value, Failure> {
+    let mut link = Socket {
+        client,
+        path: socket,
+    };
+    through_restart(&mut link, op, ask, end, &pause).map_err(|e| restart_failure(op, e))
+}
+
+pub fn restart_failure(op: &str, e: ClientError) -> Failure {
+    if transient(&e) {
+        return Failure::not_running().with_op(op);
+    }
+    Failure::from_client(Some(op), e)
+}
+
+pub fn wait_slice(left: Duration, most_ms: u64) -> u64 {
+    most_ms.min(u64::try_from(left.as_millis()).unwrap_or(most_ms))
 }
 
 pub fn pretty(value: &Value) -> String {

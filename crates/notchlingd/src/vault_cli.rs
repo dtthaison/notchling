@@ -1,4 +1,5 @@
 use crate::contract::{self, Failure};
+use crate::settings_cli::Flags;
 use notchling_engine::vault::list::describe;
 use notchling_engine::vault::{expiry, runner, Kind, VaultEntry, VaultRequest};
 use notchling_local_api::ops;
@@ -9,9 +10,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const USE_TIMEOUT: Duration = Duration::from_secs(300 + 15);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(540 + 15);
+const CALL_WAIT: Duration = Duration::from_secs(15);
+const POLL_MS: u64 = 25_000;
 
-pub const REQUEST_USAGE: &str = "Usage: notchling secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--how <steps to get or renew it>] [--expires YYYY-MM-DD] [--reason <why now>]";
+pub const REQUEST_USAGE: &str = "Usage: notchling secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--how <steps to get or renew it>] [--expires YYYY-MM-DD] [--reason <why now>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run]";
 
 pub fn usage() -> String {
     format!(
@@ -62,22 +64,65 @@ pub fn parse_use(args: &[String]) -> Result<UseArgs, String> {
 }
 
 pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>), String> {
-    let lead = args.iter().take_while(|a| *a == "--json").count();
-    let args = &args[lead..];
-    let Some(name) = args.first().filter(|a| !a.starts_with("--")) else {
-        return Err(REQUEST_USAGE.to_string());
-    };
-    let mut request = VaultRequest {
-        name: name.clone(),
-        ..VaultRequest::default()
-    };
+    parse_request_flags(args).map(|(request, socket, _)| (request, socket))
+}
+
+pub fn parse_request_flags(
+    args: &[String],
+) -> Result<(VaultRequest, Option<PathBuf>, Flags), String> {
+    let mut name: Option<String> = None;
+    let mut request = VaultRequest::default();
     let mut socket = None;
-    let mut rest = args[1..].iter();
+    let mut flags = Flags::default();
+    let mut rest = args.iter();
     while let Some(flag) = rest.next() {
-        if flag == "--json" {
+        match flag.as_str() {
+            "--help" | "-h" => return Err(REQUEST_USAGE.to_string()),
+            "--json" => continue,
+            "--wait" => {
+                flags.wait = true;
+                continue;
+            }
+            "--no-wait" => {
+                flags.wait = false;
+                continue;
+            }
+            "--dry-run" => {
+                flags.dry_run = true;
+                continue;
+            }
+            _ => {}
+        }
+        if !flag.starts_with("--") {
+            if name.is_some() {
+                return Err(format!("Unexpected {flag}.\n{REQUEST_USAGE}"));
+            }
+            name = Some(flag.clone());
             continue;
         }
         let value = rest.next().cloned();
+        let seconds = |value: &Option<String>| -> Result<u64, String> {
+            value
+                .as_deref()
+                .and_then(|v| v.parse().ok())
+                .ok_or_else(|| format!("{flag} takes seconds.\n{REQUEST_USAGE}"))
+        };
+        match flag.as_str() {
+            "--timeout" => {
+                flags.timeout = Duration::from_secs(seconds(&value)?);
+                continue;
+            }
+            "--expires-in" => {
+                flags.expires_in = Some(seconds(&value)?);
+                continue;
+            }
+            "--key" => {
+                flags.key =
+                    Some(value.ok_or_else(|| format!("--key needs a value.\n{REQUEST_USAGE}"))?);
+                continue;
+            }
+            _ => {}
+        }
         let slot = match flag.as_str() {
             "--kind" => &mut request.kind,
             "--url" => &mut request.url,
@@ -99,6 +144,10 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
             None => return Err(REQUEST_USAGE.to_string()),
         }
     }
+    let Some(name) = name else {
+        return Err(REQUEST_USAGE.to_string());
+    };
+    request.name = name;
     if request
         .kind
         .as_deref()
@@ -116,7 +165,7 @@ pub fn parse_request(args: &[String]) -> Result<(VaultRequest, Option<PathBuf>),
             }
         }
     }
-    Ok((request, socket))
+    Ok((request, socket, flags))
 }
 
 pub fn parse_find(args: &[String]) -> (String, Option<PathBuf>, bool) {
@@ -301,29 +350,105 @@ pub fn secret(args: &[String]) -> i32 {
 
 pub fn secret_request(args: &[String]) -> i32 {
     let json = contract::wants_json(args);
-    let (request, socket) = match parse_request(args) {
+    let (request, socket, flags) = match parse_request_flags(args) {
         Ok(p) => p,
+        Err(message)
+            if message == REQUEST_USAGE && args.iter().any(|a| a == "--help" || a == "-h") =>
+        {
+            if json {
+                println!("{}", contract::pretty(&json!({"usage": REQUEST_USAGE})));
+            } else {
+                println!("{REQUEST_USAGE}");
+            }
+            return contract::OK;
+        }
         Err(message) => return Failure::usage(message).report(json),
     };
-    let args = serde_json::to_value(&request).unwrap_or(Value::Null);
-    match ask(socket.as_deref(), ops::VAULT_REQUEST, args, REQUEST_TIMEOUT) {
-        Ok(reply) => match reply.get("entry").cloned().map(serde_json::from_value) {
-            Some(Ok(entry)) if json => {
-                let shown = json!({"entry": entry, "request": reply.get("request").cloned()});
-                println!("{}", contract::pretty(&shown));
-                0
-            }
-            Some(Ok(entry)) => {
-                let mut out = std::io::stdout();
-                let _ = writeln!(out, "{}", saved_report(&entry, today()));
-                0
-            }
-            _ => Failure::new(contract::FAILED, "failed", "Notchling didn't answer.")
-                .with_op(ops::VAULT_REQUEST)
-                .report(json),
-        },
-        Err(failure) => failure.report(json),
+    let mut body = serde_json::to_value(&request).unwrap_or(Value::Null);
+    let mut consent = serde_json::Map::new();
+    if let Some(seconds) = flags.expires_in {
+        consent.insert("expiresInMs".into(), json!(seconds.saturating_mul(1000)));
     }
+    if let Some(key) = &flags.key {
+        consent.insert("key".into(), json!(key));
+    }
+    body["consent"] = Value::Object(consent);
+    if flags.dry_run {
+        body["dryRun"] = json!(true);
+    }
+    let mut client = match contract::connect(socket.as_deref()) {
+        Ok(c) => c,
+        Err(failure) => return failure.report(json),
+    };
+    client.set_timeout(CALL_WAIT);
+    let first = match contract::call(&mut client, ops::VAULT_REQUEST, body) {
+        Ok(reply) => reply,
+        Err(failure) => return failure.report(json),
+    };
+    if flags.dry_run {
+        println!("{}", contract::pretty(&first));
+        return contract::OK;
+    }
+    let mut request = first.get("request").cloned().unwrap_or(Value::Null);
+    let id = request
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let end = std::time::Instant::now() + flags.timeout;
+    let ask = |left: Duration| {
+        let slice = contract::wait_slice(left, POLL_MS);
+        (
+            json!({"id": id, "waitMs": slice}),
+            CALL_WAIT + Duration::from_millis(slice),
+        )
+    };
+    while flags.wait && crate::consent_cli::exit_of(state_of(&request)) == contract::PENDING {
+        if std::time::Instant::now() >= end {
+            break;
+        }
+        request = match contract::call_through_restart(
+            &mut client,
+            socket.as_deref(),
+            ops::CONSENT_GET,
+            &ask,
+            end,
+        ) {
+            Ok(reply) => reply,
+            Err(failure) if contract::lost(&failure) => break,
+            Err(failure) => return failure.report(json),
+        };
+    }
+    if state_of(&request) != "applied" {
+        return crate::consent_cli::failure_of(&request, ops::VAULT_REQUEST).report(json);
+    }
+    let entry = request
+        .get("result")
+        .and_then(|r| r.get("entry"))
+        .cloned()
+        .map(serde_json::from_value);
+    match entry {
+        Some(Ok(entry)) if json => {
+            let shown = json!({"entry": entry, "request": request});
+            println!("{}", contract::pretty(&shown));
+            contract::OK
+        }
+        Some(Ok(entry)) => {
+            let mut out = std::io::stdout();
+            let _ = writeln!(out, "{}", saved_report(&entry, today()));
+            contract::OK
+        }
+        _ => Failure::new(contract::FAILED, "failed", "Notchling didn't answer.")
+            .with_op(ops::VAULT_REQUEST)
+            .report(json),
+    }
+}
+
+fn state_of(request: &Value) -> &str {
+    request
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("failed")
 }
 
 #[cfg(test)]

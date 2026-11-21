@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 pub const DB_NAME: &str = "notchling.db";
 
-const SCHEMA: i64 = 9;
+const SCHEMA: i64 = 10;
 
 const BUSY: Duration = Duration::from_secs(5);
 
@@ -101,7 +101,7 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|e| e.to_string())?;
     if version >= SCHEMA {
-        return Ok(());
+        return add_missing_columns(db);
     }
     retry_busy(|| {
         db.execute_batch(
@@ -176,7 +176,42 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              closed_ms INTEGER
          );
          CREATE INDEX IF NOT EXISTS asks_session ON asks(session, n);
-         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);",
+         CREATE INDEX IF NOT EXISTS asks_state ON asks(state);
+         CREATE TABLE IF NOT EXISTS consents (
+             n INTEGER PRIMARY KEY AUTOINCREMENT,
+             id TEXT NOT NULL UNIQUE,
+             kind TEXT NOT NULL,
+             target TEXT NOT NULL,
+             change TEXT NOT NULL,
+             facts TEXT NOT NULL,
+             parts TEXT,
+             parts_allowed TEXT,
+             reason TEXT,
+             session TEXT,
+             tool TEXT NOT NULL,
+             verified INTEGER NOT NULL DEFAULT 0,
+             root TEXT,
+             folder TEXT,
+             organization TEXT,
+             pid INTEGER NOT NULL,
+             pid_start INTEGER,
+             idem_key TEXT,
+             request TEXT NOT NULL DEFAULT 'null',
+             extended INTEGER NOT NULL DEFAULT 0,
+             state TEXT NOT NULL,
+             answer_on TEXT NOT NULL,
+             applied_by TEXT NOT NULL,
+             created_ms INTEGER NOT NULL,
+             expires_ms INTEGER NOT NULL,
+             answered_ms INTEGER,
+             by TEXT,
+             used_ms INTEGER,
+             used_op_id TEXT,
+             result TEXT,
+             closed_ms INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS consents_state ON consents(state);
+         CREATE INDEX IF NOT EXISTS consents_session ON consents(session, n);",
         )
     })?;
     let finished = add_missing_columns(db).and_then(|()| {
@@ -199,6 +234,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("outbox", "awaited", "INTEGER NOT NULL DEFAULT 0"),
     ("outbox", "strike", "INTEGER NOT NULL DEFAULT 0"),
     ("outbox", "done_from", "INTEGER"),
+    ("consents", "request", "TEXT NOT NULL DEFAULT 'null'"),
+    ("consents", "extended", "INTEGER NOT NULL DEFAULT 0"),
 ];
 
 fn add_missing_columns(db: &Connection) -> Result<(), String> {
@@ -206,17 +243,21 @@ fn add_missing_columns(db: &Connection) -> Result<(), String> {
         let mut query = db
             .prepare(&format!("PRAGMA table_info({table})"))
             .map_err(|e| e.to_string())?;
-        let present = query
+        let names = query
             .query_map([], |r| r.get::<_, String>(1))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-            .iter()
-            .any(|name| name == column);
+            .map_err(|e| e.to_string())?;
         drop(query);
-        if !present {
+        if names.is_empty() || names.iter().any(|name| name == column) {
+            continue;
+        }
+        match retry_busy(|| {
             db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {kind}"))
-                .map_err(|e| e.to_string())?;
+        }) {
+            Ok(()) => {}
+            Err(e) if e.contains("duplicate column") => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(())

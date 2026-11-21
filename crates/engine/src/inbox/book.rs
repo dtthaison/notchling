@@ -132,6 +132,16 @@ impl Book {
         Some(Change::Updated(item.clone()))
     }
 
+    pub fn withdraw(&mut self, id: &str, now_ms: i64) -> Option<Change> {
+        let item = self.items.iter_mut().find(|item| item.id == id)?;
+        if !matches!(item.state, State::Open | State::Answered) {
+            return None;
+        }
+        item.state = State::Withdrawn;
+        item.closed_ms = Some(now_ms);
+        Some(Change::Updated(item.clone()))
+    }
+
     pub fn remove(&mut self, id: &str) -> Option<Change> {
         let at = self.items.iter().position(|item| item.id == id)?;
         self.items.remove(at);

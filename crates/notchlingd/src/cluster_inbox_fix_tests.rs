@@ -240,6 +240,7 @@ impl Net for Blocked {
             name: "m5".to_string(),
             online: true,
             keeps: true,
+            consent: false,
         }]
     }
 
@@ -313,4 +314,99 @@ fn one_flicker_of_the_keeping_role_keeps_the_mirrors() {
     assert_eq!(standby.rig.ops.local_ids().len(), 1);
     standby.outbox.flush();
     assert!(standby.rig.ops.local_ids().is_empty());
+}
+
+fn consent_item(id: &str) -> notchling_engine::inbox::Item {
+    let mut made = item(id);
+    made.kind = notchling_engine::inbox::Kind::Consent;
+    made
+}
+
+fn kinds_sent(fabric: &Fabric, to: &NodeId) -> Vec<String> {
+    fabric
+        .sent_to(to)
+        .into_iter()
+        .filter(|(_, op, _)| op == "node.inbox")
+        .flat_map(|(_, _, args)| {
+            let one = args.get("item").cloned().into_iter();
+            let many = args
+                .get("items")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            one.chain(many)
+                .filter_map(|i| i["kind"].as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn a_consent_item_reaches_an_older_peer_as_a_notice_in_a_sync_and_in_a_change() {
+    let fabric = quartet();
+    let (home, worker) = (fabric.machine(&node(5)), fabric.machine(&node(9)));
+    worker
+        .rig
+        .ops
+        .raise(consent_item("c"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    let kinds = kinds_sent(&fabric, &node(5));
+    assert!(!kinds.is_empty());
+    assert!(kinds.iter().all(|k| k == "notice"), "{kinds:?}");
+    worker
+        .rig
+        .ops
+        .raise(consent_item("d"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    let kinds = kinds_sent(&fabric, &node(5));
+    assert!(kinds.len() >= 2);
+    assert!(kinds.iter().all(|k| k == "notice"), "{kinds:?}");
+    let mirrored = home
+        .rig
+        .ops
+        .items()
+        .into_iter()
+        .filter(|i| i.id.ends_with("/c") || i.id.ends_with("/d"))
+        .count();
+    assert_eq!(mirrored, 2);
+    assert!(worker
+        .rig
+        .ops
+        .items()
+        .iter()
+        .all(|i| i.kind == notchling_engine::inbox::Kind::Consent));
+}
+
+#[test]
+fn a_consent_item_reaches_a_peer_that_knows_the_kind_as_consent() {
+    let fabric = quartet();
+    fabric.knows_consent.lock().unwrap().insert(node(5));
+    let worker = fabric.machine(&node(9));
+    worker
+        .rig
+        .ops
+        .raise(consent_item("c"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    worker
+        .rig
+        .ops
+        .raise(consent_item("d"), Some(worker.raised.clone()));
+    worker.outbox.flush();
+    let kinds = kinds_sent(&fabric, &node(5));
+    assert!(kinds.len() >= 2, "{kinds:?}");
+    assert!(kinds.iter().all(|k| k == "consent"), "{kinds:?}");
+}
+
+#[test]
+fn a_member_knows_the_consent_kind_only_when_its_versions_say_so() {
+    use notchling_engine::cluster::versions::FEATURE_INBOX_CONSENT;
+    let knows = json!({"versions": {"features": ["dispatch", FEATURE_INBOX_CONSENT]}});
+    assert!(crate::cluster_inbox::knows_consent(&knows));
+    for older in [
+        json!({"versions": {"features": ["dispatch"]}}),
+        json!({"versions": {}}),
+        json!({}),
+    ] {
+        assert!(!crate::cluster_inbox::knows_consent(&older), "{older}");
+    }
 }

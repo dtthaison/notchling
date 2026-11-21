@@ -109,7 +109,10 @@ fn lineage(claude_exe: &Path) -> Table {
     t.exes.insert(800, claude_exe.to_path_buf());
     t.names.insert(800, "claude".into());
     t.names.insert(600, "Terminal".into());
-    t.exes.insert(600, PathBuf::from("/System/Terminal"));
+    t.exes.insert(
+        600,
+        PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"),
+    );
     t.starts.insert(600, 42);
     t.argvs.insert(
         900,
@@ -133,7 +136,10 @@ fn an_install_under_the_install_folders_is_verified() {
     assert!(who.verified);
     assert_eq!(who.session.as_deref(), Some("sess-a"));
     assert_eq!(who.folder.as_deref(), Some("/work/app"));
-    assert_eq!(who.root.as_deref(), Some("/System/Terminal:42"));
+    assert_eq!(
+        who.root.as_deref(),
+        Some("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal:42")
+    );
     assert!(who.cmd_hash.is_some());
     assert_eq!(who.cmd_hash.as_deref().map(str::len), Some(32));
     assert!(who.out_hash.is_none());
@@ -241,7 +247,10 @@ fn a_shell_is_a_shell_with_no_session_and_its_root_app() {
     );
     assert_eq!(who.tool, AgentTool::Shell);
     assert!(who.session.is_none() && !who.verified);
-    assert_eq!(who.root.as_deref(), Some("/System/Terminal:42"));
+    assert_eq!(
+        who.root.as_deref(),
+        Some("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal:42")
+    );
 }
 
 #[test]
@@ -372,7 +381,10 @@ fn the_root_app_is_found_however_deep_the_tree_is_and_is_named_by_its_path() {
     let mut t = Table::default();
     let top = 50u32;
     t.parents.insert(top, 1);
-    t.exes.insert(top, PathBuf::from("/System/Terminal"));
+    t.exes.insert(
+        top,
+        PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"),
+    );
     t.starts.insert(top, 42);
     for pid in 51..=90u32 {
         t.parents.insert(pid, pid - 1);
@@ -384,9 +396,15 @@ fn the_root_app_is_found_however_deep_the_tree_is_and_is_named_by_its_path() {
         Launches::default(),
         90,
     );
-    assert_eq!(who.root.as_deref(), Some("/System/Terminal:42"));
+    assert_eq!(
+        who.root.as_deref(),
+        Some("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal:42")
+    );
     let mut other = t;
-    other.exes.insert(top, PathBuf::from("/tmp/Terminal"));
+    other.exes.insert(
+        top,
+        PathBuf::from("/tmp/Terminal.app/Contents/MacOS/Terminal"),
+    );
     let who = identify(
         &h,
         other,
@@ -394,7 +412,10 @@ fn the_root_app_is_found_however_deep_the_tree_is_and_is_named_by_its_path() {
         Launches::default(),
         90,
     );
-    assert_eq!(who.root.as_deref(), Some("/tmp/Terminal:42"));
+    assert_eq!(
+        who.root.as_deref(),
+        Some("/tmp/Terminal.app/Contents/MacOS/Terminal:42")
+    );
 }
 
 #[test]
@@ -437,7 +458,10 @@ fn a_root_with_no_start_time_exe_or_name_shares_the_unrooted_bucket() {
     let rows = || Arc::new(Mutex::new(json!([])));
     let mut no_start = Table::default();
     no_start.parents.insert(10, 11);
-    no_start.exes.insert(11, PathBuf::from("/System/Terminal"));
+    no_start.exes.insert(
+        11,
+        PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"),
+    );
     let who = identify(&h, no_start, rows(), Launches::default(), 10);
     assert_eq!(who.root.as_deref(), Some("unrooted"));
     let mut no_name = Table::default();
@@ -456,13 +480,40 @@ fn a_tree_exactly_as_deep_as_the_limit_is_rooted_and_one_more_is_not() {
             t.parents.insert(10 + pid, 11 + pid);
         }
         t.parents.insert(10 + hops, 1);
-        t.exes.insert(10 + hops, PathBuf::from("/System/Terminal"));
+        t.exes.insert(
+            10 + hops,
+            PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"),
+        );
         t.starts.insert(10 + hops, 42);
         t
     };
     let rows = || Arc::new(Mutex::new(json!([])));
     let at_limit = identify(&h, chain(4096), rows(), Launches::default(), 10);
-    assert_eq!(at_limit.root.as_deref(), Some("/System/Terminal:42"));
+    assert_eq!(
+        at_limit.root.as_deref(),
+        Some("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal:42")
+    );
     let past = identify(&h, chain(4097), rows(), Launches::default(), 10);
     assert_eq!(past.root.as_deref(), Some("unrooted"));
+}
+
+#[test]
+fn a_root_that_is_no_app_bundle_is_named_as_it_is_and_stays_unverified() {
+    let h = home("rotating", &[]);
+    for (start, exe) in [(42, "/bin/sh"), (43, "/bin/sh"), (44, "/tmp/x/nohup")] {
+        let mut t = Table::default();
+        t.parents.insert(70, 1);
+        t.exes.insert(70, PathBuf::from(exe));
+        t.starts.insert(70, start);
+        t.parents.insert(71, 70);
+        let who = identify(
+            &h,
+            t,
+            Arc::new(Mutex::new(json!([]))),
+            Launches::default(),
+            71,
+        );
+        assert_eq!(who.root, Some(format!("{exe}:{start}")));
+        assert!(!who.verified && who.session.is_none());
+    }
 }

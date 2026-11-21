@@ -1,17 +1,17 @@
 use crate::contract::{self, Failure};
-use crate::settings_asks::ASK_WAIT;
 use notchling_local_api::{ops, ClientError, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-pub const USAGE: &str = "Usage: notchling settings list [--json]\n       notchling settings get <key> [--json]\n       notchling settings set <key> <value> [--json]";
+pub const USAGE: &str = "Usage: notchling settings list [--json]\n       notchling settings get <key> [--json]\n       notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
+
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub const WAITING: &str =
     "Waiting for the user to allow this in Notchling's Inbox (on the Mac or a paired phone)…";
 
 const POLL: u64 = 25;
-const POLL_TIMEOUT: Duration = Duration::from_secs(POLL + 15);
 
 pub const DONE: i32 = contract::OK;
 
@@ -23,19 +23,65 @@ pub enum Sub {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Flags {
+    pub reason: Option<String>,
+    pub wait: bool,
+    pub timeout: Duration,
+    pub expires_in: Option<u64>,
+    pub key: Option<String>,
+    pub dry_run: bool,
+}
+
+impl Default for Flags {
+    fn default() -> Flags {
+        Flags {
+            reason: None,
+            wait: true,
+            timeout: DEFAULT_TIMEOUT,
+            expires_in: None,
+            key: None,
+            dry_run: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
     pub sub: Sub,
     pub json: bool,
     pub socket: Option<PathBuf>,
+    pub flags: Flags,
 }
 
 pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut words: Vec<String> = Vec::new();
     let mut json = false;
     let mut socket = None;
+    let mut flags = Flags::default();
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
+        let mut value = |flag: &str| match rest.next() {
+            Some(v) if !v.is_empty() => Ok(v.clone()),
+            _ => Err(format!("{flag} needs a value.\n{USAGE}")),
+        };
         match arg.as_str() {
+            "--reason" => flags.reason = Some(value("--reason")?),
+            "--key" => flags.key = Some(value("--key")?),
+            "--wait" => flags.wait = true,
+            "--no-wait" => flags.wait = false,
+            "--dry-run" => flags.dry_run = true,
+            "--timeout" => {
+                let n: u64 = value("--timeout")?
+                    .parse()
+                    .map_err(|_| format!("--timeout takes seconds.\n{USAGE}"))?;
+                flags.timeout = Duration::from_secs(n);
+            }
+            "--expires-in" => {
+                let n: u64 = value("--expires-in")?
+                    .parse()
+                    .map_err(|_| format!("--expires-in takes seconds.\n{USAGE}"))?;
+                flags.expires_in = Some(n);
+            }
             "--json" => json = true,
             "--socket" => match rest.next() {
                 Some(path) if !path.is_empty() => socket = Some(PathBuf::from(path)),
@@ -55,7 +101,12 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         [get] if get == "get" => return Err(format!("settings get needs a key.\n{USAGE}")),
         _ => return Err(USAGE.to_string()),
     };
-    Ok(Args { sub, json, socket })
+    Ok(Args {
+        sub,
+        json,
+        socket,
+        flags,
+    })
 }
 
 pub fn value_text(value: &Value) -> String {
@@ -193,7 +244,7 @@ pub fn outcome(reply: &Value) -> (i32, String) {
             (DONE, format!("{key} is already {value}."))
         }
         "applied" => (DONE, format!("Set {key} to {value}.")),
-        "denied" => (
+        "denied" | "cancelled" => (
             contract::DENIED,
             format!("The user denied setting {key} to {value}."),
         ),
@@ -222,7 +273,13 @@ fn failure_of(reply: &Value, code: i32, text: String) -> Failure {
     let mut failure = Failure::new(code, reason, message)
         .with_op(ops::SETTINGS_SET)
         .with_human(text);
-    failure.request = Some(reply.clone());
+    failure.request = Some(
+        reply
+            .get("request")
+            .filter(|r| r.is_object())
+            .cloned()
+            .unwrap_or_else(|| reply.clone()),
+    );
     failure
 }
 
@@ -239,37 +296,57 @@ fn print_lines(lines: &[String]) {
     }
 }
 
-type Call<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, ClientError> + 'a;
+type Call<'a> = dyn FnMut(&str, &contract::Ask<'_>, Instant) -> Result<Value, ClientError> + 'a;
 
 fn set(
     call: &mut Call<'_>,
-    key: &str,
-    text: &str,
+    (key, text): (&str, &str),
+    flags: &Flags,
     quiet: bool,
 ) -> Result<Value, (&'static str, ClientError)> {
+    let mut consent = serde_json::Map::new();
+    if let Some(reason) = &flags.reason {
+        consent.insert("reason".into(), json!(reason));
+    }
+    if let Some(seconds) = flags.expires_in {
+        consent.insert("expiresInMs".into(), json!(seconds.saturating_mul(1000)));
+    }
+    if let Some(key) = &flags.key {
+        consent.insert("key".into(), json!(key));
+    }
+    let mut args = json!({"key": key, "value": text, "wait": 0, "consent": consent});
+    if flags.dry_run {
+        args["dryRun"] = json!(true);
+    }
     let first = call(
         ops::SETTINGS_SET,
-        json!({"key": key, "value": text}),
-        CALL_TIMEOUT,
+        &|_| (args.clone(), CALL_TIMEOUT),
+        Instant::now(),
     )
     .map_err(|e| (ops::SETTINGS_SET, e))?;
-    if str_of(&first, "state") != "waiting" {
+    if flags.dry_run || str_of(&first, "state") != "waiting" || !flags.wait {
         return Ok(first);
     }
     if !quiet {
         eprintln!("{WAITING}");
     }
     let id = str_of(&first, "id").to_string();
-    let end = Instant::now() + ASK_WAIT + Duration::from_secs(15);
+    let end = Instant::now() + flags.timeout;
     let mut last = first;
-    while Instant::now() < end {
-        last = call(
-            ops::SETTINGS_ASKED,
-            json!({"id": id, "wait": POLL}),
-            POLL_TIMEOUT,
+    let ask = |left: Duration| {
+        let ms = contract::wait_slice(left, POLL * 1000);
+        (
+            json!({"id": id, "wait": ms / 1000, "waitMs": ms}),
+            CALL_TIMEOUT + Duration::from_millis(ms),
         )
-        .map_err(|e| (ops::SETTINGS_ASKED, e))?;
-        if !matches!(str_of(&last, "state"), "waiting" | "applying") {
+    };
+    while Instant::now() < end {
+        last = match call(ops::SETTINGS_ASKED, &ask, end) {
+            Ok(reply) => reply,
+            Err(e) if contract::transient(&e) => break,
+            Err(e) => return Err((ops::SETTINGS_ASKED, e)),
+        };
+        if !matches!(str_of(&last, "state"), "waiting" | "opened" | "applying") {
             break;
         }
     }
@@ -286,27 +363,39 @@ pub fn run(args: &[String]) -> i32 {
         Ok(c) => c,
         Err(failure) => return failure.report(json),
     };
-    let mut call = |op: &str, args: Value, timeout: Duration| {
-        client.set_timeout(timeout);
-        client.call(op, args)
+    let mut link = contract::Socket {
+        client: &mut client,
+        path: parsed.socket.as_deref(),
     };
+    let mut call = |op: &str, ask: &contract::Ask<'_>, end: Instant| {
+        contract::through_restart(&mut link, op, ask, end, &contract::pause)
+    };
+    let once = |args: Value| move |_: Duration| (args.clone(), CALL_TIMEOUT);
     let plain = |reply: Result<Value, ClientError>, op: &'static str| reply.map_err(|e| (op, e));
     let reply = match &parsed.sub {
         Sub::List => plain(
-            call(ops::SETTINGS_LIST, json!({}), CALL_TIMEOUT),
+            call(ops::SETTINGS_LIST, &once(json!({})), Instant::now()),
             ops::SETTINGS_LIST,
         ),
         Sub::Get(key) => plain(
-            call(ops::SETTINGS_GET, json!({"key": key}), CALL_TIMEOUT),
+            call(
+                ops::SETTINGS_GET,
+                &once(json!({"key": key})),
+                Instant::now(),
+            ),
             ops::SETTINGS_GET,
         ),
-        Sub::Set(key, value) => set(&mut call, key, value, json),
+        Sub::Set(key, value) => set(&mut call, (key, value), &parsed.flags, json),
     };
     let reply = match reply {
         Ok(reply) => reply,
         Err((op, e)) => return Failure::from_client(Some(op), e).report(json),
     };
     if let Sub::Set(..) = parsed.sub {
+        if reply.get("dryRun") == Some(&Value::Bool(true)) {
+            print_json(&reply);
+            return DONE;
+        }
         let (code, text) = outcome(&reply);
         if code != DONE {
             return failure_of(&reply, code, text).report(json);

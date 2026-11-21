@@ -450,3 +450,21 @@ fn removing_a_secret_forgets_its_shadow() {
         .unwrap();
     assert_eq!(orgs.resolve(OrgKind::Vault, "alpha").id, "personal");
 }
+
+#[test]
+fn a_save_finds_the_secret_it_replaces_under_the_store_lock() {
+    let (_temp, _item, store) = store("replacing");
+    let entry = VaultEntry::new("gh", Kind::Token);
+    store
+        .save(&entry, Some(value("fake-gh-token-0001")), None, "t")
+        .unwrap();
+    let missing = store.save_replacing(&entry, None, Some("nope"), "t2", &|_| true);
+    assert!(matches!(missing, Err(VaultError::NoSuchSecret(_))));
+    let refused = store.save_replacing(&entry, None, Some("gh"), "t2", &|_| false);
+    assert!(matches!(refused, Err(VaultError::Changed)));
+    let (saved, old) = store
+        .save_replacing(&entry, None, Some("GH"), "t3", &|_| true)
+        .unwrap();
+    assert_eq!(old.unwrap().name, "gh");
+    assert_eq!(saved.entry.updated, "t3");
+}

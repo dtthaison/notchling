@@ -32,6 +32,7 @@ pub const COMMIT_KINDS: &[&str] = &[
     "session.reply",
     "session.control",
     "agent.called",
+    "agent.consent",
     "agent.named",
 ];
 

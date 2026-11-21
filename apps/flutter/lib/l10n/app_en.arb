@@ -727,6 +727,24 @@
   "@consentPair": {
     "description": "Shown in pairing with a Mac."
   },
+  "consentSecretRequest": "Save the secret {name} in the Vault",
+  "@consentSecretRequest": {
+    "description": "What a card asks when an agent wants a secret saved in the Vault, new or replacing one of the same name. $name is the secret's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "consentSettingChange": "Change {title}",
+  "@consentSettingChange": {
+    "description": "What a card asks when an agent wants a setting changed. $title is the setting's name as Settings shows it.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
   "consentStopAndTakeOver": "Stop and take over",
   "@consentStopAndTakeOver": {
     "description": "Shown in the Chat screen."

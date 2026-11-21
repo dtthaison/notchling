@@ -7,7 +7,6 @@ pub enum Kind {
     SecretRequest,
     LimitNotice,
     ActionFailed,
-    Notice,
     SettingChange,
     VersionCheckFailed,
     VersionDrift,
@@ -21,6 +20,9 @@ pub enum Kind {
     PrimaryBack,
     SessionWaits,
     Question,
+    Consent,
+    #[serde(other)]
+    Notice,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

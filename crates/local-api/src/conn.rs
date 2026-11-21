@@ -424,9 +424,11 @@ impl Session {
         };
         let started = Instant::now();
         let _ = scope::take_consent();
+        let bound = crate::bound::bind(self.identity.clone());
         let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             handler.call_with_extras(&caller, op, args)
         }));
+        drop(bound);
         let (result, more) = match called {
             Ok(done) => done,
             Err(panic) => {

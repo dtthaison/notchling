@@ -1,13 +1,13 @@
 use super::{parse, FailoverSink, KeyMirror, NodeSink, SinkNode, KEY, STARTING};
-use crate::acting_ops_tests::{app, FakeRoom};
+use crate::acting_ops_tests::FakeRoom;
 use crate::cluster_node::Hooks;
 use crate::cluster_ops::{follow_switch, ClusterOps};
 use crate::cluster_testkit::{eventually, node, online, Opts, TestNode};
+use crate::consent_testkit::{consent, item_for, item_id_for};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::limits_ops_tests::TempDir;
 use crate::op_group::OpGroup;
-use crate::settings_asks::item_id;
 use crate::settings_ops::{SettingsOps, SwitchStates};
 use crate::switches::{SwitchFlag, CLUSTER, CLUSTER_OFF};
 use notchling_cluster_net::MemNet;
@@ -249,9 +249,12 @@ fn ask_rig(net: &Arc<MemNet>, name: &'static str) -> AskRig {
     let tmp = TempDir::new("fo-ask");
     let inbox = InboxOps::new(tmp.path("inbox"), home.room.clone());
     let states: SwitchStates = Arc::new(|_: &str| None);
+    let sink = Arc::new(MemorySink::new());
+    let consent = consent(home.room.clone(), inbox.clone(), sink.clone());
     let settings = SettingsOps::new(tmp.path("data"), home.room.clone(), states)
-        .with_events(Events::fixed(Arc::new(MemorySink::new()), Salt([2; 32])))
-        .with_inbox(inbox.clone());
+        .with_events(Events::fixed(sink, Salt([2; 32])))
+        .with_consent(consent.clone());
+    consent.register(notchling_engine::consent::SETTING, settings.writer());
     settings.bind_failover(Arc::new(NodeSink::new(home.node.node.clone())));
     home.room.app.store(true, Ordering::SeqCst);
     home.room
@@ -293,18 +296,7 @@ impl AskRig {
     }
 
     fn item(&self, id: &str) -> Value {
-        self.inbox.flush();
-        let list = self
-            .inbox
-            .call(&app(), ops::INBOX_LIST, &json!({}))
-            .unwrap();
-        list["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|i| i["id"] == item_id(id))
-            .cloned()
-            .unwrap_or(Value::Null)
+        item_for(&self.inbox, id)
     }
 
     fn stored(&self) -> Option<Value> {
@@ -322,9 +314,15 @@ fn agent_set_raises_an_item_and_deny_keeps_off() {
     let id = r.ask("30m");
     let item = r.item(&id);
     assert_eq!(item["kind"], "setting_change");
-    assert_eq!(item["title"], "Set Automatic Failover to 30m");
+    assert_eq!(
+        item["title"],
+        "Claude Code asks to change Automatic Failover"
+    );
     assert!(
-        item["detail"].as_str().unwrap().ends_with("Now off."),
+        item["detail"]
+            .as_str()
+            .unwrap()
+            .ends_with("is now off. It would become 30m."),
         "{item}"
     );
     assert_eq!(
@@ -333,7 +331,7 @@ fn agent_set_raises_an_item_and_deny_keeps_off() {
         "nothing changes before the user allows"
     );
     r.inbox
-        .decide(&item_id(&id), ActionId::Deny, "mac")
+        .decide(&item_id_for(&r.inbox, &id), ActionId::Deny, "mac")
         .unwrap();
     let done = r.finished(&id);
     assert_eq!(done["state"], "denied", "{done}");
@@ -348,7 +346,7 @@ fn an_allowed_agent_set_is_journaled_on_the_primary_and_reaches_the_cluster() {
     let r = ask_rig(&net, "fo-home8");
     let id = r.ask("1h");
     r.inbox
-        .decide(&item_id(&id), ActionId::Allow, "phone")
+        .decide(&item_id_for(&r.inbox, &id), ActionId::Allow, "phone")
         .unwrap();
     let done = r.finished(&id);
     assert_eq!(done["state"], "applied", "{done}");
