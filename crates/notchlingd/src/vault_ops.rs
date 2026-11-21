@@ -446,7 +446,7 @@ impl VaultOps {
                 consent.now() < row.expires_ms
                     && match (existing, current) {
                         (false, None) => true,
-                        (true, Some(now)) => revision.as_deref() == Some(now.updated.as_str()),
+                        (true, Some(now)) => revision.as_deref() == Some(now.revision().as_str()),
                         _ => false,
                     }
             }
@@ -510,7 +510,7 @@ impl VaultOps {
             .map(str::to_string);
         match (existing, current) {
             (false, None) => Ok((existing, revision)),
-            (true, Some(now)) if revision.as_deref() == Some(now.updated.as_str()) => {
+            (true, Some(now)) if revision.as_deref() == Some(now.revision().as_str()) => {
                 Ok((existing, revision))
             }
             _ => Err(drifted()),
@@ -536,6 +536,7 @@ impl VaultOps {
             let mut same = old.clone();
             same.ask = saved.entry.ask;
             same.updated = saved.entry.updated.clone();
+            same.rev = saved.entry.rev;
             same == saved.entry && !saved.value_changed && old.asks() != saved.entry.asks()
         });
         let action = match (flag_only, saved.entry.asks()) {

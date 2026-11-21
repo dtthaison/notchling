@@ -208,7 +208,7 @@ impl VaultOps {
             target: request.name.clone(),
             change: json!({"name": request.name, "folder": folder, "request": request,
                            "entry": entry_json(&entry), "existing": known,
-                           "revision": existing.as_ref().map(|e| e.updated.clone()),
+                           "revision": existing.as_ref().map(VaultEntry::revision),
                            "changes": changes, "verified": verified}),
             facts: json!([{"line": "consent-secret-request", "args": {"name": request.name}}]),
             request: json!({"op": ops::VAULT_REQUEST, "request": request}),
@@ -311,7 +311,7 @@ impl VaultOps {
         let mut change = change.clone();
         change["entry"] = entry_json(&entry);
         change["existing"] = json!(saved.is_some());
-        change["revision"] = json!(saved.as_ref().map(|e| e.updated.clone()));
+        change["revision"] = json!(saved.as_ref().map(VaultEntry::revision));
         change["changes"] = serde_json::to_value(changes).ok()?;
         Some(change)
     }

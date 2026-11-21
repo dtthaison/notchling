@@ -297,8 +297,12 @@ impl VaultStore {
                     .iter()
                     .find(|e| Some(e.id()) == old_id)
                     .or_else(|| list.iter().find(|e| e.id() == id))
-                    .map(|e| e.organization.clone());
-                if let Some(organization) = current {
+                    .map(|e| (e.organization.clone(), e.rev));
+                saved.rev = current
+                    .as_ref()
+                    .map_or(0, |(_, rev)| *rev)
+                    .saturating_add(1);
+                if let Some((organization, _)) = current {
                     saved.organization = organization;
                 }
                 list.retain(|e| e.id() != id && Some(e.id()) != old_id);

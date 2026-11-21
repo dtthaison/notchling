@@ -346,6 +346,7 @@ fn token(name: &str) -> VaultEntry {
         name: name.to_string(),
         note: String::new(),
         organization: None,
+        rev: 0,
         secret_var: "TOKEN".to_string(),
         updated: String::new(),
         url: None,

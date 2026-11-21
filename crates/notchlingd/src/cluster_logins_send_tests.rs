@@ -83,6 +83,7 @@ fn entry(expires: Option<&str>, updated: &str) -> VaultEntry {
         name: LOGIN_ENTRY.to_string(),
         note: String::new(),
         organization: None,
+        rev: 0,
         secret_var: TOKEN_VAR.to_string(),
         updated: updated.to_string(),
         url: None,

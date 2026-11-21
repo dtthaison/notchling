@@ -42,6 +42,8 @@ pub struct VaultEntry {
     pub note: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rev: u64,
     #[serde(default, rename = "secretVar")]
     pub secret_var: String,
     #[serde(default)]
@@ -94,6 +96,7 @@ impl VaultEntry {
             name: name.to_string(),
             note: String::new(),
             organization: None,
+            rev: 0,
             secret_var: secret,
             updated: String::new(),
             url: None,
@@ -107,6 +110,13 @@ impl VaultEntry {
 
     pub fn id(&self) -> String {
         self.name.to_lowercase()
+    }
+
+    pub fn revision(&self) -> String {
+        match self.rev {
+            0 => self.updated.clone(),
+            rev => format!("{}#{rev}", self.updated),
+        }
     }
 
     pub fn asks(&self) -> bool {
@@ -176,6 +186,10 @@ impl VaultEntry {
             .unwrap_or(Kind::Token);
         VaultEntry::new(&request.name, kind).prefilled(request)
     }
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 pub fn prefix(name: &str) -> String {

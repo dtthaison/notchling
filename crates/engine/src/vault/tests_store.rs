@@ -468,3 +468,74 @@ fn a_save_finds_the_secret_it_replaces_under_the_store_lock() {
     assert_eq!(old.unwrap().name, "gh");
     assert_eq!(saved.entry.updated, "t3");
 }
+
+#[test]
+fn every_save_changes_the_revision_whatever_the_clock_says() {
+    let (_temp, _item, store) = store("revision");
+    let entry = VaultEntry::new("gh", Kind::Token);
+    let first = store
+        .save(&entry, Some(value("fake-gh-0001")), None, "t")
+        .unwrap()
+        .entry;
+    let second = store
+        .save(&first, Some(value("fake-gh-0002")), Some(&first), "t")
+        .unwrap()
+        .entry;
+    assert_eq!(first.updated, second.updated);
+    assert_eq!((first.rev, second.rev), (1, 2));
+    assert_ne!(first.revision(), second.revision());
+    let held = first.revision();
+    let stale = store.save_replacing(&second, None, Some("gh"), "t", &|now| {
+        now.is_some_and(|e| e.revision() == held)
+    });
+    assert!(matches!(stale, Err(VaultError::Changed)));
+    let current = second.revision();
+    let (third, _) = store
+        .save_replacing(&second, None, Some("gh"), "t", &|now| {
+            now.is_some_and(|e| e.revision() == current)
+        })
+        .unwrap();
+    assert_eq!(third.entry.rev, 3);
+}
+
+#[test]
+fn the_counter_comes_from_the_stored_entry_and_survives_a_rename() {
+    let (_temp, _item, store) = store("revision-rename");
+    let mut entry = VaultEntry::new("gh", Kind::Token);
+    entry.rev = 40;
+    let first = store
+        .save(&entry, Some(value("fake-gh-0001")), None, "t")
+        .unwrap()
+        .entry;
+    assert_eq!(first.rev, 1, "a caller's own counter is ignored");
+    let renamed = store.rename(&first, "gh2", "t").unwrap().entry;
+    assert_eq!((renamed.name.as_str(), renamed.rev), ("gh2", 2));
+    assert_eq!(store.entry("gh2").unwrap().unwrap().rev, 2);
+}
+
+#[test]
+fn an_entry_written_before_the_counter_loads_and_saves() {
+    let (temp, _item, store) = store("revision-legacy");
+    std::fs::create_dir_all(temp.old_file().parent().unwrap()).unwrap();
+    let old = br#"[{"name":"gh","kind":"token","note":"n","userVar":"","secretVar":"GH_TOKEN","updated":"2026-11-05T00:00:00Z"}]"#;
+    std::fs::write(temp.old_file(), old).unwrap();
+    let loaded = store.entry("gh").unwrap().unwrap();
+    assert_eq!(loaded.rev, 0);
+    assert_eq!(loaded.revision(), "2026-11-05T00:00:00Z");
+    assert!(serde_json::to_value(&loaded).unwrap().get("rev").is_none());
+    let before = loaded.revision();
+    let saved = store
+        .save(
+            &loaded,
+            Some(value("fake-gh-0001")),
+            Some(&loaded),
+            "2026-11-05T00:00:00Z",
+        )
+        .unwrap()
+        .entry;
+    assert_eq!(saved.updated, loaded.updated);
+    assert_eq!(saved.rev, 1);
+    assert_ne!(saved.revision(), before);
+    let text = temp.text().unwrap();
+    assert!(text.contains("\"rev\": 1"), "{text}");
+}

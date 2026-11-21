@@ -33,7 +33,7 @@ fn a_request_opened_while_the_vault_was_off_keeps_the_entry_shown_once_it_turns_
     let kept = row(&s, &id);
     assert_eq!(kept.change["existing"], true, "{}", kept.change);
     let saved = s.ops.store.entry("gh").unwrap().unwrap();
-    assert_eq!(kept.change["revision"], json!(saved.updated));
+    assert_eq!(kept.change["revision"], json!(saved.revision()));
     s.ops
         .call(&app(), ops::VAULT_REMOVE, &json!({"name": "gh"}))
         .unwrap();
@@ -192,7 +192,7 @@ fn legacy_copy(s: &super::tests::Setup, id: &str) -> String {
 }
 
 fn stored(s: &super::tests::Setup, name: &str) -> String {
-    s.ops.store.entry(name).unwrap().unwrap().updated
+    s.ops.store.entry(name).unwrap().unwrap().revision()
 }
 
 #[test]
