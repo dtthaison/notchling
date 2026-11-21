@@ -8,7 +8,7 @@ use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ConnectO
 use notchling_platform::notify::{system_notifier, Notifier, Unsupported};
 use serde_json::{json, Value};
 
-use super::model::{answer_args, seen_args, InboxModel};
+use super::model::{answer_args, consent_answer_args, consent_of, seen_args, InboxModel};
 use super::system::{notify_new, remember, Detached};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -20,6 +20,7 @@ struct Shared {
     notifier: Arc<dyn Notifier>,
     generation: AtomicU64,
     stop: AtomicBool,
+    refresh: AtomicBool,
 }
 
 impl Shared {
@@ -30,6 +31,7 @@ impl Shared {
             notifier,
             generation: AtomicU64::new(0),
             stop: AtomicBool::new(false),
+            refresh: AtomicBool::new(false),
         }
     }
 
@@ -50,6 +52,11 @@ impl Shared {
         model.load(reply);
         remember(&model, &mut self.notified());
         drop(model);
+        self.bump();
+    }
+
+    fn seed_consents(&self, reply: &Value) {
+        self.model().load_consents(reply);
         self.bump();
     }
 
@@ -138,6 +145,10 @@ impl InboxFeed {
         self.shared.generation.load(Ordering::SeqCst)
     }
 
+    pub fn refresh_consents(&self) {
+        self.shared.refresh.store(true, Ordering::SeqCst);
+    }
+
     pub fn unread(&self) -> usize {
         self.shared.model().unread()
     }
@@ -151,6 +162,16 @@ impl InboxFeed {
     pub fn answer(&self, id: &str, action: ActionId) -> Result<bool, String> {
         let reply = self.call(ops::INBOX_ANSWER, answer_args(id, action))?;
         Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
+    }
+
+    pub fn consent_answer(&self, id: &str, allow: bool) -> Result<bool, String> {
+        let reply = self.call(ops::CONSENT_ANSWER, consent_answer_args(id, allow))?;
+        Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
+    }
+
+    pub fn consent_opened(&self, id: &str) -> Result<(), String> {
+        self.call(ops::CONSENT_OPENED, json!({"consentId": id}))
+            .map(|_| ())
     }
 
     pub fn seen(&self, ids: &[String]) -> Result<(), String> {
@@ -181,10 +202,11 @@ fn run(config: &FeedConfig, shared: &Shared) {
     let mut failures = 0u32;
     while !shared.stopped() {
         match connect(config) {
-            Ok((client, reply)) => {
+            Ok((mut client, reply)) => {
                 failures = 0;
                 if let Some(reply) = reply {
                     shared.seed(&reply);
+                    refresh_consents(&mut client, shared);
                 }
                 follow(client, shared);
             }
@@ -216,11 +238,35 @@ fn connect(config: &FeedConfig) -> Result<(Client, Option<Value>), ClientError> 
 
 fn follow(mut client: Client, shared: &Shared) {
     while !shared.stopped() {
+        if shared.refresh.swap(false, Ordering::SeqCst) {
+            refresh_consents(&mut client, shared);
+        }
         match client.next_event(Duration::from_millis(250)) {
-            Ok(Some(event)) => shared.apply(&event),
+            Ok(Some(event)) => {
+                shared.apply(&event);
+                if raises_consent(&event) {
+                    refresh_consents(&mut client, shared);
+                }
+            }
             Ok(None) => {}
             Err(_) => return,
         }
+    }
+}
+
+fn raises_consent(event: &Event) -> bool {
+    event.event == topics::INBOX_CHANGED
+        && event
+            .data
+            .get("item")
+            .and_then(|item| item.get("open"))
+            .and_then(consent_of)
+            .is_some()
+}
+
+fn refresh_consents(client: &mut Client, shared: &Shared) {
+    if let Ok(reply) = client.call(ops::CONSENT_LIST, json!({})) {
+        shared.seed_consents(&reply);
     }
 }
 

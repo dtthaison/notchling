@@ -1,10 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use notchling_engine::vault::entry::{VaultEntry, VaultValue};
-use notchling_local_api::{ClientError, SOCKET_NAME};
+use notchling_local_api::{ApiError, ClientError, SOCKET_NAME};
 use notchling_locale as t;
 use serde_json::Value;
 
+use super::consent_save::{failure, wants_state, Failure, Refusal};
 use super::wire::{parse_entries, Call, Decision};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
@@ -35,6 +36,17 @@ fn message(e: &ClientError) -> String {
     match e {
         ClientError::Api(api) => api.message.clone(),
         other => other.to_string(),
+    }
+}
+
+struct Failed {
+    line: String,
+    api: Option<Box<ApiError>>,
+}
+
+impl Failed {
+    fn line(line: String) -> Failed {
+        Failed { line, api: None }
     }
 }
 
@@ -148,29 +160,45 @@ impl Vault {
         call: &Call,
         pinned: Option<&str>,
     ) -> Result<Value, String> {
-        self.gate(switches)?;
+        self.exchange(switches, call, pinned)
+            .map_err(|failed| failed.line)
+    }
+
+    fn exchange(
+        &self,
+        switches: &Switches,
+        call: &Call,
+        pinned: Option<&str>,
+    ) -> Result<Value, Failed> {
+        self.gate(switches).map_err(Failed::line)?;
         let Some(transport) = &self.transport else {
-            return Err(crate::acting::DETACHED_MESSAGE.into());
+            return Err(Failed::line(crate::acting::DETACHED_MESSAGE.into()));
         };
         let mut args = call.args.clone();
         if self.remote.is_some() {
             let node = self.current_node().unwrap_or_default();
             if pinned.is_some_and(|p| p != node) {
-                return Err(t::cluster::vault_moved().to_owned());
+                return Err(Failed::line(t::cluster::vault_moved().to_owned()));
             }
             args["node"] = Value::String(pinned.map_or(node, str::to_owned));
         }
         transport.call(call.op, args).map_err(|e| {
             if switches::detaches(&e) {
                 self.update(|s| *s = Snapshot::default());
-                return crate::acting::DETACHED_MESSAGE.to_owned();
+                return Failed::line(crate::acting::DETACHED_MESSAGE.to_owned());
             }
             let line = message(&e);
             self.update(|s| {
                 s.attached = true;
                 s.error = Some(line.clone());
             });
-            line
+            Failed {
+                line,
+                api: match e {
+                    ClientError::Api(api) => Some(Box::new(api)),
+                    _ => None,
+                },
+            }
         })
     }
 
@@ -220,7 +248,12 @@ impl Vault {
     ) -> Result<(), String> {
         let call = Call::save(entry, value, replacing, request);
         let v = self.send_at(switches, &call, pinned)?;
-        if let Ok(saved) = serde_json::from_value::<VaultEntry>(v["entry"].clone()) {
+        self.kept(&v, replacing);
+        Ok(())
+    }
+
+    fn kept(&self, reply: &Value, replacing: Option<&str>) {
+        if let Ok(saved) = serde_json::from_value::<VaultEntry>(reply["entry"].clone()) {
             self.update(|s| {
                 s.entries
                     .retain(|e| e.id() != saved.id() && Some(e.name.as_str()) != replacing);
@@ -229,7 +262,41 @@ impl Vault {
                 s.error = None;
             });
         }
-        Ok(())
+    }
+
+    pub fn save_for_consent(
+        &self,
+        switches: &Switches,
+        entry: &VaultEntry,
+        value: Option<&VaultValue>,
+        replacing: Option<&str>,
+        consent: &str,
+    ) -> Result<(), Failure> {
+        if self.remote.is_none() && !switches.is_on(Switch::Vault) {
+            return Err(Failure::Refused(Refusal::VaultOff));
+        }
+        let call = Call::save(entry, value, replacing, Some(consent));
+        match self.exchange(switches, &call, None) {
+            Ok(v) => {
+                self.kept(&v, replacing);
+                Ok(())
+            }
+            Err(Failed { line, api: None }) => Err(Failure::Other(line)),
+            Err(Failed { api: Some(api), .. }) => {
+                let state = wants_state(&api)
+                    .then(|| self.consent_state(switches, consent))
+                    .flatten();
+                Err(failure(&api, state.as_deref()))
+            }
+        }
+    }
+
+    fn consent_state(&self, switches: &Switches, id: &str) -> Option<String> {
+        self.send(switches, &Call::consent_get(id))
+            .ok()?
+            .get("state")?
+            .as_str()
+            .map(str::to_owned)
     }
 
     pub fn remove(&self, switches: &Switches, name: &str) -> Result<(), String> {
@@ -253,10 +320,6 @@ impl Vault {
     pub fn answer(&self, switches: &Switches, id: &str, decision: Decision) -> Result<(), String> {
         self.send(switches, &Call::approval_answer(id, decision))
             .map(|_| ())
-    }
-
-    pub fn cancel_request(&self, switches: &Switches, id: &str) -> Result<(), String> {
-        self.send(switches, &Call::request_cancel(id)).map(|_| ())
     }
 }
 
@@ -291,7 +354,7 @@ mod tests {
             Ok(match op {
                 "vault.list" => json!({"entries": [VaultEntry::new("npm", Kind::Token)]}),
                 "vault.save" => {
-                    json!({"entry": args["entry"], "answered": args.get("request").is_some()})
+                    json!({"entry": args["entry"], "answered": args.get("consentId").is_some()})
                 }
                 "vault.remove" => json!({"removed": true}),
                 _ => json!({"answered": true}),
@@ -354,7 +417,6 @@ mod tests {
         vault.remove(&on, "npm").unwrap();
         assert_eq!(vault.snapshot().entries.len(), 1);
         vault.answer(&on, "ap-1", Decision::Always).unwrap();
-        vault.cancel_request(&on, "r1").unwrap();
         let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
         assert_eq!(
             sent,
@@ -362,10 +424,104 @@ mod tests {
                 "vault.list",
                 "vault.save",
                 "vault.remove",
-                "vault.approval.answer",
-                "vault.request.cancel"
+                "vault.approval.answer"
             ]
         );
+    }
+
+    struct Refuses {
+        calls: Calls,
+        message: &'static str,
+        reason: &'static str,
+        state: &'static str,
+    }
+
+    impl Transport for Refuses {
+        fn call(&self, op: &str, args: Value) -> Result<Value, ClientError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((op.to_owned(), args.clone()));
+            if op == "consent.get" {
+                return Ok(json!({"id": args["id"], "state": self.state}));
+            }
+            Err(ClientError::Api(
+                ApiError::new(ErrorCode::Forbidden, self.message).with_reason(self.reason),
+            ))
+        }
+    }
+
+    fn refused_with(message: &'static str, state: &'static str) -> (Vault, Calls) {
+        let calls: Calls = Arc::default();
+        let vault = Vault::over(Box::new(Refuses {
+            calls: calls.clone(),
+            message,
+            reason: "needs_consent",
+            state,
+        }));
+        (vault, calls)
+    }
+
+    #[test]
+    fn a_save_under_a_consent_sends_its_id_and_nothing_else_about_it() {
+        let (vault, calls) = fake(false);
+        let entry = VaultEntry::new("github", Kind::Token);
+        vault
+            .save_for_consent(&Switches::all_on(), &entry, None, Some("gh"), "c1")
+            .unwrap();
+        let sent = calls.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "vault.save");
+        assert_eq!(sent[0].1["consentId"], "c1");
+        assert_eq!(sent[0].1["replacing"], "gh");
+        assert!(sent[0].1.get("request").is_none());
+        drop(sent);
+        assert_eq!(vault.snapshot().entries[0].name, "github");
+    }
+
+    #[test]
+    fn a_save_with_the_vault_off_is_refused_before_anything_is_sent() {
+        let (vault, calls) = fake(false);
+        let entry = VaultEntry::new("github", Kind::Token);
+        let off = vault.save_for_consent(&Switches::all_off(), &entry, None, None, "c1");
+        assert_eq!(off, Err(Failure::Refused(Refusal::VaultOff)));
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_refused_save_asks_the_daemon_what_became_of_the_request() {
+        let entry = VaultEntry::new("github", Kind::Token);
+        let on = Switches::all_on();
+        let ended = "That request is no longer waiting for your yes.";
+        let (vault, calls) = refused_with(ended, "expired");
+        assert_eq!(
+            vault.save_for_consent(&on, &entry, None, None, "c1"),
+            Err(Failure::Refused(Refusal::Expired))
+        );
+        let sent: Vec<String> = calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
+        assert_eq!(sent, ["vault.save", "consent.get"]);
+        let (vault, _) = refused_with(ended, "cancelled");
+        assert_eq!(
+            vault.save_for_consent(&on, &entry, None, None, "c1"),
+            Err(Failure::Refused(Refusal::Withdrawn))
+        );
+        let drifted = "That request no longer matches what you were shown.";
+        let (vault, _) = refused_with(drifted, "opened");
+        assert_eq!(
+            vault.save_for_consent(&on, &entry, None, None, "c1"),
+            Err(Failure::Refused(Refusal::Changed))
+        );
+    }
+
+    #[test]
+    fn any_other_failure_of_a_save_keeps_the_daemons_words() {
+        let (vault, calls) = fake(true);
+        let entry = VaultEntry::new("github", Kind::Token);
+        assert_eq!(
+            vault.save_for_consent(&Switches::all_on(), &entry, None, None, "c1"),
+            Err(Failure::Other("the Keychain refused".into()))
+        );
+        assert_eq!(calls.lock().unwrap().len(), 1, "no state read for it");
     }
 
     #[test]

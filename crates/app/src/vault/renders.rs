@@ -11,7 +11,7 @@ use crate::views::ViewSpec;
 pub const NOW: f64 = 1_794_096_000.0;
 pub const TODAY: i64 = 20_765;
 
-pub const VIEWS: [ViewSpec; 5] = [
+pub const VIEWS: [ViewSpec; 6] = [
     ViewSpec {
         name: "vault-sheet",
         size: (540.0, 560.0),
@@ -33,6 +33,11 @@ pub const VIEWS: [ViewSpec; 5] = [
         about: "an agent's request form over a saved secret, with its changes marked (made-up data)",
     },
     ViewSpec {
+        name: "vault-request-refused",
+        size: (540.0, 760.0),
+        about: "an agent's request form after the daemon refused the save: the entry changed since the card (made-up data)",
+    },
+    ViewSpec {
         name: "vault-remote",
         size: (540.0, 560.0),
         about: "the Secret Vault sheet on a Mac that isn't the vault's machine: the Vault on mac-mini tab (made-up data)",
@@ -45,6 +50,7 @@ pub enum Shown {
     Form,
     Approval,
     Request,
+    RequestRefused,
     Remote,
 }
 
@@ -54,6 +60,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "vault-form" => Shown::Form,
         "vault-approval" => Shown::Approval,
         "vault-request" => Shown::Request,
+        "vault-request-refused" => Shown::RequestRefused,
         "vault-remote" => Shown::Remote,
         _ => return None,
     })

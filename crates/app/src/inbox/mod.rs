@@ -1,3 +1,6 @@
+pub mod consent_card;
+#[cfg(target_os = "macos")]
+pub mod consent_view;
 pub mod feed;
 pub mod model;
 pub mod renders;

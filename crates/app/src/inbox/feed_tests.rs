@@ -38,7 +38,12 @@ struct Daemon {
 impl Handler for Daemon {
     fn spec(&self, op: &str) -> Option<OpSpec> {
         match op {
-            ops::INBOX_LIST | ops::INBOX_ANSWER | ops::INBOX_SEEN => Some(OpSpec::APP),
+            ops::INBOX_LIST
+            | ops::INBOX_ANSWER
+            | ops::INBOX_SEEN
+            | ops::CONSENT_LIST
+            | ops::CONSENT_ANSWER
+            | ops::CONSENT_OPENED => Some(OpSpec::APP),
             _ => None,
         }
     }
@@ -51,6 +56,9 @@ impl Handler for Daemon {
         Ok(match op {
             ops::INBOX_LIST => json!({"items": [item("early", 1_000, "open")], "unread": 1}),
             ops::INBOX_ANSWER => json!({"answered": args["id"] == "early"}),
+            ops::CONSENT_LIST => json!({"requests": [{"id": "c1", "kind": "setting"}]}),
+            ops::CONSENT_ANSWER => json!({"answered": args["decision"] == "allow"}),
+            ops::CONSENT_OPENED => json!({"state": "opened"}),
             _ => json!({"unread": 0}),
         })
     }
@@ -160,7 +168,7 @@ fn it_seeds_from_the_list_then_follows_events_and_answers_by_op() {
     assert_eq!(feed.seen(&[]), Ok(()));
     let sent: Vec<(String, Value)> = calls.lock().unwrap().clone();
     assert_eq!(
-        sent[1..],
+        sent[2..],
         [
             (
                 "inbox.answer".to_owned(),
@@ -174,6 +182,7 @@ fn it_seeds_from_the_list_then_follows_events_and_answers_by_op() {
         ]
     );
     assert_eq!(sent[0].0, "inbox.list");
+    assert_eq!(sent[1].0, "consent.list");
     daemon.0.shutdown();
     let _ = daemon.1.join();
 }
@@ -251,4 +260,53 @@ fn only_an_event_notifies_never_a_seed_or_a_reseed() {
     assert_eq!(titles, ["Title late", "Title later"]);
     again.0.shutdown();
     let _ = again.1.join();
+}
+
+#[test]
+fn it_follows_the_consent_requests_and_answers_them_by_the_consent_ops() {
+    let scratch = Scratch::new("inbox-cns");
+    let socket = scratch.path().join(SOCKET_NAME);
+    let calls: Calls = Arc::default();
+    let daemon = serve(&socket, &calls);
+    let feed = start(&socket);
+    wait_until("the seed", || ids(&feed) == ["early"]);
+    wait_until("the requests", || feed.snapshot(0).consent("c1").is_some());
+    assert!(feed.snapshot(0).consent("c2").is_none());
+
+    let mut raised = item("consent:c1:5", 4_000, "open");
+    raised["open"] = json!({"consent": "c1"});
+    daemon
+        .0
+        .publish("inbox", "inbox.changed", &json!({"item": raised}));
+    wait_until("the refresh", || {
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(op, _)| op == "consent.list")
+            .count()
+            == 2
+    });
+
+    assert_eq!(feed.consent_answer("c1", true), Ok(true));
+    assert_eq!(feed.consent_answer("c1", false), Ok(false));
+    assert_eq!(feed.consent_opened("c1"), Ok(()));
+    let sent: Vec<(String, Value)> = calls.lock().unwrap().clone();
+    let last: Vec<_> = sent.iter().rev().take(3).rev().cloned().collect();
+    assert_eq!(
+        last,
+        [
+            (
+                "consent.answer".to_owned(),
+                json!({"consentId": "c1", "decision": "allow"})
+            ),
+            (
+                "consent.answer".to_owned(),
+                json!({"consentId": "c1", "decision": "deny"})
+            ),
+            ("consent.opened".to_owned(), json!({"consentId": "c1"})),
+        ]
+    );
+    daemon.0.shutdown();
+    let _ = daemon.1.join();
 }

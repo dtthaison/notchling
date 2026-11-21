@@ -276,3 +276,30 @@ fn a_reconnect_reads_every_key_an_agent_can_change_again() {
     assert!(keys.iter().any(|k| k == "limitMode"));
     assert!(!keys.iter().any(|k| k == "accounts"));
 }
+
+#[test]
+fn the_public_calls_allow_dismiss_and_resolve_a_form() {
+    let feed = SwitchFeed::fixed(Switches::all_on());
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r1"})));
+    assert!(feed.requests().is_empty());
+    feed.allow_request("r1");
+    assert_eq!(feed.requests().len(), 1);
+    feed.dismiss_request("r1");
+    assert!(feed.requests().is_empty());
+    feed.allow_request("r1");
+    feed.resolve("r1");
+    assert!(feed.requests().is_empty());
+    feed.allow_request("r1");
+    assert!(feed.requests().is_empty(), "a resolved request stays gone");
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r2"})));
+    feed.allow_request("r2");
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_RESOLVED, json!({"id": "r2"})));
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r2"})));
+    assert!(feed.requests().is_empty(), "asking again needs a new yes");
+    feed.shared.lost();
+    assert!(feed.shared.state().allowed.is_empty());
+}

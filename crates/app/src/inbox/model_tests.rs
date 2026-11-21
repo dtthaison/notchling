@@ -339,3 +339,45 @@ fn inbox_open_on_question_goes_to_chat() {
     assert_eq!(target(&json!({"ask": "q1"})), None, "no session, no card");
     assert!(is_local(ActionId::Open));
 }
+
+#[test]
+fn consent_requests_are_held_by_id_and_dropped_on_loss() {
+    let mut model = InboxModel::default();
+    model.load_consents(&json!({"requests": [{"id": "c1"}, {"id": "c2"}]}));
+    assert!(model.consent("c1").is_some());
+    assert!(model.consent("c3").is_none());
+    model.load_consents(&json!({"nothing": true}));
+    assert!(
+        model.consent("c2").is_some(),
+        "a reply without requests changes nothing"
+    );
+    model.clear();
+    assert!(model.consent("c1").is_none());
+}
+
+#[test]
+fn a_consent_row_names_its_request_and_the_calls_name_their_arguments() {
+    assert_eq!(
+        consent_of(&json!({"consent": "c1", "vault_request": "c1"})),
+        Some("c1")
+    );
+    assert_eq!(consent_of(&json!({"ask": "q"})), None);
+    assert_eq!(
+        consent_answer_args("c1", true),
+        json!({"consentId": "c1", "decision": "allow"})
+    );
+    assert_eq!(
+        consent_answer_args("c1", false),
+        json!({"consentId": "c1", "decision": "deny"})
+    );
+}
+
+#[test]
+fn a_row_carries_the_node_its_item_came_from() {
+    let mut raised = item("consent:c1:5", 1_000, "open", false);
+    raised["source"] = json!({"node": "m1"});
+    let mut model = InboxModel::default();
+    model.load(&json!({"items": [raised]}));
+    let (needs, _) = model.sections();
+    assert_eq!(needs[0].node.as_deref(), Some("m1"));
+}
