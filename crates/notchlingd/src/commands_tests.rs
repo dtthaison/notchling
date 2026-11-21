@@ -144,7 +144,24 @@ fn the_help_json_has_the_shape_agents_read() {
     assert!(help["userOnly"][0]["why"].is_string());
 }
 
+fn sorted(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let mut out = serde_json::Map::new();
+            for key in keys {
+                out.insert(key.clone(), sorted(&map[key]));
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
+}
+
 fn one_per_line(value: &Value) -> String {
+    let value = sorted(value);
     let parts: Vec<String> = value
         .as_object()
         .unwrap()
