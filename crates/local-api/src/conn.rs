@@ -3,8 +3,8 @@ use crate::peer::{same_user, PeerInfo};
 use crate::server::{AgentCall, AgentIdentity, Caller, OpHome, OpSpec, Shared, Slot};
 use crate::transport::{self, Stream};
 use crate::wire::{
-    err_reply, ok_reply, ops, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
-    topics, Subscribe, Tier, API_VERSION,
+    err_reply, ok_reply, ops, topics, ApiError, ClientKind, ErrorCode, Hello, HelloReply, Request,
+    Subscribe, Tier, API_VERSION,
 };
 use notchling_events::kinds::choices::AgentResult;
 use notchling_events::kinds::security::{PeerWhy, RefusedWhy};
@@ -368,7 +368,9 @@ impl Session {
                 "only the Notchling app may follow this topic",
             ));
         }
-        self.shared.hub.subscribe(self.id, &subscribe.topics, owner.as_deref());
+        self.shared
+            .hub
+            .subscribe(self.id, &subscribe.topics, owner.as_deref());
         self.subscribed |= !subscribe.topics.is_empty();
         Ok(serde_json::json!({ "topics": subscribe.topics }))
     }

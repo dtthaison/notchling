@@ -1,6 +1,7 @@
 use crate::contract::{self, Failure};
 use notchling_local_api::ops;
 use serde_json::{json, Map, Value};
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,49 +99,55 @@ fn text_of(row: &Value, key: &str) -> String {
         .to_owned()
 }
 
-fn show(read: Read, reply: &Value) {
+fn lines(read: Read, reply: &Value) -> Vec<String> {
     let rows = reply["rows"].as_array().cloned().unwrap_or_default();
     if reply["reason"] == json!("no_session") {
-        println!("This command reads the calling session's own data; none here.");
-        return;
+        return vec!["This command reads the calling session's own data; none here.".to_owned()];
     }
+    let mut out: Vec<String> = Vec::new();
     if rows.is_empty() {
-        println!("Nothing.");
+        out.push("Nothing.".to_owned());
     }
     for row in &rows {
-        match read {
-            Read::Outbox => println!(
+        out.push(match read {
+            Read::Outbox => format!(
                 "{}  {}  {}",
                 text_of(row, "id"),
                 text_of(row, "state"),
                 text_of(row, "text").lines().next().unwrap_or_default()
             ),
-            Read::Receipts => println!(
+            Read::Receipts => format!(
                 "{}  {}  {}",
                 text_of(row, "id"),
                 text_of(row, "state"),
                 text_of(row, "why")
             ),
-            Read::Activity => println!(
+            Read::Activity => format!(
                 "{}  {}  {}",
                 row["time_ms"],
                 text_of(row, "event"),
                 text_of(row, "result")
             ),
-            Read::Prompts => println!(
+            Read::Prompts => format!(
                 "{}  {}  {}",
                 text_of(row, "id"),
                 text_of(row, "kind"),
                 text_of(row, "summary")
             ),
-        }
+        });
     }
     if let Some(others) = reply.get("others") {
-        println!(
+        out.push(format!(
             "Other sessions: {} messages in {} sessions.",
             others["messages"], others["sessions"]
-        );
+        ));
     }
+    out
+}
+
+fn say(text: &str) {
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "{text}").and_then(|()| out.flush());
 }
 
 pub fn run(read: Read, args: &[String]) -> i32 {
@@ -156,11 +163,9 @@ pub fn run(read: Read, args: &[String]) -> i32 {
     let reply = match read {
         Read::Outbox => contract::call(&mut client, ops::OUTBOX_MINE, json!({})),
         Read::Prompts => contract::call(&mut client, ops::PROMPTS_MINE, json!({})),
-        Read::Activity => contract::call(
-            &mut client,
-            ops::ACTIVITY_MINE,
-            activity_args(&parsed, &[]),
-        ),
+        Read::Activity => {
+            contract::call(&mut client, ops::ACTIVITY_MINE, activity_args(&parsed, &[]))
+        }
         Read::Receipts => contract::call(&mut client, ops::OUTBOX_MINE, json!({"receipts": true}))
             .and_then(|mut queued| {
                 let events = contract::call(
@@ -177,9 +182,11 @@ pub fn run(read: Read, args: &[String]) -> i32 {
         Err(failure) => return failure.report(json),
     };
     if json {
-        println!("{}", contract::pretty(&reply));
+        say(&contract::pretty(&reply));
     } else {
-        show(read, &reply);
+        for line in lines(read, &reply) {
+            say(&line);
+        }
     }
     contract::OK
 }

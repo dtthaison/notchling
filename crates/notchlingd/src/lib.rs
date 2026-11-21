@@ -113,8 +113,6 @@ pub mod codex_fence;
 pub mod codex_ops;
 pub mod commands;
 pub mod consent_cli;
-pub mod mine_cli;
-pub mod watch_cli;
 mod consent_events;
 pub mod consent_ops;
 #[cfg(test)]
@@ -180,6 +178,7 @@ pub mod log_queue;
 pub mod log_retention;
 pub mod log_rotate;
 pub mod log_start;
+pub mod mine_cli;
 pub mod models_cli;
 pub mod models_ops;
 pub mod op_group;
@@ -242,6 +241,7 @@ pub mod versions_drift;
 pub mod versions_ops;
 pub mod versions_update;
 pub mod wake_loop;
+pub mod watch_cli;
 
 #[cfg(test)]
 mod accounts_late_tests;
@@ -261,6 +261,8 @@ mod acting_ops_tests;
 mod acting_permission_tests;
 #[cfg(test)]
 mod acting_shell_output_tests;
+#[cfg(test)]
+mod activity_mine_tests;
 #[cfg(test)]
 mod activity_ops_tests;
 #[cfg(test)]
@@ -453,6 +455,8 @@ mod outbox_testkit;
 mod pages_ops_tests;
 #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod process_facts_tests;
+#[cfg(test)]
+mod prompts_mine_tests;
 #[cfg(test)]
 mod providers_add_tests;
 #[cfg(test)]

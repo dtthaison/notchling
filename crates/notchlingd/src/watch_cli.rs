@@ -28,8 +28,7 @@ pub struct Args {
 
 pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut found: Vec<String> = Vec::new();
-    let (mut until, mut count, mut timeout, mut socket, mut json) =
-        (None, None, None, None, false);
+    let (mut until, mut count, mut timeout, mut socket, mut json) = (None, None, None, None, false);
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let mut value = |what: &str| {
@@ -91,7 +90,11 @@ fn wire_topics(wanted: &[String], public_only: bool) -> Vec<&'static str> {
         let wire = match topic.as_str() {
             "settings.changed" | "settings.switch" => topics::SETTINGS,
             t if public_only && t.starts_with(topics::MINE_PREFIX) => continue,
-            t => TOPICS.iter().find(|k| **k == t).copied().unwrap_or(topics::SETTINGS),
+            t => TOPICS
+                .iter()
+                .find(|k| **k == t)
+                .copied()
+                .unwrap_or(topics::SETTINGS),
         };
         if !out.contains(&wire) {
             out.push(wire);
@@ -110,7 +113,7 @@ pub fn wanted(topics_in: &[String], event: &str) -> bool {
     topics_in.iter().any(|t| t == topic)
 }
 
-fn reached(args: &Args, data: &Value) -> bool {
+pub fn reached(args: &Args, data: &Value) -> bool {
     match (&args.until, data.get("state").and_then(Value::as_str)) {
         (Some(until), Some(state)) => until == state,
         _ => false,
@@ -184,9 +187,9 @@ pub fn run(args: &[String]) -> i32 {
                 if end.is_some_and(|e| Instant::now() >= e) {
                     break;
                 }
-                std::thread::sleep(contract::pause(step).min(
-                    end.map_or(Duration::MAX, |e| e.saturating_duration_since(Instant::now())),
-                ));
+                std::thread::sleep(contract::pause(step).min(end.map_or(Duration::MAX, |e| {
+                    e.saturating_duration_since(Instant::now())
+                })));
                 step += 1;
                 if let Ok(fresh) = open(&parsed) {
                     client = fresh;

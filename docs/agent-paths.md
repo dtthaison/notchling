@@ -26,6 +26,11 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]` | `settings.set` (agent, acts), `settings.asked` (agent, acts) | by_key_class | 0 1 2 3 4 5 6 7 124 |
 | `notchling consent <id> [--wait] [--timeout <seconds>] [--json]` | `consent.get` (agent) | none | 0 1 2 3 4 5 6 124 |
 | `notchling consents [--json]` | `consent.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling watch [--topic <topic>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]` | `events.subscribe` (agent) | none | 0 1 2 3 4 124 |
+| `notchling outbox [--json]` | `outbox.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling receipts [--json]` | none | none | 0 1 2 3 4 |
+| `notchling activity [--kind <event>]... [--since <ms>] [--limit <n>] [--json]` | `activity.mine` (agent) | none | 0 1 2 3 4 |
+| `notchling prompts [--json]` | `prompts.mine` (agent) | none | 0 1 2 3 4 |
 | `notchling consent cancel <id> [--json]` | `consent.cancel` (agent, acts) | none | 0 1 2 3 4 |
 | `notchling session reload <id|self> [--after-turn] [--json]` | `session.reload` (agent, acts) | own_free | 0 1 2 3 4 |
 | `notchling cluster status [--json]` | `cluster.status` (agent) | none | 0 1 2 3 4 |
@@ -41,7 +46,6 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 
 | Op | Feature | Phase |
 | --- | --- | --- |
-| `events.subscribe` | Follow events | 2 |
 | `search.query` | Search pages and sessions | 2 |
 | `inbox.list` | Read the Inbox | 2 |
 | `accounts.list` | Read accounts | 2 |
@@ -59,9 +63,6 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `versions.latest` | Read the newest versions | 2 |
 | `versions.workers` | Read worker versions | 2 |
 | `versions.check` | Check tool versions | 2 |
-| `outbox.list` | Read queued messages | 2 |
-| `activity.list` | Read the session's activity | 2 |
-| `prompts.list` | Read pending prompts | 2 |
 | `catalog.roles` | Read the role table | 2 |
 | `catalog.get` | Read the model catalog | 2 |
 | `log.verify` | Verify the log chain | 2 |
@@ -189,6 +190,9 @@ Written by `NOTCHLING_UPDATE_GOLDEN=1 cargo test -p notchling-notchlingd command
 | `git.branches` | app_ui |
 | `git.worktrees` | app_ui |
 | `git.branch_list` | app_ui |
+| `outbox.list` | app_ui |
+| `activity.list` | app_ui |
+| `prompts.list` | app_ui |
 | `outbox.edit` | app_ui |
 | `outbox.remove` | app_ui |
 | `outbox.hold` | app_ui |

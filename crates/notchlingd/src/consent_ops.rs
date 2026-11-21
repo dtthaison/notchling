@@ -851,3 +851,7 @@ mod tests;
 #[cfg(test)]
 #[path = "consent_ops_review_tests.rs"]
 mod review_tests;
+
+#[cfg(test)]
+#[path = "consent_scoped_tests.rs"]
+mod scoped_tests;

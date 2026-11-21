@@ -319,7 +319,7 @@ pub const COMMANDS: &[Row] = &[
         "receipts",
         "notchling receipts [--json]",
         "delivery receipts of this session's messages, without their text",
-        &[read("outbox.mine"), read("activity.mine")],
+        &[],
         "none",
         true,
         READ_EXITS,

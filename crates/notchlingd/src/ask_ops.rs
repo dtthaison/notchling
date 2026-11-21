@@ -278,7 +278,8 @@ impl AskOps {
         let Some(owner) = row.session_id.as_deref() else {
             return;
         };
-        let data = json!({"row": wire(row, self.waiting(&row.id), false), "state": row.state.as_str()});
+        let data =
+            json!({"row": wire(row, self.waiting(&row.id), false), "state": row.state.as_str()});
         self.room
             .publish_to(owner, topics::MINE_ASKS, topics::ASK_CHANGED, &data);
     }

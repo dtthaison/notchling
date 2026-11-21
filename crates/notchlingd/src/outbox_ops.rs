@@ -23,9 +23,7 @@ use notchling_events::field::Count;
 use notchling_events::kinds::agents::{OutboxThen, SessionOutbox};
 use notchling_events::spec::Outcome;
 use notchling_events::{scope, Event, Ref, Session};
-use notchling_local_api::{
-    bound_identity, ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier,
-};
+use notchling_local_api::{bound_identity, ops, topics, ApiError, Caller, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -626,7 +624,9 @@ impl OutboxOps {
             .filter(|who| who.verified)
             .and_then(|who| who.session)
         else {
-            return Ok(json!({"rows": [], "others": {"messages": 0, "sessions": 0}, "reason": "no_session"}));
+            return Ok(
+                json!({"rows": [], "others": {"messages": 0, "sessions": 0}, "reason": "no_session"}),
+            );
         };
         let key = self.key_of(&session);
         let all = self.store.list(None).map_err(|_| save_failed())?;
@@ -900,6 +900,9 @@ impl OpGroup for OutboxOps {
 #[cfg(test)]
 #[path = "outbox_blank_tests.rs"]
 mod blank_tests;
+#[cfg(test)]
+#[path = "outbox_mine_tests.rs"]
+mod mine_tests;
 #[cfg(test)]
 #[path = "outbox_ops_tests.rs"]
 mod tests;
