@@ -1,0 +1,11 @@
+{"time":"1970-01-01T00:00:03.500Z","device":"Pixel 9","op":"message","session":"sess-secret-id","length":42,"address":"192.168.1.9"}
+{"time":"1970-01-01T00:00:04.500Z","device":"Pixel 9","op":"inbox.answer:allow_once"}
+{"time":"1970-01-01T00:00:05.500Z","device":"Pixel 9","op":"inbox.answer:refused:acting_off"}
+{"time":"1970-01-01T00:00:06.500Z","device":"Pixel 9","op":"revoke"}
+{"time":"1970-01-01T00:00:07.500Z","device":"Pixel 9","op":"pair"}
+{"time":"1970-01-01T00:00:08.500Z","device":"Pixel 9","op":"sendNow","session":"sess-secret-id"}
+{"time":"1970-01-01T00:00:09.500Z","device":"Pixel 9","op":"newSession"}
+{"time":"1970-01-01T00:00:10.500Z","device":"Pixel 9","op":"takeover"}
+{"time":"1970-01-01T00:00:11.500Z","device":"Pixel 9","op":"image","length":9}
+{"time":"1970-01-01T00:00:12.500Z","device":"Pixel 9","op":"answer"}
+broken line

@@ -1,0 +1,28 @@
+cursor 17 2 false
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Opus 5.5 with medium effort · Claude Ultra
+ ▝▝   ▝▝   ~/work/demo
+
+
+❯ /chrome
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Claude in Chrome
+
+  Let Claude use your Chrome browser: open sites, fill forms, take screenshots, and read console
+  logs and network requests.
+
+  Status:      ◯ not enabled in this session
+  Extension:   ✔ installed
+  By default:  ◯ off
+
+  ❯ Manage permissions
+    Reconnect extension
+    Turn on by default
+
+  For one session, start with claude --chrome or claude --no-chrome. Claude Code asks before
+  Claude acts on a site, unless your permission mode or a rule in /permissions answers for you.
+
+  Learn more: https://code.claude.com/docs/en/chrome
+
+  ↑/↓ to navigate · Enter to select · Esc to close

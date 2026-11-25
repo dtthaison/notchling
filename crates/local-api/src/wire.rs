@@ -1,0 +1,727 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::fmt;
+
+pub const API_VERSION: u32 = 1;
+
+pub mod ops {
+    pub const HELLO: &str = "hello";
+    pub const DAEMON_STATUS: &str = "daemon.status";
+    pub const DAEMON_CAPABILITIES: &str = "daemon.capabilities";
+    pub const SESSIONS_LIST: &str = "sessions.list";
+    pub const EVENTS_SUBSCRIBE: &str = "events.subscribe";
+
+    pub const SESSION_REPLY: &str = "session.reply";
+    pub const SESSION_ANSWER: &str = "session.answer";
+    pub const SESSION_PERMISSION: &str = "session.permission";
+    pub const SESSION_INTERRUPT: &str = "session.interrupt";
+    pub const SESSION_STOP: &str = "session.stop";
+    pub const SESSION_REMOVE: &str = "session.remove";
+    pub const SESSION_TAKE_BACK: &str = "session.take_back";
+    pub const SESSION_NEW: &str = "session.new";
+    pub const FOLDER_TRUST: &str = "folder.trust";
+    pub const SESSION_MOVE: &str = "session.move";
+    pub const SESSION_COMMAND: &str = "session.command";
+    pub const SESSION_HELD_DISCARD: &str = "session.held.discard";
+    pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
+    pub const SETTINGS_GET_ACTING: &str = "settings.get_acting";
+    pub const PROMPTS_LIST: &str = "prompts.list";
+    pub const PROMPTS_MINE: &str = "prompts.mine";
+    pub const SESSION_QUESTION: &str = "session.question";
+    pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
+    pub const SESSION_DIALOG: &str = "session.dialog";
+    pub const SESSION_DIALOG_PICK: &str = "session.dialog_pick";
+    pub const SESSION_DIALOG_DISMISS: &str = "session.dialog_dismiss";
+    pub const SESSION_CHROME: &str = "session.chrome";
+    pub const SESSION_RELOAD: &str = "session.reload";
+    pub const SESSION_RELOAD_STATE: &str = "session.reload.state";
+    pub const HOOK_REQUEST: &str = "hook.request";
+
+    pub const CODEX_SEND: &str = "codex.send";
+    pub const CODEX_STOP: &str = "codex.stop";
+    pub const CODEX_DELETE: &str = "codex.delete";
+    pub const CODEX_CHILDREN: &str = "codex.children";
+
+    pub const AGY_SESSIONS: &str = "agy.sessions";
+    pub const AGY_STATE: &str = "agy.state";
+    pub const AGY_CONVERSATION: &str = "agy.conversation";
+    pub const AGY_OPEN: &str = "agy.open";
+    pub const AGY_SEND: &str = "agy.send";
+    pub const AGY_CANCEL: &str = "agy.cancel";
+    pub const AGY_SET_OPTION: &str = "agy.set_option";
+    pub const AGY_PERMISSION: &str = "agy.permission";
+    pub const AGY_SIDECAR_TAKE: &str = "agy.sidecar.take";
+    pub const AGY_SIDECAR_REPORT: &str = "agy.sidecar.report";
+    pub const AGY_SIDECAR_STATUS: &str = "agy.sidecar.status";
+    pub const AGY_SIDECAR_SETUP: &str = "agy.sidecar.setup";
+    pub const AGY_HOOK: &str = "agy.hook";
+
+    pub const BRIDGE_SET: &str = "bridge.set";
+    pub const BRIDGE_STATUS: &str = "bridge.status";
+    pub const BRIDGE_PAIR_BEGIN: &str = "bridge.pair.begin";
+    pub const BRIDGE_PAIR_ANSWER: &str = "bridge.pair.answer";
+    pub const BRIDGE_DEVICES: &str = "bridge.devices";
+    pub const BRIDGE_REVOKE: &str = "bridge.revoke";
+    pub const BRIDGE_TUNNEL_STATUS: &str = "bridge.tunnel.status";
+
+    pub const SEARCH_QUERY: &str = "search.query";
+    pub const SEARCH_FACETS: &str = "search.facets";
+    pub const PAGES_LIST: &str = "pages.list";
+    pub const PAGES_FIND: &str = "pages.find";
+    pub const EMBED_REFRESH: &str = "embed.refresh";
+    pub const EMBED_STATUS: &str = "embed.status";
+    pub const EMBED_SETTINGS: &str = "embed.settings";
+    pub const EMBED_REMOVE: &str = "embed.remove";
+    pub const EMBED_FETCH: &str = "embed.fetch";
+    pub const EMBED_FETCH_CANCEL: &str = "embed.fetch.cancel";
+    pub const EMBED_REQUEST: &str = "embed.request";
+
+    pub const INSTALL_PLAN: &str = "install.plan";
+    pub const INSTALL_APPLY: &str = "install.apply";
+    pub const INSTALL_REMOVE: &str = "install.remove";
+    pub const SETTINGS_SET_SWITCH: &str = "settings.set_switch";
+    pub const SETTINGS_SWITCHES: &str = "settings.switches";
+    pub const SETTINGS_LIST: &str = "settings.list";
+    pub const SETTINGS_GET: &str = "settings.get";
+    pub const SETTINGS_SET: &str = "settings.set";
+    pub const SETTINGS_ASKED: &str = "settings.asked";
+
+    pub const ACCOUNTS_LIST: &str = "accounts.list";
+    pub const ACCOUNTS_SWITCH: &str = "accounts.switch";
+    pub const ACCOUNTS_ADD_BEGIN: &str = "accounts.add.begin";
+    pub const ACCOUNTS_ADD_FINISH: &str = "accounts.add.finish";
+    pub const ACCOUNTS_REMOVE: &str = "accounts.remove";
+    pub const ACCOUNTS_MOVE_ALL: &str = "accounts.move_all";
+    pub const ACCOUNTS_RESULT: &str = "accounts.result";
+    pub const LANES_LIST: &str = "lanes.list";
+    pub const LANES_CREATE: &str = "lanes.create";
+    pub const LANES_REMOVE: &str = "lanes.remove";
+    pub const LANES_SWITCH: &str = "lanes.switch";
+
+    pub const PROVIDERS_LIST: &str = "providers.list";
+    pub const PROVIDERS_SWITCH: &str = "providers.switch";
+    pub const PROVIDERS_ADD_BEGIN: &str = "providers.add.begin";
+    pub const PROVIDERS_ADD_CANCEL: &str = "providers.add.cancel";
+    pub const PROVIDERS_REMOVE: &str = "providers.remove";
+    pub const PROVIDERS_USAGE: &str = "providers.usage";
+
+    pub const VAULT_FIND: &str = "vault.find";
+    pub const VAULT_USE: &str = "vault.use";
+    pub const VAULT_REQUEST: &str = "vault.request";
+    pub const VAULT_LIST: &str = "vault.list";
+    pub const VAULT_SAVE: &str = "vault.save";
+    pub const VAULT_REMOVE: &str = "vault.remove";
+    pub const VAULT_APPROVAL_ANSWER: &str = "vault.approval.answer";
+    pub const VAULT_REQUEST_CANCEL: &str = "vault.request.cancel";
+    pub const VAULT_PENDING: &str = "vault.pending";
+    pub const VAULT_ADMIN: &str = "vault.admin";
+
+    pub const CATALOG_GET: &str = "catalog.get";
+    pub const CATALOG_ROLES: &str = "catalog.roles";
+    pub const MODELS_CHECK: &str = "models.check";
+    pub const MODELS_UPDATE: &str = "models.update";
+    pub const COST_PROFILE_GET: &str = "cost.profile.get";
+    pub const COST_PROFILE_SET: &str = "cost.profile.set";
+    pub const COST_SETUP_PLAN: &str = "cost.setup.plan";
+    pub const COST_SETUP_APPLY: &str = "cost.setup.apply";
+    pub const COST_SETUP_UNDO: &str = "cost.setup.undo";
+    pub const COST_SETUP_CHECK: &str = "cost.setup.check";
+
+    pub const INBOX_LIST: &str = "inbox.list";
+    pub const INBOX_MINE: &str = "inbox.mine";
+    pub const ACCOUNTS_SUMMARY: &str = "accounts.summary";
+    pub const LANES_SUMMARY: &str = "lanes.summary";
+    pub const LIMITS_SUMMARY: &str = "limits.summary";
+    pub const ORGANIZATIONS_MINE: &str = "organizations.mine";
+    pub const INBOX_ANSWER: &str = "inbox.answer";
+    pub const INBOX_SEEN: &str = "inbox.seen";
+
+    pub const GIT_STATUS: &str = "git.status";
+    pub const GIT_DIFF: &str = "git.diff";
+    pub const GIT_BRANCH_DIFF_STAT: &str = "git.branch_diff_stat";
+    pub const GIT_BRANCH_DIFF_FILE: &str = "git.branch_diff_file";
+    pub const GIT_BRANCHES: &str = "git.branches";
+    pub const GIT_WORKTREES: &str = "git.worktrees";
+    pub const GIT_BRANCH_LIST: &str = "git.branch_list";
+
+    pub const ACTIVITY_LIST: &str = "activity.list";
+    pub const ACTIVITY_MINE: &str = "activity.mine";
+    pub const LOG_VERIFY: &str = "log.verify";
+    pub const LOG_CHAIN_START: &str = "log.chain.start";
+    pub const LOG_AUDIT_DELETE: &str = "log.audit.delete";
+
+    pub const VERSIONS_GET: &str = "versions.get";
+    pub const VERSIONS_WORKERS: &str = "versions.workers";
+    pub const VERSIONS_CHECK: &str = "versions.check";
+    pub const VERSIONS_LATEST: &str = "versions.latest";
+    pub const VERSIONS_UPDATE_LOCAL: &str = "versions.update_local";
+
+    pub const AWAKE_STATE: &str = "awake.state";
+
+    pub const TAILSCALE_SWITCH: &str = "tailscale.switch";
+
+    pub const CLUSTER_STATUS: &str = "cluster.status";
+    pub const CLUSTER_CREATE: &str = "cluster.create";
+    pub const CLUSTER_JOIN_TOKEN: &str = "cluster.join.token";
+    pub const CLUSTER_JOIN: &str = "cluster.join";
+    pub const CLUSTER_MEMBER_SET: &str = "cluster.member.set";
+    pub const CLUSTER_REMOVE: &str = "cluster.remove";
+    pub const CLUSTER_MAIN_SET: &str = "cluster.main.set";
+    pub const CLUSTER_MOVE_HOME: &str = "cluster.move_home";
+    pub const CLUSTER_MOVE_NOW: &str = "cluster.move.now";
+    pub const CLUSTER_FOLLOW: &str = "cluster.follow";
+    pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
+    pub const SHELL_STOP: &str = "shell.stop";
+    pub const CLUSTER_RETURN: &str = "cluster.return";
+    pub const CLUSTER_FAILOVER_SET: &str = "cluster.failover.set";
+    pub const CLUSTER_ALLOW_SET: &str = "cluster.allow.set";
+    pub const CLUSTER_PROMOTE: &str = "cluster.promote";
+    pub const CLUSTER_TAKE_BACK: &str = "cluster.take_back";
+    pub const CLUSTER_CONTINUE_HERE: &str = "cluster.continue_here";
+    pub const CLUSTER_SIDE_COPY_HIDE: &str = "cluster.side_copy.hide";
+
+    pub const SESSION_SEND: &str = "session.send";
+    pub const OUTBOX_LIST: &str = "outbox.list";
+    pub const OUTBOX_MINE: &str = "outbox.mine";
+    pub const OUTBOX_EDIT: &str = "outbox.edit";
+    pub const OUTBOX_REMOVE: &str = "outbox.remove";
+    pub const OUTBOX_HOLD: &str = "outbox.hold";
+    pub const OUTBOX_RESEND: &str = "outbox.resend";
+    pub const OUTBOX_DISCARD: &str = "outbox.discard";
+
+    pub const CLUSTER_INVITE: &str = "cluster.invite";
+    pub const CLUSTER_ADMIN_REQUEST: &str = "cluster.admin.request";
+    pub const ACCOUNTS_REQUEST: &str = "accounts.request";
+
+    pub const MACHINES_LIST: &str = "machines.list";
+    pub const MACHINES_CHECK: &str = "machines.check";
+    pub const MACHINES_PLAN: &str = "machines.plan";
+    pub const MACHINES_PEERS: &str = "machines.peers";
+    pub const MACHINES_REQUEST: &str = "machines.request";
+    pub const MACHINES_APPLY: &str = "machines.apply";
+    pub const NETWORK_LIST: &str = "network.list";
+    pub const INSTALL_REQUEST: &str = "install.request";
+    pub const COST_REQUEST: &str = "cost.request";
+    pub const VERSIONS_REQUEST: &str = "versions.request";
+
+    pub const ASK_OPEN: &str = "ask.open";
+    pub const ASK_WAIT: &str = "ask.wait";
+    pub const ASK_MINE: &str = "ask.mine";
+    pub const ASK_ANSWER: &str = "ask.answer";
+    pub const ASK_DISMISS: &str = "ask.dismiss";
+    pub const ASK_LIST: &str = "ask.list";
+
+    pub const SHELLS_MINE: &str = "shells.mine";
+    pub const SHELLS_STOP: &str = "shells.stop";
+    pub const SHELLS_STUCK: &str = "shells.stuck";
+
+    pub const CONSENT_GET: &str = "consent.get";
+    pub const CONSENT_MINE: &str = "consent.mine";
+    pub const CONSENT_CANCEL: &str = "consent.cancel";
+    pub const CONSENT_LIST: &str = "consent.list";
+    pub const CONSENT_ANSWER: &str = "consent.answer";
+    pub const CONSENT_OPENED: &str = "consent.opened";
+    pub const SWITCH_REQUEST: &str = "switch.request";
+    pub const SWITCH_OFF: &str = "switch.off";
+    pub const SESSION_START: &str = "session.start";
+    pub const SESSION_SAY: &str = "session.say";
+    pub const SESSION_HALT: &str = "session.halt";
+    pub const SESSION_DISCARD: &str = "session.discard";
+    pub const SESSION_CHOOSE: &str = "session.choose";
+    pub const SESSION_RUN: &str = "session.run";
+    pub const SESSION_PICK: &str = "session.pick";
+    pub const SESSION_BROWSE: &str = "session.browse";
+    pub const SESSION_TUNE: &str = "session.tune";
+    pub const JOBS_MINE: &str = "jobs.mine";
+    pub const JOBS_GET: &str = "jobs.get";
+    pub const JOBS_TAIL: &str = "jobs.tail";
+    pub const JOBS_RETURN: &str = "jobs.return";
+    pub const JOBS_STOP: &str = "jobs.stop";
+    pub const DELEGATE_BEGIN: &str = "delegate.begin";
+    pub const DELEGATE_END: &str = "delegate.end";
+
+    pub const ORGANIZATIONS_LIST: &str = "organizations.list";
+    pub const ORGANIZATIONS_CREATE: &str = "organizations.create";
+    pub const ORGANIZATIONS_RENAME: &str = "organizations.rename";
+    pub const ORGANIZATIONS_COLOR_SET: &str = "organizations.color.set";
+    pub const ORGANIZATIONS_FOLDERS_SET: &str = "organizations.folders.set";
+    pub const ORGANIZATIONS_FOLDERS_PREVIEW: &str = "organizations.folders.preview";
+    pub const ORGANIZATIONS_DELETE: &str = "organizations.delete";
+}
+
+pub mod topics {
+    pub const SESSIONS: &str = "sessions";
+    pub const EMBED: &str = "embed";
+    pub const EMBED_CHANGED: &str = "embed.changed";
+    pub const SESSIONS_CHANGED: &str = "sessions.changed";
+    pub const SESSIONS_REMOTE_SHELL: &str = "sessions.remote.shell";
+    pub const SESSIONS_REMOTE_CODEX: &str = "sessions.remote.codex";
+    pub const PROMPTS: &str = "prompts";
+    pub const PROMPT_PENDING: &str = "prompt.pending";
+    pub const PROMPT_RESOLVED: &str = "prompt.resolved";
+    pub const SETTINGS: &str = "settings";
+    pub const ACTING_CHANGED: &str = "settings.acting";
+    pub const SWITCH_CHANGED: &str = "settings.switch";
+    pub const SETTINGS_CHANGED: &str = "settings.changed";
+    pub const AWAKE_CHANGED: &str = "awake.changed";
+    pub const ACCOUNTS: &str = "accounts";
+    pub const ACCOUNTS_CHANGED: &str = "accounts.changed";
+    pub const ACCOUNTS_ADD_ENDED: &str = "accounts.add.ended";
+    pub const ACCOUNTS_DONE: &str = "accounts.done";
+    pub const TOOLS: &str = "tools";
+    pub const CATALOG_CHANGED: &str = "catalog.changed";
+    pub const CODEX_TURN: &str = "codex.turn";
+    pub const SESSION_CHANGED: &str = "session.changed";
+    pub const SESSION_HELD: &str = "session.held";
+    pub const AGY_PERMISSION_PENDING: &str = "agy.permission.pending";
+    pub const AGY_PERMISSION_RESOLVED: &str = "agy.permission.resolved";
+    pub const LOG: &str = "log";
+    pub const LOG_EVENT: &str = "log.event";
+    pub const LOG_CHECK: &str = "log.check";
+    pub const BRIDGE: &str = "bridge";
+    pub const BRIDGE_PAIR_REQUEST: &str = "bridge.pair.request";
+    pub const BRIDGE_CHANGED: &str = "bridge.changed";
+    pub const PROVIDERS: &str = "providers";
+    pub const PROVIDERS_CHANGED: &str = "providers.changed";
+
+    pub const VAULT: &str = "vault";
+    pub const VAULT_APPROVAL_PENDING: &str = "vault.approval.pending";
+    pub const VAULT_APPROVAL_RESOLVED: &str = "vault.approval.resolved";
+    pub const VAULT_REQUEST_PENDING: &str = "vault.request.pending";
+    pub const VAULT_REQUEST_RESOLVED: &str = "vault.request.resolved";
+    pub const VAULT_CHANGED: &str = "vault.changed";
+
+    pub const INBOX: &str = "inbox";
+    pub const INBOX_CHANGED: &str = "inbox.changed";
+    pub const INBOX_REMOVED: &str = "inbox.removed";
+
+    pub const VERSIONS: &str = "versions";
+    pub const VERSIONS_CHANGED: &str = "versions.changed";
+    pub const VERSIONS_CHECKED: &str = "versions.checked";
+    pub const VERSIONS_UPDATED: &str = "versions.updated";
+
+    pub const CLUSTER: &str = "cluster";
+    pub const CLUSTER_CHANGED: &str = "cluster.changed";
+    pub const CLUSTER_REFUSED: &str = "cluster.refused";
+
+    pub const MACHINES: &str = "machines";
+    pub const MACHINES_CHANGED: &str = "machines.changed";
+
+    pub const OUTBOX: &str = "outbox";
+    pub const OUTBOX_CHANGED: &str = "outbox.changed";
+    pub const OUTBOX_REMOVED: &str = "outbox.removed";
+
+    pub const RELOADS: &str = "reloads";
+    pub const RELOAD_CHANGED: &str = "reload.changed";
+
+    pub const ASKS: &str = "asks";
+    pub const ASK_CHANGED: &str = "ask.changed";
+    pub const ASK_REMOVED: &str = "ask.removed";
+
+    pub const MINE_CONSENTS: &str = "mine.consents";
+    pub const MINE_ASKS: &str = "mine.asks";
+    pub const MINE_JOBS: &str = "mine.jobs";
+    pub const MINE_SESSIONS: &str = "mine.sessions";
+    pub const CONSENT_CHANGED: &str = "consent.changed";
+    pub const MINE_PREFIX: &str = "mine.";
+    pub const SCOPED: [&str; 2] = [MINE_CONSENTS, MINE_ASKS];
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientKind {
+    App,
+    Cli,
+    Hook,
+    Node,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tier {
+    App,
+    Agent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    BadRequest,
+    UnknownOp,
+    Forbidden,
+    NeedsApproval,
+    Internal,
+    Unimplemented,
+    Failed,
+}
+
+impl ErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorCode::BadRequest => "bad_request",
+            ErrorCode::UnknownOp => "unknown_op",
+            ErrorCode::Forbidden => "forbidden",
+            ErrorCode::NeedsApproval => "needs_approval",
+            ErrorCode::Internal => "internal",
+            ErrorCode::Unimplemented => "unimplemented",
+            ErrorCode::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiError {
+    pub code: ErrorCode,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+impl ApiError {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> ApiError {
+        ApiError {
+            code,
+            message: message.into(),
+            data: None,
+        }
+    }
+
+    pub fn with_data(mut self, data: Value) -> ApiError {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn with_reason(mut self, reason: &str) -> ApiError {
+        let mut data = match self.data.take() {
+            Some(Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+        data.insert("reason".into(), Value::String(reason.to_string()));
+        self.data = Some(Value::Object(data));
+        self
+    }
+
+    pub fn with_field(mut self, name: &str, value: Value) -> ApiError {
+        let mut data = match self.data.take() {
+            Some(Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+        data.insert(name.into(), value);
+        self.data = Some(Value::Object(data));
+        self
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> ApiError {
+        ApiError::new(ErrorCode::BadRequest, message)
+    }
+
+    pub fn internal(message: impl Into<String>) -> ApiError {
+        ApiError::new(ErrorCode::Internal, message)
+    }
+}
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.code.as_str(), self.message)
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub id: u64,
+    pub op: String,
+    #[serde(default)]
+    pub args: Value,
+}
+
+impl Request {
+    pub fn parse(line: &[u8]) -> Result<Request, (u64, ApiError)> {
+        let value: Value = serde_json::from_slice(line)
+            .map_err(|e| (0, ApiError::bad_request(format!("not JSON: {e}"))))?;
+        let id = value.get("id").and_then(Value::as_u64).unwrap_or(0);
+        serde_json::from_value(value)
+            .map_err(|e| (id, ApiError::bad_request(format!("not a request: {e}"))))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hello {
+    pub client: ClientKind,
+    pub version: String,
+    pub api: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelloReply {
+    pub api: u32,
+    pub daemon: String,
+    pub tier: Tier,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientCounts {
+    pub app: u32,
+    pub cli: u32,
+    pub hook: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonStatus {
+    pub version: String,
+    pub pid: u32,
+    pub uptime_secs: u64,
+    pub clients: ClientCounts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Subscribe {
+    pub topics: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    pub event: String,
+    #[serde(default)]
+    pub data: Value,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Incoming {
+    Reply {
+        id: u64,
+        result: Result<Value, ApiError>,
+    },
+    Event(Event),
+}
+
+impl Incoming {
+    pub fn parse(line: &[u8]) -> Result<Incoming, String> {
+        let value: Value = serde_json::from_slice(line).map_err(|e| format!("not JSON: {e}"))?;
+        let Value::Object(mut map) = value else {
+            return Err("not an object".into());
+        };
+        if let Some(name) = map.get("event").and_then(Value::as_str) {
+            let event = name.to_string();
+            let data = map.remove("data").unwrap_or(Value::Null);
+            return Ok(Incoming::Event(Event { event, data }));
+        }
+        let id = map
+            .get("id")
+            .and_then(Value::as_u64)
+            .ok_or("a reply without an id")?;
+        if let Some(err) = map.remove("err") {
+            let err: ApiError =
+                serde_json::from_value(err).map_err(|e| format!("a bad error: {e}"))?;
+            return Ok(Incoming::Reply {
+                id,
+                result: Err(err),
+            });
+        }
+        match map.remove("ok") {
+            Some(ok) => Ok(Incoming::Reply { id, result: Ok(ok) }),
+            None => Err("a reply with neither ok nor err".into()),
+        }
+    }
+}
+
+pub fn ok_reply(id: u64, result: Value) -> Value {
+    json!({ "id": id, "ok": result })
+}
+
+pub fn err_reply(id: u64, error: &ApiError) -> Value {
+    let mut err = json!({ "code": error.code.as_str(), "message": error.message });
+    if let (Some(data), Some(map)) = (&error.data, err.as_object_mut()) {
+        map.insert("data".to_owned(), data.clone());
+    }
+    json!({ "id": id, "err": err })
+}
+
+pub fn event_line(event: &str, data: &Value) -> Value {
+    json!({ "event": event, "data": data })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_outbox_names_are_on_the_wire() {
+        assert_eq!(ops::SESSION_SEND, "session.send");
+        assert_eq!(ops::OUTBOX_LIST, "outbox.list");
+        assert_eq!(ops::OUTBOX_EDIT, "outbox.edit");
+        assert_eq!(ops::OUTBOX_REMOVE, "outbox.remove");
+        assert_eq!(ops::OUTBOX_RESEND, "outbox.resend");
+        assert_eq!(ops::OUTBOX_DISCARD, "outbox.discard");
+        assert_eq!(ops::OUTBOX_HOLD, "outbox.hold");
+        assert_eq!(topics::OUTBOX, "outbox");
+        assert_eq!(topics::OUTBOX_CHANGED, "outbox.changed");
+        assert_eq!(topics::OUTBOX_REMOVED, "outbox.removed");
+    }
+
+    #[test]
+    fn the_ask_names_are_on_the_wire() {
+        assert_eq!(ops::ASK_OPEN, "ask.open");
+        assert_eq!(ops::ASK_WAIT, "ask.wait");
+        assert_eq!(ops::ASK_MINE, "ask.mine");
+        assert_eq!(ops::ASK_ANSWER, "ask.answer");
+        assert_eq!(ops::ASK_DISMISS, "ask.dismiss");
+        assert_eq!(ops::ASK_LIST, "ask.list");
+        assert_eq!(topics::ASKS, "asks");
+        assert_eq!(topics::ASK_CHANGED, "ask.changed");
+        assert_eq!(topics::ASK_REMOVED, "ask.removed");
+    }
+
+    #[test]
+    fn a_request_reads_with_default_args() {
+        let r = Request::parse(br#"{"id":7,"op":"sessions.list"}"#).unwrap();
+        assert_eq!(r.id, 7);
+        assert_eq!(r.op, "sessions.list");
+        assert_eq!(r.args, Value::Null);
+    }
+
+    #[test]
+    fn a_bad_request_keeps_its_id_when_it_has_one() {
+        let (id, e) = Request::parse(br#"{"id":9,"op":5}"#).unwrap_err();
+        assert_eq!(id, 9);
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        let (id, _) = Request::parse(b"\xff\xfe garbage").unwrap_err();
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn replies_and_events_round_trip() {
+        let ok = serde_json::to_vec(&ok_reply(3, json!(null))).unwrap();
+        assert_eq!(
+            Incoming::parse(&ok).unwrap(),
+            Incoming::Reply {
+                id: 3,
+                result: Ok(Value::Null)
+            }
+        );
+        let e = ApiError::new(ErrorCode::NeedsApproval, "no app attached");
+        let err = serde_json::to_vec(&err_reply(4, &e)).unwrap();
+        assert_eq!(
+            Incoming::parse(&err).unwrap(),
+            Incoming::Reply {
+                id: 4,
+                result: Err(e)
+            }
+        );
+        let ev = serde_json::to_vec(&event_line("sessions.changed", &json!([1]))).unwrap();
+        assert_eq!(
+            Incoming::parse(&ev).unwrap(),
+            Incoming::Event(Event {
+                event: "sessions.changed".into(),
+                data: json!([1])
+            })
+        );
+    }
+
+    #[test]
+    fn an_error_may_carry_data_and_one_without_still_reads_the_old_way() {
+        let plain = ApiError::new(ErrorCode::Failed, "no");
+        assert_eq!(
+            err_reply(2, &plain),
+            json!({"id": 2, "err": {"code": "failed", "message": "no"}}),
+            "nothing is added when there is no data"
+        );
+        let held = ApiError::new(ErrorCode::Failed, "no").with_data(json!({"box": "a draft"}));
+        let line = serde_json::to_vec(&err_reply(5, &held)).unwrap();
+        assert_eq!(
+            Incoming::parse(&line).unwrap(),
+            Incoming::Reply {
+                id: 5,
+                result: Err(held)
+            }
+        );
+        let old = br#"{"id":6,"err":{"code":"failed","message":"no"}}"#;
+        assert_eq!(
+            Incoming::parse(old).unwrap(),
+            Incoming::Reply {
+                id: 6,
+                result: Err(plain)
+            }
+        );
+    }
+
+    #[test]
+    fn error_codes_are_the_wire_names() {
+        let text = serde_json::to_string(&ErrorCode::NeedsApproval).unwrap();
+        assert_eq!(text, "\"needs_approval\"");
+        for code in [
+            ErrorCode::BadRequest,
+            ErrorCode::UnknownOp,
+            ErrorCode::Forbidden,
+            ErrorCode::NeedsApproval,
+            ErrorCode::Internal,
+        ] {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                Value::String(code.as_str().into())
+            );
+        }
+    }
+
+    #[test]
+    fn the_m3_codes_are_wire_names_too() {
+        for (code, name) in [
+            (ErrorCode::Unimplemented, "unimplemented"),
+            (ErrorCode::Failed, "failed"),
+        ] {
+            assert_eq!(code.as_str(), name);
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                Value::String(name.into())
+            );
+        }
+        assert_eq!(ops::SETTINGS_SET_ACTING, "settings.set_acting");
+        assert_eq!(ops::HOOK_REQUEST, "hook.request");
+        assert_eq!(ops::INSTALL_PLAN, "install.plan");
+        assert_eq!(ops::INSTALL_APPLY, "install.apply");
+        assert_eq!(ops::INSTALL_REMOVE, "install.remove");
+        assert_eq!(topics::PROMPT_PENDING, "prompt.pending");
+        assert_eq!(topics::PROMPT_RESOLVED, "prompt.resolved");
+    }
+
+    #[test]
+    fn the_phase_8_ops_and_topics_keep_their_names() {
+        for (have, want) in [
+            (ops::MACHINES_LIST, "machines.list"),
+            (ops::MACHINES_CHECK, "machines.check"),
+            (ops::MACHINES_PLAN, "machines.plan"),
+            (ops::MACHINES_PEERS, "machines.peers"),
+            (ops::MACHINES_REQUEST, "machines.request"),
+            (ops::MACHINES_APPLY, "machines.apply"),
+            (ops::NETWORK_LIST, "network.list"),
+            (ops::INSTALL_REQUEST, "install.request"),
+            (ops::COST_REQUEST, "cost.request"),
+            (ops::VERSIONS_REQUEST, "versions.request"),
+            (ops::EMBED_REQUEST, "embed.request"),
+            (topics::MACHINES, "machines"),
+            (topics::MACHINES_CHANGED, "machines.changed"),
+        ] {
+            assert_eq!(have, want);
+        }
+    }
+
+    #[test]
+    fn hello_reads_the_plan_shape() {
+        let h: Hello =
+            serde_json::from_str(r#"{"client":"cli","version":"0.1.0","api":1}"#).unwrap();
+        assert_eq!(h.client, ClientKind::Cli);
+        let r = HelloReply {
+            api: 1,
+            daemon: "0.1.0".into(),
+            tier: Tier::Agent,
+        };
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({"api":1,"daemon":"0.1.0","tier":"agent"})
+        );
+    }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "filter": {},
+    "sql": "",
+    "args": []
+  },
+  {
+    "filter": { "tool": ["codex"] },
+    "sql": " AND d.id IN (SELECT doc FROM facets WHERE name = ? AND value IN (?))",
+    "args": ["tool", "codex"]
+  },
+  {
+    "filter": { "tool": ["claude", "codex"], "account": ["work"] },
+    "sql": " AND d.id IN (SELECT doc FROM facets WHERE name = ? AND value IN (?, ?)) AND d.id IN (SELECT doc FROM facets WHERE name = ? AND value IN (?))",
+    "args": ["tool", "claude", "codex", "account", "work"]
+  },
+  {
+    "filter": { "project": ["/w/app"], "after": 100.5, "before": 200.0 },
+    "sql": " AND d.id IN (SELECT doc FROM facets WHERE name = ? AND value IN (?)) AND d.modified >= ? AND d.modified < ?",
+    "args": ["project", "/w/app", 100.5, 200.0]
+  },
+  {
+    "filter": { "before": 50.0 },
+    "sql": " AND d.modified < ?",
+    "args": [50.0]
+  }
+]

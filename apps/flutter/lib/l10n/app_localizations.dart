@@ -1,0 +1,2076 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/intl.dart' as intl;
+
+import 'app_localizations_en.dart';
+
+// ignore_for_file: type=lint
+
+/// Callers can lookup localized strings with an instance of AppL10n
+/// returned by `AppL10n.of(context)`.
+///
+/// Applications need to include `AppL10n.delegate()` in their app's
+/// `localizationDelegates` list, and the locales they support in the app's
+/// `supportedLocales` list. For example:
+///
+/// ```dart
+/// import 'l10n/app_localizations.dart';
+///
+/// return MaterialApp(
+///   localizationsDelegates: AppL10n.localizationsDelegates,
+///   supportedLocales: AppL10n.supportedLocales,
+///   home: MyApplicationHome(),
+/// );
+/// ```
+///
+/// ## Update pubspec.yaml
+///
+/// Please make sure to update your pubspec.yaml to include the following
+/// packages:
+///
+/// ```yaml
+/// dependencies:
+///   # Internationalization support.
+///   flutter_localizations:
+///     sdk: flutter
+///   intl: any # Use the pinned version from flutter_localizations
+///
+///   # Rest of dependencies
+/// ```
+///
+/// ## iOS Applications
+///
+/// iOS applications define key application metadata, including supported
+/// locales, in an Info.plist file that is built into the application bundle.
+/// To configure the locales supported by your app, you’ll need to edit this
+/// file.
+///
+/// First, open your project’s ios/Runner.xcworkspace Xcode workspace file.
+/// Then, in the Project Navigator, open the Info.plist file under the Runner
+/// project’s Runner folder.
+///
+/// Next, select the Information Property List item, select Add Item from the
+/// Editor menu, then select Localizations from the pop-up menu.
+///
+/// Select and expand the newly-created Localizations item then, for each
+/// locale your application supports, add a new item and select the locale
+/// you wish to add from the pop-up menu in the Value field. This list should
+/// be consistent with the languages listed in the AppL10n.supportedLocales
+/// property.
+abstract class AppL10n {
+  AppL10n(String locale)
+    : localeName = intl.Intl.canonicalizedLocale(locale.toString());
+
+  final String localeName;
+
+  static AppL10n of(BuildContext context) {
+    return Localizations.of<AppL10n>(context, AppL10n)!;
+  }
+
+  static const LocalizationsDelegate<AppL10n> delegate = _AppL10nDelegate();
+
+  /// A list of this localizations delegate along with the default localizations
+  /// delegates.
+  ///
+  /// Returns a list of localizations delegates containing this delegate along with
+  /// GlobalMaterialLocalizations.delegate, GlobalCupertinoLocalizations.delegate,
+  /// and GlobalWidgetsLocalizations.delegate.
+  ///
+  /// Additional delegates can be added by appending to this list in
+  /// MaterialApp. This list does not have to be used at all if a custom list
+  /// of delegates is preferred or required.
+  static const List<LocalizationsDelegate<dynamic>> localizationsDelegates =
+      <LocalizationsDelegate<dynamic>>[
+        delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ];
+
+  /// A list of this localizations delegate's supported locales.
+  static const List<Locale> supportedLocales = <Locale>[Locale('en')];
+
+  /// Shown in the Chat screen and the Paired Macs screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get appCancel;
+
+  /// Shown in the app shell when the phone refuses to connect to other computers of the cluster because it cannot check who they are. $names is their names.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connecting to {names}: the phone can\'t verify it is the right computer.'**
+  String appCannotVerifyNodes(String names);
+
+  /// Shown in the Chat screen and pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get appClose;
+
+  /// Shown in the app shell and the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get appConnected;
+
+  /// Shown in the app shell. $route is Home Wi-Fi or Internet.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected · {route}'**
+  String appConnectedVia(String route);
+
+  /// Shown in the app shell and the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting'**
+  String get appConnecting;
+
+  /// Shown in the app shell. $seconds is the wait before the next try, in seconds.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection lost, retrying in {seconds}s'**
+  String appConnectionLostRetry(int seconds);
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac revoked this device. Pair again.'**
+  String get appConnectionRevoked;
+
+  /// Shown in the app shell. $count is how many requests are open.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} open'**
+  String appInboxOpenCount(int count);
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.'**
+  String get appKeepAliveBody;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get appKeepAliveEnable;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep the connection in the background?'**
+  String get appKeepAliveTitle;
+
+  /// Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load data. Please try again.'**
+  String get appLoadFailed;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent Console'**
+  String get appName;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.'**
+  String get appNoRouteToMac;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get appNotNow;
+
+  /// Shown in the app shell and the Chat screen and Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired Macs'**
+  String get appOpenMacs;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Pull to refresh'**
+  String get appPullToRefresh;
+
+  /// Shown in the app shell and the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get appRetry;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry now'**
+  String get appRetryNow;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Home Wi-Fi'**
+  String get appRouteHome;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Internet'**
+  String get appRouteInternet;
+
+  /// Shown in the app shell and Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get appSettingsTitle;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat'**
+  String get appTabChat;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Inbox'**
+  String get appTabInbox;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions'**
+  String get appTabSessions;
+
+  /// Shown in the app shell.
+  ///
+  /// In en, this message translates to:
+  /// **'Visualize'**
+  String get appTabVisualize;
+
+  /// Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Take over'**
+  String get appTakeover;
+
+  /// Shown in the Chat screen and the Sessions tab. $reason is the reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not take over: {reason}'**
+  String appTakeoverFailed(String reason);
+
+  /// Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to, $primary the one that cannot be reached.
+  ///
+  /// In en, this message translates to:
+  /// **'Through {node} · {primary} isn\'t reachable'**
+  String appThroughNode(String node, String primary);
+
+  /// Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to.
+  ///
+  /// In en, this message translates to:
+  /// **'Through {node}'**
+  String appThroughNodeOnly(String node);
+
+  /// Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'View only'**
+  String get appViewOnly;
+
+  /// The Mac is busy with something else.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac is busy. Try again.'**
+  String get bridgeErrorBusy;
+
+  /// The phone is not connected to the Mac, or the link dropped while a request was waiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connected to the Mac.'**
+  String get bridgeErrorDisconnected;
+
+  /// The Mac failed, or answered in a way the phone does not understand.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong on the Mac.'**
+  String get bridgeErrorInternal;
+
+  /// The Mac refused the request, or does not know it because it runs an older version.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t accept that request.'**
+  String get bridgeErrorInvalid;
+
+  /// The Mac could not find what the phone asked for, such as a session or a folder.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac couldn\'t find that.'**
+  String get bridgeErrorNotFound;
+
+  /// The Mac could not reach what the phone asked for, such as a web page.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac couldn\'t reach it.'**
+  String get bridgeErrorNotReachable;
+
+  /// The Mac did not answer a request in time.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t answer in time.'**
+  String get bridgeErrorTimeout;
+
+  /// The Mac no longer trusts this phone.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac doesn\'t accept this phone. Pair again.'**
+  String get bridgeErrorUnauthorized;
+
+  /// An error code this version of the phone does not know.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac refused the request.'**
+  String get bridgeErrorUnknown;
+
+  /// The session was opened outside Console, so the phone can only read it.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is view only.'**
+  String get bridgeErrorViewOnly;
+
+  /// $error is one of the messages above. $detail is the Mac's own explanation, in English.
+  ///
+  /// In en, this message translates to:
+  /// **'{error} {detail}'**
+  String bridgeErrorWithDetail(String error, String detail);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Idle'**
+  String get chatActivityIdle;
+
+  /// Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking your earlier answer…'**
+  String get chatAnswerChecking;
+
+  /// Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.
+  ///
+  /// In en, this message translates to:
+  /// **'Your earlier answer ({answer}) was already delivered. Nothing more was sent.'**
+  String chatAnswerDelivered(String answer);
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t send the answer. Please try again.'**
+  String get chatAnswerFailed;
+
+  /// Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.
+  ///
+  /// In en, this message translates to:
+  /// **'Your earlier answer ({answer}) may still be delivered. Tap again to send this one instead.'**
+  String chatAnswerMayDeliver(String answer);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Answer on the Mac'**
+  String get chatAnswerOnMac;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Attach a photo'**
+  String get chatAttachPhoto;
+
+  /// Body of the dialog that asks before compacting a session.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact this session\'s context? Claude summarises the conversation so far to free room. This cannot be undone.'**
+  String get chatCompactConfirm;
+
+  /// Title of the dialog that asks before compacting a session.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact context'**
+  String get chatCompactTitle;
+
+  /// Tooltip of the Compact button in the Chat composer and the confirm button of its dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get chatCompactTooltip;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation compacted'**
+  String get chatCompactionTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Message this session'**
+  String get chatComposerHint;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Context'**
+  String get chatContext;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Console'**
+  String get chatControlConsole;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Background job'**
+  String get chatControlJob;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get chatCopied;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get chatCopyCode;
+
+  /// The Effort button in the Chat composer, before a level is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Effort'**
+  String get chatEffortChip;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'High'**
+  String get chatEffortHigh;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Low'**
+  String get chatEffortLow;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Max'**
+  String get chatEffortMax;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium'**
+  String get chatEffortMedium;
+
+  /// Title of the sheet that lists effort levels in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an effort level'**
+  String get chatEffortSheetTitle;
+
+  /// An effort level in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra High'**
+  String get chatEffortXhigh;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'No messages yet.'**
+  String get chatEmpty;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'5h'**
+  String get chatLimitFiveHours;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Week'**
+  String get chatLimitWeek;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Load older messages'**
+  String get chatLoadOlder;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrow'**
+  String get chatMarkArrow;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Box'**
+  String get chatMarkBox;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Circle'**
+  String get chatMarkCircle;
+
+  /// Tooltip of the button that removes every mark in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get chatMarkClear;
+
+  /// Shown in the picture editor when the marked picture could not be made.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not prepare the picture'**
+  String get chatMarkFailed;
+
+  /// Button of the picture editor that goes on to the caption and Send.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get chatMarkNext;
+
+  /// A drawing tool in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Pen'**
+  String get chatMarkPen;
+
+  /// Name of a mark colour in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Red'**
+  String get chatMarkRed;
+
+  /// Shown in the picture editor while the marks are drawn into the picture.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing the picture'**
+  String get chatMarkRendering;
+
+  /// Tooltip of the button that removes the last mark in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get chatMarkUndo;
+
+  /// Name of a mark colour in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'White'**
+  String get chatMarkWhite;
+
+  /// Name of a mark colour in the picture editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Yellow'**
+  String get chatMarkYellow;
+
+  /// The Model button in the Chat composer, before a model is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get chatModelChip;
+
+  /// Heading of the older models in the model sheet.
+  ///
+  /// In en, this message translates to:
+  /// **'More models'**
+  String get chatModelOlder;
+
+  /// Title of the sheet that lists models in the Chat composer.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a model'**
+  String get chatModelSheetTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'This question allows several answers. Answer it on the Mac.'**
+  String get chatMultiSelectOnMac;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute notifications for this session'**
+  String get chatMuteSession;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'New messages'**
+  String get chatNewMessages;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'New messages'**
+  String get chatNewMessagesBelow;
+
+  /// Shown in the Chat screen. $tool is the tool Claude wants to use.
+  ///
+  /// In en, this message translates to:
+  /// **'Permission needed: {tool}'**
+  String chatPendingPermission(String tool);
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Question from Claude'**
+  String get chatPendingQuestion;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Take a photo'**
+  String get chatPhotoCamera;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a caption (optional)'**
+  String get chatPhotoCaptionHint;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from library'**
+  String get chatPhotoGallery;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the camera or library.'**
+  String get chatPhotoPickFailed;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo sent'**
+  String get chatPhotoSent;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Send a photo'**
+  String get chatPhotoTitle;
+
+  /// Beside the model or effort the user just picked in the Chat composer, until the session reports it back.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying'**
+  String get chatPickPending;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Close picture'**
+  String get chatPictureClose;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load the picture'**
+  String get chatPictureFailed;
+
+  /// Title of the picture editor and the button that opens it in the picture viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark up'**
+  String get chatPictureMarkup;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open picture'**
+  String get chatPictureOpen;
+
+  /// Button in the picture viewer that sends the picture as it is, with a caption.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply'**
+  String get chatPictureReply;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'waiting'**
+  String get chatQueued;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a session to see its chat.'**
+  String get chatSelectSession;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get chatSend;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending'**
+  String get chatSendBusy;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t send the message. Please try again.'**
+  String get chatSendError;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Not sent'**
+  String get chatSendFailed;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Send now'**
+  String get chatSendNow;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude stops the current turn and runs this waiting message right away.'**
+  String get chatSendNowBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not interrupt'**
+  String get chatSendNowFailed;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Interrupt the running turn to send now?'**
+  String get chatSendNowTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'sending'**
+  String get chatSending;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'sent'**
+  String get chatSent;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Shell command'**
+  String get chatShellHeader;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Send runs it like ! in the terminal · delete the ! to send a message instead'**
+  String get chatShellHint;
+
+  /// Shown in the Chat screen. $folder is the folder path.
+  ///
+  /// In en, this message translates to:
+  /// **'runs in {folder} · Claude sees the output'**
+  String chatShellRunsIn(String folder);
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Will run'**
+  String get chatShellWillRun;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Show output'**
+  String get chatShowOutput;
+
+  /// What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear the conversation and start fresh'**
+  String get chatSlashClear;
+
+  /// What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Summarise the conversation to free up context'**
+  String get chatSlashCompact;
+
+  /// What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show how much context is used'**
+  String get chatSlashContext;
+
+  /// What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the cost of this session'**
+  String get chatSlashCost;
+
+  /// What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the effort level'**
+  String get chatSlashEffort;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Commands'**
+  String get chatSlashHeader;
+
+  /// What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show help'**
+  String get chatSlashHelp;
+
+  /// What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a CLAUDE.md for this project'**
+  String get chatSlashInit;
+
+  /// What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit memory files'**
+  String get chatSlashMemory;
+
+  /// What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the model'**
+  String get chatSlashModel;
+
+  /// What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename this session'**
+  String get chatSlashRename;
+
+  /// What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Review a pull request'**
+  String get chatSlashReview;
+
+  /// What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Go back to an earlier point'**
+  String get chatSlashRewind;
+
+  /// What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Security review of pending changes'**
+  String get chatSlashSecurityReview;
+
+  /// What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show version, model and account'**
+  String get chatSlashStatus;
+
+  /// What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the current task list'**
+  String get chatSlashTodos;
+
+  /// What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+  ///
+  /// In en, this message translates to:
+  /// **'Show plan usage limits'**
+  String get chatSlashUsage;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac will reopen this session in Console\'s Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.'**
+  String get chatTakeoverBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'The session is running; the current turn will be cut off.'**
+  String get chatTakeoverBusyBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Session is running'**
+  String get chatTakeoverBusyTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened outside Console, view only. Take it over to message it from your phone.'**
+  String get chatTakeoverHint;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Taking over…'**
+  String get chatTakeoverRunning;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?'**
+  String get chatTakeoverStopBody;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Take over this session?'**
+  String get chatTakeoverTitle;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'1 tool step'**
+  String get chatToolStepOne;
+
+  /// Shown in the Chat screen. $count is the number of tool steps.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} tool step} other{{count} tool steps}}'**
+  String chatToolStepsCount(int count);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse'**
+  String get chatToolsCollapse;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand'**
+  String get chatToolsExpand;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Unmute this session'**
+  String get chatUnmuteSession;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating'**
+  String get chatUpdating;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'View only'**
+  String get chatViewOnlyChip;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened outside Console, view only'**
+  String get chatViewOnlyReason;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get consentAllow;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get consentDeny;
+
+  /// Option of the notch's permission card: allow this one time. The line under it is the next message.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get consentNotchAllow;
+
+  /// Line under the Allow option of the notch's permission card.
+  ///
+  /// In en, this message translates to:
+  /// **'This time only'**
+  String get consentNotchAllowDetail;
+
+  /// Option of the notch's permission card: allow and stop asking for the same thing. The line under it is the next message.
+  ///
+  /// In en, this message translates to:
+  /// **'Always allow this'**
+  String get consentNotchAlways;
+
+  /// Line under the Always allow option of the notch's permission card.
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t ask again for this'**
+  String get consentNotchAlwaysDetail;
+
+  /// Option of the notch's permission card: refuse. The line under it is the next message.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get consentNotchDeny;
+
+  /// Line under the Deny option of the notch's permission card.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude tries something else'**
+  String get consentNotchDenyDetail;
+
+  /// Title of the card in the notch that asks to allow a tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Permission needed'**
+  String get consentNotchPermissionNeeded;
+
+  /// Line of the card in the notch that says what is asked. $tool is the tool Claude wants to use.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude wants to use {tool}'**
+  String consentNotchWantsToUse(String tool);
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair'**
+  String get consentPair;
+
+  /// What a card asks when an agent wants a secret saved in the Vault, new or replacing one of the same name. $name is the secret's name.
+  ///
+  /// In en, this message translates to:
+  /// **'Save the secret {name} in the Vault'**
+  String consentSecretRequest(String name);
+
+  /// What a card asks when an agent wants a setting changed. $title is the setting's name as Settings shows it.
+  ///
+  /// In en, this message translates to:
+  /// **'Change {title}'**
+  String consentSettingChange(String title);
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop and take over'**
+  String get consentStopAndTakeOver;
+
+  /// Shown in the Chat screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop anyway'**
+  String get consentStopAnyway;
+
+  /// Shown in the Inbox. $action is the choice you made, such as Allow.
+  ///
+  /// In en, this message translates to:
+  /// **'You answered: {action}'**
+  String inboxAnsweredHere(String action);
+
+  /// Shown in the Inbox. $action is the choice made on the Mac, such as Allow.
+  ///
+  /// In en, this message translates to:
+  /// **'Answered on the Mac: {action}'**
+  String inboxAnsweredOnMac(String action);
+
+  /// Body of that question.
+  ///
+  /// In en, this message translates to:
+  /// **'The newer copy on the other machine is kept beside it.'**
+  String get inboxConfirmContinueBodyUnnamed;
+
+  /// Title of the question before a waiting session continues from this machine's copy. $title is the session's name.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue {title} here?'**
+  String inboxConfirmContinueTitle(String title);
+
+  /// Title of the question before an inbox answer that moves the primary although safety can't be shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Move anyway?'**
+  String get inboxConfirmMoveAnywayTitle;
+
+  /// Body of that question.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions continue here from the newest copy this machine holds. Work the old machine did after that is kept on it.'**
+  String get inboxConfirmMoveHereBody;
+
+  /// Title of the question before the inbox answer that moves the primary here.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to this machine now?'**
+  String get inboxConfirmMoveHereTitle;
+
+  /// Body of that question.
+  ///
+  /// In en, this message translates to:
+  /// **'This machine becomes the primary again. Sessions that moved away come back when their turn ends.'**
+  String get inboxConfirmTakeBackBody;
+
+  /// Title of the question before the inbox answer that takes the primary back.
+  ///
+  /// In en, this message translates to:
+  /// **'Take Back?'**
+  String get inboxConfirmTakeBackTitle;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac didn\'t take that answer. Try again on the Mac.'**
+  String get inboxDeclined;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get inboxDone;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Requests from your Mac show up here.'**
+  String get inboxEmptyBody;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing Needs You'**
+  String get inboxEmptyTitle;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs You'**
+  String get inboxNeedsYou;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Open on Mac'**
+  String get inboxOpenOnMac;
+
+  /// Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Notchling on this Mac has no inbox yet.'**
+  String get inboxUnsupported;
+
+  /// The result of an inbox item nobody answered in time. Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get itemExpired;
+
+  /// The result of an inbox item taken back. Shown in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdrawn'**
+  String get itemWithdrawn;
+
+  /// The language's own name, as its speakers write it. It is the label of this language in the Language row.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get languageName;
+
+  /// Button in an inbox card that opens the Machines popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a Machine'**
+  String get machinesChoose;
+
+  /// Body of that question for a machine with a copy. $time is the clock time of the copy, such as 14:02. $old is the name of the machine that can't be reached, such as m5.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions continue there from {time}. Work {old} did after that is kept on {old}.'**
+  String machinesConfirmBody(String time, String old);
+
+  /// Body of that question for a machine that holds no copy of the sessions. $machine is the machine's name, such as m3.
+  ///
+  /// In en, this message translates to:
+  /// **'{machine} holds no copy of your sessions, so it will only control jobs. Work done on the old machine stays there.'**
+  String machinesConfirmBodyJobs(String machine);
+
+  /// Body of that question for a machine with a copy when the old machine's name is not known. $time is the clock time of the copy, such as 14:02.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions continue there from {time}. Work the old machine did after that is kept on it.'**
+  String machinesConfirmBodyUnnamed(String time);
+
+  /// Title of the question before a session moves to a machine. $machine is the machine's name, such as m1.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to {machine} now?'**
+  String machinesConfirmTitle(String machine);
+
+  /// Shown in the Machines popup when no other machine is online.
+  ///
+  /// In en, this message translates to:
+  /// **'No other machine is online.'**
+  String get machinesEmpty;
+
+  /// Shown when a move could not be started.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t start the move. Try again.'**
+  String get machinesFailed;
+
+  /// Shown under the title of the Machines popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Your main machine can\'t be reached. Pick the machine that should take over.'**
+  String get machinesIntro;
+
+  /// One machine in the Machines popup that holds no copy of the sessions.
+  ///
+  /// In en, this message translates to:
+  /// **'Controls jobs only'**
+  String get machinesJobsOnly;
+
+  /// Button that sends the move.
+  ///
+  /// In en, this message translates to:
+  /// **'Move'**
+  String get machinesMove;
+
+  /// Button that sends the move after the risk was shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Move Anyway'**
+  String get machinesMoveAnyway;
+
+  /// Shown after a move was sent. $machine is the machine's name, such as m1.
+  ///
+  /// In en, this message translates to:
+  /// **'Moving to {machine}. Sessions continue there soon.'**
+  String machinesMoving(String machine);
+
+  /// One machine in the Machines popup that is not allowed to be the primary. It can't be picked.
+  ///
+  /// In en, this message translates to:
+  /// **'Can Be Master is off'**
+  String get machinesNotMaster;
+
+  /// One machine in the Machines popup that is not ready to take over.
+  ///
+  /// In en, this message translates to:
+  /// **'Not ready to take over'**
+  String get machinesNotReady;
+
+  /// Shown when the Mac says the old machine can be reached and nothing moved but gave no words.
+  ///
+  /// In en, this message translates to:
+  /// **'The old machine is reachable through another machine; nothing moved.'**
+  String get machinesRelayedFallback;
+
+  /// One machine in the Machines popup that holds a copy of the sessions. $time is the clock time of the copy, such as 14:02.
+  ///
+  /// In en, this message translates to:
+  /// **'Can resume old sessions · copy from {time}'**
+  String machinesResume(String time);
+
+  /// Title of the risk question that follows a move the Mac wants confirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Move anyway?'**
+  String get machinesRiskTitle;
+
+  /// Spoken description of one machine in the Machines popup. $name is the machine's name, such as m1. $detail is what the row says under the name, such as Controls jobs only.
+  ///
+  /// In en, this message translates to:
+  /// **'{name}, {detail}'**
+  String machinesRowLabel(String name, String detail);
+
+  /// Title of the popup the phone opens when no primary machine can be reached.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a Machine'**
+  String get machinesTitle;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'In use'**
+  String get macsActive;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a Mac'**
+  String get macsAdd;
+
+  /// Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{name}, {link}, {count} session} other{{name}, {link}, {count} sessions}}'**
+  String macsComputerHeadingLabel(int count, String name, String link);
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connected'**
+  String get macsComputerOffline;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked'**
+  String get macsComputerRevoked;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Get notifications while the app is in the background. Shows a small permanent notification.'**
+  String get macsKeepAliveHint;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep connection in the background'**
+  String get macsKeepAliveSetting;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove Mac'**
+  String get macsRemove;
+
+  /// Shown in the Paired Macs screen. $name is the Mac's name.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove “{name}” from this phone?'**
+  String macsRemoveConfirm(String name);
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired Macs'**
+  String get macsTitle;
+
+  /// Shown in the Paired Macs screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Use this Mac'**
+  String get macsUse;
+
+  /// The name of the Android notification channel for sessions that finished.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished sessions'**
+  String get notificationsChannelFinished;
+
+  /// The name of the Android notification channel for new messages from Claude.
+  ///
+  /// In en, this message translates to:
+  /// **'New messages from Claude'**
+  String get notificationsChannelMessages;
+
+  /// The name of the Android notification channel for sessions that need an answer. Shown in the system's notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions that need you'**
+  String get notificationsChannelNeedsYou;
+
+  /// The text of a notification when a session finished.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get notificationsFinishedBody;
+
+  /// The text of a notification when Claude waits for an answer and has no question to show.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs your answer'**
+  String get notificationsNeedsBody;
+
+  /// Not shown yet. $name is the session name.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is waiting.'**
+  String notificationsNeedsInputBody(String name);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Session needs input'**
+  String get notificationsNeedsInputTitle;
+
+  /// The text of the grouped notification that stands for several new ones.
+  ///
+  /// In en, this message translates to:
+  /// **'Something new'**
+  String get notificationsSummaryBody;
+
+  /// The line of the permanent notification while the app watches and no session is working.
+  ///
+  /// In en, this message translates to:
+  /// **'Watching'**
+  String get notificationsWatching;
+
+  /// The line of the permanent notification while the app watches sessions that work or wait. $count is the number of those sessions.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Watching · {count} session} other{Watching · {count} sessions}}'**
+  String notificationsWatchingSessions(int count);
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera access is off. Use manual entry.'**
+  String get pairingCameraDenied;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Pairing code (8 characters)'**
+  String get pairingCode;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac refused this device, or the code expired.'**
+  String get pairingDenied;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Device name'**
+  String get pairingDeviceName;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t pair. Please try again.'**
+  String get pairingFailed;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Certificate fingerprint (SHA-256)'**
+  String get pairingFingerprint;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac\'s certificate doesn\'t match the pinned fingerprint. Connection refused.'**
+  String get pairingFingerprintMismatch;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Mac address (IP or .local name)'**
+  String get pairingHost;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'On the Mac, open Agent Console, choose Phone, then Pair a phone.'**
+  String get pairingIntro;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'The pairing code isn\'t valid.'**
+  String get pairingInvalid;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter manually'**
+  String get pairingManual;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste the QR content (JSON)'**
+  String get pairingPasteJson;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Port'**
+  String get pairingPort;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan QR'**
+  String get pairingScan;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair with a Mac'**
+  String get pairingTitle;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach the Mac. Check the network and address.'**
+  String get pairingUnreachable;
+
+  /// Shown in pairing with a Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the Mac to allow…'**
+  String get pairingWaiting;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'All projects'**
+  String get sessionsAllProjects;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive'**
+  String get sessionsArchive;
+
+  /// Shown in the Sessions tab. $name is the session name.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived {name}'**
+  String sessionsArchivedToast(String name);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions'**
+  String get sessionsComputerNoSessions;
+
+  /// Shown in the Sessions tab. $n is days.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} d'**
+  String sessionsDaysShort(int n);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude Code sessions on your Mac show up here.'**
+  String get sessionsEmptyBody;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions yet'**
+  String get sessionsEmptyTitle;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions in this project.'**
+  String get sessionsFilteredEmpty;
+
+  /// Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{state}, {count} session} other{{state}, {count} sessions}}'**
+  String sessionsGroupLabel(int count, String state);
+
+  /// Shown in the Sessions tab on a held command. Drops it without sending.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get sessionsHeldCancel;
+
+  /// Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get sessionsHeldDismiss;
+
+  /// Shown in the Sessions tab under a held command when the Mac did not do what was asked, such as cancelling or sending it.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t update that command. Try again.'**
+  String get sessionsHeldFailed;
+
+  /// Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Held on {name}'**
+  String sessionsHeldOn(String name);
+
+  /// Shown in the Sessions tab on a held command. Sends it now.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get sessionsHeldSend;
+
+  /// Shown in the Sessions tab on a held command that waited over an hour, once the Mac can be reached again. The buttons under it are Send and Cancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Still send?'**
+  String get sessionsHeldStillSend;
+
+  /// Shown in the Sessions tab on a held command that has waited over an hour and is not sent on its own. Also read aloud.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting'**
+  String get sessionsHeldWaiting;
+
+  /// Shown in the Sessions tab. $n is hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} h'**
+  String sessionsHoursShort(int n);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Just now'**
+  String get sessionsJustNow;
+
+  /// Shown in the Sessions tab. $n is minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} min'**
+  String sessionsMinutesShort(int n);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get sessionsModelDefault;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'New session'**
+  String get sessionsNewSession;
+
+  /// Shown in the Sessions tab. $folder is the folder path.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude will run in {folder} on the Mac.'**
+  String sessionsNewSessionConfirmBody(String folder);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a new session?'**
+  String get sessionsNewSessionConfirmTitle;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t start a new session. Please try again.'**
+  String get sessionsNewSessionFailed;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder'**
+  String get sessionsNewSessionFolder;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get sessionsNewSessionModel;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent folders on the Mac.'**
+  String get sessionsNewSessionNoProjects;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Start'**
+  String get sessionsNewSessionOpen;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac started a new session.'**
+  String get sessionsNewSessionStarted;
+
+  /// Shown on a session row in the Sessions tab beside the name of its computer, when that computer can't be reached right now. Also read aloud.
+  ///
+  /// In en, this message translates to:
+  /// **'Offline'**
+  String get sessionsNodeOffline;
+
+  /// Read aloud by a screen reader for a session that runs on another computer of the cluster. $name is that computer's name.
+  ///
+  /// In en, this message translates to:
+  /// **'On {name}'**
+  String sessionsNodeOn(String name);
+
+  /// Read aloud by a screen reader for a session that runs on another computer of the cluster when that computer can't be reached right now. $name is that computer's name.
+  ///
+  /// In en, this message translates to:
+  /// **'On {name}, offline'**
+  String sessionsNodeOnOffline(String name);
+
+  /// Shown in the Sessions tab. $count is the number of subagents.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} subagent running} other{{count} subagents running}}'**
+  String sessionsRunningSubagents(int count);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Search sessions'**
+  String get sessionsSearchHint;
+
+  /// Shown in the Sessions tab. $query is what you typed.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions match “{query}”.'**
+  String sessionsSearchNoMatch(String query);
+
+  /// A session that finished its turn. Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get sessionsStateDone;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Ended'**
+  String get sessionsStateExited;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs Input'**
+  String get sessionsStateNeedsInput;
+
+  /// A session that is working on a turn. Shown in the Chat screen and the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Working'**
+  String get sessionsStateRunning;
+
+  /// Shown in the Sessions tab. $count is the number of subagents.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Hide {count} subagent} other{Hide {count} subagents}}'**
+  String sessionsSubagentsHide(int count);
+
+  /// Shown in the Sessions tab. $count is the number of subagents.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Show {count} subagent} other{Show {count} subagents}}'**
+  String sessionsSubagentsShow(int count);
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Take over'**
+  String get sessionsTakeoverShort;
+
+  /// Shown in the Sessions tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get sessionsUndo;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications'**
+  String get settingsNotifications;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Notification sounds'**
+  String get settingsSound;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'A soft sound for new messages and sessions that need you while the app is open.'**
+  String get settingsSoundHint;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get settingsTheme;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get settingsThemeDark;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get settingsThemeLight;
+
+  /// Shown in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get settingsThemeSystem;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'The viz bundle is missing. Run tool/sync_viz.sh and rebuild.'**
+  String get visualizeBundleMissing;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load the visualization. Please try again.'**
+  String get visualizeLoadFailed;
+
+  /// Not shown yet. $message is the reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t show the device: {message}'**
+  String visualizePhoneError(String message);
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'The Mac hasn\'t granted Screen Recording to Agent Console.'**
+  String get visualizePhoneNoPermission;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No device window is showing on the Mac.'**
+  String get visualizePhoneNoWindow;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for frames from the Mac…'**
+  String get visualizePhoneStarting;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a session to see its visualization.'**
+  String get visualizeSelectSession;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggested'**
+  String get visualizeSuggested;
+
+  /// A tab of the Visualize screen: a chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Chart'**
+  String get visualizeTabChart;
+
+  /// A tab of the Visualize screen: a diagram.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagram'**
+  String get visualizeTabDiagram;
+
+  /// A tab of the Visualize screen: an entity diagram.
+  ///
+  /// In en, this message translates to:
+  /// **'Entity'**
+  String get visualizeTabEntity;
+
+  /// A tab of the Visualize screen: a flow chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Flow'**
+  String get visualizeTabFlow;
+
+  /// A tab of the Visualize screen: the Mac's device window.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get visualizeTabPhone;
+
+  /// A tab of the Visualize screen: a web page captured on the Mac.
+  ///
+  /// In en, this message translates to:
+  /// **'Web'**
+  String get visualizeTabWeb;
+
+  /// Not shown yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Running on the Mac'**
+  String get visualizeWebCandidates;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t capture the page. Please try again.'**
+  String get visualizeWebFailed;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Start the dev server on the Mac and refresh, or pick another address below.'**
+  String get visualizeWebHint;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'This session has no web address yet. Enter one above.'**
+  String get visualizeWebNoUrl;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture again'**
+  String get visualizeWebRefresh;
+
+  /// Shown in the Visualize tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Page address (localhost on the Mac)'**
+  String get visualizeWebUrl;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcription failed. Try again.'**
+  String get voiceEngineError;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel transcription'**
+  String get voiceMicCancel;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Dictate'**
+  String get voiceMicStart;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop and transcribe'**
+  String get voiceMicStop;
+
+  /// Shown under the reply box when dictation cannot start because the model file was not bundled.
+  ///
+  /// In en, this message translates to:
+  /// **'The speech model is missing from this app.'**
+  String get voiceModelMissing;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'No speech heard. Try speaking closer to the mic.'**
+  String get voiceNoSpeech;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Open settings'**
+  String get voiceOpenSettings;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone access is off.'**
+  String get voicePermissionDenied;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not record.'**
+  String get voiceRecorderError;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped at 60 seconds.'**
+  String get voiceTooLong;
+
+  /// Shown in dictation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcribing…'**
+  String get voiceTranscribing;
+}
+
+class _AppL10nDelegate extends LocalizationsDelegate<AppL10n> {
+  const _AppL10nDelegate();
+
+  @override
+  Future<AppL10n> load(Locale locale) {
+    return SynchronousFuture<AppL10n>(lookupAppL10n(locale));
+  }
+
+  @override
+  bool isSupported(Locale locale) =>
+      <String>['en'].contains(locale.languageCode);
+
+  @override
+  bool shouldReload(_AppL10nDelegate old) => false;
+}
+
+AppL10n lookupAppL10n(Locale locale) {
+  // Lookup logic when only language code is specified.
+  switch (locale.languageCode) {
+    case 'en':
+      return AppL10nEn();
+  }
+
+  throw FlutterError(
+    'AppL10n.delegate failed to load unsupported locale "$locale". This is likely '
+    'an issue with the localizations generation tool. Please file an issue '
+    'on GitHub with a reproducible sample app and the gen-l10n configuration '
+    'that was used.',
+  );
+}

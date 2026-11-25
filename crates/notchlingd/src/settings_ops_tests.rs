@@ -1,0 +1,726 @@
+use super::*;
+use crate::acting_ops_tests::{app, FakeRoom};
+use crate::consent_ops::ConsentOps;
+use crate::consent_testkit::{consent_at, item_for, item_id_for};
+use crate::event_assert::{of, results, text};
+use crate::inbox_ops::InboxOps;
+use crate::limits_ops_tests::TempDir;
+use notchling_engine::inbox::ActionId;
+use notchling_engine::limits::mode::CLAUDE;
+use notchling_events::{MemorySink, Salt};
+use notchling_local_api::ClientKind;
+use std::sync::atomic::{AtomicI64, Ordering};
+
+pub(super) struct Rig {
+    pub(super) tmp: TempDir,
+    pub(super) room: Arc<FakeRoom>,
+    pub(super) inbox: Arc<InboxOps>,
+    pub(super) limits: Arc<LimitConfig>,
+    pub(super) sink: Arc<MemorySink>,
+    pub(super) consent: Arc<ConsentOps>,
+    pub(super) clock: Arc<AtomicI64>,
+    pub(super) ops: SettingsOps,
+}
+
+pub(super) fn agent() -> Caller {
+    Caller {
+        tier: Tier::Agent,
+        client: ClientKind::Cli,
+        peer: Some(PathBuf::from("/agents/notchling")),
+        pid: None,
+    }
+}
+
+pub(super) fn rig(tag: &str) -> Rig {
+    let tmp = TempDir::new(&format!("settings-{tag}"));
+    let room = Arc::new(FakeRoom::default());
+    let inbox = InboxOps::new(tmp.path("inbox"), room.clone());
+    let limits = Arc::new(LimitConfig::in_memory());
+    let states: SwitchStates = Arc::new(|name: &str| match name {
+        "acting" => Some(true),
+        "vault" => Some(false),
+        _ => None,
+    });
+    let sink = Arc::new(MemorySink::new());
+    let clock = Arc::new(AtomicI64::new(1_000_000));
+    let ticking = clock.clone();
+    let consent = consent_at(
+        room.clone(),
+        inbox.clone(),
+        sink.clone(),
+        Arc::new(move || ticking.load(Ordering::SeqCst)),
+    );
+    let ops = SettingsOps::new(tmp.path("data"), room.clone(), states)
+        .with_events(Events::fixed(sink.clone(), Salt([1; 32])))
+        .with_limits(limits.clone())
+        .with_consent(consent.clone());
+    consent.register(notchling_engine::consent::SETTING, ops.writer());
+    Rig {
+        tmp,
+        room,
+        inbox,
+        limits,
+        sink,
+        consent,
+        clock,
+        ops,
+    }
+}
+
+impl Rig {
+    pub(super) fn call(&self, caller: &Caller, op: &str, args: Value) -> Result<Value, ApiError> {
+        self.ops.call(caller, op, &args)
+    }
+
+    fn stored(&self, key: &str) -> Option<Value> {
+        Settings::open(&self.tmp.path("data/settings.json"))
+            .unwrap()
+            .raw(key)
+            .cloned()
+    }
+
+    fn audit(&self) -> Vec<notchling_events::Event> {
+        of(&self.sink, "settings.agent")
+    }
+
+    fn results(&self) -> Vec<String> {
+        results(&self.sink, "settings.agent")
+    }
+
+    pub(super) fn app_follows_the_inbox(&self) {
+        self.room.app.store(true, Ordering::SeqCst);
+        self.room
+            .following
+            .lock()
+            .unwrap()
+            .push(topics::INBOX.into());
+    }
+
+    pub(super) fn item(&self, id: &str) -> Value {
+        item_for(&self.inbox, id)
+    }
+
+    pub(super) fn item_id(&self, id: &str) -> String {
+        item_id_for(&self.inbox, id)
+    }
+
+    pub(super) fn wait_for(&self, what: &str, until: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !until() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(until(), "{what}");
+    }
+}
+
+fn entry<'a>(list: &'a Value, key: &str) -> &'a Value {
+    list["settings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["key"] == key)
+        .unwrap_or_else(|| panic!("{key} is not listed"))
+}
+
+#[test]
+fn every_op_is_agent_tier_on_the_settings_topic() {
+    let r = rig("spec");
+    for op in SETTINGS_OPS {
+        let want = if op == ops::SETTINGS_SET {
+            OpSpec::AGENT_ACTS
+        } else {
+            OpSpec::AGENT_READ
+        };
+        assert_eq!(r.ops.spec(op), Some(want), "{op}");
+    }
+    assert_eq!(r.ops.spec(ops::SETTINGS_SET_SWITCH), None);
+    assert_eq!(r.ops.topics(), &[topics::SETTINGS]);
+}
+
+#[test]
+fn an_agent_lists_and_gets_every_setting_with_its_class() {
+    let r = rig("list");
+    let list = r.call(&agent(), ops::SETTINGS_LIST, json!({})).unwrap();
+    let acting = entry(&list, "switch.acting");
+    assert_eq!(acting["value"], true);
+    assert_eq!(acting["class"], "never");
+    assert_eq!(acting["switch"], true);
+    assert_eq!(entry(&list, "switch.vault")["value"], false);
+    assert_eq!(entry(&list, "switch.bridge")["value"], Value::Null);
+    let history = entry(&list, "chatHistory");
+    assert_eq!(history["class"], "free");
+    assert_eq!(history["value"], "4mb");
+    assert_eq!(history["title"], "Conversation history to load");
+    assert_eq!(history["allowed"], json!(["2mb", "4mb", "8mb", "16mb"]));
+    assert_eq!(entry(&list, "limitSwitchAt")["range"], json!([80, 99]));
+    assert_eq!(entry(&list, "limitMode")["class"], "ask");
+    let accounts = entry(&list, "accounts");
+    assert_eq!(accounts["class"], "never");
+    assert!(accounts.get("value").is_none(), "an agent never sees it");
+    assert_eq!(list["settings"].as_array().unwrap().len(), KEYS.len() + 5);
+    let full = r.call(&app(), ops::SETTINGS_LIST, json!({})).unwrap();
+    assert!(entry(&full, "accounts").get("value").is_some());
+
+    let got = r
+        .call(&agent(), ops::SETTINGS_GET, json!({"key": "showPet"}))
+        .unwrap();
+    assert_eq!(got["value"], true);
+    assert_eq!(got["kind"], "bool");
+    let vault = r
+        .call(&agent(), ops::SETTINGS_GET, json!({"key": "vault"}))
+        .unwrap();
+    assert_eq!(vault["key"], "switch.vault");
+    let e = r
+        .call(&agent(), ops::SETTINGS_GET, json!({"key": "history"}))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    assert!(
+        e.message.contains("No setting named history"),
+        "{}",
+        e.message
+    );
+    assert!(e.message.contains("chatHistory"), "{}", e.message);
+    assert!(r.audit().is_empty(), "reads are not audited");
+}
+
+#[test]
+fn a_free_key_is_set_at_once_published_and_audited() {
+    let r = rig("free");
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "chatHistory", "value": "8MB"}),
+        )
+        .unwrap();
+    assert_eq!(
+        reply,
+        json!({"key": "chatHistory", "value": "8mb", "state": "applied", "changed": true})
+    );
+    assert_eq!(r.stored("chatHistory"), Some(json!("8mb")));
+    assert_eq!(
+        r.room.named(topics::SETTINGS_CHANGED),
+        vec![json!({"key": "chatHistory", "value": "8mb", "by": "agent"})]
+    );
+    let again = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "showPet", "value": false}),
+        )
+        .unwrap();
+    assert_eq!(again["value"], false);
+    assert_eq!(r.stored("showPet"), Some(json!(false)));
+    let audit = r.audit();
+    assert_eq!(audit.len(), 2);
+    assert_eq!(text(&audit[0], "key").as_deref(), Some("chatHistory"));
+    assert_eq!(text(&audit[0], "class").as_deref(), Some("free"));
+    assert_eq!(text(&audit[0], "result").as_deref(), Some("set"));
+    assert_eq!(text(&audit[0], "value_choice").as_deref(), Some("8mb"));
+    assert_eq!(text(&audit[1], "value_flag").as_deref(), Some("false"));
+    assert!(r.inbox.items().is_empty(), "nothing to ask");
+}
+
+#[test]
+fn switches_and_never_keys_are_refused_and_audited() {
+    let r = rig("never");
+    for (key, value) in [
+        ("switch.acting", json!(true)),
+        ("acting", json!("on")),
+        ("switch.accounts", json!(true)),
+        ("install", json!(true)),
+        ("bridgeEnabled", json!(true)),
+        ("codexNetwork", json!(true)),
+        ("accounts", json!("[]")),
+    ] {
+        let e = r
+            .call(
+                &agent(),
+                ops::SETTINGS_SET,
+                json!({"key": key, "value": value}),
+            )
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Forbidden, "{key}");
+        assert!(r.stored(key).is_none(), "{key}");
+    }
+    let e = r
+        .call(
+            &app(),
+            ops::SETTINGS_SET,
+            json!({"key": "switch.vault", "value": true}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Forbidden, "not even the app, here");
+    let e = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "codexNetwork", "value": true}),
+        )
+        .unwrap_err();
+    assert!(e.message.contains("sandbox permission"), "{}", e.message);
+    assert!(r.room.named(topics::SETTINGS_CHANGED).is_empty());
+    assert!(r.inbox.items().is_empty());
+    let results = r.results();
+    assert_eq!(results.len(), 8, "the app's refusal is the app's own");
+    assert!(results.iter().all(|r| r == "refused"), "{results:?}");
+}
+
+#[test]
+fn bad_values_and_unknown_keys_are_refused_with_what_they_take() {
+    let r = rig("bad");
+    r.app_follows_the_inbox();
+    for (key, value, says) in [
+        (
+            "chatHistory",
+            json!("1gb"),
+            "chatHistory takes one of 2mb, 4mb, 8mb, 16mb.",
+        ),
+        ("showPet", json!("maybe"), "showPet takes true or false."),
+        (
+            "limitSwitchAt",
+            json!("120"),
+            "limitSwitchAt takes a whole number from 80 to 99.",
+        ),
+        (
+            "notchWidth",
+            json!(3),
+            "notchWidth takes one of small, medium, large.",
+        ),
+    ] {
+        let e = r
+            .call(
+                &agent(),
+                ops::SETTINGS_SET,
+                json!({"key": key, "value": value}),
+            )
+            .unwrap_err();
+        assert_eq!((e.code, e.message.as_str()), (ErrorCode::BadRequest, says));
+    }
+    let e = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "theme", "value": "light"}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    assert!(
+        e.message.starts_with("No setting named theme."),
+        "{}",
+        e.message
+    );
+    let e = r
+        .call(&agent(), ops::SETTINGS_SET, json!({"key": "showPet"}))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    assert!(r.inbox.items().is_empty(), "a bad value is never asked");
+    assert_eq!(
+        r.results(),
+        [
+            "bad_value",
+            "bad_value",
+            "bad_value",
+            "bad_value",
+            "unknown_key"
+        ]
+    );
+}
+
+pub(super) fn ask(r: &Rig, key: &str, value: Value) -> String {
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": key, "value": value}),
+        )
+        .unwrap();
+    assert_eq!(reply["state"], "waiting", "{reply}");
+    reply["id"].as_str().unwrap().to_string()
+}
+
+pub(super) fn asked(r: &Rig, id: &str) -> Value {
+    r.call(&agent(), ops::SETTINGS_ASKED, json!({"id": id, "wait": 5}))
+        .unwrap()
+}
+
+#[test]
+fn an_ask_key_raises_an_inbox_item_and_allow_applies_it() {
+    let r = rig("allow");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    let item = r.item(&id);
+    assert_eq!(item["kind"], "setting_change");
+    assert!(
+        item["title"]
+            .as_str()
+            .unwrap()
+            .starts_with("Claude Code asks to change"),
+        "{item}"
+    );
+    assert!(
+        !item.to_string().contains("because"),
+        "the reason stays out of the item"
+    );
+    assert!(
+        item["detail"]
+            .as_str()
+            .unwrap()
+            .ends_with("It would become notify."),
+        "{item}"
+    );
+    let actions: Vec<&str> = item["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(actions, ["allow", "deny"]);
+    assert!(
+        r.stored("limitMode").is_none(),
+        "nothing changes before the user allows"
+    );
+    let got = r
+        .call(&agent(), ops::SETTINGS_GET, json!({"key": "limitMode"}))
+        .unwrap();
+    assert_eq!(got["pending"], json!([{"id": id, "value": "notify"}]));
+
+    let decided = r
+        .inbox
+        .decide(&r.item_id(&id), ActionId::Allow, "phone")
+        .unwrap();
+    assert!(decided.answered);
+    let done = asked(&r, &id);
+    assert_eq!(done["state"], "applied", "{done}");
+    assert_eq!(r.stored("limitMode"), Some(json!("notify")));
+    assert_eq!(r.limits.mode(&CLAUDE), LimitMode::Notify);
+    assert_eq!(
+        r.room.named(topics::SETTINGS_CHANGED),
+        vec![json!({"key": "limitMode", "value": "notify", "by": "agent", "ask": id})]
+    );
+    assert_eq!(r.item(&id)["answered_by"], "phone");
+    r.wait_for("the allowed line", || r.results().len() >= 2);
+    assert_eq!(r.results(), ["asked", "allowed"]);
+    let again = r
+        .inbox
+        .decide(&r.item_id(&id), ActionId::Deny, "mac")
+        .unwrap();
+    assert!(!again.answered, "the first answer wins");
+}
+
+#[test]
+fn deny_leaves_the_setting_as_it_was() {
+    let r = rig("deny");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "keepPages", json!("false"));
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Deny, "mac")
+        .unwrap();
+    let done = asked(&r, &id);
+    assert_eq!(done["state"], "denied");
+    assert_eq!(done["message"], "The user denied it.");
+    assert!(r.stored("keepPages").is_none());
+    assert!(r.room.named(topics::SETTINGS_CHANGED).is_empty());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while r.results().len() < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(r.results(), ["asked", "denied"]);
+}
+
+#[test]
+fn an_unanswered_ask_expires_and_closes_its_item() {
+    let r = rig("expire");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "continueAfterSleep", json!(false));
+    let reply = r
+        .call(&agent(), ops::SETTINGS_ASKED, json!({"id": id}))
+        .unwrap();
+    assert_eq!(reply["state"], "waiting");
+    r.clock.fetch_add(16 * 60_000, Ordering::SeqCst);
+    r.consent.tick();
+    let done = asked(&r, &id);
+    assert_eq!(done["state"], "expired", "{done}");
+    assert!(r.stored("continueAfterSleep").is_none());
+    assert_eq!(r.item(&id)["state"], "expired");
+    let late = r
+        .inbox
+        .decide(&r.item_id(&id), ActionId::Allow, "mac")
+        .unwrap();
+    assert!(!late.answered);
+    assert!(r.stored("continueAfterSleep").is_none());
+}
+
+#[test]
+fn an_ask_with_no_app_attached_is_saved_and_waits() {
+    let r = rig("no-app");
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "limitMode", "value": "off"}),
+        )
+        .unwrap();
+    assert_eq!(reply["state"], "waiting", "{reply}");
+    assert!(reply["request"]["id"].as_str().unwrap().starts_with('c'));
+    assert_eq!(reply["request"]["answerOn"], "mac_or_phone");
+    assert_eq!(r.inbox.items().len(), 1, "the card waits for the app");
+    assert_eq!(r.results(), ["asked"]);
+}
+
+#[test]
+fn the_app_sets_an_ask_key_without_asking() {
+    let r = rig("app");
+    let reply = r
+        .call(
+            &app(),
+            ops::SETTINGS_SET,
+            json!({"key": "limitSwitchAt", "value": 90}),
+        )
+        .unwrap();
+    assert_eq!(reply["state"], "applied");
+    assert_eq!(r.limits.switch_at(), 90);
+    assert_eq!(
+        r.room.named(topics::SETTINGS_CHANGED),
+        vec![json!({"key": "limitSwitchAt", "value": 90, "by": "app"})]
+    );
+    assert!(r.audit().is_empty(), "an app change is not an agent's");
+}
+
+#[test]
+fn a_restart_keeps_a_waiting_ask_and_raises_a_fresh_item() {
+    let r = rig("restart");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "answerFromNotch", json!(false));
+    let first = r.item_id(&id);
+    r.clock.fetch_add(5, Ordering::SeqCst);
+    r.consent.load();
+    let second = r.item_id(&id);
+    assert_ne!(first, second, "a fresh item, a fresh id");
+    assert_eq!(r.item(&id)["state"], "open");
+    let reply = r
+        .call(&agent(), ops::SETTINGS_ASKED, json!({"id": id}))
+        .unwrap();
+    assert_eq!(reply["state"], "waiting");
+    let e = r
+        .call(&agent(), ops::SETTINGS_ASKED, json!({"id": "cnope"}))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Failed);
+}
+
+#[test]
+fn a_setting_that_changed_meanwhile_is_withdrawn_not_applied() {
+    let r = rig("changed");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    r.call(
+        &app(),
+        ops::SETTINGS_SET,
+        json!({"key": "limitMode", "value": "off"}),
+    )
+    .unwrap();
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Allow, "mac")
+        .unwrap();
+    let done = asked(&r, &id);
+    r.wait_for("withdrawn", || asked(&r, &id)["state"] == "withdrawn");
+    assert_ne!(done["state"], "applied");
+    assert_eq!(r.stored("limitMode"), Some(json!("off")));
+}
+
+#[test]
+fn a_dry_run_changes_and_opens_nothing_and_says_what_would_happen() {
+    let r = rig("dry");
+    let dry = |key: &str, value: Value| {
+        r.call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": key, "value": value, "dryRun": true}),
+        )
+        .unwrap()
+    };
+    let free = dry("showPet", json!(false));
+    assert_eq!(
+        (free["would"].as_str(), free["request"].is_null()),
+        (Some("apply"), true)
+    );
+    let ask = dry("limitMode", json!("notify"));
+    assert_eq!(ask["would"], "ask");
+    assert_eq!(ask["request"]["kind"], "setting");
+    assert_eq!(ask["request"]["answerOn"], "mac_or_phone");
+    assert_eq!(ask["request"]["expiresInMs"], 900_000);
+    assert_eq!(ask["change"]["after"], "notify");
+    let never = dry("acting", json!(true));
+    assert_eq!(never["would"], "refuse");
+    assert_eq!(never["error"]["reason"], "never");
+    assert!(r.stored("showPet").is_none() && r.stored("limitMode").is_none());
+    assert!(r.inbox.items().is_empty());
+    assert!(r.results().is_empty(), "a dry run writes no settings line");
+}
+
+#[test]
+fn the_same_key_returns_the_same_request_and_another_value_is_key_reused() {
+    let r = rig("key");
+    let with_key = |value: &str| {
+        r.call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "limitMode", "value": value, "consent": {"key": "abc", "reason": "x"}}),
+        )
+    };
+    let first = with_key("notify").unwrap();
+    let again = with_key("notify").unwrap();
+    assert_eq!(first["id"], again["id"]);
+    assert_eq!(r.inbox.items().len(), 1, "counted and raised once");
+    let e = with_key("off").unwrap_err();
+    assert_eq!(e.data.as_ref().unwrap()["reason"], "key_reused");
+}
+
+#[test]
+fn a_planted_token_in_the_reason_stays_in_the_row_and_the_askers_reply_only() {
+    let r = rig("untrusted");
+    r.app_follows_the_inbox();
+    let token = "PLANTED-TOKEN-91";
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "limitMode", "value": "off", "consent": {"reason": token}}),
+        )
+        .unwrap();
+    let id = reply["id"].as_str().unwrap().to_string();
+    assert_eq!(reply["request"]["reason"], token);
+    let seen = format!("{:?}{}", r.sink.events(), r.item(&id));
+    assert!(!seen.contains(token), "never in an event or the Inbox item");
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Deny, "mac")
+        .unwrap();
+    r.wait_for("denied", || asked(&r, &id)["state"] == "denied");
+    let closed = asked(&r, &id);
+    assert!(
+        closed["request"]["reason"].is_null(),
+        "deleted at close: {closed}"
+    );
+}
+
+#[test]
+fn free_set_commits_before_writing() {
+    let r = rig("commit-first");
+    r.call(
+        &agent(),
+        ops::SETTINGS_SET,
+        json!({"key": "showPet", "value": false}),
+    )
+    .unwrap();
+    assert_eq!(r.sink.commits(), 1);
+    assert_eq!(r.results(), ["set"]);
+}
+
+#[test]
+fn commit_failure_leaves_store_unchanged() {
+    let r = rig("commit-fails");
+    r.sink.fail_commits(true);
+    let e = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "showPet", "value": false}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Failed);
+    assert_eq!(e.message, "the audit log can't be written");
+    assert!(r.stored("showPet").is_none());
+    assert!(r.room.named(topics::SETTINGS_CHANGED).is_empty());
+}
+
+#[test]
+fn ask_allowed_commits_with_answered_by() {
+    let r = rig("ask-by");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Allow, "phone")
+        .unwrap();
+    let done = asked(&r, &id);
+    assert_eq!(done["state"], "applied", "{done}");
+    let events = r.audit();
+    let allowed = events
+        .iter()
+        .find(|e| text(e, "result").as_deref() == Some("allowed"))
+        .unwrap();
+    assert_eq!(text(allowed, "answered_by").as_deref(), Some("phone"));
+    assert_eq!(text(allowed, "class").as_deref(), Some("ask"));
+    let thens: Vec<String> = of(&r.sink, "agent.consent")
+        .iter()
+        .filter_map(|e| text(e, "then"))
+        .collect();
+    assert_eq!(thens, ["asked", "allowed", "applied"]);
+    assert_eq!(
+        r.sink.commits(),
+        4,
+        "three consent lines and the setting's own"
+    );
+}
+
+#[test]
+fn an_allowed_ask_is_not_applied_when_the_commit_fails() {
+    let r = rig("ask-commit-fails");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "limitMode", json!("notify"));
+    r.sink.fail_commits(true);
+    r.inbox
+        .decide(&r.item_id(&id), ActionId::Allow, "mac")
+        .unwrap();
+    r.wait_for("failed", || asked(&r, &id)["state"] == "failed");
+    assert!(r.stored("limitMode").is_none());
+}
+
+#[test]
+fn text_value_is_chars_and_hash() {
+    let r = rig("text");
+    r.app_follows_the_inbox();
+    let marker = "ctrl+alt+marker7";
+    ask(&r, "searchShortcut", json!(marker));
+    let events = r.audit();
+    assert_eq!(text(&events[0], "value_chars").as_deref(), Some("16"));
+    assert_eq!(text(&events[0], "value_hash").unwrap().len(), 16);
+    assert!(!format!("{:?}", r.sink.events()).contains(marker));
+}
+
+#[test]
+fn unknown_key_is_hashed() {
+    let r = rig("unknown-hash");
+    let e = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "my-private-key", "value": "v"}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    let events = r.audit();
+    assert_eq!(text(&events[0], "key").as_deref(), Some("unknown"));
+    assert_eq!(text(&events[0], "key_hash").unwrap().len(), 16);
+    assert!(!format!("{:?}", r.sink.events()).contains("my-private-key"));
+}
+
+#[test]
+fn asked_waits_in_milliseconds_when_given_wait_ms() {
+    let r = rig("wait-ms");
+    r.app_follows_the_inbox();
+    let id = ask(&r, "continueAfterSleep", json!(false));
+    let started = std::time::Instant::now();
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_ASKED,
+            json!({"id": id, "wait": 0, "waitMs": 300}),
+        )
+        .unwrap();
+    assert_eq!(reply["state"], "waiting");
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(250) && took < Duration::from_secs(5),
+        "{took:?}"
+    );
+}

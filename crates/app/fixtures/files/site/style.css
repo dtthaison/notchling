@@ -1,0 +1,7 @@
+:root { color-scheme: light; }
+body { margin: 0; font: 15px/1.5 -apple-system, "Helvetica Neue", sans-serif; background: #fff7e6; color: #2b2118; }
+main { padding: 28px; }
+h1 { margin: 12px 0 4px; font-size: 28px; color: #b4380f; }
+.lede { margin: 0 0 16px; color: #6b5844; }
+.status { display: inline-block; padding: 4px 10px; border-radius: 6px; background: #ffe0a8; font-weight: 600; }
+a { color: #0b57d0; }

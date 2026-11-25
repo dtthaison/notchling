@@ -1,0 +1,10 @@
+{
+  "data": {
+    "projects": [
+      "/Users/example/src/app",
+      "/Users/example/src/notes"
+    ]
+  },
+  "id": 20,
+  "ok": true
+}

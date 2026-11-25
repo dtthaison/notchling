@@ -1,0 +1,51 @@
+cursor 46 7 true
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/work
+
+
+❯ Reply with just the word ok.
+
+⏺ ok
+
+✻ Worked for 2s · done 12:09 PM
+
+❯ Say only the word seen. /tmp/shots/one.png /tmp/shots/two.jpg
+
+⏺ seen
+
+✻ Worked for 2s · done 12:11 PM
+
+❯ [Image #1] [Image #2]Say only the word seen.
+  ⎿  [Image #1]
+  ⎿  [Image #2]
+
+⏺ seen
+
+✻ Crunched for 2s · done 12:11 PM
+
+❯ [Image #3] [Image #4]Say only the word big.
+  ⎿  [Image #3]
+  ⎿  [Image #4]
+
+⏺ big
+
+✻ Worked for 3s · done 12:13 PM
+
+❯ [Image #5] [Image #6]Say only the word race.
+  ⎿  [Image #5]
+  ⎿  [Image #6]
+
+⏺ race
+
+✻ Crunched for 4s · done 12:16 PM
+
+※ recap: Overall, you're running a series of one-word replies to images you've shared, with the latest being "race." Nothing is pending on my side; send the next image or word when you're ready.
+  (disable recaps in /config)
+                                                                                                                                                                             ctrl+g to edit in VS Code
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ one
+  two
+  three
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  work > Haiku 5.5 | 66.7k tokens | someone@example.invalid
+  ⏵⏵ auto mode on (shift+tab to cycle)

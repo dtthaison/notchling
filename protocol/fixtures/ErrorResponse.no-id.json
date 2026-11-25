@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid",
+    "message": "The message is not valid JSON."
+  },
+  "ok": false
+}

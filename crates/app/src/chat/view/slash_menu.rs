@@ -1,0 +1,136 @@
+use gpui::{div, prelude::*, px, relative, Context, Div, KeyDownEvent, SharedString, Window};
+use notchling_engine::control::slash::{self, SlashCommand};
+use notchling_kit::labels::Corner;
+use notchling_kit::metric::{MENU_GAP, SIDE_PADDING};
+use notchling_kit::ui::{label, menu_panel, menu_row, KitPart, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
+
+use super::ChatView;
+use crate::chat::chrome;
+use crate::chat::data::Tool;
+use crate::chat::remote_control::Action;
+use crate::chat::slash_menu::{picked, query};
+
+impl ChatView {
+    pub(super) fn slash_rows(&self, cx: &gpui::App) -> Vec<SlashCommand> {
+        let Some(session) = self.selected_session() else {
+            return Vec::new();
+        };
+        if session.tool != Tool::Claude || self.remote_refused(&session.agent.id, Action::Slash) {
+            return Vec::new();
+        }
+        let text = self.tools.editor.read(cx).text().to_owned();
+        if chrome::offered(session) && self.slash.hidden_at.as_deref() != Some(text.as_str()) {
+            let spaced = chrome::spaced(&text);
+            if !spaced.is_empty() {
+                return spaced;
+            }
+        }
+        let Some((cwd, commands)) = &self.slash_commands else {
+            return Vec::new();
+        };
+        if *cwd != session.agent.cwd {
+            return Vec::new();
+        }
+        self.slash
+            .rows(&text, &chrome::commands_for(session, commands))
+    }
+
+    pub(super) fn slash_typed(&mut self, text: &str) {
+        self.slash.typed(text);
+        if query(text).is_none() {
+            return;
+        }
+        if self.selected_refused(Action::Slash) {
+            return;
+        }
+        let Some(cwd) = self.selected_session().map(|s| s.agent.cwd.clone()) else {
+            return;
+        };
+        if self.slash_commands.as_ref().map(|(c, _)| c) != Some(&cwd) {
+            let commands = slash::all(&self.root.home, &cwd);
+            self.slash_commands = Some((cwd, commands));
+        }
+    }
+
+    fn pick_slash(&mut self, command: &SlashCommand, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        self.put_draft(&id, picked(command), cx);
+        self.redraw_chrome(cx);
+    }
+
+    pub(super) fn capture_slash_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.tools.focus.is_focused(window) {
+            return;
+        }
+        let keys = &event.keystroke;
+        let m = &keys.modifiers;
+        if m.platform || m.control || m.alt {
+            return;
+        }
+        let rows = self.slash_rows(cx);
+        if rows.is_empty() {
+            return;
+        }
+        match keys.key.as_str() {
+            "up" => self.slash.step(-1, rows.len()),
+            "down" => self.slash.step(1, rows.len()),
+            "tab" | "enter" => {
+                let at = self.slash.selected.min(rows.len() - 1);
+                self.pick_slash(&rows[at], cx);
+            }
+            "escape" => {
+                self.slash.hidden_at = Some(self.tools.editor.read(cx).text().to_owned());
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+        self.redraw_chrome(cx);
+    }
+}
+
+pub fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>) -> Option<Div> {
+    let rows = view.slash_rows(cx);
+    if rows.is_empty() {
+        return None;
+    }
+    let selected = view.slash.selected.min(rows.len() - 1);
+    let mut list = menu_panel(a).w(relative(1.0)).max_w(relative(1.0));
+    for (i, command) in rows.into_iter().enumerate() {
+        let hint = command.argument_hint.clone().unwrap_or_default();
+        let pick = command.clone();
+        let row = menu_row(SharedString::from(format!("slash-{}", command.name)), a)
+            .when(i == selected, |r| r.fill(Ink::Raised, a))
+            .child(
+                label(&format!("/{}", command.name), TypeRole::Meta, Ink::Text, a).flex_shrink_0(),
+            )
+            .when(!hint.is_empty(), |r| {
+                r.child(label(&hint, TypeRole::Meta, Ink::TextFaint, a).flex_shrink_0())
+            })
+            .child(
+                label(&command.description, TypeRole::Meta, Ink::TextMuted, a)
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .elide(),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.pick_slash(&pick, cx)));
+        list = list.child(row);
+    }
+    Some(
+        div()
+            .absolute()
+            .bottom(relative(1.0))
+            .left(px(SIDE_PADDING))
+            .right(px(SIDE_PADDING))
+            .pb(px(MENU_GAP))
+            .child(list)
+            .part_at("Command List", Corner::TopTrailing, a, cx),
+    )
+}

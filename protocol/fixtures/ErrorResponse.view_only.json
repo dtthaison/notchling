@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "view_only",
+    "message": "This session is open outside Notchling: view only."
+  },
+  "id": 10,
+  "ok": false
+}

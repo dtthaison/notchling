@@ -1,0 +1,638 @@
+use notchling_engine::transcript::model::{BackgroundShell, Conversation, TaskStatus};
+use notchling_engine::transcript::shells_stuck;
+use notchling_kit::ui::ToolMark;
+use notchling_kit::{Icon, Ink, Status};
+use notchling_locale as t;
+
+use super::format::tokens;
+use super::markers;
+use super::paging::Counts;
+use super::shell_list::Listing;
+use super::shell_rows::shell_rows_with_fan;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskRow {
+    pub subject: String,
+    pub status: Status,
+    pub icon: Icon,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    Spinner,
+    Icon(Icon, Ink),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubagentRow {
+    pub id: String,
+    pub description: String,
+    pub detail: String,
+    pub status: Status,
+    pub status_word: String,
+    pub running: bool,
+    pub mark: Mark,
+    pub tool: ToolMark,
+    pub doing: Option<String>,
+    pub cwd: Option<String>,
+    pub started_ms: i64,
+    pub depth: u8,
+    pub children: usize,
+    pub open: bool,
+    pub more_after: Vec<(String, usize)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShellRow {
+    pub id: String,
+    pub started: Option<i64>,
+    pub title: String,
+    pub command: String,
+    pub status: Status,
+    pub status_word: String,
+    pub running: bool,
+    pub mark: Mark,
+    pub output_path: String,
+    pub left_behind: bool,
+    pub shape: shells_stuck::Shape,
+    pub quiet_min: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Inspector {
+    pub tasks: Vec<TaskRow>,
+    pub facts: Vec<(&'static str, String)>,
+    pub subagents: Vec<SubagentRow>,
+    pub subagent_counts: Counts,
+    pub shells: Vec<ShellRow>,
+    pub shell_counts: Counts,
+}
+
+fn task_row(subject: &str, status: TaskStatus) -> TaskRow {
+    let (status, icon) = match status {
+        TaskStatus::Pending => (Status::Needs, Icon::More),
+        TaskStatus::InProgress => (Status::Working, Icon::Working),
+        TaskStatus::Completed => (Status::Done, Icon::Check),
+    };
+    TaskRow {
+        subject: subject.to_owned(),
+        status,
+        icon,
+    }
+}
+
+pub fn task_rows(conversation: &Conversation) -> Vec<TaskRow> {
+    conversation
+        .tasks
+        .iter()
+        .map(|t| task_row(&t.subject, t.status))
+        .collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskSummary {
+    pub done: usize,
+    pub total: usize,
+    pub current: Option<String>,
+}
+
+impl TaskSummary {
+    pub fn of(tasks: &[TaskRow]) -> Option<TaskSummary> {
+        if tasks.is_empty() {
+            return None;
+        }
+        Some(TaskSummary {
+            done: tasks.iter().filter(|t| t.status == Status::Done).count(),
+            total: tasks.len(),
+            current: tasks
+                .iter()
+                .find(|t| t.status == Status::Working)
+                .map(|t| t.subject.clone()),
+        })
+    }
+
+    pub fn title(&self) -> String {
+        t::chat::details_tasks_progress(self.done, self.total)
+    }
+
+    pub fn fraction(&self) -> f32 {
+        self.done as f32 / self.total as f32
+    }
+
+    pub fn all_done(&self) -> bool {
+        self.done == self.total
+    }
+}
+
+pub fn token_line(input: u64, output: u64, cached: u64) -> String {
+    let mut line = t::chat::details_tokens(&tokens(input), &tokens(output));
+    if cached > 0 && input > 0 {
+        let share = (cached as f64 / input as f64 * 100.0).round().min(100.0);
+        line.push('\n');
+        line.push_str(&t::chat::details_cached(
+            &tokens(cached),
+            &share.to_string(),
+        ));
+    }
+    line
+}
+
+pub fn counted_title(name: &str, running: usize, total: usize) -> String {
+    if total == 0 {
+        name.to_owned()
+    } else if running > 0 {
+        t::chat::details_running(name, &running.to_string())
+    } else {
+        t::chat::details_total(name, &total.to_string())
+    }
+}
+
+impl Inspector {
+    pub fn tasks_title(&self) -> String {
+        if self.tasks.is_empty() {
+            return t::chat::details_tasks().to_owned();
+        }
+        let done = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == Status::Done)
+            .count();
+        t::chat::details_tasks_counted(done, self.tasks.len())
+    }
+
+    pub fn subagents_title(&self) -> String {
+        let counts = self.subagent_counts;
+        counted_title(t::chat::details_subagents(), counts.running, counts.total)
+    }
+
+    pub fn shells_title(&self) -> String {
+        let running = self.shells.iter().filter(|s| s.running).count();
+        counted_title(t::chat::details_shells(), running, self.shell_counts.total)
+    }
+}
+
+pub fn facts(conversation: &Conversation) -> Vec<(&'static str, String)> {
+    let f = &conversation.facts;
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    if let Some(branch) = &f.branch {
+        out.push((markers::FACT_BRANCH, branch.clone()));
+    }
+    if f.turns > 0 {
+        out.push((markers::FACT_TURNS, f.turns.to_string()));
+    }
+    if f.input_tokens + f.output_tokens > 0 {
+        out.push((
+            markers::FACT_TOKENS,
+            token_line(f.input_tokens, f.output_tokens, f.cached_tokens),
+        ));
+    }
+    if f.commands > 0 {
+        out.push((markers::FACT_COMMANDS, f.commands.to_string()));
+    }
+    out
+}
+
+pub fn inspector(
+    conversation: &Conversation,
+    subagents: &[SubagentRow],
+    writers: &dyn Fn(&str) -> Vec<i32>,
+) -> Inspector {
+    let counts = Counts {
+        total: subagents.len(),
+        running: subagents.iter().filter(|s| s.running).count(),
+        hidden: 0,
+    };
+    inspector_listed(conversation, subagents, counts, None, writers)
+}
+
+pub fn inspector_listed(
+    conversation: &Conversation,
+    subagents: &[SubagentRow],
+    subagent_counts: Counts,
+    shells: Option<&Listing>,
+    writers: &dyn Fn(&str) -> Vec<i32>,
+) -> Inspector {
+    inspector_with_fan(
+        conversation,
+        &[],
+        subagents,
+        subagent_counts,
+        shells,
+        writers,
+    )
+}
+
+pub fn inspector_with_fan(
+    conversation: &Conversation,
+    fan: &[BackgroundShell],
+    subagents: &[SubagentRow],
+    subagent_counts: Counts,
+    shells: Option<&Listing>,
+    writers: &dyn Fn(&str) -> Vec<i32>,
+) -> Inspector {
+    Inspector {
+        tasks: task_rows(conversation),
+        facts: facts(conversation),
+        subagent_counts,
+        subagents: subagents.to_vec(),
+        shell_counts: shells.map_or_else(
+            || Counts {
+                total: conversation.shells.len() + fan.len(),
+                ..Counts::default()
+            },
+            |listing| listing.counts,
+        ),
+        shells: {
+            let mut rows = shell_rows_with_fan(
+                conversation,
+                fan,
+                shells.map_or(&[][..], |listing| listing.idle.as_slice()),
+                shells.map(|listing| listing.ids.as_slice()),
+                writers,
+            );
+            if let Some(listing) = shells {
+                for row in rows.iter_mut().filter(|row| row.running) {
+                    row.quiet_min = listing.quiet.get(&row.id).copied();
+                }
+            }
+            rows
+        },
+    }
+}
+
+pub fn fact_icon(label: &str) -> Icon {
+    match label {
+        markers::FACT_FOLDER => Icon::Folder,
+        markers::FACT_BRANCH => Icon::Branch,
+        markers::FACT_TURNS => Icon::Turns,
+        markers::FACT_TOKENS => Icon::Tokens,
+        markers::FACT_COMMANDS => Icon::Terminal,
+        _ => Icon::File,
+    }
+}
+
+pub fn fact_text(label: &str, value: &str) -> String {
+    let count = value.parse::<i64>();
+    match (label, count) {
+        (markers::FACT_TURNS, Ok(n)) => t::chat::details_turns(n, value),
+        (markers::FACT_COMMANDS, Ok(n)) => t::chat::details_commands(n, value),
+        _ => value.to_owned(),
+    }
+}
+
+pub fn no_writers(_: &str) -> Vec<i32> {
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::subagent_rows::SubagentRows;
+    use notchling_engine::contract::Tool;
+    use notchling_engine::transcript::model::{BackgroundShell, SessionFacts, TaskEntry};
+    use notchling_engine::transcript::subagents::{
+        Origin as SubagentOrigin, Status as SubagentStatus, Subagent,
+    };
+
+    fn rows(agents: &[Subagent]) -> Vec<SubagentRow> {
+        let all: Vec<usize> = (0..agents.len()).collect();
+        SubagentRows::default().rows(agents, &all)
+    }
+
+    #[test]
+    fn tasks_facts_and_shells() {
+        let mut c = Conversation {
+            tasks: vec![
+                TaskEntry {
+                    id: "1".into(),
+                    subject: "Fix".into(),
+                    status: TaskStatus::Completed,
+                },
+                TaskEntry {
+                    id: "2".into(),
+                    subject: "Port".into(),
+                    status: TaskStatus::InProgress,
+                },
+            ],
+            facts: SessionFacts {
+                branch: Some("main".into()),
+                model: Some("claude-opus-5-5".into()),
+                effort: Some("high".into()),
+                input_tokens: 15_400,
+                output_tokens: 900,
+                turns: 2,
+                files: vec!["/Users/me/w/a.rs".into()],
+                commands: 3,
+                ..SessionFacts::default()
+            },
+            shells: vec![
+                BackgroundShell {
+                    id: "b1".into(),
+                    command: "cargo test".into(),
+                    title: "Run tests".into(),
+                    output_path: "/tmp/b1.output".into(),
+                    started: None,
+                },
+                BackgroundShell {
+                    id: "b2".into(),
+                    command: "sleep 9".into(),
+                    title: String::new(),
+                    output_path: "/tmp/b2.output".into(),
+                    started: None,
+                },
+            ],
+            ..Conversation::default()
+        };
+        c.finished_agents.insert("b1".into(), "completed".into());
+        let i = inspector(&c, &[], &no_writers);
+        assert_eq!(i.tasks[0].status, Status::Done);
+        assert_eq!(i.tasks[1].icon, Icon::Working);
+        assert_eq!(
+            i.facts,
+            [
+                ("Branch", "main".to_owned()),
+                ("Turns", "2".to_owned()),
+                ("Tokens", "15.4k in · 900 out".to_owned()),
+                ("Commands", "3".to_owned()),
+            ]
+        );
+        assert_eq!(i.shells[1].title, "Run tests");
+        assert_eq!(
+            (i.shells[1].status, i.shells[1].status_word.as_str()),
+            (Status::Done, "Completed")
+        );
+        assert_eq!(i.shells[0].title, "sleep 9", "no description: the command");
+        assert_eq!(i.shells[0].status_word, "Ended");
+    }
+
+    #[test]
+    fn subagent_rows() {
+        let agent = Subagent {
+            id: "abg".into(),
+            path: String::new(),
+            description: "Survey the repo".into(),
+            agent_type: "Explore".into(),
+            model: Some("sonnet".into()),
+            effort: Some("high".into()),
+            background: true,
+            tool_use_id: None,
+            started: 0.0,
+            updated: 0.0,
+            status: SubagentStatus::Completed,
+            origin: Default::default(),
+            session: String::new(),
+            parent: String::new(),
+            depth: 1,
+        };
+        let i = inspector(&Conversation::default(), &rows(&[agent]), &no_writers);
+        assert_eq!(
+            i.subagents[0],
+            SubagentRow {
+                id: "abg".into(),
+                description: "Survey the repo".into(),
+                detail: "Done · sonnet high · Explore".into(),
+                status: Status::Done,
+                status_word: "Done".into(),
+                running: false,
+                mark: Mark::Icon(Icon::Done, Ink::Done),
+                tool: ToolMark::Claude,
+                doing: None,
+                cwd: None,
+                started_ms: 0,
+                depth: 1,
+                children: 0,
+                open: false,
+                more_after: Vec::new(),
+            }
+        );
+        assert_eq!(i.subagents_title(), "Subagents · 1");
+        assert!(i.facts.is_empty() && i.tasks.is_empty() && i.shells.is_empty());
+    }
+
+    fn agent(status: SubagentStatus, kind: &str) -> Subagent {
+        Subagent {
+            id: "a".into(),
+            path: String::new(),
+            description: "d".into(),
+            agent_type: kind.into(),
+            model: None,
+            effort: None,
+            background: false,
+            tool_use_id: None,
+            started: 0.0,
+            updated: 0.0,
+            status,
+            origin: Default::default(),
+            session: String::new(),
+            parent: String::new(),
+            depth: 1,
+        }
+    }
+
+    #[test]
+    fn a_running_subagent_has_the_spinner_and_the_plain_type_is_left_out() {
+        let i = inspector(
+            &Conversation::default(),
+            &rows(&[
+                agent(SubagentStatus::Running, "general-purpose"),
+                agent(SubagentStatus::Failed, "Plan"),
+            ]),
+            &no_writers,
+        );
+        assert_eq!(i.subagents[0].mark, Mark::Spinner);
+        assert_eq!(i.subagents[0].detail, "Running");
+        assert_eq!(i.subagents[1].detail, "Failed · Plan");
+        assert_eq!(i.subagents_title(), "Subagents · 1 running");
+    }
+
+    #[test]
+    fn a_job_handed_to_another_tool_names_the_tool_before_its_model() {
+        let mut job = agent(SubagentStatus::Running, "Codex");
+        job.origin = SubagentOrigin::delegated(Tool::Codex);
+        job.model = Some("gpt-5.5".into());
+        job.effort = Some("high".into());
+        let mut gone = agent(SubagentStatus::Stopped, "Antigravity CLI");
+        gone.origin = SubagentOrigin::delegated(Tool::Antigravity);
+        let i = inspector(&Conversation::default(), &rows(&[job, gone]), &no_writers);
+        assert_eq!(i.subagents[0].detail, "Running · Codex · gpt-5.5 high");
+        assert_eq!(i.subagents[0].doing, None, "no rollout yet, nothing to say");
+        assert_eq!(i.subagents[1].detail, "Stopped · Antigravity CLI");
+        assert_eq!(i.subagents[0].tool, ToolMark::Codex);
+        assert_eq!(i.subagents[1].tool, ToolMark::Antigravity);
+        assert_eq!(i.subagents_title(), "Subagents · 1 running");
+    }
+
+    #[test]
+    fn a_running_codex_job_says_what_it_is_doing_from_its_rollout() {
+        let s = crate::testutil::Scratch::new("codex-job-doing");
+        let rollout = s.write(
+            "rollout.jsonl",
+            concat!(
+                r#"{"timestamp":"2026-11-12T10:00:00.000Z","type":"session_meta","payload":{"id":"c1","cwd":"/w"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-11-12T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cargo test\"}","call_id":"k1"}}"#,
+                "\n",
+            ),
+        );
+        let mut job = agent(SubagentStatus::Running, "Codex");
+        job.origin = SubagentOrigin::delegated(Tool::Codex);
+        job.path = rollout.to_string_lossy().into_owned();
+        let i = inspector(&Conversation::default(), &rows(&[job]), &no_writers);
+        let doing = i.subagents[0].doing.as_deref().expect("a running job says");
+        assert!(doing.ends_with('…'), "{doing}");
+        assert_ne!(doing, "Thinking…", "it is running a command");
+    }
+
+    #[test]
+    fn a_running_subagent_says_what_it_is_doing_now() {
+        let s = crate::testutil::Scratch::new("subagent-doing");
+        let file = s.write(
+            "agent-a.jsonl",
+            concat!(
+                r#"{"isSidechain":true,"type":"user","message":{"role":"user","content":"Fix it"},"uuid":"u1","timestamp":"2026-11-08T08:00:00.000Z"}"#,
+                "\n",
+                r#"{"isSidechain":true,"type":"assistant","message":{"id":"a1","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}],"usage":{"input_tokens":1000,"cache_read_input_tokens":231000,"output_tokens":300}},"uuid":"u2","timestamp":"2026-11-08T08:00:05.000Z"}"#,
+                "\n"
+            ),
+        );
+        let mut running = agent(SubagentStatus::Running, "general-purpose");
+        running.path = file.to_string_lossy().into_owned();
+        let mut done = agent(SubagentStatus::Completed, "general-purpose");
+        done.path = running.path.clone();
+        let i = inspector(
+            &Conversation::default(),
+            &rows(&[running, done]),
+            &no_writers,
+        );
+        let doing = i.subagents[0].doing.as_deref().expect("a running one says");
+        assert!(doing.contains("Run the tests"), "{doing}");
+        assert_eq!(i.subagents[1].doing, None, "a finished one doesn't");
+        assert_eq!(i.subagents[0].detail, "Running · 232.3k");
+        assert_eq!(i.subagents[1].detail, "Done · 232.3k");
+        assert_eq!(i.subagents[0].tool, ToolMark::Claude);
+    }
+
+    #[test]
+    fn the_token_line_says_the_cached_part_and_its_share() {
+        assert_eq!(token_line(71_100, 650, 0), "71.1k in · 650 out");
+        assert_eq!(
+            token_line(71_100, 650, 68_200),
+            "71.1k in · 650 out\n68.2k cached (96%)"
+        );
+        assert_eq!(token_line(0, 10, 5), "0 in · 10 out");
+    }
+
+    #[test]
+    fn the_tasks_bar_counts_done_of_all() {
+        let row = |subject: &str, status| task_row(subject, status);
+        assert_eq!(TaskSummary::of(&[]), None);
+        let none_done =
+            TaskSummary::of(&[row("a", TaskStatus::Pending), row("b", TaskStatus::Pending)])
+                .unwrap();
+        assert_eq!(none_done.title(), "Tasks 0/2");
+        assert_eq!((none_done.fraction(), none_done.current), (0.0, None));
+        let mid = TaskSummary::of(&[
+            row("a", TaskStatus::Completed),
+            row("b", TaskStatus::InProgress),
+            row("c", TaskStatus::InProgress),
+            row("d", TaskStatus::Pending),
+        ])
+        .unwrap();
+        assert_eq!(mid.title(), "Tasks 1/4");
+        assert_eq!(mid.fraction(), 0.25);
+        assert_eq!(mid.current.as_deref(), Some("b"));
+        assert!(!mid.all_done());
+        let all = TaskSummary::of(&[row("a", TaskStatus::Completed)]).unwrap();
+        assert!(all.all_done() && all.fraction() == 1.0);
+    }
+
+    #[test]
+    fn titles_carry_the_counts() {
+        assert_eq!(counted_title("Subagents", 2, 5), "Subagents · 2 running");
+        assert_eq!(counted_title("Subagents", 0, 7), "Subagents · 7");
+        assert_eq!(counted_title("Shells", 0, 0), "Shells");
+        let mut c = Conversation::default();
+        assert_eq!(inspector(&c, &[], &no_writers).tasks_title(), "Tasks");
+        c.tasks = vec![
+            TaskEntry {
+                id: "1".into(),
+                subject: "a".into(),
+                status: TaskStatus::Completed,
+            },
+            TaskEntry {
+                id: "2".into(),
+                subject: "b".into(),
+                status: TaskStatus::Pending,
+            },
+        ];
+        assert_eq!(inspector(&c, &[], &no_writers).tasks_title(), "Tasks · 1/2");
+    }
+
+    #[test]
+    fn shell_rows_know_if_they_run() {
+        let mut c = Conversation::default();
+        for (id, ended, path) in [
+            ("b0", true, "/old"),
+            ("b1", false, "/live"),
+            ("b2", true, "/done"),
+        ] {
+            c.shells.push(BackgroundShell {
+                id: id.into(),
+                command: id.into(),
+                title: String::new(),
+                output_path: path.into(),
+                started: None,
+            });
+            if ended {
+                c.finished_agents.insert(id.into(), "completed".into());
+            }
+        }
+        let writers = |path: &str| if path == "/live" { vec![1] } else { Vec::new() };
+        let i = inspector(&c, &[], &writers);
+        assert!(i.shells[0].running && i.shells[0].mark == Mark::Spinner);
+        assert_eq!(i.shells[1].mark, Mark::Icon(Icon::Done, Ink::Done));
+        let order: Vec<&str> = i.shells.iter().map(|s| s.command.as_str()).collect();
+        assert_eq!(order, ["b1", "b2", "b0"]);
+        assert_eq!(i.shells_title(), "Shells · 1 running");
+    }
+
+    #[test]
+    fn a_running_shell_carries_the_minutes_it_made_no_progress() {
+        let mut c = Conversation::default();
+        for id in ["b1", "b2"] {
+            c.shells.push(BackgroundShell {
+                id: id.into(),
+                command: id.into(),
+                title: String::new(),
+                output_path: format!("/{id}"),
+                started: None,
+            });
+        }
+        c.finished_agents.insert("b2".into(), "completed".into());
+        let listing = Listing {
+            ids: vec!["b1".into(), "b2".into()],
+            quiet: [("b1".to_owned(), 12), ("b2".to_owned(), 12)].into(),
+            ..Listing::default()
+        };
+        let rows =
+            inspector_listed(&c, &[], Counts::default(), Some(&listing), &|_| vec![1]).shells;
+        let quiet: Vec<(&str, Option<u64>)> =
+            rows.iter().map(|r| (r.id.as_str(), r.quiet_min)).collect();
+        assert_eq!(quiet, [("b1", Some(12)), ("b2", None)]);
+    }
+
+    #[test]
+    fn fact_rows_read_like_the_swift_panel() {
+        assert_eq!(fact_icon("Folder"), Icon::Folder);
+        assert_eq!(fact_icon("Branch"), Icon::Branch);
+        assert_eq!(fact_icon("Commands"), Icon::Terminal);
+        assert_eq!(fact_icon("Files"), Icon::File);
+        assert_eq!(fact_text("Turns", "1"), "1 turn");
+        assert_eq!(fact_text("Turns", "2"), "2 turns");
+        assert_eq!(fact_text("Commands", "3"), "3 commands");
+        assert_eq!(
+            fact_text("Tokens", "15.4k in · 900 out"),
+            "15.4k in · 900 out"
+        );
+    }
+}

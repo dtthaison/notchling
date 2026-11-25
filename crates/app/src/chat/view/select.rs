@@ -1,0 +1,682 @@
+use std::cell::RefCell;
+use std::ops::Range;
+
+use gpui::{
+    canvas, div, fill, point, px, size, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Div,
+    Element, ElementId, EntityId, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior,
+    InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Point, Styled, StyledText, TextLayout, WeakEntity, Window,
+};
+use notchling_kit::ui::{hsla, KitStyled};
+use notchling_kit::{Appearance, Ink, TypeRole};
+
+use super::copy_menu::selects;
+use super::occlusion::{pick, reachable, Hit};
+use super::ChatView;
+use crate::chat::selection::{copied as copy_of, floor, ordered, range_in, word_at, At};
+
+struct Note {
+    key: String,
+    text: String,
+    layout: TextLayout,
+    links: Vec<(Range<usize>, String)>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Spot {
+    key: String,
+    index: usize,
+}
+
+#[derive(Default)]
+struct State {
+    hits: std::collections::HashMap<String, Hitbox>,
+    notes: Vec<Note>,
+    at: std::collections::HashMap<String, usize>,
+    anchor: Option<Spot>,
+    focus: Option<Spot>,
+    unit: Unit,
+    dragging: bool,
+    view: Option<EntityId>,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Unit {
+    #[default]
+    Char,
+    Word,
+    Block,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    File,
+    Details,
+}
+
+thread_local! {
+    static STATES: [RefCell<State>; 2] = [RefCell::new(State::default()), RefCell::new(State::default())];
+}
+
+fn state<R>(scope: Scope, f: impl FnOnce(&RefCell<State>) -> R) -> R {
+    STATES.with(|all| f(&all[scope as usize]))
+}
+
+fn other(scope: Scope) -> Scope {
+    match scope {
+        Scope::File => Scope::Details,
+        Scope::Details => Scope::File,
+    }
+}
+
+fn take_over(scope: Scope) -> Option<EntityId> {
+    state(other(scope), |s| s.borrow_mut().release())
+}
+
+impl State {
+    fn release(&mut self) -> Option<EntityId> {
+        let had = self.anchor.take().is_some();
+        self.focus = None;
+        self.dragging = false;
+        had.then_some(self.view).flatten()
+    }
+
+    fn order(&self, spot: &Spot) -> Option<At> {
+        let order = *self.at.get(&spot.key)?;
+        Some(At {
+            order,
+            index: spot.index,
+        })
+    }
+
+    fn ends(&self) -> Option<(At, At)> {
+        let anchor = self.order(self.anchor.as_ref()?)?;
+        let focus = self.order(self.focus.as_ref()?)?;
+        Some(ordered(anchor, focus))
+    }
+
+    fn link_at(&self, position: Point<Pixels>) -> Option<String> {
+        let note = self
+            .notes
+            .iter()
+            .find(|n| n.layout.bounds().contains(&position))?;
+        let index = note.layout.index_for_position(position).ok()?;
+        crate::chat::link_target::link_at(&note.links, index).map(str::to_owned)
+    }
+
+    fn spot_at(&self, position: Point<Pixels>) -> Option<Spot> {
+        for note in &self.notes {
+            let bounds = note.layout.bounds();
+            if position.y > bounds.bottom() {
+                continue;
+            }
+            let index = if position.y < bounds.top() {
+                0
+            } else {
+                note.layout
+                    .index_for_position(position)
+                    .unwrap_or_else(|nearest| nearest)
+            };
+            return Some(Spot {
+                key: note.key.clone(),
+                index: floor(&note.text, index),
+            });
+        }
+        let last = self.notes.last()?;
+        Some(Spot {
+            key: last.key.clone(),
+            index: last.text.len(),
+        })
+    }
+
+    fn hit_at(&self, position: Point<Pixels>, window: &Window) -> Hit<String> {
+        let candidates: Vec<(String, bool, bool)> = self
+            .notes
+            .iter()
+            .map(|n| {
+                (
+                    n.key.clone(),
+                    n.layout.bounds().contains(&position),
+                    reachable(self.hits.get(&n.key), window),
+                )
+            })
+            .collect();
+        pick(&candidates)
+    }
+
+    fn note_drawn(&mut self, note: Note) {
+        match self.at.get(&note.key) {
+            Some(&i) if i < self.notes.len() => self.notes[i] = note,
+            _ => {
+                self.at.insert(note.key.clone(), self.notes.len());
+                self.notes.push(note);
+            }
+        }
+    }
+
+    fn note(&self, key: &str) -> Option<&Note> {
+        self.at.get(key).and_then(|&i| self.notes.get(i))
+    }
+
+    fn widen(&self, spot: Spot) -> Spot {
+        let Some(note) = self.note(&spot.key) else {
+            return spot;
+        };
+        let forward = match (
+            self.anchor.as_ref().and_then(|a| self.order(a)),
+            self.order(&spot),
+        ) {
+            (Some(a), Some(f)) => f >= a,
+            _ => true,
+        };
+        let range = match self.unit {
+            Unit::Char => return spot,
+            Unit::Word => word_at(&note.text, spot.index),
+            Unit::Block => 0..note.text.len(),
+        };
+        Spot {
+            index: if forward { range.end } else { range.start },
+            ..spot
+        }
+    }
+}
+
+pub fn copied() -> Option<String> {
+    copied_in(Scope::File).or_else(|| copied_in(Scope::Details))
+}
+
+pub fn copied_in(scope: Scope) -> Option<String> {
+    state(scope, |s| {
+        let s = s.borrow();
+        let (start, end) = s.ends()?;
+        let blocks: Vec<&str> = s.notes.iter().map(|n| n.text.as_str()).collect();
+        let text = copy_of(&blocks, start, end);
+        (!text.is_empty()).then_some(text)
+    })
+}
+
+pub fn keep_only(file: bool, details: bool) {
+    for (scope, mounted) in [(Scope::File, file), (Scope::Details, details)] {
+        if !mounted {
+            state(scope, |s| *s.borrow_mut() = State::default());
+        }
+    }
+}
+
+pub fn clear() {
+    for scope in [Scope::File, Scope::Details] {
+        state(scope, |s| {
+            let mut s = s.borrow_mut();
+            s.anchor = None;
+            s.focus = None;
+            s.dragging = false;
+        });
+    }
+}
+
+pub fn listener(chat: WeakEntity<ChatView>) -> impl IntoElement {
+    listener_in(Scope::File, chat)
+}
+
+pub fn listener_in(scope: Scope, chat: WeakEntity<ChatView>) -> impl IntoElement {
+    canvas(
+        move |_, _, _| {
+            state(scope, |s| {
+                let mut s = s.borrow_mut();
+                s.notes.clear();
+                s.at.clear();
+                s.hits.clear();
+            })
+        },
+        move |_, _, window, cx| {
+            let view = window.current_view();
+            state(scope, |s| s.borrow_mut().view = Some(view));
+            if scope == Scope::Details {
+                preview_select(scope, cx, view);
+            }
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                if event.button == MouseButton::Right {
+                    let (over, enabled, link) = state(scope, |s| {
+                        let s = s.borrow();
+                        let over = matches!(s.hit_at(event.position, window), Hit::Text(_));
+                        (
+                            over,
+                            selects(s.anchor.as_ref(), s.focus.as_ref()),
+                            s.link_at(event.position),
+                        )
+                    });
+                    if over {
+                        let at = event.position;
+                        chat.update(cx, |chat, cx| chat.open_copy_menu(at, enabled, link, cx))
+                            .ok();
+                    }
+                    return;
+                }
+                if event.button != MouseButton::Left {
+                    return;
+                }
+                if chat
+                    .upgrade()
+                    .is_some_and(|chat| chat.read(cx).copy_menu_open())
+                {
+                    return;
+                }
+                state(scope, |s| {
+                    let mut s = s.borrow_mut();
+                    let key = match s.hit_at(event.position, window) {
+                        Hit::Text(key) => key,
+                        Hit::Covered => return,
+                        Hit::Empty => {
+                            if s.anchor.take().is_some() {
+                                s.focus = None;
+                                cx.notify(view);
+                            }
+                            return;
+                        }
+                    };
+                    let Some(spot) = s.spot_at(event.position).filter(|p| p.key == key) else {
+                        return;
+                    };
+                    if let Some(left) = take_over(scope) {
+                        cx.notify(left);
+                    }
+                    let note = s.note(&key).map(|n| n.text.clone()).unwrap_or_default();
+                    let (unit, range) = match event.click_count {
+                        1 => (Unit::Char, spot.index..spot.index),
+                        2 => (Unit::Word, word_at(&note, spot.index)),
+                        _ => (Unit::Block, 0..note.len()),
+                    };
+                    s.unit = unit;
+                    s.anchor = Some(Spot {
+                        key: key.clone(),
+                        index: range.start,
+                    });
+                    s.focus = Some(Spot {
+                        key,
+                        index: range.end,
+                    });
+                    s.dragging = true;
+                    cx.notify(view);
+                });
+            });
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                state(scope, |s| {
+                    let mut s = s.borrow_mut();
+                    if !s.dragging {
+                        return;
+                    }
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        s.dragging = false;
+                        return;
+                    }
+                    let Some(spot) = s.spot_at(event.position) else {
+                        return;
+                    };
+                    let spot = s.widen(spot);
+                    if s.focus.as_ref() != Some(&spot) {
+                        s.focus = Some(spot);
+                        cx.notify(view);
+                    }
+                });
+            });
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                    state(scope, |s| s.borrow_mut().dragging = false);
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_0()
+}
+
+pub fn selectable(
+    key: impl Into<String>,
+    text: impl Into<String>,
+    layout: TextLayout,
+    child: AnyElement,
+    a: Appearance,
+) -> Selectable {
+    selectable_in(Scope::File, key, text, layout, child, a)
+}
+
+pub fn selectable_in(
+    scope: Scope,
+    key: impl Into<String>,
+    text: impl Into<String>,
+    layout: TextLayout,
+    child: AnyElement,
+    a: Appearance,
+) -> Selectable {
+    Selectable {
+        scope,
+        key: key.into(),
+        text: text.into(),
+        layout,
+        child: Some(child),
+        a,
+        links: Vec::new(),
+    }
+}
+
+pub fn detail_keyed(key: String, text: &str, role: TypeRole, ink: Ink, a: Appearance) -> Div {
+    detail_marked(key, text, role, ink, Vec::new(), a)
+}
+
+pub fn detail_marked(
+    key: String,
+    text: &str,
+    role: TypeRole,
+    ink: Ink,
+    marks: Vec<(Range<usize>, HighlightStyle)>,
+    a: Appearance,
+) -> Div {
+    let shown = role.display(text);
+    let styled = StyledText::new(shown.clone()).with_highlights(marks);
+    let layout = styled.layout().clone();
+    div().kit_type(role).ink(ink, a).child(selectable_in(
+        Scope::Details,
+        key,
+        shown,
+        layout,
+        styled.into_any_element(),
+        a,
+    ))
+}
+
+fn preview_select(scope: Scope, cx: &mut App, view: gpui::EntityId) {
+    let Some(prefix) = std::env::var_os("NOTCHLING_RENDER_SELECT") else {
+        return;
+    };
+    let prefix = prefix.to_string_lossy().into_owned();
+    state(scope, |s| {
+        let mut s = s.borrow_mut();
+        if s.anchor.is_some() {
+            return;
+        }
+        let mut keyed = s.notes.iter().filter(|n| n.key.starts_with(&prefix));
+        let (Some(first), last) = (keyed.next(), keyed.next_back()) else {
+            return;
+        };
+        let last = last.unwrap_or(first);
+        let (anchor, focus) = (
+            Spot {
+                key: first.key.clone(),
+                index: 0,
+            },
+            Spot {
+                key: last.key.clone(),
+                index: last.text.len(),
+            },
+        );
+        s.anchor = Some(anchor);
+        s.focus = Some(focus);
+        cx.notify(view);
+    });
+}
+
+pub fn selected_in(scope: Scope) -> bool {
+    state(scope, |s| {
+        let s = s.borrow();
+        selects(s.anchor.as_ref(), s.focus.as_ref())
+    })
+}
+
+pub struct Selectable {
+    scope: Scope,
+    key: String,
+    text: String,
+    layout: TextLayout,
+    child: Option<AnyElement>,
+    a: Appearance,
+    links: Vec<(Range<usize>, String)>,
+}
+
+impl Selectable {
+    pub fn links(mut self, links: Vec<(Range<usize>, String)>) -> Selectable {
+        self.links = links;
+        self
+    }
+}
+
+impl IntoElement for Selectable {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for Selectable {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = Hitbox;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, AnyElement) {
+        let mut child = self
+            .child
+            .take()
+            .unwrap_or_else(|| gpui::Empty.into_any_element());
+        (child.request_layout(window, cx), child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut AnyElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Hitbox {
+        child.prepaint(window, cx);
+        let note = Note {
+            key: self.key.clone(),
+            text: std::mem::take(&mut self.text),
+            layout: self.layout.clone(),
+            links: std::mem::take(&mut self.links),
+        };
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let key = note.key.clone();
+        state(self.scope, |s| {
+            let mut s = s.borrow_mut();
+            s.note_drawn(note);
+            s.hits.insert(key, hitbox.clone());
+        });
+        hitbox
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        child: &mut AnyElement,
+        hitbox: &mut Hitbox,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.set_cursor_style(CursorStyle::IBeam, hitbox);
+        let selected = state(self.scope, |s| {
+            let s = s.borrow();
+            let (start, end) = s.ends()?;
+            let order = *s.at.get(&self.key)?;
+            let len = s.notes.get(order)?.text.len();
+            range_in(start, end, order, len)
+        });
+        child.paint(window, cx);
+        if let Some(range) = selected {
+            let wash = hsla(Ink::Accent.color(self.a).with_alpha(0.32));
+            for rect in rects(&self.layout, range) {
+                window.paint_quad(fill(rect, wash));
+            }
+        }
+    }
+}
+
+pub(super) fn rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> {
+    let height = layout.line_height();
+    let text = layout.text();
+    let mut rows: Vec<(Pixels, Pixels, Pixels)> = Vec::new();
+    let mut push = |top: Pixels, left: Pixels, right: Pixels| match rows.last_mut() {
+        Some(row) if row.0 == top => {
+            row.1 = row.1.min(left);
+            row.2 = row.2.max(right);
+        }
+        _ => rows.push((top, left, right)),
+    };
+    let mut index = floor(&text, range.start);
+    while index < range.end.min(text.len()) {
+        let next = text[index..]
+            .chars()
+            .next()
+            .map_or(index + 1, |c| index + c.len_utf8());
+        let (Some(here), there) = (
+            layout.position_for_index(index),
+            layout.position_for_index(next),
+        ) else {
+            break;
+        };
+        let blank = text[index..].starts_with(char::is_whitespace);
+        match there {
+            Some(p) if p.y == here.y => push(here.y, here.x, p.x),
+            Some(p) if p.y > here.y && !blank => push(p.y, layout.bounds().left(), p.x),
+            _ => push(here.y, here.x, here.x + height * 0.3),
+        }
+        index = next;
+    }
+    rows.into_iter()
+        .map(|(top, left, right)| Bounds {
+            origin: point(left, top),
+            size: size((right - left).max(px(2.0)), height),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(key: &str, text: &str) -> Note {
+        Note {
+            key: key.to_owned(),
+            text: text.to_owned(),
+            layout: TextLayout::default(),
+            links: Vec::new(),
+        }
+    }
+
+    fn selected_note(scope: Scope, key: &str, text: &str) {
+        state(scope, |s| {
+            let mut s = s.borrow_mut();
+            *s = State::default();
+            s.note_drawn(note(key, text));
+            s.anchor = Some(Spot {
+                key: key.to_owned(),
+                index: 0,
+            });
+            s.focus = Some(Spot {
+                key: key.to_owned(),
+                index: text.len(),
+            });
+        });
+    }
+
+    #[test]
+    fn a_selection_started_in_one_scope_ends_the_other_and_copy_follows_it() {
+        selected_note(Scope::File, "file-line", "from the file");
+        selected_note(Scope::Details, "fact-0", "from the details");
+        assert_eq!(copied().as_deref(), Some("from the file"));
+        take_over(Scope::Details);
+        assert_eq!(copied().as_deref(), Some("from the details"));
+        assert!(!selected_in(Scope::File));
+        assert!(selected_in(Scope::Details));
+        take_over(Scope::File);
+        assert_eq!(copied(), None);
+        assert!(!selected_in(Scope::Details));
+    }
+
+    #[test]
+    fn a_scope_that_is_not_mounted_loses_its_selection_notes_and_copy() {
+        selected_note(Scope::File, "file-line", "from the file");
+        selected_note(Scope::Details, "fact-0", "from the details");
+        keep_only(true, true);
+        assert_eq!(copied().as_deref(), Some("from the file"));
+        keep_only(false, true);
+        assert!(!selected_in(Scope::File));
+        assert_eq!(copied().as_deref(), Some("from the details"));
+        state(Scope::File, |s| {
+            let s = s.borrow();
+            assert!(s.notes.is_empty() && s.at.is_empty() && s.hits.is_empty());
+            assert!(s.anchor.is_none() && s.focus.is_none() && !s.dragging);
+        });
+        keep_only(false, false);
+        assert!(!selected_in(Scope::Details));
+        assert_eq!(copied(), None);
+        state(Scope::Details, |s| assert!(s.borrow().notes.is_empty()));
+    }
+
+    #[test]
+    fn a_scope_that_is_mounted_keeps_everything_it_had() {
+        selected_note(Scope::Details, "fact-0", "from the details");
+        state(Scope::Details, |s| s.borrow_mut().dragging = true);
+        keep_only(false, true);
+        assert!(selected_in(Scope::Details));
+        state(Scope::Details, |s| {
+            let s = s.borrow();
+            assert_eq!(s.notes.len(), 1);
+            assert!(s.dragging);
+        });
+    }
+
+    #[test]
+    fn a_scope_that_ends_reports_the_view_to_repaint_only_when_it_held_a_selection() {
+        let mut s = State {
+            view: Some(EntityId::from(7u64)),
+            ..State::default()
+        };
+        assert_eq!(s.release(), None);
+        s.anchor = Some(Spot {
+            key: "a".into(),
+            index: 0,
+        });
+        assert_eq!(s.release(), Some(EntityId::from(7u64)));
+        assert!(s.anchor.is_none() && s.focus.is_none() && !s.dragging);
+    }
+
+    #[test]
+    fn a_text_noted_again_replaces_its_note_in_place() {
+        let mut s = State::default();
+        s.note_drawn(note("a", "one"));
+        s.note_drawn(note("b", "two"));
+        s.note_drawn(note("a", "one, edited"));
+        s.note_drawn(note("a", "one, edited"));
+        let texts: Vec<&str> = s.notes.iter().map(|n| n.text.as_str()).collect();
+        assert_eq!(texts, vec!["one, edited", "two"], "no note piles up");
+        assert_eq!(s.note("b").map(|n| n.text.as_str()), Some("two"));
+        let spot = Spot {
+            key: "b".into(),
+            index: 1,
+        };
+        assert_eq!(s.order(&spot), Some(At { order: 1, index: 1 }));
+    }
+}

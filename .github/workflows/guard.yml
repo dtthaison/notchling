@@ -1,0 +1,59 @@
+name: Guard
+
+# The project's rules as checks: the guard's own tests, the tests of the agents' scripts in
+# tools/agents/ (triage, preflight, push wrapper, review; against local fakes only), the tests of the
+# release tools in tools/release/ (version, fragments, appcast and the Release workflow's
+# contract; temp files only), the architecture lint against its baseline, pinned actions, CODEOWNERS
+# generated from zones.json, the rulesets, and the rules catalog (each rule in docs/rules.md has a
+# check that fires on its bad example; CLAUDE.md is @AGENTS.md) and the generated protocol types
+# (regenerating them from the schema changes nothing). No secrets.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: tools/guard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Guard tests
+        run: python3 -m unittest discover -s tools/guard/tests -t tools/guard
+      - name: Agents tests
+        run: python3 -m unittest discover -s tools/agents/tests -t tools/agents
+      - name: Release tests
+        run: python3 -m unittest discover -s tools/release/tests -t tools/release
+      - name: Architecture lint
+        run: python3 -m guard lint
+      - name: Actions pinned
+        run: python3 -m guard pins
+      - name: CODEOWNERS
+        run: python3 -m guard codeowners --check
+      - name: Rulesets
+        run: python3 -m guard rulesets
+      - name: Rules
+        run: |
+          python3 -m guard rules
+          python3 -m guard claudemd
+          python3 -m guard featuremap
+      - name: Protocol types
+        run: |
+          python3 tools/protocol/gen.py --check
+          python3 -m unittest discover -s tools/protocol/tests -t tools/protocol
+      - name: Locale
+        run: |
+          python3 tools/locale/gen.py --check
+          python3 -m unittest discover -s tools/locale/tests -t tools/locale
+          python3 tools/locale/gen.py --report --markdown >> "$GITHUB_STEP_SUMMARY"

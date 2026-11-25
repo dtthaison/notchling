@@ -1,0 +1,17 @@
+{
+  "data": {
+    "commands": [
+      {
+        "argumentHint": "[instructions]",
+        "description": "Summarise the conversation to free context",
+        "name": "compact"
+      },
+      {
+        "description": "Start a new conversation",
+        "name": "clear"
+      }
+    ]
+  },
+  "id": 15,
+  "ok": true
+}

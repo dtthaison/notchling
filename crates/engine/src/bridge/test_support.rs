@@ -1,0 +1,709 @@
+use super::backend::{
+    Audit, AuditEntry, BridgeBackend, Devices, PairedDevice, PairingCodes, RateLimiter,
+};
+use super::connection::{lock, Connection, ConnectionIo};
+use super::hub::Hub;
+use super::inbox::InboxOutcome;
+use super::model::*;
+use super::relay::{Call, Cancelled, HeldList, HeldNoticeView, HeldRef, HeldView, Relay, Routed};
+use super::router::{Router, RouterParts};
+use super::wire::BridgeFailure;
+use crate::inbox::{Action, ActionId, Item, Kind, Source, State};
+use crate::sessions::testutil::TempDir;
+use notchling_protocol::generated as wire;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+pub const NOW_MS: f64 = 1_793_541_465_000.0;
+
+type Done = Box<dyn FnOnce() + Send>;
+
+#[derive(Default)]
+pub struct RecordingIo {
+    texts: Mutex<Vec<String>>,
+    binaries: Mutex<Vec<Vec<u8>>>,
+    closed: AtomicBool,
+    pub hold_binary: AtomicBool,
+    held: Mutex<Vec<Done>>,
+}
+
+impl RecordingIo {
+    pub fn texts(&self) -> Vec<String> {
+        lock(&self.texts).clone()
+    }
+    pub fn binaries(&self) -> Vec<Vec<u8>> {
+        lock(&self.binaries).clone()
+    }
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+    pub fn json(&self, index: usize) -> Value {
+        serde_json::from_str(&self.texts()[index]).expect("json")
+    }
+    pub fn last_json(&self) -> Value {
+        let texts = self.texts();
+        serde_json::from_str(texts.last().expect("a reply")).expect("json")
+    }
+    pub fn release_binary(&self) {
+        let pending: Vec<Done> = std::mem::take(&mut *lock(&self.held));
+        pending.into_iter().for_each(|done| done());
+    }
+}
+
+impl ConnectionIo for RecordingIo {
+    fn send_text(&self, text: String) {
+        lock(&self.texts).push(text);
+    }
+    fn send_binary(&self, data: Vec<u8>, sent: Done) {
+        lock(&self.binaries).push(data);
+        if self.hold_binary.load(Ordering::SeqCst) {
+            lock(&self.held).push(sent);
+        } else {
+            sent();
+        }
+    }
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+}
+
+pub fn error_code(reply: &Value) -> Option<&str> {
+    reply.get("error")?.get("code")?.as_str()
+}
+
+pub fn is_ok(reply: &Value) -> bool {
+    reply.get("ok").and_then(Value::as_bool) == Some(true)
+}
+
+pub fn data(reply: &Value) -> Value {
+    reply.get("data").cloned().unwrap_or(Value::Null)
+}
+
+#[derive(Default)]
+pub struct FakeState {
+    pub sessions: Vec<Session>,
+    pub chat: Vec<ChatMessage>,
+    pub prompts: HashMap<String, PendingPrompt>,
+    pub refuse_approval: bool,
+    pub approval_delay_ms: u64,
+    pub send_delay_ms: u64,
+    pub phone_error: Option<BridgeFailure>,
+    pub commands: Vec<Command>,
+    pub viz: Option<BridgeViz>,
+    pub takeover: Option<Result<TakeoverOutcome, BridgeFailure>>,
+    pub sent: Vec<(String, String)>,
+    pub responses: Vec<(String, PromptResponse)>,
+    pub new_sessions: Vec<(PathBuf, Option<String>)>,
+    pub models: Vec<ModelChoice>,
+    pub phone_starts: Vec<PhoneOptions>,
+    pub interrupted: Vec<String>,
+    pub takeovers: Vec<(String, bool)>,
+    pub approval_calls: usize,
+    pub session_calls: usize,
+    pub inbox: Vec<Item>,
+    pub inbox_answers: Vec<(String, ActionId)>,
+    pub inbox_answer_calls: usize,
+    pub inbox_answer_devices: Vec<Option<String>>,
+    pub acting_off: bool,
+    pub relay: Option<Arc<dyn Relay>>,
+    pub machines: Vec<wire::ClusterMachine>,
+    pub machine_calls: usize,
+    pub promote_answer: Option<Result<Value, BridgeFailure>>,
+    pub promotes: Vec<(String, bool)>,
+}
+
+#[derive(Default)]
+pub struct FakeBackend {
+    pub state: Mutex<FakeState>,
+}
+
+impl FakeBackend {
+    pub fn with<R>(&self, f: impl FnOnce(&mut FakeState) -> R) -> R {
+        f(&mut lock(&self.state))
+    }
+}
+
+pub const JPEG: [u8; 4] = [0xFF, 0xD8, 0xFF, 0xD9];
+
+impl BridgeBackend for FakeBackend {
+    fn sessions(&self) -> Vec<Session> {
+        self.with(|s| {
+            s.session_calls += 1;
+            s.sessions.clone()
+        })
+    }
+    fn chat_messages(&self, _: &str, _: Option<&str>) -> Result<Vec<ChatMessage>, BridgeFailure> {
+        Ok(self.with(|s| s.chat.clone()))
+    }
+    fn chat_image(&self, _: &str, _: &str, _: i64) -> Result<Vec<u8>, BridgeFailure> {
+        Ok(JPEG.to_vec())
+    }
+    fn commands(&self, _: &str) -> Vec<Command> {
+        self.with(|s| s.commands.clone())
+    }
+    fn viz(&self, _: &str, include_entity: bool) -> Result<BridgeViz, BridgeFailure> {
+        let canned = self.with(|s| s.viz.clone());
+        Ok(canned.unwrap_or_else(|| super::fixtures_data::viz(include_entity)))
+    }
+    fn web_snapshot(&self, _: &str, _: i64) -> Result<Vec<u8>, BridgeFailure> {
+        Ok(JPEG.to_vec())
+    }
+    fn send_message(&self, text: &str, session: &Session) -> Result<(), BridgeFailure> {
+        let delay = self.with(|s| s.send_delay_ms);
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
+        self.with(|s| s.sent.push((session.id.clone(), text.to_string())));
+        Ok(())
+    }
+    fn send_now(&self, session: &Session) -> Result<(), BridgeFailure> {
+        self.with(|s| s.interrupted.push(session.id.clone()));
+        Ok(())
+    }
+    fn pending_prompt(&self, request_id: &str) -> Option<PendingPrompt> {
+        self.with(|s| s.prompts.get(request_id).cloned())
+    }
+    fn respond(
+        &self,
+        prompt: &PendingPrompt,
+        response: &PromptResponse,
+    ) -> Result<(), BridgeFailure> {
+        self.with(|s| s.responses.push((prompt.id.clone(), response.clone())));
+        Ok(())
+    }
+    fn new_session(&self, cwd: &Path, model: Option<&str>) -> Result<(), BridgeFailure> {
+        self.with(|s| {
+            s.new_sessions
+                .push((cwd.to_path_buf(), model.map(String::from)))
+        });
+        Ok(())
+    }
+    fn models(&self) -> Vec<ModelChoice> {
+        self.with(|s| s.models.clone())
+    }
+    fn model_allowed(&self, id: &str) -> bool {
+        self.with(|s| s.models.iter().any(|m| m.id == id))
+    }
+    fn new_session_with_model(&self, cwd: &Path, model_id: &str) -> Result<(), BridgeFailure> {
+        self.with(|s| {
+            s.new_sessions
+                .push((cwd.to_path_buf(), Some(model_id.to_string())))
+        });
+        Ok(())
+    }
+    fn take_over(&self, session: &Session, stop: bool) -> Result<TakeoverOutcome, BridgeFailure> {
+        self.with(|s| {
+            s.takeovers.push((session.id.clone(), stop));
+            s.takeover.clone().unwrap_or(Ok(TakeoverOutcome {
+                session_id: "pty:7C3A91E2".into(),
+                stopped_pid: stop.then_some(4242),
+            }))
+        })
+    }
+    fn recent_projects(&self) -> Vec<String> {
+        vec![
+            "/Users/example/src/app".into(),
+            "/Users/example/src/notes".into(),
+        ]
+    }
+    fn request_approval(&self, _: &str, _: &str, _: &str) -> bool {
+        let delay = self.with(|s| s.approval_delay_ms);
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
+        self.with(|s| {
+            s.approval_calls += 1;
+            !s.refuse_approval
+        })
+    }
+    fn start_phone(
+        &self,
+        _: &Arc<Connection>,
+        options: &PhoneOptions,
+    ) -> Result<(), BridgeFailure> {
+        self.with(|s| match s.phone_error.clone() {
+            Some(error) => Err(error),
+            None => {
+                s.phone_starts.push(options.clone());
+                Ok(())
+            }
+        })
+    }
+    fn stop_phone(&self, _: &Arc<Connection>) {}
+    fn acting_on(&self) -> bool {
+        self.with(|s| !s.acting_off)
+    }
+    fn relay(&self) -> Option<Arc<dyn Relay>> {
+        self.with(|s| s.relay.clone())
+    }
+    fn cluster_machines(&self) -> Vec<wire::ClusterMachine> {
+        self.with(|s| {
+            s.machine_calls += 1;
+            s.machines.clone()
+        })
+    }
+    fn cluster_promote(&self, node: &str, confirmed: bool) -> Result<Value, BridgeFailure> {
+        self.with(|s| {
+            s.promotes.push((node.to_string(), confirmed));
+            s.promote_answer
+                .clone()
+                .unwrap_or(Ok(json!({"step": "bump"})))
+        })
+    }
+    fn inbox_items(&self) -> Vec<Item> {
+        self.with(|s| s.inbox.clone())
+    }
+    fn inbox_answer(&self, item_id: &str, action: ActionId) -> Result<InboxOutcome, BridgeFailure> {
+        self.with(|s| {
+            s.inbox_answer_calls += 1;
+            s.inbox_answer_devices.push(
+                notchling_events::scope::current()
+                    .actor
+                    .and_then(|a| a.device)
+                    .map(|d| d.as_str().to_owned()),
+            );
+            let item = s
+                .inbox
+                .iter_mut()
+                .find(|i| i.id == item_id)
+                .ok_or_else(|| BridgeFailure::not_found("No such inbox item."))?;
+            if item.state != State::Open {
+                return Ok(InboxOutcome {
+                    answered: false,
+                    state: item.state,
+                    answer: item.answer,
+                });
+            }
+            if !item.actions.iter().any(|a| a.id == action) {
+                return Err(BridgeFailure::invalid(
+                    "The item doesn't offer that action.",
+                ));
+            }
+            item.state = State::Answered;
+            item.answer = Some(action);
+            item.answered_by = Some("phone".into());
+            s.inbox_answers.push((item_id.to_string(), action));
+            Ok(InboxOutcome {
+                answered: true,
+                state: State::Answered,
+                answer: Some(action),
+            })
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryDevices {
+    pub list: Mutex<Vec<(PairedDevice, String)>>,
+}
+
+impl MemoryDevices {
+    pub fn names(&self) -> Vec<String> {
+        lock(&self.list).iter().map(|d| d.0.name.clone()).collect()
+    }
+    pub fn revoke(&self, id: &str) {
+        lock(&self.list).retain(|d| d.0.id != id);
+    }
+}
+
+impl Devices for MemoryDevices {
+    fn authenticate(&self, token: &str) -> Option<PairedDevice> {
+        lock(&self.list)
+            .iter()
+            .find(|d| d.1 == token)
+            .map(|d| d.0.clone())
+    }
+    fn touch(&self, _: &str) {}
+    fn register(&self, name: &str, _: &str) -> Result<(PairedDevice, String), String> {
+        let mut list = lock(&self.list);
+        let n = list.len() + 1;
+        let device = PairedDevice {
+            id: format!("DEVICE-{n}"),
+            name: name.to_string(),
+        };
+        let token = format!("tok-{n}-{name}");
+        list.push((device.clone(), token.clone()));
+        Ok((device, token))
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryCodes {
+    current: Mutex<Option<(String, f64)>>,
+}
+
+impl MemoryCodes {
+    pub fn issue(&self, now_ms: f64) -> String {
+        let code = "K7M2Q9XA".to_string();
+        *lock(&self.current) = Some((code.clone(), now_ms + 300_000.0));
+        code
+    }
+}
+
+impl PairingCodes for MemoryCodes {
+    fn consume(&self, code: &str, now_ms: f64) -> bool {
+        let mut current = lock(&self.current);
+        match current.as_ref() {
+            Some((live, expires)) if live == code && now_ms < *expires => {
+                *current = None;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryLimiter {
+    entries: Mutex<HashMap<String, (u32, f64)>>,
+}
+
+impl RateLimiter for MemoryLimiter {
+    fn is_blocked(&self, address: &str, now_ms: f64) -> bool {
+        lock(&self.entries)
+            .get(address)
+            .is_some_and(|e| e.1 > now_ms)
+    }
+    fn record_failure(&self, address: &str, now_ms: f64) {
+        let mut entries = lock(&self.entries);
+        let entry = entries.entry(address.to_string()).or_insert((0, 0.0));
+        if entry.0 >= 5 && entry.1 <= now_ms {
+            *entry = (0, 0.0);
+        }
+        entry.0 += 1;
+        let delay = if entry.0 >= 5 {
+            300_000.0
+        } else {
+            1000.0 * 2f64.powi(entry.0 as i32 - 1)
+        };
+        entry.1 = now_ms + delay;
+    }
+    fn record_success(&self, address: &str) {
+        lock(&self.entries).remove(address);
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryAudit {
+    pub entries: Mutex<Vec<AuditEntry>>,
+}
+
+impl MemoryAudit {
+    pub fn recent(&self) -> Vec<AuditEntry> {
+        lock(&self.entries).iter().rev().cloned().collect()
+    }
+}
+
+impl Audit for MemoryAudit {
+    fn append(&self, entry: AuditEntry) {
+        lock(&self.entries).push(entry);
+    }
+}
+
+pub struct Rig {
+    pub hub: Arc<Hub>,
+    pub router: Router,
+    pub backend: Arc<FakeBackend>,
+    pub devices: Arc<MemoryDevices>,
+    pub codes: Arc<MemoryCodes>,
+    pub audit: Arc<MemoryAudit>,
+    pub clock: Arc<Mutex<f64>>,
+    pub dir: TempDir,
+}
+
+impl Rig {
+    pub fn new() -> Rig {
+        let dir = TempDir::new("bridge");
+        std::fs::create_dir_all(dir.path("home")).expect("home");
+        let backend = Arc::new(FakeBackend::default());
+        let devices = Arc::new(MemoryDevices::default());
+        let codes = Arc::new(MemoryCodes::default());
+        let audit = Arc::new(MemoryAudit::default());
+        let hub = Arc::new(Hub::new());
+        let clock = Arc::new(Mutex::new(NOW_MS));
+        let ticking = Arc::clone(&clock);
+        let router = Router::new(RouterParts {
+            backend: backend.clone(),
+            devices: devices.clone(),
+            codes: codes.clone(),
+            limiter: Arc::new(MemoryLimiter::default()),
+            audit: audit.clone(),
+            hub: Arc::clone(&hub),
+            home: dir.path("home"),
+            images_dir: dir.path("images"),
+            now_ms: Arc::new(move || *lock(&ticking)),
+        });
+        Rig {
+            hub,
+            router,
+            backend,
+            devices,
+            codes,
+            audit,
+            clock,
+            dir,
+        }
+    }
+
+    pub fn home(&self) -> PathBuf {
+        self.dir.path("home")
+    }
+
+    pub fn set_clock(&self, ms: f64) {
+        *lock(&self.clock) = ms;
+    }
+
+    pub fn connect(&self, address: &str) -> (Arc<Connection>, Arc<RecordingIo>) {
+        let io = Arc::new(RecordingIo::default());
+        let connection = self.hub.connect(address, false, io.clone());
+        (connection, io)
+    }
+
+    pub fn send(&self, connection: &Arc<Connection>, text: &str) {
+        self.router.handle(connection, text);
+    }
+
+    pub fn login(&self, name: &str) -> (Arc<Connection>, Arc<RecordingIo>, String) {
+        let (_, token) = self.devices.register(name, "ios").expect("register");
+        let (connection, io) = self.connect("192.168.1.20");
+        self.send(
+            &connection,
+            &format!(r#"{{"id":1,"op":"hello","token":"{token}"}}"#),
+        );
+        assert!(connection.is_authenticated());
+        (connection, io, token)
+    }
+}
+
+pub fn session(id: &str, control: Control, state: wire::SessionState) -> Session {
+    let mut s = Session::new(id, &format!("Session {id}"), "/p", control, state);
+    s.status_updated_ms = NOW_MS;
+    s.started_ms = NOW_MS;
+    s.pid = Some(1);
+    s
+}
+
+pub fn message(n: usize, text: &str, role: wire::ChatRole) -> ChatMessage {
+    ChatMessage {
+        id: format!("M-{n:04}"),
+        role,
+        text: text.into(),
+        time: NOW_MS,
+        tool_summary: None,
+        queued: false,
+        images: Vec::new(),
+        kind: None,
+        steps: None,
+        output: None,
+    }
+}
+
+pub fn permission(id: &str, session_id: &str) -> PendingPrompt {
+    PendingPrompt {
+        id: id.into(),
+        session_id: session_id.into(),
+        kind: PromptKind::Permission,
+        tool_name: "Bash".into(),
+        summary: "ls".into(),
+        created_ms: NOW_MS,
+    }
+}
+
+pub fn inbox_item(id: &str, kind: Kind) -> Item {
+    let action = |id: ActionId, label: &str, primary: bool| Action {
+        id,
+        label: label.into(),
+        primary,
+    };
+    let actions = match kind {
+        Kind::SecretApproval => vec![
+            action(ActionId::AllowOnce, "Allow Once", true),
+            action(ActionId::AllowAlways, "Always Allow", false),
+            action(ActionId::Deny, "Deny", false),
+        ],
+        Kind::SecretRequest => vec![
+            action(ActionId::Open, "Open Form", true),
+            action(ActionId::Cancel, "Cancel", false),
+        ],
+        _ => vec![action(ActionId::Done, "Done", true)],
+    };
+    Item {
+        id: id.into(),
+        kind,
+        title: "Allow Secret".into(),
+        detail: "claude wants the npm token".into(),
+        source: Source {
+            node: None,
+            session: Some("5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11".into()),
+            job: None,
+        },
+        created_ms: NOW_MS as i64,
+        expires_ms: Some(NOW_MS as i64 + 300_000),
+        actions,
+        state: State::Open,
+        answer: None,
+        answered_by: None,
+        seen: false,
+        open: None,
+        closed_ms: None,
+        switch: None,
+    }
+}
+
+#[derive(Clone)]
+pub enum Plan {
+    Local,
+    Relayed,
+    Hold,
+    Done(Value),
+    Fail(BridgeFailure),
+}
+
+pub struct ScriptedRelay {
+    pub cluster: Mutex<Option<Value>>,
+    pub stale: Mutex<Option<i64>>,
+    pub plan: Mutex<Plan>,
+    pub entries: Mutex<Vec<HeldView>>,
+    pub notices: Mutex<Vec<HeldNoticeView>>,
+    pub delivered: Mutex<Vec<String>>,
+    pub delivered_keys: Mutex<Vec<String>>,
+    pub inflight_keys: Mutex<Vec<String>>,
+    pub calls: Mutex<Vec<(String, String, String)>>,
+    pub keys: Mutex<Vec<Option<String>>>,
+}
+
+impl ScriptedRelay {
+    pub fn new(cluster: Option<Value>) -> Arc<ScriptedRelay> {
+        Arc::new(ScriptedRelay {
+            cluster: Mutex::new(cluster),
+            stale: Mutex::new(None),
+            plan: Mutex::new(Plan::Local),
+            entries: Mutex::new(Vec::new()),
+            notices: Mutex::new(Vec::new()),
+            delivered: Mutex::new(Vec::new()),
+            delivered_keys: Mutex::new(Vec::new()),
+            inflight_keys: Mutex::new(Vec::new()),
+            calls: Mutex::new(Vec::new()),
+            keys: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn plan(&self, plan: Plan) {
+        *lock(&self.plan) = plan;
+    }
+}
+
+impl Relay for ScriptedRelay {
+    fn cluster(&self) -> Option<Value> {
+        lock(&self.cluster).clone()
+    }
+
+    fn route(&self, call: &Call<'_>) -> Routed {
+        lock(&self.keys).push(call.key.map(str::to_string));
+        lock(&self.calls).push((
+            call.device.to_string(),
+            call.request.to_string(),
+            call.act.op().to_string(),
+        ));
+        let plan = lock(&self.plan).clone();
+        match plan {
+            Plan::Local => Routed::Local,
+            Plan::Relayed => Routed::Relayed,
+            Plan::Done(data) => Routed::Done(data),
+            Plan::Fail(failure) => Routed::Fail(failure),
+            Plan::Hold => {
+                let mut entries = lock(&self.entries);
+                let id = format!("held-{}", entries.len() + 1);
+                entries.push(HeldView {
+                    id: id.clone(),
+                    key: call.key.map(str::to_string),
+                    device: call.device.to_string(),
+                    op: call.act.op().to_string(),
+                    session_id: call.act.session_id().map(str::to_string),
+                    summary: call.act.summary(),
+                    at_ms: NOW_MS as i64,
+                    waiting: false,
+                });
+                Routed::Held(HeldRef {
+                    id,
+                    at_ms: NOW_MS as i64,
+                })
+            }
+        }
+    }
+
+    fn list(&self, device: &str) -> HeldList {
+        let mine = |d: &str| d.is_empty() || d == device;
+        HeldList {
+            entries: lock(&self.entries)
+                .iter()
+                .filter(|e| mine(&e.device))
+                .cloned()
+                .collect(),
+            notices: lock(&self.notices)
+                .iter()
+                .filter(|n| mine(&n.device))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn cancel(&self, device: &str, id: &str) -> Cancelled {
+        if lock(&self.delivered).iter().any(|d| d == id) {
+            return Cancelled::Delivered;
+        }
+        let mut entries = lock(&self.entries);
+        match entries
+            .iter()
+            .position(|e| e.id == id && (e.device.is_empty() || e.device == device))
+        {
+            Some(at) => {
+                entries.remove(at);
+                Cancelled::Dropped
+            }
+            None => Cancelled::Unknown,
+        }
+    }
+
+    fn cancel_key(&self, device: &str, key: &str) -> Cancelled {
+        let mut entries = lock(&self.entries);
+        let at = entries.iter().position(|e| {
+            e.key.as_deref() == Some(key) && (e.device.is_empty() || e.device == device)
+        });
+        if let Some(at) = at {
+            entries.remove(at);
+            return Cancelled::Dropped;
+        }
+        if lock(&self.inflight_keys).iter().any(|k| k == key) {
+            return Cancelled::InFlight;
+        }
+        if lock(&self.delivered_keys).iter().any(|k| k == key) {
+            return Cancelled::Delivered;
+        }
+        Cancelled::Unknown
+    }
+
+    fn confirm(&self, device: &str, id: &str) -> bool {
+        lock(&self.entries)
+            .iter()
+            .any(|e| e.id == id && e.waiting && (e.device.is_empty() || e.device == device))
+    }
+
+    fn stale_ms(&self) -> Option<i64> {
+        *lock(&self.stale)
+    }
+}
+
+pub fn scripted_cluster() -> Value {
+    json!({
+        "primary": "0123456789abcdef",
+        "term": 3,
+        "nodes": [
+            {"id": "0123456789abcdef", "name": "m5", "addrs": ["192.168.1.5:47821"], "fingerprint": "aa".repeat(32), "canBeMaster": true, "online": false},
+            {"id": "fedcba9876543210", "name": "m1", "addrs": ["192.168.1.6:47821", "m1.local:47821"], "fingerprint": "bb".repeat(32), "canBeMaster": true, "online": true}
+        ]
+    })
+}

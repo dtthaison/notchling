@@ -1,0 +1,4 @@
+{
+ "_comment": "Strict serde_json parses that may stay in a file that names a file Claude Code rewrites in place, by path and line text, each with the reason; LINT-CLAUDE-FILE-PARSE. Prefer moving the code to a file that names none. Changing it is a protected change.",
+ "entries": []
+}

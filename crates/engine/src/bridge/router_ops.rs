@@ -1,0 +1,610 @@
+use super::backend::AuditEntry;
+use super::connection::Connection;
+use super::fit;
+use super::model::{
+    Control, PendingPrompt, PhoneOptions, PromptKind, PromptQuestion, PromptResponse, Session,
+    ALREADY_CONTROLLABLE,
+};
+use super::relay::HeldAct;
+use super::router::{validated_path, Router, MAX_TEXT_CHARACTERS, MODELS};
+use super::router_relay::{mark_relayed, Audited, Gate};
+use super::uploads::{ImageStore, UploadError, CHUNK_BYTES, MAX_BYTES};
+use super::wire::{self, BridgeFailure};
+use base64::Engine;
+use serde_json::{json, Map, Value};
+use std::sync::Arc;
+
+type Body = Map<String, Value>;
+
+fn string<'a>(body: &'a Body, key: &str) -> Option<&'a str> {
+    body.get(key).and_then(Value::as_str)
+}
+
+fn int(body: &Body, key: &str) -> Option<i64> {
+    body.get(key).and_then(Value::as_i64)
+}
+
+pub(super) fn require<'a>(body: &'a Body, key: &str) -> Result<&'a str, BridgeFailure> {
+    string(body, key)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| BridgeFailure::invalid(format!("Missing \"{key}\".")))
+}
+
+fn view_only() -> BridgeFailure {
+    BridgeFailure::view_only("This session is open outside Notchling: view only.")
+}
+
+fn remote_photo() -> BridgeFailure {
+    BridgeFailure::invalid("Photos to a session on another computer come later.")
+}
+
+fn busy_sending() -> BridgeFailure {
+    BridgeFailure::busy("An earlier message is still being sent to this session.")
+}
+
+pub fn local_url(text: &str) -> Option<&str> {
+    let rest = text
+        .strip_prefix("http://")
+        .or_else(|| text.strip_prefix("https://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host_port = authority.rsplit('@').next().unwrap_or_default();
+    let (host, port) = match host_port.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (host_port, None),
+    };
+    let port_ok = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    (port_ok && (host == "localhost" || host == "127.0.0.1")).then_some(text)
+}
+
+impl Router {
+    fn session(&self, id: &str) -> Result<Session, BridgeFailure> {
+        self.backend
+            .sessions()
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| BridgeFailure::not_found("No such session."))
+    }
+
+    fn exclusive<T>(
+        &self,
+        connection: &Connection,
+        session_id: &str,
+        busy: BridgeFailure,
+        send: impl FnOnce() -> Result<T, BridgeFailure>,
+    ) -> Result<T, BridgeFailure> {
+        if !connection.begin_send(session_id) {
+            return Err(busy);
+        }
+        let result = send();
+        connection.end_send(session_id);
+        result
+    }
+
+    pub(crate) fn chat_get(&self, body: &Body) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        self.session(session_id)?;
+        let limit = int(body, "limit").unwrap_or(50).clamp(1, 200) as usize;
+        let page = self.backend.chat_page(
+            session_id,
+            string(body, "subagentId"),
+            string(body, "before"),
+            string(body, "after"),
+            limit,
+        )?;
+        let (messages, trimmed) = fit::newest(page.messages);
+        let mut answer =
+            json!({"messages": wire::object(&messages), "hasMore": page.has_more || trimmed});
+        if page.reset {
+            answer["reset"] = Value::Bool(true);
+        }
+        Ok(answer)
+    }
+
+    pub(crate) fn chat_image(
+        &self,
+        body: &Body,
+        id: Option<&Value>,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        let image_id = require(body, "imageId")?;
+        let well_formed = image_id.chars().count() <= 80
+            && image_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        if !well_formed {
+            return Err(BridgeFailure::invalid("imageId is not valid."));
+        }
+        self.session(session_id)?;
+        let width = int(body, "maxWidth").unwrap_or(800).clamp(64, 1600);
+        let jpeg = self.backend.chat_image(session_id, image_id, width)?;
+        let announce =
+            json!({"binary": true, "bytes": jpeg.len(), "format": "jpeg", "imageId": image_id});
+        connection.send_text(wire::ok(id, announce));
+        connection.send_binary(wire::frame::image(wire::request_number(id), &jpeg));
+        Ok(json!({"sent": true}))
+    }
+
+    pub(crate) fn viz_get(&self, body: &Body) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        self.session(session_id)?;
+        let include_entity = body.get("entity").and_then(Value::as_bool) == Some(true);
+        let viz = self.backend.viz(session_id, include_entity)?;
+        let mut data = json!({"suggested": viz.suggested_tab});
+        if let Some(url) = viz.web_url {
+            data["webURL"] = Value::from(url);
+        }
+        if !viz.web_candidates.is_empty() {
+            data["webCandidates"] = Value::from(viz.web_candidates);
+        }
+        for (key, spec) in &viz.specs {
+            data[key.as_str()] = wire::object(spec);
+        }
+        Ok(data)
+    }
+
+    pub(crate) fn web_snapshot(
+        &self,
+        body: &Body,
+        id: Option<&Value>,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        self.session(session_id)?;
+        let width = int(body, "width").unwrap_or(400).clamp(100, 1200);
+        let url = match body.get("url").and_then(Value::as_str) {
+            Some(text) => local_url(text)
+                .ok_or_else(|| {
+                    BridgeFailure::invalid(
+                        "Only http(s) URLs on localhost or 127.0.0.1 can be captured.",
+                    )
+                })?
+                .to_string(),
+            None => self
+                .backend
+                .viz(session_id, false)?
+                .web_url
+                .filter(|u| local_url(u).is_some())
+                .ok_or_else(|| BridgeFailure::not_found("This session has no web URL yet."))?,
+        };
+        let jpeg = self.backend.web_snapshot(&url, width)?;
+        let announce = json!({"binary": true, "bytes": jpeg.len(), "format": "jpeg", "url": url});
+        connection.send_text(wire::ok(id, announce));
+        connection.send_binary(wire::frame::snapshot(wire::request_number(id), &jpeg));
+        Ok(json!({"sent": true}))
+    }
+
+    pub(crate) fn session_message(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        let text = require(body, "text")?;
+        let length = text.chars().count();
+        if length > MAX_TEXT_CHARACTERS {
+            return Err(BridgeFailure::invalid("The message is too long."));
+        }
+        let target = self.session(session_id)?;
+        if target.control == Control::ViewOnly {
+            return Err(view_only());
+        }
+        let act = HeldAct::Message {
+            session_id: session_id.to_string(),
+            text: text.to_string(),
+        };
+        let audited = Audited {
+            op: "message",
+            session: Some(session_id),
+            length: Some(length),
+        };
+        let relayed = match self.gate(connection, body, &act, Some(&target), audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
+        self.exclusive(connection, session_id, busy_sending(), || {
+            self.backend.send_message(text, &target)
+        })?;
+        self.audit(connection, "message", Some(session_id), Some(length));
+        Ok(mark_relayed(json!({"sent": true}), relayed))
+    }
+
+    pub(crate) fn session_send_now(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        let target = self.session(session_id)?;
+        if target.control != Control::ConsolePty {
+            return Err(BridgeFailure::view_only(
+                "Only sessions whose terminal Notchling holds can be interrupted.",
+            ));
+        }
+        let act = HeldAct::SendNow {
+            session_id: session_id.to_string(),
+        };
+        let audited = Audited {
+            op: "sendNow",
+            session: Some(session_id),
+            length: Some(0),
+        };
+        let relayed = match self.gate(connection, body, &act, Some(&target), audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
+        let busy = BridgeFailure::busy("An earlier command is still being sent to this session.");
+        self.exclusive(connection, session_id, busy, || {
+            if !self.allow_send_now(session_id) {
+                return Err(BridgeFailure::busy("Just interrupted, wait a moment."));
+            }
+            self.backend.send_now(&target)
+        })?;
+        self.audit(connection, "sendNow", Some(session_id), Some(0));
+        Ok(mark_relayed(json!({"sent": true}), relayed))
+    }
+
+    pub(crate) fn image_begin(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        if !self.backend.acting_on() {
+            return Err(BridgeFailure::invalid(super::live::ACTING_OFF));
+        }
+        let session_id = require(body, "sessionId")?;
+        let bytes = int(body, "bytes")
+            .filter(|b| *b > 0 && *b as usize <= MAX_BYTES)
+            .ok_or_else(|| {
+                BridgeFailure::invalid(format!(
+                    "The image must be under {} MB.",
+                    MAX_BYTES / 1_048_576
+                ))
+            })?;
+        let caption = string(body, "caption").unwrap_or_default();
+        if caption.chars().count() > MAX_TEXT_CHARACTERS {
+            return Err(BridgeFailure::invalid("The caption is too long."));
+        }
+        let target = self.session(session_id)?;
+        if target.control == Control::ViewOnly {
+            return Err(view_only());
+        }
+        if target.node.is_some() {
+            return Err(remote_photo());
+        }
+        let upload_id = self.uploads.begin(
+            connection.id,
+            session_id,
+            bytes as usize,
+            caption,
+            self.now_ms(),
+        );
+        Ok(json!({"uploadId": upload_id, "chunkBytes": CHUNK_BYTES}))
+    }
+
+    pub(crate) fn image_chunk(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let upload_id = require(body, "uploadId")?;
+        let missing = || BridgeFailure::invalid("Missing \"seq\" or \"data\" (base64).");
+        let sequence = int(body, "seq").ok_or_else(missing)?;
+        let chunk = string(body, "data")
+            .and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
+            .ok_or_else(missing)?;
+        self.uploads
+            .append(upload_id, connection.id, sequence, &chunk, self.now_ms())
+            .map_err(upload_failure)?;
+        Ok(json!({"received": sequence}))
+    }
+
+    pub(crate) fn image_end(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let upload_id = require(body, "uploadId")?;
+        let upload = self
+            .uploads
+            .finish(upload_id, connection.id, self.now_ms())
+            .map_err(upload_failure)?;
+        let ext = ImageStore::detect(&upload.data).ok_or_else(|| {
+            BridgeFailure::invalid("Only JPEG, PNG, GIF or WebP images are accepted.")
+        })?;
+        let target = self.session(&upload.session_id)?;
+        if target.control == Control::ViewOnly {
+            return Err(view_only());
+        }
+        if target.node.is_some() {
+            return Err(remote_photo());
+        }
+        self.exclusive(connection, &upload.session_id, busy_sending(), || {
+            let file = self
+                .images
+                .save(&upload.data, ext, self.now_ms())
+                .map_err(|_| BridgeFailure::internal("The Mac can't save the image."))?;
+            let message = ImageStore::message(&upload.caption, &file.to_string_lossy());
+            let sent = self.backend.send_message(&message, &target);
+            if sent.is_err() {
+                let _ = std::fs::remove_file(&file);
+            }
+            sent
+        })?;
+        self.audit(
+            connection,
+            "image",
+            Some(&upload.session_id),
+            Some(upload.data.len()),
+        );
+        Ok(json!({"sent": true}))
+    }
+
+    pub(crate) fn commands_list(&self, body: &Body) -> Result<Value, BridgeFailure> {
+        let session_id = require(body, "sessionId")?;
+        self.session(session_id)?;
+        Ok(json!({"commands": wire::object(&self.backend.commands(session_id))}))
+    }
+
+    pub(crate) fn prompt_answer(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let request_id = require(body, "requestId")?;
+        let prompt: PendingPrompt = self.backend.pending_prompt(request_id).ok_or_else(|| {
+            BridgeFailure::not_found("This question or permission is no longer open.")
+        })?;
+        let response = match &prompt.kind {
+            PromptKind::Permission => match body.get("allow").and_then(Value::as_bool) {
+                Some(true) => PromptResponse::Allow,
+                Some(false) => PromptResponse::Deny,
+                None => {
+                    return Err(BridgeFailure::invalid(
+                        "A permission needs \"allow\": true or false.",
+                    ))
+                }
+            },
+            PromptKind::Question(questions) => {
+                if questions.iter().any(|q| q.multi_select) {
+                    return Err(BridgeFailure::invalid(
+                        "A multiple-choice question: answer it in the terminal.",
+                    ));
+                }
+                PromptResponse::Answers(answers(body, questions)?)
+            }
+        };
+        let act = HeldAct::Answer {
+            request_id: request_id.to_string(),
+            session_id: prompt.session_id.clone(),
+            allow: match &response {
+                PromptResponse::Allow => Some(true),
+                PromptResponse::Deny => Some(false),
+                PromptResponse::Answers(_) => None,
+            },
+            answers: match &response {
+                PromptResponse::Answers(list) => Some(list.clone()),
+                _ => None,
+            },
+        };
+        let session = self.session(&prompt.session_id).ok();
+        let audited = Audited {
+            op: "answer",
+            session: Some(&prompt.session_id),
+            length: None,
+        };
+        let relayed = match self.gate(connection, body, &act, session.as_ref(), audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
+        self.backend.respond(&prompt, &response)?;
+        self.audit(connection, "answer", Some(&prompt.session_id), None);
+        Ok(mark_relayed(json!({"answered": true}), relayed))
+    }
+
+    pub(crate) fn session_new(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let cwd = require(body, "cwd")?;
+        let model_id = match body.get("modelId") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(id)) if self.backend.model_allowed(id) => Some(id.as_str()),
+            Some(_) => return Err(BridgeFailure::invalid("The model is not valid.")),
+        };
+        let model = string(body, "model");
+        if model_id.is_none() && model.is_some_and(|m| !MODELS.contains(&m)) {
+            return Err(BridgeFailure::invalid("The model is not valid."));
+        }
+        let folder = validated_path(cwd, &self.home)?;
+        let act = HeldAct::NewSession {
+            cwd: folder.to_string_lossy().into_owned(),
+            model: model.filter(|m| *m != "default").map(str::to_string),
+            model_id: model_id.map(str::to_string),
+        };
+        let audited = Audited {
+            op: "newSession",
+            session: None,
+            length: None,
+        };
+        let relayed = match self.gate(connection, body, &act, None, audited)? {
+            Gate::Answer(data) => return Ok(data),
+            Gate::Go { relayed } => relayed,
+        };
+        if !folder.is_dir() {
+            return Err(BridgeFailure::not_found("The folder doesn't exist."));
+        }
+        match model_id {
+            Some(id) => self.backend.new_session_with_model(&folder, id)?,
+            None => self
+                .backend
+                .new_session(&folder, model.filter(|m| *m != "default"))?,
+        }
+        self.audit(connection, "newSession", None, None);
+        Ok(mark_relayed(json!({"started": true}), relayed))
+    }
+
+    pub(crate) fn session_takeover(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let id = require(body, "sessionId")?;
+        let stop_original = match body.get("stopOriginal") {
+            None => false,
+            Some(raw) => raw
+                .as_bool()
+                .ok_or_else(|| BridgeFailure::invalid("\"stopOriginal\" must be true or false."))?,
+        };
+        let target = self.session(id)?;
+        if target.control != Control::ViewOnly {
+            return Err(BridgeFailure::invalid(ALREADY_CONTROLLABLE));
+        }
+        let outcome = self.backend.take_over(&target, stop_original)?;
+        self.audit_entry(AuditEntry {
+            device: connection.device_name(),
+            device_id: connection.device_id(),
+            op: "takeover".into(),
+            session: Some(id.to_string()),
+            address: connection.audit_address(),
+            stopped_pid: outcome.stopped_pid,
+            ..AuditEntry::default()
+        });
+        let mut answer = json!({"sessionId": outcome.session_id, "resumed": true});
+        if let Some(pid) = outcome.stopped_pid {
+            answer["stoppedPid"] = Value::from(pid);
+        }
+        Ok(answer)
+    }
+
+    pub(crate) fn subscribe(
+        &self,
+        body: &Body,
+        connection: &Arc<Connection>,
+    ) -> Result<Value, BridgeFailure> {
+        let phone = body
+            .get("phone")
+            .and_then(Value::as_object)
+            .map(|p| PhoneOptions {
+                device_window_id: int(p, "deviceWindowId").map(|n| n as u32),
+                fps: int(p, "fps").unwrap_or(10).clamp(1, 15),
+                width: int(p, "width").unwrap_or(400).clamp(100, 600),
+            });
+        let session_id = string(body, "sessionId");
+        if let Some(id) = session_id {
+            self.session(id)?;
+        }
+        let sessions = self.backend.sessions();
+        if body.get("sessions").and_then(Value::as_bool) == Some(true) {
+            {
+                let mut sub = connection.subscription();
+                sub.wants_sessions = true;
+                sub.known_prompt_ids = sessions
+                    .iter()
+                    .filter_map(|s| s.pending.as_ref().map(|p| p.id.clone()))
+                    .collect();
+                sub.last_sessions_json = Some(super::hub::sessions_json(&sessions));
+            }
+            connection.send_text(super::hub::sessions_event(&sessions));
+        }
+        if let Some(id) = session_id {
+            let subagent = string(body, "subagentId");
+            let current = self.backend.chat_messages(id, subagent).unwrap_or_default();
+            let known_up_to = string(body, "lastMessageId")
+                .and_then(|last| current.iter().position(|m| m.id == last))
+                .map_or(current.len(), |i| i + 1);
+            let mut sub = connection.subscription();
+            sub.chat_session_id = Some(id.to_string());
+            sub.chat_subagent_id = subagent.map(String::from);
+            sub.known_chat_ids = current[..known_up_to]
+                .iter()
+                .map(|m| m.id.clone())
+                .collect();
+        }
+        if body.get("inbox").and_then(Value::as_bool) == Some(true) {
+            let mut sub = connection.subscription();
+            if !sub.wants_inbox {
+                sub.known_inbox.clear();
+            }
+            sub.wants_inbox = true;
+        }
+        self.subscribe_held(connection, body);
+        if let Some(options) = phone {
+            self.backend.start_phone(connection, &options)?;
+            connection.subscription().phone_active = true;
+        }
+        Ok(json!({"subscribed": true}))
+    }
+
+    pub(crate) fn unsubscribe(&self, connection: &Arc<Connection>) {
+        let streaming = {
+            let mut sub = connection.subscription();
+            sub.wants_sessions = false;
+            sub.wants_inbox = false;
+            sub.wants_held = false;
+            sub.last_held_json = None;
+            sub.known_inbox.clear();
+            sub.chat_session_id = None;
+            sub.chat_subagent_id = None;
+            std::mem::take(&mut sub.phone_active)
+        };
+        if streaming {
+            self.backend.stop_phone(connection);
+        }
+    }
+}
+
+fn upload_failure(error: UploadError) -> BridgeFailure {
+    match error {
+        UploadError::OutOfOrder => BridgeFailure::invalid("Image chunks are out of order."),
+        UploadError::TooBig => BridgeFailure::invalid("The image chunk is too large."),
+        UploadError::Incomplete => BridgeFailure::invalid("The image is incomplete."),
+        UploadError::Unknown => BridgeFailure::not_found("No such image upload (expired?)."),
+    }
+}
+
+pub fn answers(body: &Body, questions: &[PromptQuestion]) -> Result<Vec<String>, BridgeFailure> {
+    if let Some(text) = string(body, "text") {
+        if questions.len() != 1 || text.is_empty() || text.chars().count() > 500 {
+            return Err(BridgeFailure::invalid(
+                "\"text\" works for a single question only, up to 500 characters.",
+            ));
+        }
+        return Ok(vec![text.to_string()]);
+    }
+    let raw: Vec<&Value> = match body.get("choice") {
+        Some(Value::Array(list)) => list.iter().collect(),
+        Some(single) => vec![single],
+        None => {
+            return Err(BridgeFailure::invalid(
+                "\"choice\" or \"text\" is required.",
+            ))
+        }
+    };
+    if raw.len() != questions.len() {
+        return Err(BridgeFailure::invalid(format!(
+            "{} answers are required.",
+            questions.len()
+        )));
+    }
+    raw.iter()
+        .zip(questions)
+        .map(|(value, question)| {
+            if let Some(number) = value.as_i64() {
+                return usize::try_from(number)
+                    .ok()
+                    .filter(|n| (1..=question.options.len()).contains(n))
+                    .map(|n| question.options[n - 1].clone())
+                    .ok_or_else(|| {
+                        BridgeFailure::invalid(format!("There is no choice {number}."))
+                    });
+            }
+            value
+                .as_str()
+                .filter(|label| question.options.iter().any(|o| o == label))
+                .map(String::from)
+                .ok_or_else(|| BridgeFailure::invalid("The choice matches no answer."))
+        })
+        .collect()
+}

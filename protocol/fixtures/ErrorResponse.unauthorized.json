@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "unauthorized",
+    "message": "The token is wrong or was revoked."
+  },
+  "id": 1,
+  "ok": false
+}

@@ -1,0 +1,20 @@
+{
+  "text": ["a", "b", "c"],
+  "text_or": false,
+  "granite": [
+    {"key": "b", "chunk": 1},
+    {"key": "d", "chunk": 2},
+    {"key": "a", "chunk": 3}
+  ],
+  "statics": [
+    {"key": "e", "chunk": 4},
+    {"key": "d", "chunk": 5}
+  ],
+  "expect": [
+    {"key": "b", "score": 0.0325224, "match": "both"},
+    {"key": "a", "score": 0.0322664, "match": "both"},
+    {"key": "d", "score": 0.0322580, "match": "semantic"},
+    {"key": "e", "score": 0.0163934, "match": "semantic"},
+    {"key": "c", "score": 0.0158730, "match": "text"}
+  ]
+}

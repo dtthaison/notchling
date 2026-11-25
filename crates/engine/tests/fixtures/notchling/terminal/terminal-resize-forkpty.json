@@ -1,0 +1,125 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "terminal-resize-forkpty",
+  "byteCount" : 20578,
+  "claudeCode" : "",
+  "cols" : 70,
+  "menuOpened" : true,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 1
+    },
+    {
+      "name" : "typed",
+      "offset" : 7489,
+      "tMs" : 640
+    },
+    {
+      "name" : "resize 24x70",
+      "offset" : 16488,
+      "tMs" : 2343
+    },
+    {
+      "name" : "esc",
+      "offset" : 18438,
+      "tMs" : 2723
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:22:09Z",
+  "redrawnFor70Columns" : true,
+  "rows" : 24,
+  "screenAtEnd" : [
+    "  Moon slowly outward, a process that has been unfolding for billions",
+    "  of years. Every rising and falling sea, from a quiet beach to a",
+    "  funnel-shaped bay, is a small expression of that vast interaction.",
+    "  Understanding tides therefore connects the mechanics of the solar",
+    "  system to the everyday experience of the shore, and it reminds us",
+    "  that the ocean is always responding to forces far beyond our sight.",
+    "",
+    "✻ Worked for 10s · done 8:21 AM",
+    "",
+    "❯ queued to take back",
+    "",
+    "⏺ I'm not sure what \"queued to take back\" means. Did you want me to",
+    "  stop, undo the essay, or do something else with it? The essay is",
+    "  above, unchanged.",
+    "",
+    "✻ Churned for 2s · done 8:21 AM",
+    "",
+    "❯ \/plugin",
+    "                                                  ◐ medium · \/effort",
+    "───────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "──────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 57.7k tokens > main | T…",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents"
+  ],
+  "steps" : [
+    {
+      "hex" : "2f",
+      "label" : "type \/",
+      "offset" : 7489,
+      "tMs" : 640
+    },
+    {
+      "hex" : "70",
+      "label" : "type p",
+      "offset" : 7946,
+      "tMs" : 705
+    },
+    {
+      "hex" : "6c",
+      "label" : "type l",
+      "offset" : 8746,
+      "tMs" : 771
+    },
+    {
+      "hex" : "75",
+      "label" : "type u",
+      "offset" : 9234,
+      "tMs" : 830
+    },
+    {
+      "hex" : "67",
+      "label" : "type g",
+      "offset" : 9788,
+      "tMs" : 903
+    },
+    {
+      "hex" : "69",
+      "label" : "type i",
+      "offset" : 9904,
+      "tMs" : 958
+    },
+    {
+      "hex" : "6e",
+      "label" : "type n",
+      "offset" : 10020,
+      "tMs" : 1012
+    },
+    {
+      "hex" : "0d",
+      "label" : "enter",
+      "offset" : 10169,
+      "tMs" : 1475
+    },
+    {
+      "hex" : "",
+      "label" : "resize 24x70",
+      "offset" : 16488,
+      "tMs" : 2346
+    },
+    {
+      "hex" : "1b",
+      "label" : "Esc",
+      "offset" : 18438,
+      "tMs" : 2723
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "source": "en",
+  "ship": ["en", "pt", "pt-BR"],
+  "draft": ["de"],
+  "outputs": ["rust", "arb"]
+}

@@ -1,0 +1,13 @@
+cursor 6 2 true
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Opus 5.5 with medium effort · Claude Ultra
+ ▝▝   ▝▝   ~/work/demo
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "create a util logging.py that…"
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  demo > Opus 5.5 | 0 tokens > main
+  ⏵⏵ auto mode on (shift+tab to cycle)
+                                                                                ◐ medium · /effort

@@ -1,0 +1,77 @@
+{
+  "machines": [
+    {
+      "abilities": {
+        "arch": "arm64",
+        "docker": "none",
+        "freeDiskGB": 120,
+        "osVersion": "26.1",
+        "simulators": [
+          "iPhone 17"
+        ],
+        "xcode": "26.1"
+      },
+      "admin": "sudo",
+      "claudeSecret": "claude-worker",
+      "fileVault": true,
+      "host": "m1.tail1234.ts.net",
+      "jobs": [
+        {
+          "kind": "sd-worker",
+          "sdWorker": {
+            "issuesSecret": "m1-github-issues",
+            "kinds": [
+              "ios"
+            ],
+            "python": "/opt/homebrew/bin/python3",
+            "repos": [
+              {
+                "checkCommand": "just check-affected",
+                "github": "me/app",
+                "localPath": "/Users/me/code/app",
+                "verifySkill": ".claude/skills/verify-app/SKILL.md"
+              }
+            ],
+            "sdPath": "/Users/worker/.claude/plugins/marketplaces/system-design/plugins/sd/sd.py",
+            "tokenExpires": "2026-12-01"
+          }
+        }
+      ],
+      "name": "m1",
+      "os": "macos",
+      "user": "worker"
+    },
+    {
+      "admin": "root-ssh",
+      "claudeSecret": "claude-worker",
+      "fileVault": false,
+      "host": "vps-sing-1",
+      "jobs": [
+        {
+          "kind": "sd-worker",
+          "sdWorker": {
+            "healthURL": "https://example.com/health",
+            "issuesSecret": "vps-sing-1-github-issues",
+            "kinds": [
+              "backend"
+            ],
+            "python": "/usr/bin/python3",
+            "repos": [
+              {
+                "checkCommand": "make check",
+                "github": "me/backend",
+                "localPath": "/Users/me/code/backend",
+                "machinePath": "~/src/backend"
+              }
+            ],
+            "sdPath": "/home/agent/sd/sd.py"
+          }
+        }
+      ],
+      "name": "vps-sing-1",
+      "os": "linux",
+      "user": "agent"
+    }
+  ],
+  "version": 2
+}

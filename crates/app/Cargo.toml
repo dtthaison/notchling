@@ -1,0 +1,49 @@
+[package]
+name = "notchling-app"
+description = "Notchling app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The menu bar app, and the Machines window as a binary of its own (part E10): a GPUI window over
+# the engine's `machines` module, apart from the daemon. `main.rs` stays the auto-discovered
+# `notchling-app`.
+[[bin]]
+name = "notchling-machines"
+path = "src/bin/machines.rs"
+
+[dependencies]
+notchling-engine = { path = "../engine" }
+notchling-kit = { path = "../kit" }
+notchling-locale = { path = "../locale" }
+notchling-local-api = { path = "../local-api" }
+notchling-platform = { path = "../platform" }
+qrcode = { version = "=0.14.1", default-features = false }
+serde_json = "1"
+
+# GPUI and AppKit are macOS only for now (LINT-GPUI-MACOS-ONLY); elsewhere `main` says so and exits 0.
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+objc2 = "=0.6.5"
+# The block a window-close notification calls (a page window telling its owner it was closed); the
+# version objc2-foundation already locks, so no second copy.
+block2 = "=0.6.2"
+objc2-foundation = "=0.3.2"
+objc2-app-kit = "=0.3.2"
+objc2-core-graphics = { version = "=0.3.2", features = ["CGWindow", "CGImage", "CGGeometry"] }
+raw-window-handle = "=0.6.2"
+# Pages open in a web view in their own window (part U4, decision 0005): the Phase 1 spike's pin.
+# Without its default features: those are its Linux stack (gtk, webkit2gtk), which `cargo deny`
+# would still walk from here (it filters each edge by target on its own) and which brings the
+# unmaintained proc-macro-error. The WebKit backend on macOS needs no feature.
+wry = { version = "=0.57.1", default-features = false }
+# The simulator panel saves an annotated screenshot as a PNG, and the render tests read one back:
+# the version GPUI's `image` already locks, so no second copy.
+png = "=0.17.16"
+
+
+# The phone panel's readers are tested on the engine bridge's real replies, over a test certificate.
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+p12 = "0.6.3"

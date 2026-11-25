@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "No such session."
+  },
+  "id": 4,
+  "ok": false
+}

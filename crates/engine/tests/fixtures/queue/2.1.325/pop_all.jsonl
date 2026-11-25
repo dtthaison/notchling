@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"Check the repo"},"uuid":"u1","timestamp":"2026-11-15T10:00:01.100Z","sessionId":"s-1","cwd":"/work/demo"}
+{"type":"assistant","message":{"id":"m2","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Looking."}]},"uuid":"a2","timestamp":"2026-11-15T10:00:02.200Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","sessionId":"s-1","content":"keep going with the tidy"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:11.000Z","sessionId":"s-1","content":"and then the tests"}
+{"type":"queue-operation","operation":"popAll","timestamp":"2026-11-15T10:00:12.000Z","sessionId":"s-1"}

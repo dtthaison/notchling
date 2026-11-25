@@ -1,0 +1,693 @@
+use serde_json::{json, Value};
+
+use super::agents::Page;
+use super::client_model::{client_part, client_part_with, ClientPart, Extras};
+use super::hook_rows::HooksShown;
+use super::models_rows::ModelsShown;
+use super::skills_rows::SkillsShown;
+use crate::acting::Acting;
+use crate::notch::source::{fixture_clock, DataRoot, Source};
+use crate::views::ViewSpec;
+use crate::welcome::facts::HookFacts;
+use notchling_engine::versions::Tool;
+
+use super::banner::{Banner, Banners};
+use super::new_session::{accounts, folders, NewSession};
+use super::run_on::{Code, Remote, RunOn};
+use crate::accounts::menu::targets;
+use crate::accounts::renders::{snapshot, Shown as AccountsShown};
+use crate::cluster::model::ClusterModel;
+
+pub const VIEWS: [ViewSpec; 26] = [
+    ViewSpec {
+        name: "banner",
+        size: (620.0, 260.0),
+        about: "banners: limit switches, an error and a notice (fixture data)",
+    },
+    ViewSpec {
+        name: "new-session",
+        size: (680.0, 460.0),
+        about: "the New Session sheet, acting off: Start disabled (fixture data)",
+    },
+    ViewSpec {
+        name: "new-session-worker",
+        size: (680.0, 460.0),
+        about: "the New Session sheet with a Worker picked in Run On: a shell job to run there, a version warning under the node and a node that can't be picked (fixture data)",
+    },
+    ViewSpec {
+        name: "trust-folder",
+        size: (680.0, 460.0),
+        about: "the Trust Folder pop-up over New Session, acting on (fixture data)",
+    },
+    ViewSpec {
+        name: "settings",
+        size: (620.0, 1980.0),
+        about: "the Settings sheet's General page with acting shown read-only (defaults), the Search section and the Chat section",
+    },
+    ViewSpec {
+        name: "settings-semantic-off",
+        size: (620.0, 1980.0),
+        about: "the Settings sheet with Semantic Search off: the switch and its line, nothing else (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-semantic-models",
+        size: (620.0, 1980.0),
+        about: "the Settings sheet with Semantic Search on: Standard to download and Accent Helper on this Mac, with Pause (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-semantic-downloading",
+        size: (620.0, 1980.0),
+        about: "the Settings sheet with Semantic Search on: Standard downloading with its progress bar and Cancel, Accent Helper failed with Download to try again (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-semantic-indexing",
+        size: (620.0, 1980.0),
+        about: "the Settings sheet with Semantic Search on and both models on this Mac: Indexing 1,240 of 15,000 passages and Pause (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-cluster",
+        size: (620.0, 1800.0),
+        about: "the Settings sheet's General page on a Mac in a cluster: the Automatic Failover row saying it is not available yet, though the status says 30m (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-agents",
+        size: (620.0, 760.0),
+        about: "the Settings sheet's Agents page: Claude Code's Hooks with all six installed (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-agents-partial",
+        size: (620.0, 760.0),
+        about: "the Agents page's Hooks with a Swift app entry, an unmanaged one and some missing (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-agents-empty",
+        size: (620.0, 760.0),
+        about: "the Agents page's Hooks with none installed (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-agents-detached",
+        size: (620.0, 760.0),
+        about: "the Agents page's Hooks with no daemon attached: the six explained, none checked",
+    },
+    ViewSpec {
+        name: "settings-agents-codex",
+        size: (620.0, 1100.0),
+        about: "the Agents page's Codex tab: its network row and What Notchling Can Do for Codex (fixture data)",
+    },
+    ViewSpec {
+        name: "settings-agents-antigravity",
+        size: (620.0, 1500.0),
+        about: "the Agents page's Antigravity tab with the app (full) choice: Send With, Open Remote Control In, the sidecar row (On) and What Notchling Can Do for Antigravity (fixture data)",
+    },
+    ViewSpec {
+        name: "settings-agents-client",
+        size: (620.0, 900.0),
+        about: "the Agents page's Client part: the Mac's Claude Code and two workers, one the same and one behind (fixture reply)",
+    },
+    ViewSpec {
+        name: "settings-agents-client-failed",
+        size: (620.0, 900.0),
+        about: "the Client part after a new version failed its check: the red line, the soak and Go Back",
+    },
+    ViewSpec {
+        name: "settings-skills",
+        size: (620.0, 1640.0),
+        about: "the Settings sheet's Skills & Models page: How It Works, each tool's skills (installed, out of date, not installed, tool missing), Models by Job (built-in, override and live-list choices) and the Override file (fixture replies)",
+    },
+    ViewSpec {
+        name: "chrome-on",
+        size: (560.0, 420.0),
+        about: "the Chrome sheet for a session with Chrome on: the status, the help lines and Turn Off (made-up data)",
+    },
+    ViewSpec {
+        name: "chrome-off",
+        size: (560.0, 420.0),
+        about: "the Chrome sheet for a session with Chrome off: the status, the help lines and Turn On (made-up data)",
+    },
+    ViewSpec {
+        name: "chrome-not-connected",
+        size: (560.0, 440.0),
+        about: "the Chrome sheet when the extension isn't connected: the fix, the help lines and Try Again (made-up data)",
+    },
+    ViewSpec {
+        name: "reload-card",
+        size: (560.0, 176.0),
+        about: "the Reload Session card: what it does, the conversation's tokens and the catalog price on its model, Reload and Cancel (made-up data)",
+    },
+    ViewSpec {
+        name: "reload-waiting",
+        size: (560.0, 252.0),
+        about: "the Reload Session card while three helpers run: the question, the note and Cancel Reload (made-up data)",
+    },
+    ViewSpec {
+        name: "reload-terminal",
+        size: (560.0, 236.0),
+        about: "the Reload Session card for a terminal session the user owns: the instructions, the command and Copy Command (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-agents-client-update",
+        size: (620.0, 900.0),
+        about: "the Client part with a newer version out: Latest, Update (Install off, so disabled with its note) and the Partly Checked line",
+    },
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shown {
+    Banner,
+    NewSession,
+    NewSessionWorker,
+    TrustFolder,
+    Settings,
+    SettingsCluster,
+    SettingsSemanticOff,
+    SettingsSemanticModels,
+    SettingsSemanticDownloading,
+    SettingsSemanticIndexing,
+    SettingsAgents,
+    SettingsAgentsPartial,
+    SettingsAgentsEmpty,
+    SettingsAgentsDetached,
+    SettingsAgentsCodex,
+    SettingsAgentsAntigravity,
+    SettingsAgentsClient,
+    SettingsAgentsClientFailed,
+    SettingsAgentsClientUpdate,
+    SettingsSkills,
+    ChromeOn,
+    ChromeOff,
+    ChromeNotConnected,
+    ReloadCard,
+    ReloadWaiting,
+    ReloadTerminal,
+}
+
+pub fn shown(name: &str) -> Option<Shown> {
+    Some(match name {
+        "banner" => Shown::Banner,
+        "new-session" => Shown::NewSession,
+        "new-session-worker" => Shown::NewSessionWorker,
+        "trust-folder" => Shown::TrustFolder,
+        "settings" => Shown::Settings,
+        "settings-cluster" => Shown::SettingsCluster,
+        "settings-semantic-off" => Shown::SettingsSemanticOff,
+        "settings-semantic-models" => Shown::SettingsSemanticModels,
+        "settings-semantic-downloading" => Shown::SettingsSemanticDownloading,
+        "settings-semantic-indexing" => Shown::SettingsSemanticIndexing,
+        "settings-agents" => Shown::SettingsAgents,
+        "settings-agents-partial" => Shown::SettingsAgentsPartial,
+        "settings-agents-empty" => Shown::SettingsAgentsEmpty,
+        "settings-agents-detached" => Shown::SettingsAgentsDetached,
+        "settings-agents-codex" => Shown::SettingsAgentsCodex,
+        "settings-agents-antigravity" => Shown::SettingsAgentsAntigravity,
+        "settings-agents-client" => Shown::SettingsAgentsClient,
+        "settings-agents-client-failed" => Shown::SettingsAgentsClientFailed,
+        "settings-agents-client-update" => Shown::SettingsAgentsClientUpdate,
+        "settings-skills" => Shown::SettingsSkills,
+        "chrome-on" => Shown::ChromeOn,
+        "chrome-off" => Shown::ChromeOff,
+        "chrome-not-connected" => Shown::ChromeNotConnected,
+        "reload-card" => Shown::ReloadCard,
+        "reload-waiting" => Shown::ReloadWaiting,
+        "reload-terminal" => Shown::ReloadTerminal,
+        _ => return None,
+    })
+}
+
+pub fn acting(shown: Shown) -> Acting {
+    match shown {
+        Shown::TrustFolder | Shown::NewSessionWorker => Acting::On,
+        Shown::Banner
+        | Shown::NewSession
+        | Shown::Settings
+        | Shown::SettingsCluster
+        | Shown::SettingsSemanticOff
+        | Shown::SettingsSemanticModels
+        | Shown::SettingsSemanticDownloading
+        | Shown::SettingsSemanticIndexing
+        | Shown::SettingsAgents
+        | Shown::SettingsAgentsPartial
+        | Shown::SettingsAgentsEmpty
+        | Shown::SettingsAgentsDetached
+        | Shown::SettingsAgentsCodex
+        | Shown::SettingsAgentsAntigravity
+        | Shown::SettingsAgentsClient
+        | Shown::SettingsAgentsClientFailed
+        | Shown::SettingsAgentsClientUpdate
+        | Shown::SettingsSkills
+        | Shown::ChromeOn
+        | Shown::ChromeOff
+        | Shown::ChromeNotConnected
+        | Shown::ReloadCard
+        | Shown::ReloadWaiting
+        | Shown::ReloadTerminal => Acting::Off,
+    }
+}
+
+pub fn chrome_sheet(shown: Shown) -> Option<crate::chat::chrome::Sheet> {
+    use notchling_engine::chrome::flow::Need;
+    let (on, need) = match shown {
+        Shown::ChromeOn => (Some(true), None),
+        Shown::ChromeOff => (Some(false), None),
+        Shown::ChromeNotConnected => (Some(false), Some(Need::NotConnected)),
+        _ => return None,
+    };
+    Some(crate::chat::chrome::Sheet {
+        session: "fix-the-bug".to_owned(),
+        on,
+        wanted_on: true,
+        need,
+    })
+}
+
+pub fn reload_card(shown: Shown) -> Option<crate::chat::session_reload::Card> {
+    use crate::chat::session_reload::{lead, Card, Stage};
+    use notchling_engine::catalog::{Catalog, Tool};
+    use notchling_engine::reload::Wait;
+    use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
+    let target = match shown {
+        Shown::ReloadTerminal => AgentTarget::Process(4242),
+        Shown::ReloadCard | Shown::ReloadWaiting => AgentTarget::Job("fix-the-bug".to_owned()),
+        _ => return None,
+    };
+    let agent = Agent {
+        id: "fix-the-bug".to_owned(),
+        name: "Fix the Bug".to_owned(),
+        project: "api".to_owned(),
+        cwd: "/srv/api".to_owned(),
+        group: AgentGroup::Completed,
+        label: "Done".to_owned(),
+        detail: None,
+        since_ms: 0,
+        target,
+        suggested_reply: None,
+        transcript_path: None,
+        host: "Background".to_owned(),
+        headless: false,
+        config_dir: None,
+        command: None,
+        resume_session_id: None,
+        at_prompt: false,
+        node: None,
+        worktree_path: None,
+    };
+    let catalog = Catalog::built_in().models(Tool::Claude, &[]);
+    let words = lead(184_000, Some("claude-opus-5-5"), &catalog);
+    let mut card = Card::open(&agent, words, 0)?;
+    if shown == Shown::ReloadWaiting {
+        card.stage = Stage::Waiting(Wait::Tasks { count: 3 });
+    }
+    Some(card)
+}
+
+pub fn page(shown: Shown) -> Page {
+    match shown {
+        Shown::SettingsAgents
+        | Shown::SettingsAgentsPartial
+        | Shown::SettingsAgentsEmpty
+        | Shown::SettingsAgentsDetached
+        | Shown::SettingsAgentsCodex
+        | Shown::SettingsAgentsAntigravity
+        | Shown::SettingsAgentsClient
+        | Shown::SettingsAgentsClientFailed
+        | Shown::SettingsAgentsClientUpdate => Page::Agents,
+        Shown::SettingsSkills => Page::Skills,
+        _ => Page::General,
+    }
+}
+
+pub fn tool(shown: Shown) -> super::agents::Tool {
+    match shown {
+        Shown::SettingsAgentsCodex => super::agents::Tool::Codex,
+        Shown::SettingsAgentsAntigravity => super::agents::Tool::Antigravity,
+        _ => super::agents::Tool::ClaudeCode,
+    }
+}
+
+pub fn semantic_status(shown: Shown) -> Option<Value> {
+    let standard = "granite-97m-r2@835ad14/p1";
+    let helper = "static-mrl@b68f412/512i8/p1";
+    let corpora =
+        json!([{"corpus": "sessions", "docs": 40, "chunks": 15000, "embedded": {"a": 1240}}]);
+    let present = |ids: &[&str]| -> Value {
+        json!(ids
+            .iter()
+            .map(|id| json!({"id": id, "present": true}))
+            .collect::<Vec<_>>())
+    };
+    Some(match shown {
+        Shown::SettingsSemanticOff => json!({"state": "off", "models": [], "fetch": []}),
+        Shown::SettingsSemanticModels => json!({
+            "state": "ready", "models": present(&[helper]), "fetch": [], "corpora": []
+        }),
+        Shown::SettingsSemanticDownloading => json!({
+            "state": "no_model", "models": [], "corpora": [],
+            "fetch": [
+                {"model": standard, "state": "downloading", "bytes": 92_000_000u64, "total": 220_192_456u64},
+                {"model": helper, "state": "failed", "bytes": 0, "total": 436_243_850u64, "error": "The connection dropped."}
+            ]
+        }),
+        Shown::SettingsSemanticIndexing => json!({
+            "state": "indexing", "models": present(&[standard, helper]), "fetch": [], "corpora": corpora
+        }),
+        _ => return None,
+    })
+}
+
+pub fn values(shown: Shown) -> serde_json::Map<String, Value> {
+    let mut values = serde_json::Map::new();
+    if semantic_status(shown).is_some() && shown != Shown::SettingsSemanticOff {
+        values.insert("semanticSearch".to_owned(), json!(true));
+    }
+    if shown == Shown::SettingsAgentsAntigravity {
+        values.insert("antigravityChannel".to_owned(), json!("sidecar"));
+    }
+    values
+}
+
+pub fn sidecar(shown: Shown) -> Option<super::sidecar_rows::Shown> {
+    (shown == Shown::SettingsAgentsAntigravity).then_some(super::sidecar_rows::Shown {
+        state: super::sidecar_rows::State::On,
+        running: true,
+    })
+}
+
+fn hook(event: &str, matcher: &str, origin: &str, managed: bool) -> Value {
+    json!({"event": event, "matcher": matcher, "origin": origin,
+        "command": "'/Applications/Notchling.app/Contents/MacOS/notchling' hook",
+        "managed": managed})
+}
+
+pub fn hooks(shown: Shown) -> HooksShown {
+    let present = match shown {
+        Shown::SettingsAgentsDetached => return HooksShown::Detached,
+        Shown::SettingsAgentsEmpty => vec![],
+        Shown::SettingsAgentsPartial => vec![
+            hook("PermissionRequest", "*", "swift", false),
+            hook("PreToolUse", "AskUserQuestion", "notchling", true),
+            hook("PostToolUse", "Artifact", "notchling", true),
+            hook("SessionStart", "*", "swift", false),
+        ],
+        _ => vec![
+            hook("PermissionRequest", "*", "notchling", true),
+            hook("PreToolUse", "AskUserQuestion", "notchling", true),
+            hook("PreToolUse", "Artifact", "notchling", true),
+            hook("PostToolUse", "Artifact", "notchling", true),
+            hook("PostToolUseFailure", "Artifact", "notchling", true),
+            hook("PreToolUse", "*", "notchling", true),
+            hook("PreToolUse", "Bash|Read|Agent", "notchling", true),
+            hook("SubagentStart", "*", "notchling", true),
+            hook("SubagentStop", "*", "notchling", true),
+        ],
+    };
+    let reply = json!({"on": false, "applied": false,
+        "plan": {"blocked": null, "skills": [],
+            "hooks": {"state": "present", "refused": null, "changes": [], "notes": [],
+                      "present": present}}});
+    HooksShown::from_plan(HookFacts::parse(&reply).ok_or_else(|| "no plan".to_owned()))
+}
+
+fn plan_skill(name: &str, tool: &str, action: &str, reason: Option<&str>) -> Value {
+    json!({"name": name, "tool": tool, "action": action, "reason": reason,
+        "tool_missing": reason.is_some_and(|r| r.contains("not installed")),
+        "path": "/Users/me/.claude/skills/x", "error": null})
+}
+
+pub fn models_refreshed(shown: Shown) -> Option<(String, bool)> {
+    if shown != Shown::SettingsSkills {
+        return None;
+    }
+    let tool = |id: &str, read: bool, added: &[&str], efforts: usize, unpriced: &[&str]| {
+        json!({"tool": id, "read": read, "added": added, "removed": [],
+            "efforts": vec![json!({"model": "gemini-4-hydrogen", "added": ["xhigh"], "removed": []}); efforts],
+            "unpriced": unpriced})
+    };
+    let report = json!({
+        "tools": [
+            tool("claude", false, &[], 0, &[]),
+            tool("codex", true, &["gpt-6.2-sol", "gpt-6.2-astra"], 0, &["gpt-6.2-sol", "gpt-6.2-astra"]),
+            tool("antigravity", true, &["gemini-4-neon"], 2, &["gemini-4-neon"]),
+        ],
+        "suggestions": ["review-final: codex gpt-6-astra: newer in family: gpt-6.2-astra"],
+    });
+    Some(super::models_refresh::summary(Ok(report)))
+}
+
+pub fn skills_models(shown: Shown) -> Option<(SkillsShown, ModelsShown)> {
+    if shown != Shown::SettingsSkills {
+        return None;
+    }
+    let plan = json!({"on": true, "applied": false, "plan": {"skills": [
+        plan_skill("notchling-delegate", "claude", "unchanged", None),
+        plan_skill("notchling-models", "claude", "write", None),
+        plan_skill("notchling-pages", "claude", "update", None),
+        plan_skill("notchling-settings", "claude", "write", None),
+        plan_skill("notchling-delegate", "codex", "unchanged", None),
+        plan_skill("notchling-settings", "codex", "unchanged", None),
+        plan_skill("notchling-delegate", "antigravity", "skip",
+            Some("the tool is not installed here")),
+    ]}});
+    let choice = |tool: &str, marked: &str, model: Option<&str>, effort: &str, source: &str| {
+        json!({"tool": tool, "marked": marked, "model": model, "effort": effort,
+            "source": source, "note": null, "advice": null, "checked": true})
+    };
+    let mut review = choice(
+        "antigravity",
+        "gemini-4-hydrogen",
+        Some("gemini-4.1-hydrogen"),
+        "high",
+        "live",
+    );
+    review["note"] =
+        json!("gemini-4-hydrogen is gone; using gemini-4.1-hydrogen (same family, newer)");
+    review["advice"] = json!(
+        "Review after each task. Cannot run commands: put the diff and task text in files under .review/."
+    );
+    let mut last = choice(
+        "codex",
+        "gpt-6-astra",
+        Some("gpt-6-astra"),
+        "xhigh",
+        "built_in",
+    );
+    last["advice"] = json!("Final review of a branch. Can run git diff itself.");
+    let mut secrets_agy = choice(
+        "antigravity",
+        "gemini-4-argon",
+        Some("gemini-4-argon"),
+        "xhigh",
+        "override",
+    );
+    secrets_agy["note"] = json!("newer in family: gemini-4.1-argon");
+    let mut unchecked = choice(
+        "antigravity",
+        "gemini-4-argon",
+        Some("gemini-4-argon"),
+        "high",
+        "built_in",
+    );
+    unchecked["checked"] = json!(false);
+    let roles = json!({"roles": [
+        {"role": "review", "choices": [review]},
+        {"role": "review-final", "choices": [last.clone()]},
+        {"role": "review-secrets", "choices": [last, secrets_agy]},
+        {"role": "spec-check", "choices": [unchecked]},
+        {"role": "triage", "choices": []},
+    ], "override": {
+        "path": "/Users/me/Library/Application Support/Notchling/catalog.json",
+        "state": "found"}});
+    Some((
+        SkillsShown::from_reply(Ok(plan)),
+        ModelsShown::from_reply(Ok(roles), "/Users/me"),
+    ))
+}
+
+pub fn client(shown: Shown) -> Option<ClientPart> {
+    match shown {
+        Shown::SettingsAgentsDetached => Some(ClientPart::not_running()),
+        Shown::SettingsAgents
+        | Shown::SettingsAgentsPartial
+        | Shown::SettingsAgentsEmpty
+        | Shown::SettingsAgentsClient
+        | Shown::SettingsAgentsClientFailed
+        | Shown::SettingsAgentsClientUpdate => {
+            let mut row = json!({"tool": "claude", "installed": {"version": "2.1.324", "sha256": null},
+                 "method": "native", "path": "/Users/me/.local/bin/claude"});
+            let mut extras = Extras::default();
+            let reference = json!({"version": "2.1.324", "sha256": "ab", "result": "partly",
+                "partly": true, "at": 1_700_000_000_000_i64,
+                "unchecked": ["screens", "dialogs", "turns"]});
+            if shown == Shown::SettingsAgentsClientUpdate {
+                row["latest"] = json!("2.1.325");
+                row["reference"] = reference.clone();
+                row["usable"] = json!(true);
+                row["soak"] = json!({"since": "2.1.324", "turns": 41, "unknown": 0,
+                    "line": "41 turns on real sessions, none unknown"});
+            }
+            if shown == Shown::SettingsAgentsClientFailed {
+                row["installed"] = json!({"version": "2.1.325", "sha256": null});
+                row["reference"] = reference;
+                row["failed"] = json!([{"version": "2.1.325", "part": "transcripts",
+                    "at": 1_700_000_300_000_i64, "why": "2 lines it can't read"}]);
+                row["goBack"] = json!("2.1.324");
+                row["soak"] = json!({"since": "2.1.325", "turns": 12, "unknown": 2,
+                    "line": "12 turns on real sessions, 2 unknown lines"});
+            }
+            let get = json!({"tools": [row]});
+            let workers = json!({"workers": {
+                "m1": {"tools": {"claude": {"state": "installed", "version": "2.1.324",
+                    "method": "native", "path": "/home/w/.local/bin/claude"}}, "atMs": 1},
+                "vps-sing-1": {"tools": {"claude": {"state": "installed", "version": "2.1.320",
+                    "method": "native", "path": "/home/w/.local/bin/claude"}}, "atMs": 1},
+                "ub-3": {"tools": {"claude": {"state": "notInstalled"}}, "atMs": 1},
+            }});
+            extras.install_on = false;
+            Some(
+                if shown == Shown::SettingsAgentsClientUpdate
+                    || shown == Shown::SettingsAgentsClientFailed
+                {
+                    client_part_with(Tool::Claude, &get, &workers, "/Users/me", extras)
+                } else {
+                    client_part(Tool::Claude, &get, &workers, "/Users/me")
+                },
+            )
+        }
+        _ => None,
+    }
+}
+
+fn run_on_status() -> Value {
+    let mut status = crate::cluster::renders::status();
+    let members = status["members"].as_array_mut().into_iter().flatten();
+    for member in members {
+        match member["name"].as_str() {
+            Some("mac-mini") => member["versions"]["tools"]["claude"] = json!("2.1.318"),
+            Some("build-box") => {
+                member["online"] = json!(true);
+                member["versions"]["tools"]["claude"] = json!("2.1.320");
+            }
+            _ => {}
+        }
+    }
+    status
+}
+
+pub fn new_session(shown: Shown) -> NewSession {
+    let mut source = Source::keeping_everything(DataRoot::for_render());
+    let agents = source.load(0).agents;
+    let saved = vec!["/work/notchling/apps/flutter".to_owned()];
+    let made_up = snapshot(AccountsShown::Claude);
+    let mut sheet = NewSession::new(
+        accounts(&targets(&made_up), &agents, &made_up.providers.providers),
+        folders(&saved, &agents),
+        "",
+    )
+    .with_run_on(RunOn::from_cluster(&ClusterModel::from_status(
+        &run_on_status(),
+        crate::cluster::renders::ME,
+    )));
+    if shown == Shown::NewSessionWorker {
+        sheet.pick_remote(Remote::Shell);
+        sheet.pick_node(crate::cluster::renders::STANDBY);
+        sheet.pick_code(Code::Folder);
+        sheet.set_path("/srv/api");
+        sheet.set_text("make test");
+    }
+    if shown == Shown::TrustFolder {
+        sheet.pick_folder(0);
+        sheet.start();
+        sheet.started(Err("Workspace not trusted".into()));
+    }
+    sheet
+}
+
+pub fn cluster_model() -> crate::cluster::model::ClusterModel {
+    use crate::cluster::renders::{status, ME, STANDBY};
+    let mut made_up = status();
+    made_up["failover"] = json!({"value": "30m", "armed": false, "target": STANDBY});
+    crate::cluster::model::ClusterModel::from_status(&made_up, ME)
+}
+
+pub fn banners() -> Banners {
+    let mut source = Source::keeping_everything(DataRoot::for_render());
+    let now = fixture_clock(&source.load(0).agents);
+    let mut b = Banners::default();
+    b.push(Banner::notice(
+        "Notchling",
+        "Notifications are off for this build, so notices show here.",
+        now,
+    ));
+    b.push(Banner::error(
+        "Couldn't stop the session: acting is off.",
+        now,
+    ));
+    b.push(Banner::lane_switched(
+        "night",
+        "ops@example.com",
+        "dev@example.com",
+        now,
+    ));
+    b.push(Banner::switched(
+        "me@example.com",
+        "team@example.com",
+        12.4,
+        now,
+    ));
+    b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sheets::new_session::Stage;
+
+    #[test]
+    fn every_view_has_its_data() {
+        for spec in VIEWS {
+            assert!(shown(spec.name).is_some(), "{}", spec.name);
+        }
+        assert_eq!(shown("chat"), None);
+        let sheet = new_session(Shown::NewSession);
+        assert!(!sheet.accounts.is_empty() && sheet.folders.len() >= 2);
+        assert_eq!(sheet.stage, Stage::Choosing);
+        let trust = new_session(Shown::TrustFolder);
+        assert_eq!(trust.stage, Stage::Untrusted);
+        assert_eq!(acting(Shown::TrustFolder), Acting::On);
+        assert_eq!(banners().all().len(), 4);
+        assert_eq!(hooks(Shown::SettingsAgents).lines().len(), 9);
+        assert_eq!(hooks(Shown::SettingsAgentsPartial).lines().len(), 10);
+        assert_eq!(hooks(Shown::SettingsAgentsEmpty).lines().len(), 9);
+        assert_eq!(hooks(Shown::SettingsAgentsDetached), HooksShown::Detached);
+        assert_eq!(page(Shown::Settings), Page::General);
+        assert_eq!(page(Shown::SettingsAgents), Page::Agents);
+        assert_eq!(page(Shown::SettingsSkills), Page::Skills);
+        assert_eq!(page(Shown::SettingsAgentsCodex), Page::Agents);
+        assert_eq!(page(Shown::SettingsAgentsAntigravity), Page::Agents);
+        assert_eq!(
+            tool(Shown::SettingsAgents),
+            super::super::agents::Tool::ClaudeCode
+        );
+        assert_eq!(
+            tool(Shown::SettingsAgentsCodex),
+            super::super::agents::Tool::Codex
+        );
+        assert_eq!(
+            tool(Shown::SettingsAgentsAntigravity),
+            super::super::agents::Tool::Antigravity
+        );
+        assert!(sidecar(Shown::SettingsAgentsAntigravity).is_some());
+        assert!(sidecar(Shown::SettingsAgentsCodex).is_none());
+        let (skills, models) = skills_models(Shown::SettingsSkills).unwrap();
+        assert_eq!(skills.names().len(), 4);
+        let (text, failed) = models_refreshed(Shown::SettingsSkills).unwrap();
+        assert!(!failed);
+        assert!(text.starts_with("Model lists updated: 3 new models, 2 models with new efforts."));
+        assert!(models_refreshed(Shown::Settings).is_none());
+        assert!(models.file().is_some());
+        assert!(skills_models(Shown::Settings).is_none());
+        assert_eq!(
+            client(Shown::SettingsAgentsClient).unwrap().workers.len(),
+            3
+        );
+        assert_eq!(client(Shown::Settings), None);
+    }
+}

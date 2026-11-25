@@ -1,0 +1,135 @@
+{
+  "data": {
+    "chart": {
+      "chart": {
+        "models": [
+          {
+            "count": 6,
+            "model": "claude-opus-5-5"
+          }
+        ],
+        "tokens": [
+          {
+            "cacheCreation": 0,
+            "cacheRead": 9000,
+            "input": 1200,
+            "output": 340,
+            "time": 1793541300000
+          }
+        ],
+        "tools": [
+          {
+            "count": 4,
+            "name": "Read"
+          },
+          {
+            "count": 2,
+            "name": "Edit"
+          }
+        ],
+        "totals": {
+          "cacheCreation": 0,
+          "cacheRead": 9000,
+          "input": 1200,
+          "output": 340
+        }
+      },
+      "kind": "chart"
+    },
+    "diagram": {
+      "diagram": {
+        "blocks": [
+          {
+            "id": "d-1",
+            "label": "Launch sequence",
+            "origin": "assistant",
+            "source": "sequenceDiagram\n  A->>B: hi",
+            "time": 1793541300000
+          }
+        ]
+      },
+      "kind": "diagram"
+    },
+    "entity": {
+      "entity": {
+        "files": [
+          {
+            "path": "db/schema.sql",
+            "tables": 2
+          }
+        ],
+        "inferredCount": 0,
+        "links": [
+          {
+            "from": "USER",
+            "inferred": false,
+            "to": "ORDER"
+          }
+        ],
+        "mermaid": "erDiagram\n  USER ||--o{ ORDER : places",
+        "relationCount": 1,
+        "tableCount": 2,
+        "tables": [
+          {
+            "columns": 3,
+            "id": "USER",
+            "name": "user"
+          },
+          {
+            "columns": 4,
+            "id": "ORDER",
+            "name": "order"
+          }
+        ],
+        "warnings": [
+          "no primary key on order_item"
+        ]
+      },
+      "kind": "entity"
+    },
+    "flow": {
+      "flow": {
+        "branch": "main",
+        "diffStat": "2 files changed, 14 insertions(+), 3 deletions(-)",
+        "files": [
+          {
+            "count": 3,
+            "name": "main.swift",
+            "path": "/Users/example/src/app/main.swift"
+          }
+        ],
+        "totalCalls": 2,
+        "turns": [
+          {
+            "calls": [
+              {
+                "edit": false,
+                "subagent": false,
+                "target": "main.swift",
+                "time": 1793541400000,
+                "tool": "Read"
+              },
+              {
+                "edit": true,
+                "subagent": false,
+                "target": "main.swift",
+                "tool": "Edit"
+              }
+            ],
+            "index": 1,
+            "prompt": "Fix the crash on launch"
+          }
+        ]
+      },
+      "kind": "flow"
+    },
+    "suggested": "entity",
+    "webCandidates": [
+      "http://localhost:3000",
+      "http://localhost:5173"
+    ],
+    "webURL": "http://localhost:3000"
+  },
+  "id": 8,
+  "ok": true
+}

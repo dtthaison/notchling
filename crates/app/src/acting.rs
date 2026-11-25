@@ -1,0 +1,693 @@
+use notchling_engine::transcript::snapshot::PendingQuestion;
+use notchling_local_api::{ops as api_ops, ClientError, ErrorCode};
+use notchling_locale as t;
+use serde_json::{json, Value};
+use std::io;
+
+pub const OFF_MESSAGE: &str =
+    "acting is off: the Swift app owns sessions until the maintainer turns this on";
+pub const DETACHED_MESSAGE: &str = "Notchling's daemon isn't attached, so nothing can be sent";
+
+pub mod ops {
+    pub const DAEMON_STATUS: &str = "daemon.status";
+    pub const SETTINGS_SET_ACTING: &str = "settings.set_acting";
+    pub const SESSION_REPLY: &str = "session.reply";
+    pub const SESSION_ANSWER: &str = "session.answer";
+    pub const SESSION_PERMISSION: &str = "session.permission";
+    pub const SESSION_INTERRUPT: &str = "session.interrupt";
+    pub const SESSION_STOP: &str = "session.stop";
+    pub const SESSION_REMOVE: &str = "session.remove";
+    pub const SESSION_TAKE_BACK: &str = "session.take_back";
+    pub const SESSION_NEW: &str = "session.new";
+    pub const FOLDER_TRUST: &str = "folder.trust";
+    pub const SESSION_MOVE: &str = "session.move";
+    pub const SESSION_COMMAND: &str = "session.command";
+    pub const SESSION_QUESTION: &str = "session.question";
+    pub const SESSION_DIALOG: &str = "session.dialog";
+    pub const SESSION_DIALOG_PICK: &str = "session.dialog_pick";
+    pub const SESSION_DIALOG_DISMISS: &str = "session.dialog_dismiss";
+    pub const SESSION_SHELL_OUTPUT: &str = "session.shell_output";
+    pub const SESSION_CHROME: &str = "session.chrome";
+    pub const SESSION_RELOAD: &str = "session.reload";
+    pub const SESSION_RELOAD_STATE: &str = "session.reload.state";
+    pub const CLUSTER_DISPATCH: &str = "cluster.dispatch";
+    pub const CLUSTER_FOLLOW: &str = "cluster.follow";
+    pub const CLUSTER_RETURN: &str = "cluster.return";
+    pub const SHELL_STOP: &str = "shell.stop";
+    pub const SESSION_SEND: &str = "session.send";
+    pub const OUTBOX_LIST: &str = "outbox.list";
+    pub const OUTBOX_EDIT: &str = "outbox.edit";
+    pub const OUTBOX_REMOVE: &str = "outbox.remove";
+    pub const OUTBOX_HOLD: &str = "outbox.hold";
+    pub const OUTBOX_RESEND: &str = "outbox.resend";
+    pub const OUTBOX_DISCARD: &str = "outbox.discard";
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AskAnswer<'a> {
+    Choice(u8),
+    Text(&'a str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Acting {
+    On,
+    Off,
+    Detached,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Control {
+    pub enabled: bool,
+    pub tooltip: Option<&'static str>,
+}
+
+impl Acting {
+    pub fn control(self) -> Control {
+        Control {
+            enabled: self == Acting::On,
+            tooltip: self.message(),
+        }
+    }
+
+    pub fn message(self) -> Option<&'static str> {
+        match self {
+            Acting::On => None,
+            Acting::Off => Some(OFF_MESSAGE),
+            Acting::Detached => Some(DETACHED_MESSAGE),
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Acting::On => "On",
+            Acting::Off => "Off",
+            Acting::Detached => "Daemon not attached",
+        }
+    }
+}
+
+pub fn effective(attached: bool, said: Acting) -> Acting {
+    if attached {
+        said
+    } else {
+        Acting::Detached
+    }
+}
+
+pub fn from_status(status: &Value) -> Acting {
+    match status.get("acting") {
+        Some(Value::Bool(true)) => Acting::On,
+        Some(Value::String(s)) if s == "on" => Acting::On,
+        _ => Acting::Off,
+    }
+}
+
+pub fn after_error(error: &ClientError) -> Option<Acting> {
+    match error {
+        ClientError::Api(e) if e.code == ErrorCode::Forbidden && is_off(&e.message) => {
+            Some(Acting::Off)
+        }
+        ClientError::Api(_) | ClientError::Protocol(_) | ClientError::Timeout => None,
+        ClientError::Io(e) if slow_kind(e.kind()) => None,
+        ClientError::NotRunning(_)
+        | ClientError::Closed
+        | ClientError::Unsupported
+        | ClientError::UntrustedServer(_)
+        | ClientError::Io(_) => Some(Acting::Detached),
+    }
+}
+
+fn slow_kind(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+    )
+}
+
+fn is_busy(error: &ClientError) -> bool {
+    match error {
+        ClientError::Timeout => true,
+        ClientError::Io(e) => slow_kind(e.kind()),
+        _ => false,
+    }
+}
+
+pub fn failure_message(error: ClientError) -> String {
+    match error {
+        ClientError::Api(api) => api.message,
+        other if is_busy(&other) => t::chat::daemon_busy().to_owned(),
+        other => other.to_string(),
+    }
+}
+
+pub fn is_off(message: &str) -> bool {
+    message.contains("acting is off")
+}
+
+pub fn is_untrusted(message: &str) -> bool {
+    message.contains("not trusted")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Answer {
+    Options(Vec<usize>),
+    Text(String),
+}
+
+impl Answer {
+    fn to_value(&self) -> Value {
+        match self {
+            Answer::Options(picked) => json!(picked),
+            Answer::Text(text) => json!(text),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Allow,
+    Deny,
+    Always,
+}
+
+impl Decision {
+    pub fn wire(self) -> &'static str {
+        match self {
+            Decision::Allow => "allow",
+            Decision::Deny => "deny",
+            Decision::Always => "always",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Request {
+    pub op: &'static str,
+    pub args: Value,
+}
+
+impl Request {
+    fn new(op: &'static str, args: Value) -> Request {
+        Request { op, args }
+    }
+
+    pub fn reply(id: &str, text: &str) -> Request {
+        Request::new(ops::SESSION_REPLY, json!({ "id": id, "text": text }))
+    }
+
+    pub fn send(id: &str, text: &str) -> Request {
+        Request::new(ops::SESSION_SEND, json!({ "id": id, "text": text }))
+    }
+
+    pub fn with_options(mut self, options: Value) -> Request {
+        if self.op == ops::SESSION_SEND {
+            self.args["options"] = options;
+        }
+        self
+    }
+
+    pub fn outbox_edit(id: &str, session: &str, text: &str, from: &str) -> Request {
+        Request::new(
+            ops::OUTBOX_EDIT,
+            json!({ "id": id, "session": session, "text": text, "from": from }),
+        )
+    }
+
+    pub fn outbox_remove(id: &str, session: &str) -> Request {
+        Request::new(ops::OUTBOX_REMOVE, json!({ "id": id, "session": session }))
+    }
+
+    pub fn outbox_mark_sent(id: &str, session: &str) -> Request {
+        Request::new(
+            ops::OUTBOX_REMOVE,
+            json!({ "id": id, "session": session, "sent": true }),
+        )
+    }
+
+    pub fn outbox_hold(id: &str, session: &str, on: bool) -> Request {
+        Request::new(
+            ops::OUTBOX_HOLD,
+            json!({ "id": id, "session": session, "on": on }),
+        )
+    }
+
+    pub fn outbox_resend(id: &str, session: &str, clear_box: bool, resume: bool) -> Request {
+        let mut args = json!({ "id": id, "session": session });
+        if clear_box {
+            args["clear_box"] = json!(true);
+        }
+        if resume {
+            args["resume"] = json!(true);
+        }
+        Request::new(ops::OUTBOX_RESEND, args)
+    }
+
+    pub fn outbox_discard(session: &str) -> Request {
+        Request::new(ops::OUTBOX_DISCARD, json!({ "session": session }))
+    }
+
+    pub fn ask_answer(id: &str, answer: AskAnswer) -> Request {
+        let mut args = json!({ "id": id });
+        match answer {
+            AskAnswer::Choice(n) => args["choice"] = json!(n),
+            AskAnswer::Text(text) => args["text"] = json!(text),
+        }
+        Request::new(api_ops::ASK_ANSWER, args)
+    }
+
+    pub fn ask_dismiss(id: &str) -> Request {
+        Request::new(api_ops::ASK_DISMISS, json!({ "id": id }))
+    }
+
+    pub fn clearing_box(mut self) -> Request {
+        if self.op == ops::SESSION_REPLY || self.op == ops::SESSION_SEND {
+            self.args["clear_box"] = json!(true);
+        }
+        self
+    }
+
+    pub fn answer(id: &str, answers: &[Answer]) -> Request {
+        let answers: Vec<Value> = answers.iter().map(Answer::to_value).collect();
+        Request::new(ops::SESSION_ANSWER, json!({ "id": id, "answers": answers }))
+    }
+
+    pub fn answer_for(row: &str, question: &PendingQuestion, answers: &[Answer]) -> Request {
+        if let Some(prompt) = question.tool_use_id.strip_prefix("hook:") {
+            return Request::answer(prompt, answers);
+        }
+        let mut request = Request::answer(row, answers);
+        let items: Vec<Value> = question
+            .items
+            .iter()
+            .map(|i| {
+                json!({"header": i.header, "question": i.question, "options": i.options,
+                       "details": i.details, "multiSelect": i.multi_select})
+            })
+            .collect();
+        request.args["question"] = json!({ "items": items });
+        request
+    }
+
+    pub fn permission(id: &str, decision: Decision) -> Request {
+        Request::new(
+            ops::SESSION_PERMISSION,
+            json!({ "id": id, "decision": decision.wire() }),
+        )
+    }
+
+    pub fn permission_on_screen(
+        row: &str,
+        decision: Decision,
+        tool: &str,
+        summary: &str,
+    ) -> Request {
+        Request::new(
+            ops::SESSION_PERMISSION,
+            json!({ "id": row, "decision": decision.wire(),
+                    "expect": { "tool": tool, "summary": summary } }),
+        )
+    }
+
+    pub fn question(id: &str) -> Request {
+        Request::new(ops::SESSION_QUESTION, json!({ "id": id }))
+    }
+
+    pub fn dialog(id: &str) -> Request {
+        Request::new(ops::SESSION_DIALOG, json!({ "id": id }))
+    }
+
+    pub fn dialog_pick(id: &str, title: &str, number: u64, label: &str) -> Request {
+        Request::new(
+            ops::SESSION_DIALOG_PICK,
+            json!({ "id": id, "title": title, "number": number, "label": label }),
+        )
+    }
+
+    pub fn dialog_dismiss(id: &str) -> Request {
+        Request::new(ops::SESSION_DIALOG_DISMISS, json!({ "id": id }))
+    }
+
+    pub fn shell_output(id: &str, command: &str) -> Request {
+        Request::new(
+            ops::SESSION_SHELL_OUTPUT,
+            json!({ "id": id, "command": command }),
+        )
+    }
+
+    pub fn interrupt(id: &str) -> Request {
+        Request::new(ops::SESSION_INTERRUPT, json!({ "id": id }))
+    }
+
+    pub fn stop(id: &str) -> Request {
+        Request::new(ops::SESSION_STOP, json!({ "id": id }))
+    }
+
+    pub fn remove(id: &str) -> Request {
+        Request::new(ops::SESSION_REMOVE, json!({ "id": id }))
+    }
+
+    pub fn take_back(id: &str) -> Request {
+        Request::new(ops::SESSION_TAKE_BACK, json!({ "id": id }))
+    }
+
+    pub fn new_session(folder: &str, config_dir: Option<&str>, flags: &[String]) -> Request {
+        let mut args = json!({ "folder": folder });
+        if let Some(dir) = config_dir {
+            args["config_dir"] = json!(dir);
+        }
+        if !flags.is_empty() {
+            args["flags"] = json!(flags);
+        }
+        Request::new(ops::SESSION_NEW, args)
+    }
+
+    pub fn trust_folder(folder: &str, config_dir: Option<&str>) -> Request {
+        let mut args = json!({ "folder": folder });
+        if let Some(dir) = config_dir {
+            args["config_dir"] = json!(dir);
+        }
+        Request::new(ops::FOLDER_TRUST, args)
+    }
+
+    pub fn move_session(id: &str, to_config_dir: &str) -> Request {
+        Request::new(
+            ops::SESSION_MOVE,
+            json!({ "id": id, "to_config_dir": to_config_dir }),
+        )
+    }
+
+    pub fn cluster_follow(id: &str) -> Request {
+        Request::new(ops::CLUSTER_FOLLOW, json!({ "id": id }))
+    }
+
+    pub fn cluster_return(job: &str) -> Request {
+        Request::new(ops::CLUSTER_RETURN, json!({ "job": job }))
+    }
+
+    pub fn shell_stop(id: &str) -> Request {
+        Request::new(ops::SHELL_STOP, json!({ "id": id }))
+    }
+
+    pub fn cluster_dispatch(args: Value) -> Request {
+        Request::new(ops::CLUSTER_DISPATCH, args)
+    }
+
+    pub fn chrome(id: &str, on: bool, force: bool) -> Request {
+        let mut args = json!({ "id": id, "command": crate::chat::chrome::command(on) });
+        if force {
+            args["force"] = json!(true);
+        }
+        Request::new(ops::SESSION_COMMAND, args)
+    }
+
+    pub fn chrome_state(id: &str, ack: bool) -> Request {
+        let mut args = json!({ "id": id });
+        if ack {
+            args["ack"] = json!(true);
+        }
+        Request::new(ops::SESSION_CHROME, args)
+    }
+
+    pub fn reload(id: &str, after_turn: bool) -> Request {
+        Request::new(
+            ops::SESSION_RELOAD,
+            json!({ "id": id, "afterTurn": after_turn }),
+        )
+    }
+
+    pub fn reload_cancel(id: &str) -> Request {
+        Request::new(ops::SESSION_RELOAD, json!({ "id": id, "cancel": true }))
+    }
+
+    pub fn reload_ack(id: &str, rev: u64) -> Request {
+        Request::new(
+            ops::SESSION_RELOAD_STATE,
+            json!({ "id": id, "ack": true, "rev": rev }),
+        )
+    }
+
+    pub fn command(id: &str, command: &str) -> Request {
+        Request::new(
+            ops::SESSION_COMMAND,
+            json!({ "id": id, "command": command }),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notchling_local_api::ApiError;
+    use std::io;
+
+    #[test]
+    fn the_outbox_requests_have_the_wire_shapes() {
+        let send = Request::send("s1", "go on").clearing_box();
+        assert_eq!(send.op, "session.send");
+        assert_eq!(
+            send.args,
+            json!({"id": "s1", "text": "go on", "clear_box": true})
+        );
+        let with = Request::send("s1", "go").with_options(json!({"model": "m"}));
+        assert_eq!(
+            with.args,
+            json!({"id": "s1", "text": "go", "options": {"model": "m"}})
+        );
+        assert_eq!(
+            Request::outbox_edit("o1", "ab12cd34", "new", "old"),
+            Request {
+                op: "outbox.edit",
+                args: json!({"id": "o1", "session": "ab12cd34", "text": "new", "from": "old"})
+            }
+        );
+        assert_eq!(
+            Request::outbox_remove("o1", "ab12cd34"),
+            Request {
+                op: "outbox.remove",
+                args: json!({"id": "o1", "session": "ab12cd34"})
+            }
+        );
+        assert_eq!(
+            Request::outbox_resend("o1", "ab12cd34", false, false).args,
+            json!({"id": "o1", "session": "ab12cd34"})
+        );
+        assert_eq!(
+            Request::outbox_resend("o1", "n1/ab12cd34", true, false).args,
+            json!({"id": "o1", "session": "n1/ab12cd34", "clear_box": true})
+        );
+        assert_eq!(
+            Request::outbox_resend("o1", "ab12cd34", false, true).args,
+            json!({"id": "o1", "session": "ab12cd34", "resume": true})
+        );
+        assert_eq!(
+            Request::outbox_discard("ab12cd34"),
+            Request {
+                op: "outbox.discard",
+                args: json!({"session": "ab12cd34"})
+            }
+        );
+    }
+
+    #[test]
+    fn the_ask_requests_have_the_wire_shapes() {
+        assert_eq!(
+            Request::ask_answer("q1", AskAnswer::Choice(2)),
+            Request {
+                op: "ask.answer",
+                args: json!({"id": "q1", "choice": 2})
+            }
+        );
+        assert_eq!(
+            Request::ask_answer("q1", AskAnswer::Text("use the second")),
+            Request {
+                op: "ask.answer",
+                args: json!({"id": "q1", "text": "use the second"})
+            }
+        );
+        assert_eq!(
+            Request::ask_dismiss("q1"),
+            Request {
+                op: "ask.dismiss",
+                args: json!({"id": "q1"})
+            }
+        );
+    }
+
+    #[test]
+    fn only_on_makes_a_control_live() {
+        assert_eq!(
+            Acting::On.control(),
+            Control {
+                enabled: true,
+                tooltip: None
+            }
+        );
+        let off = Acting::Off.control();
+        assert!(!off.enabled);
+        assert_eq!(off.tooltip, Some(OFF_MESSAGE));
+        let detached = Acting::Detached.control();
+        assert!(!detached.enabled);
+        assert_eq!(detached.tooltip, Some(DETACHED_MESSAGE));
+    }
+
+    #[test]
+    fn detached_wins_over_what_the_daemon_said() {
+        assert_eq!(effective(false, Acting::On), Acting::Detached);
+        assert_eq!(effective(true, Acting::On), Acting::On);
+        assert_eq!(effective(true, Acting::Off), Acting::Off);
+    }
+
+    #[test]
+    fn status_says_on_only_explicitly() {
+        assert_eq!(from_status(&json!({"acting": true})), Acting::On);
+        assert_eq!(from_status(&json!({"acting": "on"})), Acting::On);
+        assert_eq!(from_status(&json!({"acting": false})), Acting::Off);
+        assert_eq!(from_status(&json!({"acting": "off"})), Acting::Off);
+        assert_eq!(from_status(&json!({"version": "0.1.0"})), Acting::Off);
+        assert_eq!(from_status(&Value::Null), Acting::Off);
+    }
+
+    #[test]
+    fn the_off_refusal_turns_acting_off() {
+        let off = ClientError::Api(ApiError::new(ErrorCode::Forbidden, OFF_MESSAGE));
+        assert_eq!(after_error(&off), Some(Acting::Off));
+        let tier = ClientError::Api(ApiError::new(ErrorCode::Forbidden, "app tier only"));
+        assert_eq!(after_error(&tier), None);
+        let bad = ClientError::Api(ApiError::bad_request("no session s9"));
+        assert_eq!(after_error(&bad), None);
+    }
+
+    #[test]
+    fn a_lost_daemon_detaches() {
+        let gone = [
+            ClientError::NotRunning(io::Error::from(io::ErrorKind::NotFound)),
+            ClientError::Closed,
+            ClientError::Unsupported,
+            ClientError::UntrustedServer("another user".into()),
+            ClientError::Io(io::Error::other("broken pipe")),
+        ];
+        for e in &gone {
+            assert_eq!(after_error(e), Some(Acting::Detached), "{e}");
+        }
+    }
+
+    #[test]
+    fn untrusted_is_read_from_the_refusal() {
+        assert!(is_untrusted("Workspace not trusted: /w/new"));
+        assert!(!is_untrusted("acting is off"));
+        assert!(is_off(&format!("forbidden: {OFF_MESSAGE}")));
+    }
+
+    #[test]
+    fn a_held_question_is_answered_by_its_prompt_id_and_a_screen_one_by_its_row() {
+        use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem};
+        let item = QuestionItem {
+            header: "DB".into(),
+            question: "Which db?".into(),
+            options: vec!["Postgres".into(), "SQLite".into()],
+            details: vec![],
+            multi_select: false,
+        };
+        let held = PendingQuestion {
+            tool_use_id: "hook:p7-19a".into(),
+            items: vec![item.clone()],
+        };
+        let picked = [Answer::Options(vec![2])];
+        assert_eq!(
+            Request::answer_for("job-a", &held, &picked).args,
+            json!({"id": "p7-19a", "answers": [[2]]})
+        );
+        let typed = PendingQuestion {
+            tool_use_id: "toolu_01".into(),
+            items: vec![item],
+        };
+        assert_eq!(
+            Request::answer_for("job-a", &typed, &picked).args,
+            json!({"id": "job-a", "answers": [[2]], "question": {"items": [{"header": "DB",
+                "question": "Which db?", "options": ["Postgres", "SQLite"], "details": [],
+                "multiSelect": false}]}})
+        );
+    }
+
+    #[test]
+    fn a_reply_can_ask_for_the_sessions_box_to_be_cleared_and_nothing_else_can() {
+        assert_eq!(
+            Request::reply("s1", "go on").clearing_box().args,
+            json!({"id": "s1", "text": "go on", "clear_box": true})
+        );
+        assert_eq!(
+            Request::reply("s1", "go on").args,
+            json!({"id": "s1", "text": "go on"}),
+            "a plain reply never asks"
+        );
+        assert_eq!(
+            Request::interrupt("s1").clearing_box(),
+            Request::interrupt("s1")
+        );
+    }
+
+    #[test]
+    fn requests_have_the_plan_shapes() {
+        assert_eq!(
+            Request::reply("s1", "go on"),
+            Request {
+                op: "session.reply",
+                args: json!({"id": "s1", "text": "go on"})
+            }
+        );
+        let answers = [
+            Answer::Options(vec![2]),
+            Answer::Options(vec![1, 3]),
+            Answer::Text("neither".into()),
+        ];
+        assert_eq!(
+            Request::answer("s1", &answers).args,
+            json!({"id": "s1", "answers": [[2], [1, 3], "neither"]})
+        );
+        for (d, word) in [
+            (Decision::Allow, "allow"),
+            (Decision::Deny, "deny"),
+            (Decision::Always, "always"),
+        ] {
+            let r = Request::permission("s1", d);
+            assert_eq!(r.op, "session.permission");
+            assert_eq!(r.args, json!({"id": "s1", "decision": word}));
+        }
+        assert_eq!(
+            Request::permission_on_screen("job1", Decision::Always, "Bash", "ls -la"),
+            Request {
+                op: "session.permission",
+                args: json!({"id": "job1", "decision": "always",
+                             "expect": {"tool": "Bash", "summary": "ls -la"}})
+            }
+        );
+        assert_eq!(Request::interrupt("s1").op, "session.interrupt");
+        assert_eq!(Request::stop("s1").op, "session.stop");
+        assert_eq!(Request::remove("s1").op, "session.remove");
+        assert_eq!(Request::take_back("s1").op, "session.take_back");
+        assert_eq!(
+            Request::new_session("/w/api", None, &[]).args,
+            json!({"folder": "/w/api"})
+        );
+        assert_eq!(
+            Request::new_session("/w/api", Some("/h/.claude-lanes/b"), &["--x".into()]).args,
+            json!({"folder": "/w/api", "config_dir": "/h/.claude-lanes/b", "flags": ["--x"]})
+        );
+        assert_eq!(
+            Request::trust_folder("/w/new", None),
+            Request {
+                op: "folder.trust",
+                args: json!({"folder": "/w/new"})
+            }
+        );
+        assert_eq!(
+            Request::move_session("s1", "/h/.claude-lanes/b").args,
+            json!({"id": "s1", "to_config_dir": "/h/.claude-lanes/b"})
+        );
+        assert_eq!(
+            Request::command("s1", "/compact").args,
+            json!({"id": "s1", "command": "/compact"})
+        );
+    }
+}

@@ -1,0 +1,235 @@
+{
+ "_comment": "Waits that may stay without a deadline, by path and line text, each with the reason; LINT-NO-UNBOUNDED-WAIT. Changing it is a protected change.",
+ "entries": [
+  {
+   "path": "crates/engine/src/accounts/keychain.rs",
+   "text": ".join()",
+   "reason": "A reader thread ends when the child's pipe closes; the child runs under its own deadline or is killed first."
+  },
+  {
+   "path": "crates/engine/src/accounts/procs.rs",
+   "text": "let data = reader.join().ok()?;",
+   "reason": "A reader thread ends when the child's pipe closes; the child runs under its own deadline or is killed first."
+  },
+  {
+   "path": "crates/engine/src/bridge/net/bridge.rs",
+   "text": "let _ = ticker.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/engine/src/bridge/net/server.rs",
+   "text": "let _ = thread.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/engine/src/bridge/net/server.rs",
+   "text": "running = self.done.wait(running).unwrap_or_else(|e| e.into_inner());",
+   "reason": "Back-pressure wait: a handler slot frees when a running handler ends, and each handler ends on its own socket deadline."
+  },
+  {
+   "path": "crates/engine/src/control/launcher.rs",
+   "text": "runner.join().expect(\"thread\").expect(\"ran\");",
+   "reason": "A thread the test started to run one bounded call; the test joins it to read the result."
+  },
+  {
+   "path": "crates/engine/src/delegate/codex_run.rs",
+   "text": "let _ = watcher.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/engine/src/delegate/second_opinion_host.rs",
+   "text": "let data = reader.join().unwrap_or_default();",
+   "reason": "A reader thread ends when the child's pipe closes; the child runs under its own deadline or is killed first."
+  },
+  {
+   "path": "crates/engine/src/machines/engine.rs",
+   "text": "handles.into_iter().filter_map(|h| h.join().ok()).collect()",
+   "reason": "A scoped fan-out: each thread runs one bounded call, and the join collects the results."
+  },
+  {
+   "path": "crates/engine/src/machines/engine_check.rs",
+   "text": "handles.into_iter().filter_map(|h| h.join().ok()).collect()",
+   "reason": "A scoped fan-out: each thread runs one bounded call, and the join collects the results."
+  },
+  {
+   "path": "crates/engine/src/machines/poller.rs",
+   "text": "h.join()",
+   "reason": "A scoped fan-out: each thread runs one bounded call, and the join collects the results."
+  },
+  {
+   "path": "crates/engine/src/tools/acp/process.rs",
+   "text": "let _ = stderr_thread.join();",
+   "reason": "A reader thread ends when the child's pipe closes; the child runs under its own deadline or is killed first."
+  },
+  {
+   "path": "crates/engine/src/tools/agy_sidecar/agentapi.rs",
+   "text": "let stderr = err.and_then(|h| h.join().ok()).unwrap_or_default();",
+   "reason": "A reader thread ends when the child's pipe closes; the child runs under its own deadline or is killed first."
+  },
+  {
+   "path": "crates/engine/src/tools/agy_sidecar/agentapi.rs",
+   "text": "let stdout = out.and_then(|h| h.join().ok()).unwrap_or_default();",
+   "reason": "A reader thread ends when the child's pipe closes; the child runs under its own deadline or is killed first."
+  },
+  {
+   "path": "crates/engine/src/tools/codex/process.rs",
+   "text": "let info = match rx.recv() {",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/engine/src/tools/codex/runs.rs",
+   "text": "if let Ok(process) = take.recv() {",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/agent_named.rs",
+   "text": "None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/agent_named.rs",
+   "text": "let _ = thread.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/ask_find.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/ask_find.rs",
+   "text": "rx.recv().map_err(|_| RecvTimeoutError::Disconnected)",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/ask_tick.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/awake_loop.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/cluster_inbox.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/cluster_move_run.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/cluster_node.rs",
+   "text": "let _ = thread.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/cluster_promote.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/cluster_relay.rs",
+   "text": ".wait(state)",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/cluster_workspace.rs",
+   "text": "held = self.wake.wait(held).unwrap_or_else(|e| e.into_inner());",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/codex_children.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/consent_ops.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/daemon.rs",
+   "text": "let served = match thread.join() {",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/inbox_ops.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/inbox_ops.rs",
+   "text": "while let Ok(msg) = reads.recv() {",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/limits_ops.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/log_bus.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/log_keys.rs",
+   "text": ".wait(slot)",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/outbox_inbox.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/outbox_postman.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/shell_jobs.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/shells_watch.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/snap_run.rs",
+   "text": "let _ = thread.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/snap_run.rs",
+   "text": "state = self.wake.wait(state).unwrap_or_else(|e| e.into_inner());",
+   "reason": "An idle worker thread waits for work and ends on its stop flag or when its senders drop; the owner joins it only at shutdown."
+  },
+  {
+   "path": "crates/notchlingd/src/versions_check.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/versions_ops.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/versions_update.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  },
+  {
+   "path": "crates/notchlingd/src/wake_loop.rs",
+   "text": "let _ = handle.join();",
+   "reason": "A worker owned by this struct is told to stop (flag or dropped sender) and then joined at shutdown, when it is between ticks."
+  }
+ ]
+}

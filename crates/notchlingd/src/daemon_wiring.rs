@@ -1,0 +1,993 @@
+use crate::account_history::DbSwitches;
+use crate::accounts_ops::AccountsOps;
+use crate::acting::{Acting, ACTING_OFF};
+use crate::acting_ops::{ActingOps, Room};
+use crate::activity_ops::{self, ActivityOps};
+use crate::agent_named::AgentNames;
+use crate::agy_ops::AgyOps;
+use crate::agy_sidecar_ops::AgySidecarOps;
+use crate::ask_ops::AskOps;
+use crate::attach::{ClaudeAttacher, LiveLauncher};
+use crate::awake_loop::{power_for, AwakeLoop};
+use crate::awake_ops::AwakeOps;
+use crate::bridge_ops::BridgeOps;
+use crate::catalog_ops::CatalogService;
+use crate::cluster_forward::{acting_gated, Forward};
+use crate::cluster_prompts::RemotePrompts;
+use crate::cluster_relay::HeldRelay;
+use crate::cluster_relay_wiring::{devices_replica, parts as relay_parts, RelayEnv};
+use crate::cluster_sessions::RemoteSessions;
+use crate::cluster_wiring::ClusterParts;
+use crate::codex_children::CodexChildren;
+use crate::codex_ops::CodexOps;
+use crate::consent_ops::ConsentOps;
+use crate::daemon::{FirstScan, FIRST_LIST_WAIT};
+use crate::daemon_wiring_setup::{
+    bridge_setup, job_asks, outbox_ops, session_asks, shells_ops, shells_watch,
+};
+use crate::every_session::{EverySession, CLAUDE};
+use crate::git_ops::{listed_folders, live_folders, GitOps};
+use crate::identity::{Identifier, Launches};
+use crate::inbox_ops::InboxOps;
+use crate::install_ops::{InstallOps, InstallSetup};
+use crate::late_emit::{Events, LateEmit, LateSalt};
+use crate::layout::Layout;
+use crate::limits_ops::LimitsOps;
+use crate::limits_sources::{ClaudeLimits, ProviderLimits, SessionJobs};
+use crate::log_ops::LogOps;
+use crate::models_ops::ModelsOps;
+use crate::op_group::OpGroup;
+use crate::organizations_ops::OrganizationsOps;
+use crate::outbox_inbox::OutboxNotice;
+use crate::outbox_ops::OutboxOps;
+use crate::outbox_postman::Postmen;
+use crate::pages_ops::PagesOps;
+use crate::postmen_wiring::postmen_for;
+use crate::providers_daemon::ProviderStores;
+use crate::providers_ops::ProvidersOps;
+use crate::sessions_args::{every_tool, tagged, with_remote_kinds};
+use crate::settings_ops::{SettingsOps, SwitchStates};
+use crate::shell_jobs::ShellJobs;
+use crate::shells_watch::ShellsWatch;
+use crate::switches::{SwitchOps, Switches};
+use crate::tailscale_ops::TailscaleOps;
+use crate::vault_ops::VaultOps;
+use crate::versions_ops::{AuditRecorder, VersionsOps};
+use crate::wake_loop::{wakes_for, WakeLoop, Wakes};
+use crate::{capabilities_ops, op_kinds, quiet_ops};
+use notchling_engine::accounts::codex::login::idle_for_auto_switch;
+use notchling_engine::accounts::desktop::ClaudeName;
+use notchling_engine::activity::EventsDb;
+use notchling_engine::awake::Power;
+use notchling_engine::cluster::versions::BridgeFacts;
+use notchling_engine::control::launcher::claude_path;
+use notchling_engine::control::session::home_of;
+use notchling_engine::control::RealLauncher;
+use notchling_engine::git::SandboxedLauncher;
+use notchling_engine::limits::renew::ClaudeRenewer;
+use notchling_engine::versions::mac::Roots as VersionRoots;
+use notchling_engine::versions::Version;
+use notchling_events::kinds::choices::AgentTool;
+use notchling_events::{Emit, Salt};
+use notchling_local_api::{
+    ops, topics, AgentCall, AgentIdentity, ApiError, Caller, ClientKind, Handler, OpHome, OpSpec,
+    Tier,
+};
+use serde_json::{Map, Value};
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+pub struct Ops {
+    sessions: Arc<Mutex<Value>>,
+    acting: Option<Arc<ActingOps>>,
+    bridge: Option<Arc<BridgeOps>>,
+    codex: Option<Arc<CodexOps>>,
+    agy: Option<Arc<AgyOps>>,
+    pages: Option<Arc<PagesOps>>,
+    reads: Option<Arc<crate::reads_ops::ReadsOps>>,
+    every: Option<Arc<EverySession>>,
+    shells: Option<Arc<ShellJobs>>,
+    groups: Vec<Arc<dyn OpGroup>>,
+    forward: Option<Arc<dyn Forward>>,
+    remote: Option<Arc<RemoteSessions>>,
+    gate: Option<Arc<crate::cluster_move::MoveGate>>,
+    prompts: Option<Arc<RemotePrompts>>,
+    topic_list: Vec<&'static str>,
+    first: Arc<FirstScan>,
+    first_wait: Duration,
+    identity: Option<Arc<Identifier>>,
+    names: Option<Arc<AgentNames>>,
+    switch_asks: Option<Arc<crate::switch_asks::SwitchAsks>>,
+    cluster_asks: Option<Arc<crate::cluster_asks::ClusterAsks>>,
+    account_asks: Option<Arc<crate::account_asks::AccountAsks>>,
+    cited: Vec<Arc<dyn crate::cited::Cited>>,
+}
+
+impl Ops {
+    pub fn new(sessions: Arc<Mutex<Value>>) -> Ops {
+        Ops {
+            sessions,
+            acting: None,
+            bridge: None,
+            codex: None,
+            agy: None,
+            pages: None,
+            reads: None,
+            every: None,
+            shells: None,
+            groups: Vec::new(),
+            forward: None,
+            remote: None,
+            gate: None,
+            prompts: None,
+            topic_list: vec![topics::SESSIONS],
+            first: FirstScan::open(),
+            first_wait: FIRST_LIST_WAIT,
+            identity: None,
+            names: None,
+            switch_asks: None,
+            cluster_asks: None,
+            account_asks: None,
+            cited: Vec::new(),
+        }
+    }
+
+    pub fn with_identity(mut self, identity: Arc<Identifier>, names: Arc<AgentNames>) -> Ops {
+        self.identity = Some(identity);
+        self.names = Some(names);
+        self
+    }
+
+    pub fn with_acting(sessions: Arc<Mutex<Value>>, acting: Arc<ActingOps>) -> Ops {
+        Ops {
+            acting: Some(acting),
+            ..Ops::new(sessions)
+        }
+        .with_topics()
+    }
+
+    pub fn with_switch_asks(mut self, asks: Arc<crate::switch_asks::SwitchAsks>) -> Ops {
+        self.switch_asks = Some(asks.clone());
+        self.with_group(asks)
+    }
+
+    pub fn with_cluster_asks(mut self, asks: Arc<crate::cluster_asks::ClusterAsks>) -> Ops {
+        self.cluster_asks = Some(asks.clone());
+        self.with_group(asks)
+    }
+
+    pub fn with_session_asks(self, asks: Arc<crate::session_asks::SessionAsks>) -> Ops {
+        self.with_group(asks)
+    }
+
+    pub fn with_bridge(mut self, bridge: Arc<BridgeOps>) -> Ops {
+        self.bridge = Some(bridge);
+        self.with_topics()
+    }
+
+    pub fn with_codex(mut self, codex: Arc<CodexOps>) -> Ops {
+        self.codex = Some(codex);
+        self.with_topics()
+    }
+
+    fn with_topics(mut self) -> Ops {
+        let mut list = vec![topics::SESSIONS];
+        if self.acting.is_some() {
+            list.extend([topics::PROMPTS, topics::SETTINGS, topics::RELOADS]);
+        }
+        if self.bridge.is_some() {
+            list.push(topics::BRIDGE);
+        }
+        if self.codex.is_some() || self.agy.is_some() {
+            list.push(topics::TOOLS);
+        }
+        for topic in self.groups.iter().flat_map(|g| g.topics().iter().copied()) {
+            if !list.contains(&topic) {
+                list.push(topic);
+            }
+        }
+        self.topic_list = list;
+        self
+    }
+
+    pub fn with_group(mut self, group: Arc<dyn OpGroup>) -> Ops {
+        self.groups.push(group);
+        self.with_topics()
+    }
+
+    fn group(&self, op: &str) -> Option<&Arc<dyn OpGroup>> {
+        self.groups.iter().find(|g| g.spec(op).is_some())
+    }
+
+    pub fn with_agy(mut self, agy: Arc<AgyOps>) -> Ops {
+        self.agy = Some(agy);
+        self.with_topics()
+    }
+
+    pub fn with_reads(mut self, reads: Arc<crate::reads_ops::ReadsOps>) -> Ops {
+        self.reads = Some(reads.clone());
+        self.with_group(reads)
+    }
+
+    pub fn with_pages(mut self, pages: Arc<PagesOps>) -> Ops {
+        self.pages = Some(pages);
+        self
+    }
+
+    pub fn with_every(mut self, every: Arc<EverySession>) -> Ops {
+        self.every = Some(every);
+        self
+    }
+
+    pub fn with_shells(mut self, shells: Arc<ShellJobs>) -> Ops {
+        self.shells = Some(shells);
+        self
+    }
+
+    pub fn with_cluster(
+        mut self,
+        forward: Option<Arc<dyn Forward>>,
+        remote: Arc<RemoteSessions>,
+    ) -> Ops {
+        self.forward = forward;
+        self.remote = Some(remote);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_forward(mut self, forward: Arc<dyn Forward>) -> Ops {
+        self.forward = Some(forward);
+        self
+    }
+
+    pub fn with_move_gate(mut self, gate: Arc<crate::cluster_move::MoveGate>) -> Ops {
+        self.gate = Some(gate);
+        self
+    }
+
+    pub fn with_remote_prompts(mut self, prompts: Arc<RemotePrompts>) -> Ops {
+        self.prompts = Some(prompts);
+        self
+    }
+
+    pub fn with_first_scan(mut self, first: Arc<FirstScan>, wait: Duration) -> Ops {
+        self.first = first;
+        self.first_wait = wait;
+        self
+    }
+}
+
+impl Handler for Ops {
+    fn call_with_extras(
+        &self,
+        caller: &Caller,
+        op: &str,
+        args: &Value,
+    ) -> (Result<Value, ApiError>, Map<String, Value>) {
+        if op != ops::SESSIONS_LIST {
+            return (self.call(caller, op, args), Map::new());
+        }
+        let (list, landed) = match self.sessions_list(caller, args) {
+            Ok(answer) => answer,
+            Err(e) => return (Err(e), Map::new()),
+        };
+        let mut extras = Map::new();
+        if !landed {
+            extras.insert("partial".into(), Value::Bool(true));
+        }
+        (Ok(list), extras)
+    }
+
+    fn loud(&self, op: &str, args: &Value) -> bool {
+        quiet_ops::loud(op, args)
+    }
+
+    fn identity_of(&self, pid: u32) -> AgentIdentity {
+        if let Some(identity) = &self.identity {
+            return identity.identify(pid);
+        }
+        let mut who = AgentIdentity::shell();
+        who.session = self.acting.as_ref().and_then(|a| a.session_of(pid));
+        if who.session.is_some() {
+            who.tool = AgentTool::Claude;
+        }
+        who
+    }
+
+    fn agent_called(&self, call: &AgentCall) {
+        if let Some(names) = &self.names {
+            names.enqueue(call, crate::acting_ops::now_ms());
+        }
+    }
+
+    fn home(&self, op: &str) -> OpHome {
+        op_kinds::home(op)
+    }
+
+    fn known_ops(&self) -> &[&'static str] {
+        op_kinds::known_ops()
+    }
+
+    fn spec(&self, op: &str) -> Option<OpSpec> {
+        let spec = match op {
+            ops::SESSIONS_LIST => Some(OpSpec::AGENT_READ),
+            op => self
+                .pages
+                .as_ref()
+                .and_then(|p| p.spec(op))
+                .or_else(|| self.acting.as_ref().and_then(|a| a.spec(op)))
+                .or_else(|| self.bridge.as_ref().and_then(|b| b.spec(op)))
+                .or_else(|| self.codex.as_ref().and_then(|c| c.spec(op)))
+                .or_else(|| self.agy.as_ref().and_then(|a| a.spec(op)))
+                .or_else(|| self.group(op).and_then(|g| g.spec(op))),
+        };
+        quiet_ops::quiet(spec, op)
+    }
+
+    fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        if self.acting.as_ref().is_some_and(|a| !a.is_on()) && acting_gated(caller, op, args) {
+            return Err(crate::acting_ops::switch_off("acting", ACTING_OFF));
+        }
+        if let Some(gate) = &self.gate {
+            let acting = self.acting.as_ref();
+            gate.check(op, args, &|id| acting.and_then(|a| a.prompt_session(id)))?;
+        }
+        if let Some(asked) = self.asked(caller, op, args) {
+            return asked;
+        }
+        if let Some(routed) = self
+            .forward
+            .as_ref()
+            .and_then(|forward| forward.forward(caller, op, args))
+        {
+            return routed;
+        }
+        if let Some(asks) = self
+            .switch_asks
+            .as_ref()
+            .filter(|_| crate::switch_asks::cites(op, args))
+        {
+            return asks.apply(caller, op, args, &|a| self.dispatch(caller, op, a));
+        }
+        self.dispatch(caller, op, args)
+    }
+
+    fn topics(&self) -> &[&str] {
+        &self.topic_list
+    }
+
+    fn topic_tier(&self, topic: &str) -> Tier {
+        match topic {
+            topics::PROMPTS | topics::BRIDGE | topics::RELOADS => Tier::App,
+            _ => self
+                .groups
+                .iter()
+                .find_map(|g| g.topic_tier(topic))
+                .unwrap_or(Tier::Agent),
+        }
+    }
+
+    fn acting(&self) -> Option<bool> {
+        self.acting.as_ref().map(|a| a.is_on())
+    }
+
+    fn agent_path(&self, op: &str) -> Option<(String, Value)> {
+        crate::commands::why_not(op)
+    }
+}
+
+pub struct Wired {
+    pub acting: Arc<ActingOps>,
+    pub codex: Arc<CodexOps>,
+    pub bridge: Arc<BridgeOps>,
+    pub agy: Arc<AgyOps>,
+    pub every: Arc<EverySession>,
+    pub switches: Arc<Switches>,
+    pub accounts: Arc<AccountsOps>,
+    pub providers: Arc<ProvidersOps>,
+    pub limits: Arc<LimitsOps>,
+    pub catalog: Arc<CatalogService>,
+    pub inbox: Arc<InboxOps>,
+    pub outbox: Arc<OutboxOps>,
+    pub ask: Arc<AskOps>,
+    pub postmen: Postmen,
+    pub outbox_notice: Arc<OutboxNotice>,
+    pub shells_watch: Arc<ShellsWatch>,
+    pub vault: Arc<VaultOps>,
+    pub consent: Arc<ConsentOps>,
+    pub switch_asks: Arc<crate::switch_asks::SwitchAsks>,
+    pub install: Arc<InstallOps>,
+    pub models: Arc<ModelsOps>,
+    pub sidecar: Arc<AgySidecarOps>,
+    pub settings: Arc<SettingsOps>,
+    pub versions: Arc<VersionsOps>,
+    pub awake: Arc<AwakeLoop>,
+    pub events: Arc<LateEmit>,
+    pub salt: LateSalt,
+    pub launches: Launches,
+    pub names: OnceLock<Arc<AgentNames>>,
+    history: Arc<DbSwitches>,
+    log: OnceLock<(Arc<Mutex<EventsDb>>, Arc<LogOps>)>,
+    pub wake: Arc<WakeLoop>,
+    pub codex_children: Arc<CodexChildren>,
+    pub cluster: ClusterParts,
+    session_asks: OnceLock<Arc<crate::session_asks::SessionAsks>>,
+    cluster_asks: OnceLock<Arc<crate::cluster_asks::ClusterAsks>>,
+    pub account_follow: Arc<crate::account_asks::follow::AccountFollow>,
+    account_asks: OnceLock<Arc<crate::account_asks::AccountAsks>>,
+    pub embed: OnceLock<Arc<crate::embed_ops::EmbedOps>>,
+}
+
+impl Wired {
+    pub fn build(
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        room: Arc<dyn Room>,
+        bridge_ports: (u16, u16),
+    ) -> Wired {
+        Wired::build_with_power(layout, sessions, room, bridge_ports, power_for(layout))
+    }
+
+    pub fn build_with_power(
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        room: Arc<dyn Room>,
+        bridge_ports: (u16, u16),
+        power: Box<dyn Power>,
+    ) -> Wired {
+        let wakes = wakes_for(layout);
+        Wired::build_with_hardware(layout, sessions, room, bridge_ports, power, wakes)
+    }
+
+    pub fn build_with_hardware(
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        room: Arc<dyn Room>,
+        bridge_ports: (u16, u16),
+        power: Box<dyn Power>,
+        wakes: Box<dyn Wakes>,
+    ) -> Wired {
+        let late = LateEmit::new();
+        let salt: LateSalt = Arc::new(OnceLock::new());
+        let events = Events::new(late.clone(), salt.clone());
+        let acting_switch = Arc::new(Acting::off());
+        let claude = claude_path(Path::new(&home_of(&layout.roots())));
+        let acting = Arc::new(
+            ActingOps::new(
+                acting_switch.clone(),
+                sessions.clone(),
+                layout.roots(),
+                room.clone(),
+                Box::new(ClaudeAttacher::new(&claude)),
+            )
+            .with_launcher(
+                Arc::new(LiveLauncher::new(RealLauncher::with_claude(claude.clone()))),
+                Box::new(|ms| std::thread::sleep(Duration::from_millis(ms))),
+            )
+            .with_screen_file(layout.state_dir().join("permission-screen.txt"))
+            .with_reply_screen_file(layout.state_dir().join("reply-screen.txt"))
+            .with_events(events.clone()),
+        );
+        let launches = Launches::default();
+        let codex = Arc::new(CodexOps::for_daemon_with(
+            layout,
+            acting_switch,
+            room.clone(),
+            &claude,
+            &launches,
+        ));
+        acting.attach_codex(codex.clone());
+        let inbox = InboxOps::new(layout.data_dir.clone(), room.clone())
+            .with_events(events.clone())
+            .with_cluster_dir(layout.cluster_dir());
+        let outbox = Arc::new(outbox_ops(layout, &sessions, &acting, &room, &events));
+        acting.attach_outbox(outbox.clone());
+        let chrome = crate::chrome_ops::ChromeOps::new(crate::chrome_ops::LiveHosts::new(&acting));
+        let noting = Arc::downgrade(&acting);
+        chrome.set_audit(Arc::new(move |agent, word, result| {
+            if let Some(acting) = noting.upgrade() {
+                acting.note_chrome(agent, word, result);
+            }
+        }));
+        acting.attach_chrome(chrome);
+        let reload = crate::reload_ops::ReloadOps::new(crate::reload_ops::LiveHosts::new(&acting));
+        let noting = Arc::downgrade(&acting);
+        reload.set_audit(Arc::new(move |agent, word, result| {
+            if let Some(acting) = noting.upgrade() {
+                acting.note_chrome(agent, word, result);
+            }
+        }));
+        reload.set_publish(crate::reload_ops::publisher(acting.room.clone()));
+        acting.attach_reload(reload);
+        crate::chrome_ops::reconcile_when_acting_turns_on(&acting);
+        let node_slot = crate::ask_wiring::Slot::default();
+        let worker = crate::ask_wiring::worker_in(node_slot.clone());
+        let ask =
+            crate::ask_wiring::build(layout, &sessions, &acting, &room, &events, &inbox, worker);
+        let agy = Arc::new(AgyOps::for_daemon_with(
+            layout,
+            acting.acting_switch(),
+            room.clone(),
+            &launches,
+        ));
+        acting.attach_agy(agy.clone());
+        let postmen = postmen_for(&outbox, &acting, layout, &codex, &agy);
+        let outbox_notice = OutboxNotice::new(outbox.clone(), inbox.clone());
+        let shells_watch = shells_watch(layout, &inbox, &acting, &sessions);
+        let every = Arc::new(EverySession::new(layout));
+        let bridge = Arc::new(
+            BridgeOps::new(
+                bridge_setup(layout, bridge_ports),
+                sessions.clone(),
+                acting.clone(),
+                room.clone(),
+                inbox.clone(),
+                every.clone(),
+            )
+            .with_events(events.clone())
+            .with_node_identity(
+                layout
+                    .cluster_dir()
+                    .join(crate::cluster_wiring::IDENTITY_DIR),
+            ),
+        );
+        let awake = Arc::new(AwakeLoop::for_daemon(
+            layout,
+            sessions.clone(),
+            codex.clone(),
+            agy.clone(),
+            room.clone(),
+            power,
+        ));
+        every.attach_agy(agy.clone());
+        let wake = Arc::new(WakeLoop::for_daemon(
+            layout,
+            sessions.clone(),
+            acting.clone(),
+            room.clone(),
+            wakes,
+        ));
+
+        let switches = Arc::new(Switches::off());
+        let on = switches.accounts.clone();
+        let history = DbSwitches::new();
+        let (account_follow, tapped) = accounts::tapped(&room);
+        let accounts = Arc::new(AccountsOps::recording(
+            layout,
+            on.clone(),
+            tapped.clone(),
+            events.emit(),
+            history.clone(),
+        ));
+        accounts.attach_acting(acting.clone());
+        let claude_store = accounts.store();
+        let names = claude_store.clone();
+        let stores = ProviderStores::for_daemon(
+            layout,
+            &on,
+            Arc::new(move || {
+                names
+                    .saved_list()
+                    .into_iter()
+                    .map(|a| ClaudeName {
+                        id: a.id,
+                        email: a.email,
+                    })
+                    .collect()
+            }),
+        );
+        let providers = Arc::new(ProvidersOps::new(
+            on.clone(),
+            stores.registry(),
+            tapped.clone(),
+        ));
+        let catalog = Arc::new(CatalogService::for_daemon(
+            layout,
+            (accounts.store(), on.clone()),
+            room.clone(),
+        ));
+        agy.attach_catalog(catalog.clone());
+        acting.attach_catalog(catalog.clone());
+        let limits = Arc::new(LimitsOps::for_daemon(
+            layout,
+            on.clone(),
+            room.clone(),
+            catalog.shared_catalog(),
+            inbox.clone(),
+            history.clone(),
+        ));
+        limits.set_claude(
+            Arc::new(
+                ClaudeLimits::new(on.clone(), claude_store).with_renewer(Arc::new(
+                    ClaudeRenewer::new(
+                        Arc::new(RealLauncher::with_claude(claude.clone())),
+                        layout.roots(),
+                    ),
+                )),
+            ),
+            Arc::new(SessionJobs::new(acting.clone())),
+        );
+        let codex_store = stores.codex.clone();
+        let idle_on = on.clone();
+        limits.set_codex(
+            Arc::new(ProviderLimits::new(on.clone(), stores.codex.clone())),
+            Box::new(move || idle_on.is_on() && idle_for_auto_switch(&codex_store.running_work())),
+        );
+        let (agy_switch, agy_idle) = (stores.antigravity.clone(), stores.antigravity.clone());
+        let agy_on = on.clone();
+        limits.set_antigravity(
+            Arc::new(
+                ProviderLimits::new(on, stores.antigravity.clone()).with_switch(Box::new(
+                    move |id| {
+                        agy_switch
+                            .switch_in_background(id)
+                            .map_err(|e| e.message().to_string())
+                    },
+                )),
+            ),
+            Box::new(move || agy_on.is_on() && agy_idle.idle_for_auto_switch()),
+        );
+
+        let vault = Arc::new(VaultOps::for_daemon(
+            layout,
+            switches.vault.clone(),
+            room.clone(),
+            inbox.clone(),
+            events.clone(),
+        ));
+        let binary = std::env::current_exe().and_then(std::fs::canonicalize).ok();
+        let sidecar = AgySidecarOps::for_daemon(
+            layout,
+            &agy,
+            &acting,
+            switches.install.clone(),
+            binary.clone(),
+            events.clone(),
+        );
+        let mut install = InstallOps::new(
+            InstallSetup::from_layout(layout, binary.clone()),
+            switches.install.clone(),
+        )
+        .with_events(events.clone());
+        if let Some(binary) = binary {
+            install = install.with_skill(crate::vault_skill_wiring::spec(&binary, vault.clone()));
+        }
+        let states: SwitchStates = {
+            let (acting, bridge, switches) = (acting.clone(), bridge.clone(), switches.clone());
+            Arc::new(move |name: &str| match name {
+                "acting" => Some(acting.is_on()),
+                "bridge" => Some(bridge.is_on()),
+                other => switches.get(other).map(|s| s.is_on()),
+            })
+        };
+        let consent = ConsentOps::for_daemon(
+            &layout.data_dir,
+            room.clone(),
+            inbox.clone(),
+            events.clone(),
+        );
+        let switch_asks = crate::switch_asks::SwitchAsks::new(
+            consent.clone(),
+            states.clone(),
+            crate::switch_asks::turn_for(
+                acting.clone(),
+                bridge.clone(),
+                Arc::new(
+                    SwitchOps::new(switches.clone(), room.clone()).with_events(events.clone()),
+                ),
+            ),
+            Some(inbox.clone()),
+        );
+        switch_asks.set_place(crate::switch_worker::place_in(node_slot.clone()));
+        vault.set_consent(&consent);
+        let settings = Arc::new(
+            SettingsOps::new(layout.data_dir.clone(), room.clone(), states)
+                .with_events(events.clone())
+                .with_limits(limits.config().clone())
+                .with_consent(consent.clone()),
+        );
+        consent.register(notchling_engine::consent::SETTING, settings.writer());
+        let versions = VersionsOps::new(
+            if layout.fixture {
+                VersionRoots::inside(&layout.home())
+            } else {
+                VersionRoots::for_home(&layout.home())
+            },
+            layout.data_dir.clone(),
+            room.clone(),
+            Arc::new(RealLauncher::with_claude(claude.clone())),
+            Arc::new(AuditRecorder::new(events.clone())),
+            Arc::new(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0)
+            }),
+            Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(Version::zero),
+        );
+        versions.checks().set_enabled(!layout.fixture);
+        versions.checks().set_inbox(inbox.clone());
+        versions.drifts().set_inbox(inbox.clone());
+        versions.set_install_switch(switches.install.clone());
+        let cluster = ClusterParts::build(
+            layout,
+            room.clone(),
+            switches.cluster.clone(),
+            (versions.clone(), {
+                let bridge = bridge.clone();
+                Arc::new(move || {
+                    let served = bridge.served();
+                    Some(BridgeFacts {
+                        port: served.port,
+                        fingerprint: served.fingerprint,
+                    })
+                })
+            }),
+            (inbox.clone(), vault.clone()),
+            events.clone(),
+            (sessions.clone(), acting.acting_switch()),
+        );
+        if let Ok(node) = &cluster.node {
+            let _ = node_slot.set(node.clone());
+        }
+        cluster.fence_keeper().set_codex(codex.clone());
+        codex.set_job_link(cluster.reporter.clone());
+        bridge.cluster().attach(
+            cluster.handler(),
+            cluster.remote.clone(),
+            cluster.prompts.clone(),
+        );
+        let relay = Arc::new(HeldRelay::new(relay_parts(RelayEnv {
+            cluster: layout.cluster_dir(),
+            link: cluster.link(),
+            phone: bridge.cluster(),
+            bridge: bridge.clone(),
+            acting: acting.clone(),
+            sessions: sessions.clone(),
+            clock: Arc::new(crate::acting_ops::now_ms),
+        })));
+        bridge.set_replica(devices_replica(
+            layout.cluster_dir(),
+            layout.data_dir.clone(),
+            cluster.link(),
+        ));
+        relay.start();
+        let _ = cluster.held().set(relay.clone());
+        bridge.cluster().attach_relay(relay);
+        if let Some(sink) = cluster.failover_sink() {
+            settings.bind_failover(sink);
+        }
+        if let Some(tell) = cluster.peer_teller() {
+            outbox.set_tell(tell);
+        }
+        outbox.set_remote(cluster.remote_outbox());
+        acting.attach_login(cluster.login.clone());
+        let install = Arc::new(install);
+        let models = Arc::new(ModelsOps::for_daemon(
+            layout,
+            catalog.clone(),
+            install.clone(),
+            crate::models_ops::codex_session_live(every.clone()),
+        ));
+        Wired {
+            acting,
+            codex,
+            bridge,
+            agy,
+            every,
+            switches,
+            accounts,
+            providers,
+            limits,
+            catalog,
+            inbox,
+            outbox,
+            ask,
+            postmen,
+            outbox_notice,
+            shells_watch,
+            vault,
+            consent,
+            switch_asks,
+            install,
+            models,
+            sidecar,
+            settings,
+            versions,
+            awake,
+            events: late,
+            salt,
+            launches,
+            names: OnceLock::new(),
+            history,
+            log: OnceLock::new(),
+            wake,
+            codex_children: Arc::new(CodexChildren::new(
+                layout.codex_dir().join("sessions"),
+                layout.codex_children_db(),
+            )),
+            cluster,
+            session_asks: OnceLock::new(),
+            cluster_asks: OnceLock::new(),
+            account_follow,
+            account_asks: OnceLock::new(),
+            embed: OnceLock::new(),
+        }
+    }
+
+    pub fn set_events(&self, bus: Arc<dyn Emit>, salt: Salt) {
+        self.events.set(bus);
+        let _ = self.salt.set(salt);
+    }
+
+    pub fn set_log(&self, db: Arc<Mutex<EventsDb>>, ops: Arc<LogOps>) {
+        self.history.set(db.clone());
+        let _ = self.log.set((db, ops));
+    }
+
+    pub fn ops(
+        &self,
+        layout: &Layout,
+        sessions: Arc<Mutex<Value>>,
+        first_scan: Arc<FirstScan>,
+        first_wait: Duration,
+    ) -> Ops {
+        let folders = listed_folders(
+            live_folders(
+                sessions.clone(),
+                self.agy.titles(),
+                layout.codex_dir().join("sessions"),
+                layout.fixture,
+            ),
+            self.every.clone(),
+        );
+        let claude = claude_path(Path::new(&home_of(&layout.roots())));
+        let pages = crate::daemon_wiring_search::pages(self, layout);
+        let git = GitOps::new(
+            Arc::new(SandboxedLauncher::new(Arc::new(RealLauncher::with_claude(
+                claude,
+            )))),
+            folders.clone(),
+        );
+        let listed = sessions.clone();
+        self.versions.checks().set_self_test(Arc::new(move || {
+            listed
+                .lock()
+                .map(|v| v.is_array() || v.is_object() || v.is_null())
+                .unwrap_or(false)
+        }));
+        let (identity, names) = crate::identity::for_daemon(
+            layout,
+            &sessions,
+            &self.salt,
+            &self.launches,
+            &self.names,
+            &self.events,
+        );
+        let reads = crate::daemon_wiring_setup::reads(self, layout, &sessions);
+        let ops = Ops::with_acting(sessions.clone(), self.acting.clone())
+            .with_identity(identity.clone(), names)
+            .with_bridge(self.bridge.clone())
+            .with_codex(self.codex.clone())
+            .with_agy(self.agy.clone())
+            .with_every(self.every.clone())
+            .with_pages(pages)
+            .with_switch_asks(self.switch_asks.clone())
+            .with_group(Arc::new(
+                SwitchOps::new(self.switches.clone(), self.acting.room.clone())
+                    .with_events(Events::new(self.events.clone(), self.salt.clone())),
+            ))
+            .with_group(Arc::new(capabilities_ops::CapabilitiesOps::wired(self)))
+            .with_group(shells_ops(layout, identity, self.shells_watch.progress()))
+            .with_group(self.accounts.clone())
+            .with_group(self.install.clone())
+            .with_group(self.models.clone())
+            .with_group(crate::cost_profile_ops::wired(
+                layout,
+                &self.catalog,
+                &self.switches,
+                &self.install,
+            ))
+            .with_group(self.sidecar.clone())
+            .with_group(self.providers.clone())
+            .with_group(self.limits.clone())
+            .with_group(crate::cost_report_ops::shared(
+                self.limits.cost(),
+                &layout.data_dir,
+            ))
+            .with_group(self.catalog.clone())
+            .with_group(self.inbox.clone())
+            .with_group(self.outbox.clone())
+            .with_group(self.ask.clone())
+            .with_group(self.vault.clone())
+            .with_group(self.consent.clone())
+            .with_group(self.settings.clone())
+            .with_group(self.versions.clone())
+            .with_group(self.cluster.ops.clone())
+            .with_group(self.cluster.follow.clone())
+            .with_group(self.cluster.dispatch.clone())
+            .with_group(self.cluster.returns.clone())
+            .with_shells(self.cluster.shells.clone())
+            .with_cluster(self.cluster.forward(), self.cluster.remote.clone())
+            .with_move_gate(self.cluster.gate.clone())
+            .with_remote_prompts(self.cluster.prompts.clone())
+            .with_group(Arc::new(git))
+            .with_reads(reads.clone())
+            .with_session_asks(
+                self.session_asks
+                    .get_or_init(|| session_asks(self, layout, &sessions, reads))
+                    .clone(),
+            )
+            .with_group(job_asks(self, layout, &sessions))
+            .with_cluster_asks(self.cluster_asks_for(layout))
+            .with_account_asks(self.account_asks_for(layout))
+            .with_group(Arc::new(AwakeOps::new(self.awake.clone())))
+            .with_group(Arc::new(OrganizationsOps::for_daemon(layout, folders)))
+            .with_group(Arc::new(TailscaleOps::for_layout(layout)))
+            .with_group(self.codex_children.clone())
+            .with_first_scan(first_scan, first_wait);
+        let ops = crate::daemon_wiring_phase8::wire(ops, self, layout);
+        match self.log.get() {
+            Some((db, log)) => ops
+                .with_group(Arc::new(activity_ops::for_log(db, &sessions, &self.salt)))
+                .with_group(log.clone()),
+            None => ops.with_group(Arc::new(ActivityOps::for_daemon(layout))),
+        }
+    }
+
+    pub fn start(&self) {
+        self.limits.spawn_loop();
+        self.inbox.spawn_loop();
+        self.versions.start();
+        self.awake.spawn_loop();
+        self.wake.spawn_loop();
+        self.codex_children.start();
+        self.postmen.begin();
+        self.outbox_notice.spawn_loop();
+        self.shells_watch.spawn_loop();
+        self.ask.spawn_loop();
+        self.consent.start();
+        if let Some(embed) = self.embed.get() {
+            embed.start();
+        }
+    }
+
+    pub fn close(&self) {
+        if let Some(names) = self.names.get() {
+            names.close();
+        }
+        self.ask.close();
+        self.consent.close();
+        self.outbox_notice.close();
+        self.shells_watch.close();
+        self.postmen.stop();
+        self.wake.close();
+        self.codex_children.close();
+        self.awake.close();
+        self.acting.close();
+        self.codex.close();
+        self.agy.close();
+        self.providers.close();
+        self.vault.close();
+        self.bridge.close();
+        self.limits.close();
+        self.settings.close();
+        self.cluster.close();
+        self.inbox.close();
+        self.versions.close();
+        if let Some(embed) = self.embed.get() {
+            embed.close();
+        }
+    }
+}
+
+#[path = "ops_dispatch.rs"]
+mod ops_dispatch;
+
+#[cfg(test)]
+#[path = "daemon_wiring_tests.rs"]
+mod tests;
+
+#[path = "daemon_wiring_accounts.rs"]
+mod accounts;

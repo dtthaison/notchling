@@ -1,0 +1,15 @@
+{"time_ms":1000,"op":"session.reply","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"ok"}
+{"time_ms":2000,"op":"vault.pending","tier":"agent","peer":"/usr/bin/curl","result":"forbidden"}
+{"time_ms":3000,"op":"session.move","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"failed","reason":"the target\naccount   is not signed in"}
+{"time_ms":4000,"op":"settings.set_switch accounts","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"on"}
+{"time_ms":5000,"op":"inbox.answer","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"ok"}
+{"time_ms":6000,"op":"accounts.switch","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"ok"}
+{"time_ms":7000,"op":"connect","tier":"agent","result":"peer_unknown"}
+{"time_ms":8000,"op":"vault.use","tier":"agent","peer":"/opt/homebrew/bin/claude","result":"ok:GITHUB_TOKEN,NPM_TOKEN"}
+{"time_ms":9000,"op":"vault.use","tier":"agent","peer":"/opt/homebrew/bin/claude","result":"denied:GITHUB_TOKEN"}
+not json
+{"time_ms":10000,"op":"session.reply","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"ok","reason":"ignored on a success"}
+{"time_ms":11000,"op":"settings.set","tier":"agent","peer":"/usr/local/bin/notchling","result":"ok","reason":"theme=SECRET-MARKER"}
+{"time_ms":12000,"op":"settings.set","tier":"agent","peer":"/usr/local/bin/notchling","result":"ok","reason":"appearance=dark"}
+{"time_ms":13000,"op":"settings.set_acting","tier":"app","peer":"/Applications/Notchling.app/Contents/MacOS/notchling-app","result":"file_said_on_ignored"}
+{"time_ms":14000,"op":"session.reply","tier":"agent","peer":"/usr/local/bin/notchling","result":"needs_approval"}

@@ -1,0 +1,397 @@
+# Privacy policy
+
+What data leaves a computer running Notchling: where it goes, when, and why. It was checked against the
+code on 2026-11-07: the Swift app (retired since, and removed from the tree; the git history has it) and the phone app in `apps/flutter/`. Changing this file is a
+protected change: it waits for the maintainer. A pull request that adds a network call updates this
+page in the same pull request.
+
+## In short
+
+- Notchling has no server. It sends nothing to the project or its maintainer, unless you turn on the tunnel and leave its default hostname and team, which are the maintainer's (see Tunnel below).
+- There is **no telemetry today**: no analytics, no crash reports and no usage statistics. The app
+  checks for a newer release by reading one public file (see Update check below); you can turn that off.
+  The Rust app's dependencies are pinned in `Cargo.lock` and checked by `cargo-deny`.
+- Its own calls go only to services you already use, with your own logins, for the features listed
+  below: Anthropic, OpenAI (ChatGPT), GitHub, Hugging Face (only when you press Download on a Semantic Search model) and, if you set up the tunnel, Cloudflare. It also
+  reaches the machines you list in Machines, over `ssh`, and the other machines of a cluster you create or join, over Tailscale (see The cluster). Web pages you open load what they link to.
+- The phone bridge and the internet tunnel are off until you turn them on.
+- The tools Notchling starts for you (Claude Code, Codex, Antigravity CLI, `ssh`, `gh`) send what they
+  always send.
+- The skills and rules Notchling adds to Claude Code, Codex and Antigravity go to those tools'
+  providers in each session's prompt. The vault skill names your saved secrets, never their values.
+
+## Claude accounts (Anthropic)
+
+Every request below carries `User-Agent: Notchling`. The two `GET`s carry that account's access token.
+
+| Request | When | Why |
+| --- | --- | --- |
+| `GET https://api.anthropic.com/api/oauth/profile` | When Claude Code is signed in with a login Notchling hasn't matched to an account yet; after you add an account; when a lane's login is copied back to its saved account. | To learn which account a login belongs to. |
+| `GET https://api.anthropic.com/api/oauth/usage` | For each saved account, at most every 5 minutes (checked once a minute), and when you press the refresh button in Accounts. | Limit bars, limit warnings and switching accounts at a limit. |
+| `POST https://platform.claude.com/v1/oauth/token` | When a saved account's token has expired and Notchling needs it: to read its limits, to open a lane, or to publish as a page's owner. It sends the saved refresh token. | To renew a saved login. Never the login Claude Code or a lane is using. |
+
+**Adding an account** opens `https://claude.com/cai/oauth/authorize` in your browser. The browser sends
+the sign-in code back to a listener on `127.0.0.1`, and Notchling exchanges it at
+`https://platform.claude.com/v1/oauth/token`, the way `claude auth login` does.
+
+**Claude Desktop** switching sends nothing: it swaps the app's cookie file on this Mac.
+
+## Codex accounts (OpenAI)
+
+| Request | When | Why |
+| --- | --- | --- |
+| `GET https://chatgpt.com/backend-api/wham/usage` | For each saved Codex account whose login can be read, at most every 2 minutes, and right away when you add one, press the refresh button in Accounts, or open the Codex accounts in Chat. It sends that account's access token and its ChatGPT account id. | Codex limit bars and limit watching. |
+
+Notchling never renews a Codex token.
+
+## Antigravity
+
+Nothing leaves the Mac. Limits and plan come from Antigravity's own language server on `127.0.0.1`,
+and only while Antigravity runs. Switching accounts swaps Keychain items and files on this Mac.
+
+## Artifact pages published as their owner
+
+claude.ai lets only a page's owner, or an editor in its organization, publish to it. When **Keep local
+copies of artifacts** is on (the default), Notchling's hook can publish for the owner:
+
+- **When:** a Claude Code session publishes an HTML file to a page that Notchling's local library
+  says another saved account owns. Nothing else triggers it.
+- **What:** `GET https://api.anthropic.com/api/frame/perm/<page>` to read the live version, then
+  `POST https://api.anthropic.com/api/frame/deploy/direct` with the file's content, its title, and the
+  publish's description and label. Both use the owner's saved login.
+- **Why:** so a session signed in to one account can update a page another of your accounts made.
+
+The rest of the hook sends nothing. It talks to the app only through files on this Mac.
+
+## The phone bridge
+
+Off by default. **Let phones connect** in the Phone panel turns it on.
+
+- It listens on port 47821 with TLS, and announces itself on the local network with Bonjour
+  (`_agentconsole._tcp`): the Mac's name and the start of its certificate fingerprint.
+- It closes any connection that isn't from this Mac, the private LAN, a link-local address or
+  Tailscale.
+- Only a paired phone gets anything. A phone pairs with a QR code or one-time code shown on the Mac.
+  The Mac keeps only hashes of the phones' tokens.
+- A paired phone gets: the session list with each session's activity, context use and the account's
+  limits; conversations, including tool output and diffs; terminal screens; slash commands; and
+  pictures of web pages the Mac renders. Those pages can only be `localhost` or `127.0.0.1`, and are
+  loaded with no stored cookies.
+- The phone can send messages, answers, images and new sessions to the Mac.
+- A paired phone that asks for the inbox gets each item's title and detail. For a vault item that is
+  the secret's name, the command that wants it (cut to 120 characters) and its folder. The phone can
+  answer those items only while the bridge, **acting** and the vault are all on. It can allow a
+  secret's use (Allow Once or Always Allow), deny it, or cancel a request; the first answer, from the
+  Mac or a phone, wins. It never opens the form that takes a secret's value. Pairing is a file on the
+  Mac that an agent with a shell could write, so a forged device could answer too; the maintainer
+  accepted that risk until pairing has an anchor an agent can't write.
+  For a question an agent asked (see Questions agents ask) the detail is the question, cut to 400
+  characters, and the phone can answer with one of its choices or dismiss it; the answer text stays on the
+  Mac that asked.
+- Every remote change is logged on the Mac as an event (Audit and Activity), with the device's id and the
+  length of any text sent, never the text itself.
+
+## The internet tunnel (Cloudflare)
+
+Off by default. **Reach this Mac over the internet** in the Phone panel turns it on, and needs a
+Cloudflare Tunnel and Cloudflare Access that you set up.
+
+- Notchling doesn't run `cloudflared`; you do. Notchling listens for it on `127.0.0.1:47822`.
+- With the tunnel on, everything the bridge sends to a phone through it passes through Cloudflare.
+  Cloudflare ends the TLS connection for your hostname, and the bridge adds no encryption of its own,
+  so Cloudflare's network can read that traffic.
+- When a phone connects through the tunnel, the Mac fetches your Access team's public signing keys
+  from `https://<your team>/cdn-cgi/access/certs`: at most once an hour, and for an unknown key at most
+  once every 30 seconds.
+- The Access client id and secret are stored on the Mac in `bridge/access.json` (mode 0600), and go
+  to the phone inside the pairing QR code.
+- The hostname and team fields start filled in with the maintainer's own. Replace them with yours.
+
+## Update check (Notchling)
+
+- **When:** when the app starts and then at most once a day (once an hour after a failed read), and
+  when you press Check for Updates in About. Never in a development build, and never while
+  Settings > Check for updates automatically is off or the environment variable `NOTCHLING_RELEASES`
+  is `off`. The variable also stops the button.
+- **What:** `curl` fetches one public file over https, with no cookie, no account, no login and no
+  identifier: `https://github.com/dtthaison/notchling/releases/download/appcast/appcast.xml`.
+- **Why:** to say in the menu bar and in About that a newer release is out, with a link to its page.
+  Nothing is downloaded or installed.
+
+## Semantic search models (Hugging Face)
+
+- **When:** only after you turn on Semantic Search in Settings and press Download on a model. Nothing is fetched at start, from a stored setting, or on an agent's own word: an agent can only ask, and the request waits on a card in the Inbox until you allow it.
+- **What:** `GET https://huggingface.co/<repository>/resolve/<revision>/<file>` for the files of the model you chose, at a fixed revision: Standard is `ibm-granite/granite-embedding-97m-multilingual-r2` at `835ad14087e140460703cf0fae09f97d469d65c2` (`config.json`, `model.safetensors`, `tokenizer.json`); Accent Helper is `sentence-transformers/static-similarity-mrl-multilingual-v1` at `b68f4122911bcffcd6e1f695f2d99cd6788972d8` (`0_StaticEmbedding/model.safetensors`, `0_StaticEmbedding/tokenizer.json`). Hugging Face may send you on to its own download hosts (`*.huggingface.co`, `*.hf.co`); Notchling follows no other redirect and nothing that is not https.
+- **What the request carries:** only `User-Agent: Notchling` and, to resume, a `Range` header. No cookie, no login, no account and no identifier. Hugging Face sees your Mac's IP address and the files you ask for.
+- **Checks:** every file has a size and a SHA-256 in Notchling's own manifest. A file is kept only when both match; a file that does not match is deleted.
+- **Licences:** both models are Apache 2.0. The Standard model's tokenizer comes from Gemma 3, so it also falls under the Gemma Terms of Use (https://ai.google.dev/gemma/terms).
+- **Stays on the Mac:** the files are kept in the `models` folder of Notchling's data folder (mode 0700, files 0600). Embeddings are computed on the Mac by a helper that Notchling starts, and neither the text nor the vectors ever leave it. Remove Model deletes a model's files and its vectors.
+
+## Tool versions on this Mac
+
+Settings > Agents shows the newest version of each tool, so it can tell you when the Mac is behind.
+
+- **When:** when Settings > Agents opens, and on Check for Updates, at most once an hour for each tool
+  (a failed read is tried again after 5 minutes). Never in the background.
+- **What:** `curl` fetches one public file over https, with no cookie, no account, no login and no
+  identifier: `https://downloads.claude.ai/claude-code-releases/latest` (Claude Code),
+  `https://registry.npmjs.org/@openai/codex/latest` (Codex) and Antigravity's own release manifest, the
+  URL its installer reads (`https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/<platform>.json`).
+  Your Mac's operating system and architecture choose the Antigravity file name. Notchling's own update
+  check is separate (see Update check above).
+- **Why:** to show "Latest" next to the installed version, and to offer Update.
+- The Update and Go Back buttons run the tool's own update command on this Mac (`claude update`,
+  `npm install -g`, `brew upgrade --cask`, Codex's installer, `agy update`), only while **Install** is on,
+  and only after you click. The tool then talks to its vendor as it always does.
+- The check that follows an update runs the tool's `--version`, `claude doctor` or `codex exec --help` and
+  reads transcripts already on this Mac. It starts no session, sends no prompt and writes nothing to the
+  tools' folders.
+
+## Machines
+
+Only when `machines.json` lists a machine:
+
+- Notchling runs `ssh` to each listed machine about once a minute to read the worker's status, and runs
+  slower checks when you open the window, press Check or run a fix, and every 10 minutes.
+- A secret from the vault goes to a machine only as `ssh`'s standard input, written into a mode-600
+  file there. It is never in a command line, a log or a check result.
+- To check the GitHub issues token, it calls `https://api.github.com` with that token, and nothing
+  else: requests and redirects to any other host are refused.
+- It runs `gh` with your own GitHub login, to list repositories and issues, act on issues for Morning
+  Actions, and manage deploy keys.
+- A fix runs on the machine only after you click and see its commands. Some fixes download installers
+  there (Homebrew's tools, the GitHub CLI, Claude Code).
+
+## The cluster (other machines of yours)
+
+Only when you create a cluster or join one (the `cluster` switch is off at every start; a Worker you set up
+with Machines turns it on again by itself after a restart). The cluster is for your own machines, and nothing
+in it goes to a third party: no server of the project, no cloud relay, no address on the internet.
+
+- **How:** one TCP port (47823) on the machine's Tailscale addresses only, TLS 1.3 with both ends pinned by the
+  certificate's SHA-256 fingerprint. A machine that isn't a member is refused at the handshake, except that
+  while a join token is open (10 minutes, one use) the primary lets one unpinned machine in far enough to ask
+  to join; it must hold the token's secret, and nothing else it sends is answered until you Allow it in the
+  Inbox. A member waiting for your Allow is pinned but can do nothing. Tailscale itself is yours and is
+  outside this page.
+- **Between members, always:** the machine's name, OS, architecture, Notchling and tool versions, which tools it
+  has, its load (CPU and memory) and the member list with each member's role and settings.
+- **A client (a Mac with the app) receives, from the machines it follows:** their session lists (names,
+  folders, states, labels and the details a row shows), the whole transcript of a session you open in Chat or on
+  the phone, from its start (its text, tool calls and tool output), kept as a mirror file on your Mac, 0600, at
+  most 256 MiB each, until this Mac is removed from the cluster; it keeps pulling new lines for up to 10
+  minutes after you leave the session, and the permission and question prompts of their sessions with the tool's input.
+- **A client sends to the machine that owns a session:** your replies, answers, permission decisions
+  ("always" is never sent), interrupts and stop requests for that session.
+- **Dispatched work:** when you start a session, shell job or delegated job on a Worker, its command, its text,
+  its folder and its model go to that Worker, and its result (a job's state, a delegate's output) comes back.
+  Sending code makes a git bundle of the commits that aren't pushed (at most 256 MB) and the Worker clones
+  your repository's `origin` itself with its own credentials; bringing the work back sends the Worker's
+  commits to your Mac. Uncommitted files and ignored files are not sent.
+- **What a Can Be Master machine holds:** a copy (a set) of what it needs to carry on the primary's main
+  sessions, sent at each of their turn ends, and only once that machine is ready, which includes disk
+  encryption (FileVault or LUKS) being on. A set holds each main session's transcripts, its session folder,
+  Claude Code's edit history and to-do files for it (for Codex, its rollout and its line of the session index).
+  It also holds the primary's `cluster.db` (the inbox and the cluster's state), the paired phones
+  (`devices.json`: names and token hashes, never the tokens) and the local copies of Artifact pages. The
+  machine keeps the two newest sets, 0600 in 0700 folders under `<data>/cluster/standby/`, and its own
+  `cluster.db` holds the phone commands it is holding for the primary (below).
+  Notchling doesn't encrypt them itself: the disk encryption protects them at rest. A set holds no code: for a
+  session's repository it carries the folder, the `origin` address (without a password or token), the branch
+  and the commit, and the machine that takes the session over gets the code from `origin` with its own git
+  access. A transcript holds what the session's tools read and printed, and the edit history holds earlier
+  versions of the files the session changed; both travel with the set, as a transcript does to a Mac that
+  follows the session. A set holds no secret values: no logins, tokens, Keychain items or vault values.
+- **A handover** (Move to <machine> Now) lays the moving sessions' files out on the new primary at the same
+  paths and starts them there. A local file that differs is never written over: it is moved to
+  `<data>/cluster/copies/` first, or the move is refused.
+- **The phone** sees other machines' sessions through your Mac, over the same bridge and pairing as before.
+  When your Mac can't be reached, the phone may connect to another Can Be Master machine of its cluster on the
+  LAN instead, pinned to the certificate your Mac listed for it, and that machine relays the phone's messages,
+  answers and new sessions to the primary. If the primary can't be reached either, that machine holds them in
+  its `cluster.db` until they are sent once or you cancel them. A Worker never talks to the phone.
+- **What never crosses:** Claude Code, Codex and Antigravity logins and tokens, lanes, the Secret Vault and its
+  values (except the named secrets a job on a Worker may carry, described in the next section), the Keychain, `settings.json` and your own
+  files except the commits and the sets above. A Worker and a Standby use their own tool logins.
+- **What a machine you removed keeps:** a machine that hears it was removed deletes `cluster.db`, the mirror
+  files, and the incoming and outgoing transfer files. It keeps `<data>/cluster/work` (the repositories and
+  worktrees of sent code), `jobs/` (shell job logs), `workspaces/` (notes on sent code), `node/` (its own
+  identity), and, on a Can Be Master machine, `standby/` (the primary's sets) and `copies/` (files a handover
+  set aside) until you delete them.
+
+## Cluster nodes: secrets and logins on a Worker
+
+Only when this machine is in a cluster (the `cluster` switch is on) and a job names a secret or asks for
+one:
+
+- A secret value crosses to the Worker that runs the job, over the cluster's pinned TLS link. Only the
+  vault node sends it: the Mac whose Keychain holds the vault, while it is the primary.
+- A Worker's allowlist, empty by default, says which names its jobs may carry. An entry marked Ask me
+  first still waits for an Allow from the Mac or a paired phone.
+- On the Worker the value is a mode-600 file in `<data>/cluster/grants/<job>/`. It expires 12 hours
+  after it was sent at the latest. A shell job's grants are deleted when it ends. A Claude or
+  Antigravity job has no end signal on the Worker, so its grants go when the cluster revokes them, at
+  expiry or when the daemon restarts. A Worker cut off from the cluster keeps the file until it
+  expires.
+- A value can arrive before its job starts. A Worker holds it for up to 8.5 minutes, and deletes it if
+  the job has not started by then.
+- The value is never in a command line, a log, an audit entry, the cluster's database, a snapshot or an
+  inbox item. The command `notchling secret` runs gets it in its environment, as on the vault node.
+- The Worker hides every value that is live on it, whichever job the value was granted to, in a job's
+  shell log, in the text other nodes read of the job and in a delegate job's reply. That is not
+  complete:
+  - Triple escapes, JavaScript inside Go strings and base64 or other encodings of a value stay visible.
+  - `workspace.return` carries a job's repository changes unmasked, so a secret a job wrote into a file
+    travels with its branch.
+  - A job's output is refused after a restart that lost its masks.
+  - Every job on a Worker runs as the same user, so a job can read another job's grant file. The masks
+    stop the value coming back to other machines, they do not stop another job reading it.
+- While a value is in use, the daemon holds it in memory as ordinary strings that are not wiped.
+- The vault node's audit log records each release by name, never the value, and the cluster step log
+  records the call.
+- Inbox items from every node are mirrored to the primary and to each Can Be Master machine. That
+  includes a secret approval's title, command (cut to 120 characters) and folder, never a value, and a
+  question an agent asked (below): the question's text cut to 400 characters, the agent's name and its
+  branch, and its choices, never the answer.
+- Notchling does not renew a login on a Worker. A Worker tells the cluster whether Codex and
+  Antigravity are signed in: Codex's `login status` exit code and text, and whether Antigravity's token
+  file exists and is not empty, never its contents. A check that can't tell leaves the entry absent, and
+  a Mac's Antigravity can't be refused, since its login may be in the Keychain, which is never read.
+  Claude Code's long-lived login is not sent to Workers in this build.
+
+## Questions agents ask
+
+An agent in a Claude Code session, or a Codex or Antigravity job that `notchling delegate` runs, can
+ask you a question with `notchling ask`. The question is saved on the Mac that runs the agent, in
+`notchling.db`, and shown on a card in Chat and the notch.
+
+- The question's text, cut to 400 characters, is in the Inbox item, so it is on a paired phone that
+  asks for the inbox and, in a cluster, in the primary's `cluster.db` and the Standbys' copies. The
+  question of an agent on a Worker is mirrored to the primary and each Can Be Master machine, as other
+  inbox items are. The item also carries the agent's name and branch and its choices (each cut to 60
+  characters). Without that the Inbox and the phone could not show the question.
+- The answer you give stays on the Mac that asked, in the question's row, and goes to the agent that
+  asked. It is not in the Inbox item, the cluster or on the phone. A choice you pick on a phone or on
+  another machine shows there as the choice's action, not as text. A closed question and its answer
+  are deleted 24 hours after it closed.
+- The Audit, the Activity store and `notchlingd.log` hold only counts for a question: its length, the
+  number of choices, the answer's length, how long it waited and who answered (Mac, phone or the main
+  session), never the question or the answer.
+- Notchling works out which agent asked from the session's transcripts on this Mac. The name on the
+  card is a label, not proof: an agent that can write its session's transcripts can change it. Only you
+  answer by default; the main session answers its subagents' questions only when the asking agent
+  allowed it.
+- The agent's tool (Claude Code, Codex, Antigravity) sends the answer to its provider, as it sends
+  everything in its session.
+
+## Tools Notchling starts
+
+- **Claude Code.** Replies, answers, New Session and moves run `claude` (`claude attach`,
+  `claude --bg` and others). Claude Code sends your prompts to Anthropic as it always does.
+- **Codex.** A message in a Codex session runs `codex exec`, which sends the prompt to OpenAI. Commands
+  Codex runs in that turn have network access unless you turn off **Allow Network in Codex Turns**.
+  Adding a Codex account runs `codex login`.
+- **Antigravity CLI.** A message in an Antigravity session goes to `agy acp`, which sends it to Google.
+- **Delegation.** When an agent runs `Notchling --delegate`, Notchling runs Codex or Antigravity CLI
+  with that prompt.
+- **The vault.** `Notchling --secret … -- <command>` runs a command an agent chose with the secret in
+  its environment. Where that command sends it is up to the command; Ask First is for entries you
+  want to approve each time.
+
+## Instructions in agent tools
+
+Notchling writes its skills and rules into Claude Code's, Codex's and Antigravity's folders on this
+computer ([decision 0019](../decisions/0019-agent-instructions-per-tool.md)) and sends them nowhere
+itself. Each tool puts them into a session's prompt (a rule in every session, a skill when a task
+calls for it), so their text goes to that tool's provider with your prompts, as your own instructions
+do. Today these are the vault, pages and delegate skills; the delegation and model-choice rules and
+Settings > Agents, which shows every text and turns each off per tool, come with that decision's
+phases.
+
+- **The vault skill** lists your saved secrets' names, and the host each one is for, in its
+  description, never their values. Those names reach the provider of each tool where the skill is
+  installed.
+- The other texts hold the path of Notchling's command and model names: no login, account or
+  content of your files.
+- **Your own rules.** To tell whether you have your own model or delegation rules, Notchling reads
+  the names of the files in those folders and the headings of `~/.codex/AGENTS.md` and
+  `~/.gemini/GEMINI.md`. Settings shows such a file's text when you open it; it goes into no file,
+  log or message Notchling writes.
+
+## Web views
+
+A saved Artifact page or an HTML file you open in Chat renders from the copy on disk. Like a browser,
+the web view loads whatever the page links to, such as scripts, fonts and images from other sites.
+Links you click open in your browser.
+
+## The phone app
+
+- It connects only to the Mac it paired with: on the LAN to that Mac's pinned certificate, or through
+  the tunnel URL from the pairing, with the Access headers. On the LAN it never sends Access headers.
+  When that Mac is in a cluster and can't be reached, the phone may connect on the LAN to another Can Be
+  Master machine the Mac listed, only to the certificate fingerprint the Mac gave for it, and sends that
+  machine its token only after the certificate matches (see The cluster).
+- Voice dictation runs on the phone with a Whisper model bundled in the app.
+- None of its direct dependencies is an analytics or crash-reporting package (`apps/flutter/pubspec.yaml`).
+
+## Logs on this Mac
+
+Notchling writes these files, in `~/Library/Application Support/Notchling` unless noted. None leaves the
+Mac, and Settings > Activity reads the Activity store.
+
+- `audit/YYYY-MM.jsonl`: the Audit log, written only by the daemon. Each line is a registered kind of event
+  (`docs/log-kinds.md` lists them all, with what each records and why) with fixed fields: choices, flags,
+  counts, sizes, times, names of ops and errors, ids. No field holds a message, a typed text, a free-text error,
+  a path in an error or a secret's value; a vault use records the secret's name. Each line is sealed with a
+  keyed hash over the previous line's seal; the key is a Keychain item (`dev.notchling.audit`) and so is the
+  newest seal, so an edited or cut line is found. If the key can't be read the lines are written unsealed and
+  the Inbox says so. A month's file is kept a year by default (90 days or 2 years are the other choices), the
+  folder is capped at 500 MB, and a month is pruned only after a seal that says where the chain went on.
+  `audit/legacy/` holds the old `audit.jsonl` files, moved, never rewritten.
+- `daemon/events.db`: the Activity store, the same events in a table, with rows that expire by kind.
+- `notchlingd.log` (and `.1`, rotated at 5 MB): the daemon's output.
+- `AgentConsole/bridge/remote-log.jsonl`: written only when the daemon is down and a phone acts: the phone's
+  name, the operation and the length of any text, never the text. The daemon imports it when it starts. While
+  the daemon runs, a phone's changes are events with the device's id, not its name or address.
+- `account-log.json`: the old record of which account was active, read once into the Activity store and not
+  written any more (an account switch is now an `account.switched` event with the account ids and why).
+- `logs/crash.log`: a panic's message and place (opened 0600; a message can quote what was on screen).
+- `permission-screen.txt`: the last permission screen the daemon could not read.
+- `reply-screen.txt`: the last reply the daemon could not type into a session (opened 0600): the job's id, why
+  it failed, the message's length, what each step saw and the terminal screen it ended on. The text in the
+  session's input box is masked, so neither the message nor a draft is written; the rest of the screen is as
+  the terminal showed it.
+
+## What stays on the Mac
+
+Transcripts, conversations and search are read from files on this Mac and stay there, except what a
+paired phone is shown and what the cluster shares (see The cluster). Cost tracking, the search index, the local copies of Artifacts and the vault
+list are local files. Vault values are in the Keychain, and agents reach them only through a socket
+on this Mac that answers only Notchling's own executable. A use of a secret is allowed from the
+Notchling app on the Mac, or from a paired phone through the inbox while the bridge, acting and the
+vault are on; the value itself never leaves the Mac, except to a cluster Worker for one job, as
+said above.
+
+## Planned
+
+None of these exist yet. Each will change this page when it lands.
+
+- **Crash reports**, opt-in only. Stable updates become automatic only after this privacy policy and
+  opt-in, privacy-respecting crash reports exist.
+- **Remote computers outside the cluster:** the desktop app and the phone will connect to other
+  people's computers' Notchling the way the phone connects today, with the same pairing. Accounts,
+  lanes and the vault never leave their computer. Your own machines are the cluster, above.
+- **Tool versions** (see decision XXXX, tool versions follow the Mac). The Mac will read what the
+  latest version of each tool is, on demand and at most hourly, sending nothing that identifies you:
+  Claude Code's from `downloads.claude.ai`, Codex's from `registry.npmjs.org`, and Antigravity's from
+  the manifest host its own installer reads, from which it also fetches the binaries it caches. It
+  will read Notchling's release manifest from GitHub. Machines' workers will download their updates
+  from those same vendor hosts and from GitHub, over https, each checked against a checksum, beside
+  the installers Machines already lists.
+
+## Keeping this page true
+
+The capability check (`CAP-NETWORK`, [docs/rules.md](../rules.md)) sends a pull request that adds a
+new `URLSession`, `NWConnection` or other network client use to the maintainer, wherever the file is.
+That pull request updates this page. The check catches new network code; it doesn't prove this page
+is complete, so a reviewer compares the two.

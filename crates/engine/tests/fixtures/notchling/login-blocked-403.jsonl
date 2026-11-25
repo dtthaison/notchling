@@ -1,0 +1,1 @@
+{"type":"assistant","uuid":"u-4","isSidechain":false,"timestamp":"2026-11-21T10:30:01.000Z","isApiErrorMessage":true,"error":"authentication_failed","apiErrorStatus":403,"message":{"id":"m-4","role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"}]}}

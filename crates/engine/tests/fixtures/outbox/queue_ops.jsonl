@@ -1,0 +1,12 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:01.000Z","sessionId":"s-1","content":"ok"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:02.000Z","sessionId":"s-1","content":"go on"}
+{"type":"queue-operation","operation":"popAll","timestamp":"2026-11-15T10:00:03.000Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:10.000Z","sessionId":"s-1","content":"two"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-11-15T10:00:11.000Z","sessionId":"s-1","content":"two"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:20.000Z","sessionId":"s-1","content":"ok"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:21.000Z","sessionId":"s-1"}
+{"type":"user","message":{"role":"user","content":"ok"},"uuid":"u","timestamp":"2026-11-15T10:00:22.000Z","sessionId":"s-1","cwd":"/work/demo"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:30.000Z","sessionId":"s-1","content":"three"}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"three","commandMode":"prompt"},"uuid":"x","timestamp":"2026-11-15T10:00:31.000Z","sessionId":"s-1"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T10:00:40.000Z","sessionId":"s-1","content":"lonely"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-15T10:00:41.000Z","sessionId":"s-1"}

@@ -1,0 +1,276 @@
+use super::agy_trust::{self, Trusted};
+use super::deps::Deps;
+use super::options::{self, Tool};
+use super::outcome::{render, to_json, Outcome};
+use super::quota::{self, Verdict};
+use super::record::{Delegation, Recorder};
+use super::{agy_pick, agy_run, codex_run, media, role_models};
+use crate::catalog::roles::Roles;
+use crate::tools::codex::models;
+use crate::transcript::util::now_secs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+pub struct Context<'a> {
+    pub cwd: &'a Path,
+    pub home: Option<&'a Path>,
+    pub depth: Option<&'a str>,
+    pub record: Option<RecordTo<'a>>,
+}
+
+pub struct RecordTo<'a> {
+    pub dir: &'a Path,
+    pub parent_session: &'a str,
+    pub parent_cwd: &'a str,
+    pub pid: u32,
+}
+
+pub fn run(
+    args: &[String],
+    ctx: &Context<'_>,
+    mut deps: Deps,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let parsed = match options::parse(args, ctx.cwd, ctx.home) {
+        Ok(p) => p,
+        Err(e) => return usage_error(err, &e.message),
+    };
+    deps.depth = match options::enter_depth(ctx.depth) {
+        Ok(depth) => depth,
+        Err(message) => return usage_error(err, &message),
+    };
+    let options = parsed.options;
+    if !Path::new(&options.folder).exists() {
+        return usage_error(err, &format!("No folder at {}.", options.folder));
+    }
+    if let Some(message) = quota_refusal(&options, &deps) {
+        let mut outcome = Outcome::new(options.tool);
+        outcome.model = options.model.clone();
+        outcome.effort = options.effort.clone();
+        outcome.error = Some(message);
+        return finish(&outcome, parsed.json, out);
+    }
+    let recorder = ctx.record.as_ref().map(|to| {
+        let record = Delegation::new(
+            to.parent_session,
+            to.parent_cwd,
+            &options,
+            now_secs(),
+            to.pid,
+        );
+        Arc::new(Recorder::start(to.dir, record, now_secs()))
+    });
+    deps.recorder = recorder.clone();
+    let stop = deps.stop.clone();
+    let mut outcome = match options.tool {
+        Tool::Codex => codex_run::run(&options, &deps),
+        Tool::Agy => {
+            trust_folder(&options.folder, &deps, err);
+            agy_run::run(&options, &deps, err)
+        }
+    };
+    if outcome.error.is_none() && !outcome.timed_out {
+        if let Some(message) = said_out(&options, &outcome, &deps) {
+            outcome.error = Some(message);
+        }
+    }
+    if let (Some(dir), false) = (&options.out, outcome.media.is_empty()) {
+        let files: Vec<PathBuf> = outcome.media.iter().map(PathBuf::from).collect();
+        match media::copy_to(&files, Path::new(dir)) {
+            Ok(copied) => {
+                outcome.copied = copied
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+            }
+            Err(e) => {
+                outcome.error = outcome
+                    .error
+                    .or_else(|| Some(format!("Couldn't copy to {dir}: {e}")));
+            }
+        }
+    }
+    if let Some(recorder) = &recorder {
+        recorder.finish(&outcome, stop.load(Ordering::SeqCst), now_secs());
+    }
+    finish(&outcome, parsed.json, out)
+}
+
+fn quota_refusal(options: &options::Options, deps: &Deps) -> Option<String> {
+    let source = deps.quota.as_ref()?;
+    let quota = source.load(options.tool)?;
+    let model = options.model.as_deref().unwrap_or_default();
+    let now = source.now();
+    match quota::verdict(Some(&quota), options.tool, model, now) {
+        Verdict::Out(out) => Some(quota::refusal(
+            options.tool,
+            options.model.as_deref(),
+            &out,
+            now,
+        )),
+        Verdict::Room | Verdict::SignedOut => None,
+    }
+}
+
+fn said_out(options: &options::Options, outcome: &Outcome, deps: &Deps) -> Option<String> {
+    let found = quota::detect(&outcome.reply)?;
+    let now = deps.quota.as_ref().map_or_else(now_secs, |s| s.now());
+    let model = options.model.as_deref().or(outcome.model.as_deref());
+    let out = quota::out_of(options.tool, model, &found, now);
+    if let Some(source) = &deps.quota {
+        quota::mark_out(source, options.tool, model, &found);
+    }
+    Some(quota::refusal(options.tool, model, &out, now))
+}
+
+fn trust_folder(folder: &str, deps: &Deps, err: &mut dyn Write) {
+    let Some(files) = &deps.agy_trust else {
+        return;
+    };
+    if let Trusted::Added(_) = agy_trust::trust(files, Path::new(folder)) {
+        let _ = writeln!(
+            err,
+            "Added {folder} to Antigravity CLI's trusted workspaces (Claude Code trusts it)."
+        );
+    }
+}
+
+fn finish(outcome: &Outcome, json: bool, out: &mut dyn Write) -> i32 {
+    let text = if json {
+        to_json(outcome)
+    } else {
+        render(outcome)
+    };
+    let _ = writeln!(out, "{text}");
+    outcome.exit_code()
+}
+
+fn usage_error(err: &mut dyn Write, message: &str) -> i32 {
+    let _ = writeln!(err, "{message}");
+    2
+}
+
+pub fn models_listing(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
+    if role_models::wants_for(args) {
+        return role_models::run_for(args, false, deps, out);
+    }
+    let only = args.first().and_then(|a| Tool::from_name(a));
+    let roles = Roles::load(deps.catalog_file.as_deref());
+    let mut lines: Vec<String> = Vec::new();
+    if only != Some(Tool::Agy) {
+        lines.push("codex (--model <slug> --effort <level>):".into());
+        let known = models::load_with(&deps.codex_home, deps.codex_snapshot().as_deref());
+        if known.is_empty() {
+            lines.push("  (Codex hasn't cached its model list yet; run codex once)".into());
+        }
+        for m in known {
+            let default = m
+                .default_effort
+                .map(|d| format!(" (default {d})"))
+                .unwrap_or_default();
+            lines.push(format!(
+                "  {}  efforts: {}{default}{}",
+                m.slug,
+                m.efforts.join(", "),
+                role_models::suffix(roles.tool("codex"), &m.slug)
+            ));
+        }
+        lines.extend(role_models::effort_lines(roles.tool("codex")));
+    }
+    if only != Some(Tool::Codex) {
+        lines.push("agy (--model <model> --effort <level>):".into());
+        let listing = deps
+            .agy_binary
+            .as_deref()
+            .and_then(|agy| (deps.capture)(Path::new(agy), &["models"]));
+        match listing {
+            Some(listing) => {
+                for (model, levels) in agy_pick::models(&listing) {
+                    let efforts = if levels.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  efforts: {}", levels.join(", "))
+                    };
+                    let marks = role_models::suffix(roles.tool("antigravity"), &model);
+                    lines.push(format!("  {model}{efforts}{marks}"));
+                }
+                lines.extend(role_models::effort_lines(roles.tool("antigravity")));
+            }
+            None => lines.push("  (couldn't run agy models)".into()),
+        }
+    }
+    let _ = writeln!(out, "{}", lines.join("\n"));
+    0
+}
+
+pub fn models_listing_json(args: &[String], deps: &Deps, out: &mut dyn Write) -> i32 {
+    if role_models::wants_for(args) {
+        return role_models::run_for(args, true, deps, out);
+    }
+    let only = args.first().and_then(|a| Tool::from_name(a));
+    let roles = Roles::load(deps.catalog_file.as_deref());
+    let mut root = serde_json::Map::new();
+    if only != Some(Tool::Agy) {
+        let models: Vec<serde_json::Value> =
+            models::load_with(&deps.codex_home, deps.codex_snapshot().as_deref())
+                .into_iter()
+                .map(|m| {
+                    let mut v = serde_json::json!({
+                        "slug": m.slug,
+                        "name": m.name,
+                        "summary": m.summary,
+                        "efforts": m.efforts,
+                    });
+                    if let Some(d) = m.default_effort {
+                        v["defaultEffort"] = d.into();
+                    }
+                    if let Some(w) = m.context_window {
+                        v["contextWindow"] = w.into();
+                    }
+                    role_models::json_fields(roles.tool("codex"), &m.slug, &mut v);
+                    v
+                })
+                .collect();
+        root.insert(
+            "codex".into(),
+            serde_json::json!({ "models": models, "notForEfforts": role_models::efforts_json(roles.tool("codex")) }),
+        );
+    }
+    if only != Some(Tool::Codex) {
+        let listing = deps
+            .agy_binary
+            .as_deref()
+            .and_then(|agy| (deps.capture)(Path::new(agy), &["models"]));
+        let available = listing.is_some();
+        let models: Vec<serde_json::Value> = listing
+            .map(|l| {
+                agy_pick::models(&l)
+                    .into_iter()
+                    .map(|(model, efforts)| {
+                        let mut v = serde_json::json!({"model": model, "efforts": efforts});
+                        role_models::json_fields(roles.tool("antigravity"), &model, &mut v);
+                        v
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        root.insert(
+            "agy".into(),
+            serde_json::json!({ "available": available, "models": models, "notForEfforts": role_models::efforts_json(roles.tool("antigravity")) }),
+        );
+    }
+    let value = serde_json::Value::Object(root);
+    let _ = writeln!(
+        out,
+        "{}",
+        serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+    );
+    0
+}
+
+#[cfg(test)]
+#[path = "command_tests.rs"]
+mod tests;

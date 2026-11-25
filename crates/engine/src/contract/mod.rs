@@ -1,0 +1,37 @@
+pub mod antigravity;
+pub mod baseline;
+mod capability;
+pub mod channel;
+pub mod channel_draft;
+pub mod channel_remote;
+pub mod channels;
+pub mod claude;
+pub mod codex;
+pub mod conformance;
+mod conformance_subagents;
+pub mod flows;
+pub mod matrix;
+mod provider;
+mod registry;
+pub mod subagents;
+mod support;
+mod tool;
+
+pub use capability::{Capability, Group};
+pub use provider::Provider;
+pub use registry::{Cell, Registry};
+pub use support::{Flow, Kind, Support, Unsupported};
+pub use tool::Tool;
+
+#[cfg(test)]
+#[path = "registry_subagents_tests.rs"]
+mod registry_subagents_tests;
+#[cfg(test)]
+#[path = "registry_tests.rs"]
+mod registry_tests;
+#[cfg(test)]
+#[path = "support_tests.rs"]
+mod support_tests;
+#[cfg(test)]
+#[path = "tool_tests.rs"]
+mod tool_tests;

@@ -1,0 +1,319 @@
+use super::*;
+
+fn event(name: &str, data: Value) -> Event {
+    Event {
+        event: name.to_owned(),
+        data,
+    }
+}
+
+impl SwitchFeed {
+    pub(crate) fn asked_for_test(&self, data: Value) {
+        let id = data["id"].as_str().unwrap_or_default().to_owned();
+        self.shared
+            .apply(&event(topics::VAULT_REQUEST_PENDING, data));
+        self.allow_request(&id);
+    }
+
+    pub(crate) fn ended_for_test(&self, id: &str) {
+        self.shared
+            .apply(&event(topics::VAULT_REQUEST_RESOLVED, json!({"id": id})));
+    }
+}
+
+fn shared() -> Shared {
+    Shared {
+        state: Mutex::new(State {
+            switches: Switches::all_on(),
+            following: true,
+            ..State::default()
+        }),
+        stop: AtomicBool::new(false),
+        restart: Arc::default(),
+    }
+}
+
+#[test]
+fn pending_vault_items_come_and_go_by_id_and_off_drops_them() {
+    let s = shared();
+    s.apply(&event(
+        topics::VAULT_APPROVAL_PENDING,
+        json!({"id": "a1", "names": ["github"]}),
+    ));
+    s.apply(&event(
+        topics::VAULT_APPROVAL_PENDING,
+        json!({"id": "a1", "names": ["github"]}),
+    ));
+    s.apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r1"})));
+    s.apply(&event(
+        topics::VAULT_REQUEST_PENDING,
+        json!({"name": "no id"}),
+    ));
+    assert_eq!(s.state().approvals.len(), 1, "the same id once");
+    assert_eq!(
+        s.state().requests.len(),
+        1,
+        "an item without an id is nothing"
+    );
+    s.apply(&event(
+        topics::VAULT_APPROVAL_RESOLVED,
+        json!({"id": "a1", "decision": "once"}),
+    ));
+    assert!(s.state().approvals.is_empty());
+    s.apply(&event(topics::VAULT_CHANGED, json!({"names": ["github"]})));
+    assert_eq!(s.state().changes.vault, 1);
+    s.apply(&event(
+        topics::SWITCH_CHANGED,
+        json!({"switch": "vault", "on": false}),
+    ));
+    assert!(s.state().requests.is_empty());
+    assert!(!s.state().switches.vault);
+    assert_eq!(s.state().changes.vault, 2);
+}
+
+#[test]
+fn the_areas_count_their_events_and_the_accounts_switch_moves_all_three() {
+    let s = shared();
+    s.apply(&event(topics::ACCOUNTS_CHANGED, json!({})));
+    s.apply(&event(topics::ACCOUNTS_ADD_ENDED, json!({})));
+    s.apply(&event(
+        topics::PROVIDERS_CHANGED,
+        json!({"provider": "codex"}),
+    ));
+    s.apply(&event(
+        topics::PROVIDERS_CHANGED,
+        json!({"provider": null, "reason": "sync"}),
+    ));
+    s.apply(&event(
+        "limits.notice",
+        json!({"at": 1.0, "text": "me is at 91%"}),
+    ));
+    s.apply(&event("limits.notice", json!({"at": 2.0, "text": ""})));
+    s.apply(&event("something.else", json!({})));
+    let c = s.state().changes;
+    assert_eq!((c.accounts, c.providers, c.limits, c.vault), (2, 1, 2, 0));
+    assert_eq!(
+        s.state().notices,
+        vec![Notice {
+            at: 1.0,
+            text: "me is at 91%".into()
+        }]
+    );
+    s.apply(&event(
+        topics::SWITCH_CHANGED,
+        json!({"switch": "accounts", "on": false}),
+    ));
+    let c = s.state().changes;
+    assert_eq!((c.accounts, c.providers, c.limits), (3, 2, 3));
+    s.apply(&event(
+        topics::SWITCH_CHANGED,
+        json!({"switch": "accounts", "on": false}),
+    ));
+    assert_eq!(s.state().changes.accounts, 3);
+}
+
+#[test]
+fn notices_are_capped_and_a_lost_daemon_detaches_everything() {
+    let s = shared();
+    for i in 0..25 {
+        s.apply(&event(
+            "limits.notice",
+            json!({"at": i as f64, "text": format!("n{i}")}),
+        ));
+    }
+    let notices = s.state().notices.clone();
+    assert_eq!(notices.len(), NOTICES_KEPT);
+    assert_eq!(notices[0].text, "n5");
+    s.apply(&event(topics::VAULT_APPROVAL_PENDING, json!({"id": "a1"})));
+    s.lost();
+    let st = s.state();
+    assert!(!st.following && !st.switches.attached);
+    assert!(st.approvals.is_empty());
+}
+
+#[test]
+fn a_feed_with_no_daemon_shows_its_fixed_switches_and_cannot_choose() {
+    let feed = SwitchFeed::fixed(Switches::all_on());
+    assert!(!feed.is_live() && !feed.following());
+    assert!(feed.switches().is_on(Switch::Vault));
+    assert!(feed.approvals().is_empty() && feed.requests().is_empty());
+    assert!(!feed.chosen(Switch::Vault));
+    assert!(feed.choose(Switch::Vault, true).is_err());
+    let none = SwitchFeed::none();
+    assert_eq!(none.switches(), Switches::detached());
+}
+
+#[test]
+fn the_choice_is_kept_in_the_apps_own_settings() {
+    let scratch = crate::testutil::Scratch::new("switch-choice");
+    let file = scratch.path().join("settings.json");
+    let choice = SettingsChoice { file: file.clone() };
+    assert!(!choice.get(Switch::Vault));
+    choice.set(Switch::Vault, true).unwrap();
+    assert!(SettingsChoice { file: file.clone() }.get(Switch::Vault));
+    assert!(!choice.get(Switch::Accounts));
+    let kept = notchling_engine::settings::Settings::open(&file).unwrap();
+    assert_eq!(kept.raw("vaultOn"), Some(&json!(true)));
+}
+
+#[test]
+fn the_pending_list_read_on_connect_replaces_what_was_held_and_events_still_dedupe() {
+    let s = shared();
+    s.apply(&event(
+        topics::VAULT_APPROVAL_PENDING,
+        json!({"id": "gone"}),
+    ));
+    s.apply(&event(
+        topics::VAULT_REQUEST_PENDING,
+        json!({"id": "r-gone"}),
+    ));
+    let before = s.state().changes.vault;
+    s.load_pending(&json!({
+        "approvals": [{"id": "a2", "names": ["github"]}, {"id": "a2"}, {"id": "a3"}, {"no": "id"}],
+        "requests": [{"id": "r1"}]
+    }));
+    let ids = |list: &Vec<Value>| -> Vec<String> {
+        list.iter()
+            .filter_map(|p| p["id"].as_str().map(str::to_owned))
+            .collect()
+    };
+    {
+        let st = s.state();
+        assert_eq!(ids(&st.approvals), ["a2", "a3"], "oldest first, once each");
+        assert_eq!(ids(&st.requests), ["r1"]);
+        assert_eq!(st.approvals[0]["names"], json!(["github"]));
+        assert_eq!(st.changes.vault, before + 1);
+    }
+    s.apply(&event(topics::VAULT_APPROVAL_PENDING, json!({"id": "a3"})));
+    s.apply(&event(topics::VAULT_APPROVAL_RESOLVED, json!({"id": "a2"})));
+    assert_eq!(ids(&s.state().approvals), ["a3"]);
+    s.load_pending(&json!("odd"));
+    assert_eq!(ids(&s.state().approvals), ["a3"]);
+}
+
+#[test]
+fn an_accounts_event_with_a_moves_end_is_kept_for_the_view() {
+    let s = shared();
+    s.apply(&event(topics::ACCOUNTS_CHANGED, json!({"active": "a1"})));
+    {
+        let st = s.state();
+        assert_eq!((st.changes.moves, st.last_move.clone()), (0, None));
+    }
+    let end = json!({"moved": ["job-1"], "errors": {"job-2": "Couldn't move it"}});
+    s.apply(&event(topics::ACCOUNTS_CHANGED, end.clone()));
+    {
+        let st = s.state();
+        assert_eq!((st.changes.moves, st.changes.accounts), (1, 2));
+        assert_eq!(st.last_move, Some(end));
+    }
+    let result = json!({"moved": [], "errors": {"job-9": "Couldn't move it: stop failed"}});
+    s.apply(&event(
+        topics::ACCOUNTS_DONE,
+        json!({"ticket": 4, "op": "accounts.move_all", "ok": true, "result": result}),
+    ));
+    let moves = s.state().changes.moves;
+    assert_eq!((moves, s.state_move()), (2, Some(result)));
+    s.apply(&event(
+        topics::ACCOUNTS_DONE,
+        json!({"ticket": 5, "op": "accounts.move_all", "ok": false, "error": "Acting is off."}),
+    ));
+    assert_eq!(
+        s.state_move(),
+        Some(json!({"moved": [], "errors": {"accounts": "Acting is off."}}))
+    );
+    s.apply(&event(
+        topics::ACCOUNTS_DONE,
+        json!({"ticket": 6, "op": "accounts.switch", "ok": true, "result": {"moved": []}}),
+    ));
+    let st = s.state();
+    assert_eq!((st.changes.moves, st.changes.accounts), (3, 5));
+}
+
+impl Shared {
+    fn state_move(&self) -> Option<Value> {
+        self.state().last_move.clone()
+    }
+}
+
+#[test]
+fn a_settings_change_queues_its_key_once_until_it_is_taken() {
+    let s = shared();
+    let feed = SwitchFeed {
+        shared: Arc::new(s),
+        transport: None,
+        choice: Arc::new(NoChoice),
+    };
+    for (key, value) in [
+        ("chatHistory", json!("8mb")),
+        ("showPet", json!(false)),
+        ("chatHistory", json!("16mb")),
+    ] {
+        feed.shared.apply(&event(
+            topics::SETTINGS_CHANGED,
+            json!({"key": key, "value": value, "by": "agent"}),
+        ));
+    }
+    feed.shared
+        .apply(&event(topics::SETTINGS_CHANGED, json!({"value": 1})));
+    assert_eq!(feed.take_settings(), ["chatHistory", "showPet"]);
+    assert_eq!(feed.changes().limits, 0);
+    feed.shared.apply(&event(
+        topics::SETTINGS_CHANGED,
+        json!({"key": "limitMode", "value": "off"}),
+    ));
+    assert_eq!(
+        feed.changes().limits,
+        1,
+        "the Accounts window reads limits again"
+    );
+    assert_eq!(feed.take_settings(), ["limitMode"]);
+    assert!(feed.take_settings().is_empty(), "taken once");
+    for n in 0..100 {
+        feed.shared.apply(&event(
+            topics::SETTINGS_CHANGED,
+            json!({"key": format!("k{n}")}),
+        ));
+    }
+    let kept = feed.take_settings();
+    assert_eq!(kept.len(), SETTINGS_KEPT);
+    assert_eq!(
+        kept.last().map(String::as_str),
+        Some("k99"),
+        "the newest are kept"
+    );
+}
+
+#[test]
+fn a_reconnect_reads_every_key_an_agent_can_change_again() {
+    let keys = shown_keys();
+    assert!(keys.iter().any(|k| k == "chatHistory"));
+    assert!(keys.iter().any(|k| k == "limitMode"));
+    assert!(!keys.iter().any(|k| k == "accounts"));
+}
+
+#[test]
+fn the_public_calls_allow_dismiss_and_resolve_a_form() {
+    let feed = SwitchFeed::fixed(Switches::all_on());
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r1"})));
+    assert!(feed.requests().is_empty());
+    feed.allow_request("r1");
+    assert_eq!(feed.requests().len(), 1);
+    feed.dismiss_request("r1");
+    assert!(feed.requests().is_empty());
+    feed.allow_request("r1");
+    feed.resolve("r1");
+    assert!(feed.requests().is_empty());
+    feed.allow_request("r1");
+    assert!(feed.requests().is_empty(), "a resolved request stays gone");
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r2"})));
+    feed.allow_request("r2");
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_RESOLVED, json!({"id": "r2"})));
+    feed.shared
+        .apply(&event(topics::VAULT_REQUEST_PENDING, json!({"id": "r2"})));
+    assert!(feed.requests().is_empty(), "asking again needs a new yes");
+    feed.shared.lost();
+    assert!(feed.shared.state().allowed.is_empty());
+}

@@ -1,0 +1,1556 @@
+{
+  "@@locale": "en",
+  "appCancel": "Cancel",
+  "@appCancel": {
+    "description": "Shown in the Chat screen and the Paired Macs screen and the Sessions tab."
+  },
+  "appCannotVerifyNodes": "Not connecting to {names}: the phone can't verify it is the right computer.",
+  "@appCannotVerifyNodes": {
+    "description": "Shown in the app shell when the phone refuses to connect to other computers of the cluster because it cannot check who they are. $names is their names.",
+    "placeholders": {
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "appClose": "Close",
+  "@appClose": {
+    "description": "Shown in the Chat screen and pairing with a Mac."
+  },
+  "appConnected": "Connected",
+  "@appConnected": {
+    "description": "Shown in the app shell and the Paired Macs screen."
+  },
+  "appConnectedVia": "Connected · {route}",
+  "@appConnectedVia": {
+    "description": "Shown in the app shell. $route is Home Wi-Fi or Internet.",
+    "placeholders": {
+      "route": {
+        "type": "String"
+      }
+    }
+  },
+  "appConnecting": "Connecting",
+  "@appConnecting": {
+    "description": "Shown in the app shell and the Paired Macs screen."
+  },
+  "appConnectionLostRetry": "Connection lost, retrying in {seconds}s",
+  "@appConnectionLostRetry": {
+    "description": "Shown in the app shell. $seconds is the wait before the next try, in seconds.",
+    "placeholders": {
+      "seconds": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "appConnectionRevoked": "The Mac revoked this device. Pair again.",
+  "@appConnectionRevoked": {
+    "description": "Shown in the app shell."
+  },
+  "appInboxOpenCount": "{count} open",
+  "@appInboxOpenCount": {
+    "description": "Shown in the app shell. $count is how many requests are open.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "appKeepAliveBody": "To get notified when a session needs input or finishes, the app has to run in the background. Android shows a small \"Agent Console is watching\" notification. You can turn it off under Paired Macs.",
+  "@appKeepAliveBody": {
+    "description": "Shown in the app shell."
+  },
+  "appKeepAliveEnable": "Turn on",
+  "@appKeepAliveEnable": {
+    "description": "Shown in the app shell."
+  },
+  "appKeepAliveTitle": "Keep the connection in the background?",
+  "@appKeepAliveTitle": {
+    "description": "Shown in the app shell."
+  },
+  "appLoadFailed": "Couldn't load data. Please try again.",
+  "@appLoadFailed": {
+    "description": "Shown in the Chat screen and the Sessions tab."
+  },
+  "appName": "Agent Console",
+  "@appName": {
+    "description": "Shown in the app shell."
+  },
+  "appNoRouteToMac": "Can't reach the Mac. Turn on Internet access on the Mac or join the same Wi-Fi.",
+  "@appNoRouteToMac": {
+    "description": "Shown in the app shell."
+  },
+  "appNotNow": "Not now",
+  "@appNotNow": {
+    "description": "Shown in the app shell."
+  },
+  "appOpenMacs": "Paired Macs",
+  "@appOpenMacs": {
+    "description": "Shown in the app shell and the Chat screen and Settings."
+  },
+  "appPullToRefresh": "Pull to refresh",
+  "@appPullToRefresh": {
+    "description": "Not shown yet."
+  },
+  "appRetry": "Retry",
+  "@appRetry": {
+    "description": "Shown in the app shell and the Chat screen."
+  },
+  "appRetryNow": "Retry now",
+  "@appRetryNow": {
+    "description": "Shown in the app shell."
+  },
+  "appRouteHome": "Home Wi-Fi",
+  "@appRouteHome": {
+    "description": "Shown in the app shell."
+  },
+  "appRouteInternet": "Internet",
+  "@appRouteInternet": {
+    "description": "Shown in the app shell."
+  },
+  "appSettingsTitle": "Settings",
+  "@appSettingsTitle": {
+    "description": "Shown in the app shell and Settings."
+  },
+  "appTabChat": "Chat",
+  "@appTabChat": {
+    "description": "Shown in the app shell."
+  },
+  "appTabInbox": "Inbox",
+  "@appTabInbox": {
+    "description": "Shown in the app shell."
+  },
+  "appTabSessions": "Sessions",
+  "@appTabSessions": {
+    "description": "Shown in the app shell."
+  },
+  "appTabVisualize": "Visualize",
+  "@appTabVisualize": {
+    "description": "Shown in the app shell."
+  },
+  "appTakeover": "Take over",
+  "@appTakeover": {
+    "description": "Shown in the Chat screen and the Sessions tab."
+  },
+  "appTakeoverFailed": "Could not take over: {reason}",
+  "@appTakeoverFailed": {
+    "description": "Shown in the Chat screen and the Sessions tab. $reason is the reason.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "appThroughNode": "Through {node} · {primary} isn't reachable",
+  "@appThroughNode": {
+    "description": "Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to, $primary the one that cannot be reached.",
+    "placeholders": {
+      "node": {
+        "type": "String"
+      },
+      "primary": {
+        "type": "String"
+      }
+    }
+  },
+  "appThroughNodeOnly": "Through {node}",
+  "@appThroughNodeOnly": {
+    "description": "Shown in the app shell while the phone is connected to another computer of the cluster. $node is the computer it is connected to.",
+    "placeholders": {
+      "node": {
+        "type": "String"
+      }
+    }
+  },
+  "appViewOnly": "View only",
+  "@appViewOnly": {
+    "description": "Shown in the Chat screen and the Sessions tab."
+  },
+  "bridgeErrorBusy": "The Mac is busy. Try again.",
+  "@bridgeErrorBusy": {
+    "description": "The Mac is busy with something else."
+  },
+  "bridgeErrorDisconnected": "Not connected to the Mac.",
+  "@bridgeErrorDisconnected": {
+    "description": "The phone is not connected to the Mac, or the link dropped while a request was waiting."
+  },
+  "bridgeErrorInternal": "Something went wrong on the Mac.",
+  "@bridgeErrorInternal": {
+    "description": "The Mac failed, or answered in a way the phone does not understand."
+  },
+  "bridgeErrorInvalid": "The Mac didn't accept that request.",
+  "@bridgeErrorInvalid": {
+    "description": "The Mac refused the request, or does not know it because it runs an older version."
+  },
+  "bridgeErrorNotFound": "The Mac couldn't find that.",
+  "@bridgeErrorNotFound": {
+    "description": "The Mac could not find what the phone asked for, such as a session or a folder."
+  },
+  "bridgeErrorNotReachable": "The Mac couldn't reach it.",
+  "@bridgeErrorNotReachable": {
+    "description": "The Mac could not reach what the phone asked for, such as a web page."
+  },
+  "bridgeErrorTimeout": "The Mac didn't answer in time.",
+  "@bridgeErrorTimeout": {
+    "description": "The Mac did not answer a request in time."
+  },
+  "bridgeErrorUnauthorized": "The Mac doesn't accept this phone. Pair again.",
+  "@bridgeErrorUnauthorized": {
+    "description": "The Mac no longer trusts this phone."
+  },
+  "bridgeErrorUnknown": "The Mac refused the request.",
+  "@bridgeErrorUnknown": {
+    "description": "An error code this version of the phone does not know."
+  },
+  "bridgeErrorViewOnly": "This session is view only.",
+  "@bridgeErrorViewOnly": {
+    "description": "The session was opened outside Console, so the phone can only read it."
+  },
+  "bridgeErrorWithDetail": "{error} {detail}",
+  "@bridgeErrorWithDetail": {
+    "description": "$error is one of the messages above. $detail is the Mac's own explanation, in English.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "chatActivityIdle": "Idle",
+  "@chatActivityIdle": {
+    "description": "Not shown yet."
+  },
+  "chatAnswerChecking": "Checking your earlier answer…",
+  "@chatAnswerChecking": {
+    "description": "Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done."
+  },
+  "chatAnswerDelivered": "Your earlier answer ({answer}) was already delivered. Nothing more was sent.",
+  "@chatAnswerDelivered": {
+    "description": "Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.",
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
+  "chatAnswerFailed": "Couldn't send the answer. Please try again.",
+  "@chatAnswerFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatAnswerMayDeliver": "Your earlier answer ({answer}) may still be delivered. Tap again to send this one instead.",
+  "@chatAnswerMayDeliver": {
+    "description": "Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.",
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
+  "chatAnswerOnMac": "Answer on the Mac",
+  "@chatAnswerOnMac": {
+    "description": "Not shown yet."
+  },
+  "chatAttachPhoto": "Attach a photo",
+  "@chatAttachPhoto": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatCompactConfirm": "Compact this session's context? Claude summarises the conversation so far to free room. This cannot be undone.",
+  "@chatCompactConfirm": {
+    "description": "Body of the dialog that asks before compacting a session."
+  },
+  "chatCompactTitle": "Compact context",
+  "@chatCompactTitle": {
+    "description": "Title of the dialog that asks before compacting a session."
+  },
+  "chatCompactTooltip": "Compact",
+  "@chatCompactTooltip": {
+    "description": "Tooltip of the Compact button in the Chat composer and the confirm button of its dialog."
+  },
+  "chatCompactionTitle": "Conversation compacted",
+  "@chatCompactionTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatComposerHint": "Message this session",
+  "@chatComposerHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatContext": "Context",
+  "@chatContext": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatControlConsole": "Console",
+  "@chatControlConsole": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatControlJob": "Background job",
+  "@chatControlJob": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatCopied": "Copied",
+  "@chatCopied": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatCopyCode": "Copy",
+  "@chatCopyCode": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatEffortChip": "Effort",
+  "@chatEffortChip": {
+    "description": "The Effort button in the Chat composer, before a level is known."
+  },
+  "chatEffortHigh": "High",
+  "@chatEffortHigh": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortLow": "Low",
+  "@chatEffortLow": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortMax": "Max",
+  "@chatEffortMax": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortMedium": "Medium",
+  "@chatEffortMedium": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEffortSheetTitle": "Choose an effort level",
+  "@chatEffortSheetTitle": {
+    "description": "Title of the sheet that lists effort levels in the Chat composer."
+  },
+  "chatEffortXhigh": "Extra High",
+  "@chatEffortXhigh": {
+    "description": "An effort level in the Chat composer."
+  },
+  "chatEmpty": "No messages yet.",
+  "@chatEmpty": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatLimitFiveHours": "5h",
+  "@chatLimitFiveHours": {
+    "description": "Not shown yet."
+  },
+  "chatLimitWeek": "Week",
+  "@chatLimitWeek": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatLoadOlder": "Load older messages",
+  "@chatLoadOlder": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatMarkArrow": "Arrow",
+  "@chatMarkArrow": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkBox": "Box",
+  "@chatMarkBox": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkCircle": "Circle",
+  "@chatMarkCircle": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkClear": "Clear",
+  "@chatMarkClear": {
+    "description": "Tooltip of the button that removes every mark in the picture editor."
+  },
+  "chatMarkFailed": "Could not prepare the picture",
+  "@chatMarkFailed": {
+    "description": "Shown in the picture editor when the marked picture could not be made."
+  },
+  "chatMarkNext": "Next",
+  "@chatMarkNext": {
+    "description": "Button of the picture editor that goes on to the caption and Send."
+  },
+  "chatMarkPen": "Pen",
+  "@chatMarkPen": {
+    "description": "A drawing tool in the picture editor."
+  },
+  "chatMarkRed": "Red",
+  "@chatMarkRed": {
+    "description": "Name of a mark colour in the picture editor."
+  },
+  "chatMarkRendering": "Preparing the picture",
+  "@chatMarkRendering": {
+    "description": "Shown in the picture editor while the marks are drawn into the picture."
+  },
+  "chatMarkUndo": "Undo",
+  "@chatMarkUndo": {
+    "description": "Tooltip of the button that removes the last mark in the picture editor."
+  },
+  "chatMarkWhite": "White",
+  "@chatMarkWhite": {
+    "description": "Name of a mark colour in the picture editor."
+  },
+  "chatMarkYellow": "Yellow",
+  "@chatMarkYellow": {
+    "description": "Name of a mark colour in the picture editor."
+  },
+  "chatModelChip": "Model",
+  "@chatModelChip": {
+    "description": "The Model button in the Chat composer, before a model is known."
+  },
+  "chatModelOlder": "More models",
+  "@chatModelOlder": {
+    "description": "Heading of the older models in the model sheet."
+  },
+  "chatModelSheetTitle": "Choose a model",
+  "@chatModelSheetTitle": {
+    "description": "Title of the sheet that lists models in the Chat composer."
+  },
+  "chatMultiSelectOnMac": "This question allows several answers. Answer it on the Mac.",
+  "@chatMultiSelectOnMac": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatMuteSession": "Mute notifications for this session",
+  "@chatMuteSession": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatNewMessages": "New messages",
+  "@chatNewMessages": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatNewMessagesBelow": "New messages",
+  "@chatNewMessagesBelow": {
+    "description": "Not shown yet."
+  },
+  "chatPendingPermission": "Permission needed: {tool}",
+  "@chatPendingPermission": {
+    "description": "Shown in the Chat screen. $tool is the tool Claude wants to use.",
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
+  },
+  "chatPendingQuestion": "Question from Claude",
+  "@chatPendingQuestion": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoCamera": "Take a photo",
+  "@chatPhotoCamera": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoCaptionHint": "Add a caption (optional)",
+  "@chatPhotoCaptionHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoGallery": "Choose from library",
+  "@chatPhotoGallery": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoPickFailed": "Could not open the camera or library.",
+  "@chatPhotoPickFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoSent": "Photo sent",
+  "@chatPhotoSent": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPhotoTitle": "Send a photo",
+  "@chatPhotoTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPickPending": "Applying",
+  "@chatPickPending": {
+    "description": "Beside the model or effort the user just picked in the Chat composer, until the session reports it back."
+  },
+  "chatPictureClose": "Close picture",
+  "@chatPictureClose": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPictureFailed": "Could not load the picture",
+  "@chatPictureFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPictureMarkup": "Mark up",
+  "@chatPictureMarkup": {
+    "description": "Title of the picture editor and the button that opens it in the picture viewer."
+  },
+  "chatPictureOpen": "Open picture",
+  "@chatPictureOpen": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatPictureReply": "Reply",
+  "@chatPictureReply": {
+    "description": "Button in the picture viewer that sends the picture as it is, with a caption."
+  },
+  "chatQueued": "waiting",
+  "@chatQueued": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSelectSession": "Select a session to see its chat.",
+  "@chatSelectSession": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSend": "Send",
+  "@chatSend": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendBusy": "Sending",
+  "@chatSendBusy": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendError": "Couldn't send the message. Please try again.",
+  "@chatSendError": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendFailed": "Not sent",
+  "@chatSendFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNow": "Send now",
+  "@chatSendNow": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNowBody": "Claude stops the current turn and runs this waiting message right away.",
+  "@chatSendNowBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNowFailed": "Could not interrupt",
+  "@chatSendNowFailed": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSendNowTitle": "Interrupt the running turn to send now?",
+  "@chatSendNowTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSending": "sending",
+  "@chatSending": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSent": "sent",
+  "@chatSent": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShellHeader": "Shell command",
+  "@chatShellHeader": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShellHint": "Send runs it like ! in the terminal · delete the ! to send a message instead",
+  "@chatShellHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShellRunsIn": "runs in {folder} · Claude sees the output",
+  "@chatShellRunsIn": {
+    "description": "Shown in the Chat screen. $folder is the folder path.",
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "chatShellWillRun": "Will run",
+  "@chatShellWillRun": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatShowOutput": "Show output",
+  "@chatShowOutput": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSlashClear": "Clear the conversation and start fresh",
+  "@chatSlashClear": {
+    "description": "What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashCompact": "Summarise the conversation to free up context",
+  "@chatSlashCompact": {
+    "description": "What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashContext": "Show how much context is used",
+  "@chatSlashContext": {
+    "description": "What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashCost": "Show the cost of this session",
+  "@chatSlashCost": {
+    "description": "What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashEffort": "Change the effort level",
+  "@chatSlashEffort": {
+    "description": "What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashHeader": "Commands",
+  "@chatSlashHeader": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatSlashHelp": "Show help",
+  "@chatSlashHelp": {
+    "description": "What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashInit": "Write a CLAUDE.md for this project",
+  "@chatSlashInit": {
+    "description": "What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashMemory": "Edit memory files",
+  "@chatSlashMemory": {
+    "description": "What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashModel": "Change the model",
+  "@chatSlashModel": {
+    "description": "What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashRename": "Rename this session",
+  "@chatSlashRename": {
+    "description": "What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashReview": "Review a pull request",
+  "@chatSlashReview": {
+    "description": "What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashRewind": "Go back to an earlier point",
+  "@chatSlashRewind": {
+    "description": "What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashSecurityReview": "Security review of pending changes",
+  "@chatSlashSecurityReview": {
+    "description": "What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashStatus": "Show version, model and account",
+  "@chatSlashStatus": {
+    "description": "What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashTodos": "Show the current task list",
+  "@chatSlashTodos": {
+    "description": "What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatSlashUsage": "Show plan usage limits",
+  "@chatSlashUsage": {
+    "description": "What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names."
+  },
+  "chatTakeoverBody": "The Mac will reopen this session in Console's Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.",
+  "@chatTakeoverBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverBusyBody": "The session is running; the current turn will be cut off.",
+  "@chatTakeoverBusyBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverBusyTitle": "Session is running",
+  "@chatTakeoverBusyTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverHint": "Opened outside Console, view only. Take it over to message it from your phone.",
+  "@chatTakeoverHint": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverRunning": "Taking over…",
+  "@chatTakeoverRunning": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverStopBody": "Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?",
+  "@chatTakeoverStopBody": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatTakeoverTitle": "Take over this session?",
+  "@chatTakeoverTitle": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatToolStepOne": "1 tool step",
+  "@chatToolStepOne": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatToolStepsCount": "{count, plural, one{{count} tool step} other{{count} tool steps}}",
+  "@chatToolStepsCount": {
+    "description": "Shown in the Chat screen. $count is the number of tool steps.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "chatToolsCollapse": "Collapse",
+  "@chatToolsCollapse": {
+    "description": "Not shown yet."
+  },
+  "chatToolsExpand": "Expand",
+  "@chatToolsExpand": {
+    "description": "Not shown yet."
+  },
+  "chatUnmuteSession": "Unmute this session",
+  "@chatUnmuteSession": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatUpdating": "Updating",
+  "@chatUpdating": {
+    "description": "Shown in the Chat screen."
+  },
+  "chatViewOnlyChip": "View only",
+  "@chatViewOnlyChip": {
+    "description": "Not shown yet."
+  },
+  "chatViewOnlyReason": "Opened outside Console, view only",
+  "@chatViewOnlyReason": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentAllow": "Allow",
+  "@consentAllow": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentDeny": "Deny",
+  "@consentDeny": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentNotchAllow": "Allow",
+  "@consentNotchAllow": {
+    "description": "Option of the notch's permission card: allow this one time. The line under it is the next message."
+  },
+  "consentNotchAllowDetail": "This time only",
+  "@consentNotchAllowDetail": {
+    "description": "Line under the Allow option of the notch's permission card."
+  },
+  "consentNotchAlways": "Always allow this",
+  "@consentNotchAlways": {
+    "description": "Option of the notch's permission card: allow and stop asking for the same thing. The line under it is the next message."
+  },
+  "consentNotchAlwaysDetail": "Don't ask again for this",
+  "@consentNotchAlwaysDetail": {
+    "description": "Line under the Always allow option of the notch's permission card."
+  },
+  "consentNotchDeny": "Deny",
+  "@consentNotchDeny": {
+    "description": "Option of the notch's permission card: refuse. The line under it is the next message."
+  },
+  "consentNotchDenyDetail": "Claude tries something else",
+  "@consentNotchDenyDetail": {
+    "description": "Line under the Deny option of the notch's permission card."
+  },
+  "consentNotchPermissionNeeded": "Permission needed",
+  "@consentNotchPermissionNeeded": {
+    "description": "Title of the card in the notch that asks to allow a tool."
+  },
+  "consentNotchWantsToUse": "Claude wants to use {tool}",
+  "@consentNotchWantsToUse": {
+    "description": "Line of the card in the notch that says what is asked. $tool is the tool Claude wants to use.",
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
+  },
+  "consentPair": "Pair",
+  "@consentPair": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "consentSecretRequest": "Save the secret {name} in the Vault",
+  "@consentSecretRequest": {
+    "description": "What a card asks when an agent wants a secret saved in the Vault, new or replacing one of the same name. $name is the secret's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "consentSettingChange": "Change {title}",
+  "@consentSettingChange": {
+    "description": "What a card asks when an agent wants a setting changed. $title is the setting's name as Settings shows it.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "consentStopAndTakeOver": "Stop and take over",
+  "@consentStopAndTakeOver": {
+    "description": "Shown in the Chat screen."
+  },
+  "consentStopAnyway": "Stop anyway",
+  "@consentStopAnyway": {
+    "description": "Shown in the Chat screen."
+  },
+  "inboxAnsweredHere": "You answered: {action}",
+  "@inboxAnsweredHere": {
+    "description": "Shown in the Inbox. $action is the choice you made, such as Allow.",
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxAnsweredOnMac": "Answered on the Mac: {action}",
+  "@inboxAnsweredOnMac": {
+    "description": "Shown in the Inbox. $action is the choice made on the Mac, such as Allow.",
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxConfirmContinueBodyUnnamed": "The newer copy on the other machine is kept beside it.",
+  "@inboxConfirmContinueBodyUnnamed": {
+    "description": "Body of that question."
+  },
+  "inboxConfirmContinueTitle": "Continue {title} here?",
+  "@inboxConfirmContinueTitle": {
+    "description": "Title of the question before a waiting session continues from this machine's copy. $title is the session's name.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxConfirmMoveAnywayTitle": "Move anyway?",
+  "@inboxConfirmMoveAnywayTitle": {
+    "description": "Title of the question before an inbox answer that moves the primary although safety can't be shown."
+  },
+  "inboxConfirmMoveHereBody": "Sessions continue here from the newest copy this machine holds. Work the old machine did after that is kept on it.",
+  "@inboxConfirmMoveHereBody": {
+    "description": "Body of that question."
+  },
+  "inboxConfirmMoveHereTitle": "Move to this machine now?",
+  "@inboxConfirmMoveHereTitle": {
+    "description": "Title of the question before the inbox answer that moves the primary here."
+  },
+  "inboxConfirmTakeBackBody": "This machine becomes the primary again. Sessions that moved away come back when their turn ends.",
+  "@inboxConfirmTakeBackBody": {
+    "description": "Body of that question."
+  },
+  "inboxConfirmTakeBackTitle": "Take Back?",
+  "@inboxConfirmTakeBackTitle": {
+    "description": "Title of the question before the inbox answer that takes the primary back."
+  },
+  "inboxDeclined": "The Mac didn't take that answer. Try again on the Mac.",
+  "@inboxDeclined": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxDone": "Done",
+  "@inboxDone": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxEmptyBody": "Requests from your Mac show up here.",
+  "@inboxEmptyBody": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxEmptyTitle": "Nothing Needs You",
+  "@inboxEmptyTitle": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxNeedsYou": "Needs You",
+  "@inboxNeedsYou": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxOpenOnMac": "Open on Mac",
+  "@inboxOpenOnMac": {
+    "description": "Shown in the Inbox."
+  },
+  "inboxUnsupported": "Notchling on this Mac has no inbox yet.",
+  "@inboxUnsupported": {
+    "description": "Shown in the Inbox."
+  },
+  "itemExpired": "Expired",
+  "@itemExpired": {
+    "description": "The result of an inbox item nobody answered in time. Shown in the Inbox."
+  },
+  "itemWithdrawn": "Withdrawn",
+  "@itemWithdrawn": {
+    "description": "The result of an inbox item taken back. Shown in the Inbox."
+  },
+  "languageName": "English",
+  "@languageName": {
+    "description": "The language's own name, as its speakers write it. It is the label of this language in the Language row."
+  },
+  "machinesChoose": "Choose a Machine",
+  "@machinesChoose": {
+    "description": "Button in an inbox card that opens the Machines popup."
+  },
+  "machinesConfirmBody": "Sessions continue there from {time}. Work {old} did after that is kept on {old}.",
+  "@machinesConfirmBody": {
+    "description": "Body of that question for a machine with a copy. $time is the clock time of the copy, such as 14:02. $old is the name of the machine that can't be reached, such as m5.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "old": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesConfirmBodyJobs": "{machine} holds no copy of your sessions, so it will only control jobs. Work done on the old machine stays there.",
+  "@machinesConfirmBodyJobs": {
+    "description": "Body of that question for a machine that holds no copy of the sessions. $machine is the machine's name, such as m3.",
+    "placeholders": {
+      "machine": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesConfirmBodyUnnamed": "Sessions continue there from {time}. Work the old machine did after that is kept on it.",
+  "@machinesConfirmBodyUnnamed": {
+    "description": "Body of that question for a machine with a copy when the old machine's name is not known. $time is the clock time of the copy, such as 14:02.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesConfirmTitle": "Move to {machine} now?",
+  "@machinesConfirmTitle": {
+    "description": "Title of the question before a session moves to a machine. $machine is the machine's name, such as m1.",
+    "placeholders": {
+      "machine": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesEmpty": "No other machine is online.",
+  "@machinesEmpty": {
+    "description": "Shown in the Machines popup when no other machine is online."
+  },
+  "machinesFailed": "Couldn't start the move. Try again.",
+  "@machinesFailed": {
+    "description": "Shown when a move could not be started."
+  },
+  "machinesIntro": "Your main machine can't be reached. Pick the machine that should take over.",
+  "@machinesIntro": {
+    "description": "Shown under the title of the Machines popup."
+  },
+  "machinesJobsOnly": "Controls jobs only",
+  "@machinesJobsOnly": {
+    "description": "One machine in the Machines popup that holds no copy of the sessions."
+  },
+  "machinesMove": "Move",
+  "@machinesMove": {
+    "description": "Button that sends the move."
+  },
+  "machinesMoveAnyway": "Move Anyway",
+  "@machinesMoveAnyway": {
+    "description": "Button that sends the move after the risk was shown."
+  },
+  "machinesMoving": "Moving to {machine}. Sessions continue there soon.",
+  "@machinesMoving": {
+    "description": "Shown after a move was sent. $machine is the machine's name, such as m1.",
+    "placeholders": {
+      "machine": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesNotMaster": "Can Be Master is off",
+  "@machinesNotMaster": {
+    "description": "One machine in the Machines popup that is not allowed to be the primary. It can't be picked."
+  },
+  "machinesNotReady": "Not ready to take over",
+  "@machinesNotReady": {
+    "description": "One machine in the Machines popup that is not ready to take over."
+  },
+  "machinesRelayedFallback": "The old machine is reachable through another machine; nothing moved.",
+  "@machinesRelayedFallback": {
+    "description": "Shown when the Mac says the old machine can be reached and nothing moved but gave no words."
+  },
+  "machinesResume": "Can resume old sessions · copy from {time}",
+  "@machinesResume": {
+    "description": "One machine in the Machines popup that holds a copy of the sessions. $time is the clock time of the copy, such as 14:02.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesRiskTitle": "Move anyway?",
+  "@machinesRiskTitle": {
+    "description": "Title of the risk question that follows a move the Mac wants confirmed."
+  },
+  "machinesRowLabel": "{name}, {detail}",
+  "@machinesRowLabel": {
+    "description": "Spoken description of one machine in the Machines popup. $name is the machine's name, such as m1. $detail is what the row says under the name, such as Controls jobs only.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "machinesTitle": "Choose a Machine",
+  "@machinesTitle": {
+    "description": "Title of the popup the phone opens when no primary machine can be reached."
+  },
+  "macsActive": "In use",
+  "@macsActive": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsAdd": "Add a Mac",
+  "@macsAdd": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsComputerHeadingLabel": "{count, plural, one{{name}, {link}, {count} session} other{{name}, {link}, {count} sessions}}",
+  "@macsComputerHeadingLabel": {
+    "description": "Read aloud by a screen reader for the heading of one Mac in the session list. $name is the Mac's name, $link says whether it is connected, $count is how many sessions it has.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      },
+      "name": {
+        "type": "String"
+      },
+      "link": {
+        "type": "String"
+      }
+    }
+  },
+  "macsComputerOffline": "Not connected",
+  "@macsComputerOffline": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsComputerRevoked": "Revoked",
+  "@macsComputerRevoked": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsKeepAliveHint": "Get notifications while the app is in the background. Shows a small permanent notification.",
+  "@macsKeepAliveHint": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsKeepAliveSetting": "Keep connection in the background",
+  "@macsKeepAliveSetting": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsRemove": "Remove Mac",
+  "@macsRemove": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsRemoveConfirm": "Remove “{name}” from this phone?",
+  "@macsRemoveConfirm": {
+    "description": "Shown in the Paired Macs screen. $name is the Mac's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "macsTitle": "Paired Macs",
+  "@macsTitle": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "macsUse": "Use this Mac",
+  "@macsUse": {
+    "description": "Shown in the Paired Macs screen."
+  },
+  "notificationsChannelFinished": "Finished sessions",
+  "@notificationsChannelFinished": {
+    "description": "The name of the Android notification channel for sessions that finished."
+  },
+  "notificationsChannelMessages": "New messages from Claude",
+  "@notificationsChannelMessages": {
+    "description": "The name of the Android notification channel for new messages from Claude."
+  },
+  "notificationsChannelNeedsYou": "Sessions that need you",
+  "@notificationsChannelNeedsYou": {
+    "description": "The name of the Android notification channel for sessions that need an answer. Shown in the system's notification settings."
+  },
+  "notificationsFinishedBody": "Done",
+  "@notificationsFinishedBody": {
+    "description": "The text of a notification when a session finished."
+  },
+  "notificationsNeedsBody": "Needs your answer",
+  "@notificationsNeedsBody": {
+    "description": "The text of a notification when Claude waits for an answer and has no question to show."
+  },
+  "notificationsNeedsInputBody": "{name} is waiting.",
+  "@notificationsNeedsInputBody": {
+    "description": "Not shown yet. $name is the session name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationsNeedsInputTitle": "Session needs input",
+  "@notificationsNeedsInputTitle": {
+    "description": "Not shown yet."
+  },
+  "notificationsSummaryBody": "Something new",
+  "@notificationsSummaryBody": {
+    "description": "The text of the grouped notification that stands for several new ones."
+  },
+  "notificationsWatching": "Watching",
+  "@notificationsWatching": {
+    "description": "The line of the permanent notification while the app watches and no session is working."
+  },
+  "notificationsWatchingSessions": "{count, plural, one{Watching · {count} session} other{Watching · {count} sessions}}",
+  "@notificationsWatchingSessions": {
+    "description": "The line of the permanent notification while the app watches sessions that work or wait. $count is the number of those sessions.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "pairingCameraDenied": "Camera access is off. Use manual entry.",
+  "@pairingCameraDenied": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingCode": "Pairing code (8 characters)",
+  "@pairingCode": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingDenied": "The Mac refused this device, or the code expired.",
+  "@pairingDenied": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingDeviceName": "Device name",
+  "@pairingDeviceName": {
+    "description": "Not shown yet."
+  },
+  "pairingFailed": "Couldn't pair. Please try again.",
+  "@pairingFailed": {
+    "description": "Not shown yet."
+  },
+  "pairingFingerprint": "Certificate fingerprint (SHA-256)",
+  "@pairingFingerprint": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingFingerprintMismatch": "The Mac's certificate doesn't match the pinned fingerprint. Connection refused.",
+  "@pairingFingerprintMismatch": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingHost": "Mac address (IP or .local name)",
+  "@pairingHost": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingIntro": "On the Mac, open Agent Console, choose Phone, then Pair a phone.",
+  "@pairingIntro": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingInvalid": "The pairing code isn't valid.",
+  "@pairingInvalid": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingManual": "Enter manually",
+  "@pairingManual": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingPasteJson": "Paste the QR content (JSON)",
+  "@pairingPasteJson": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingPort": "Port",
+  "@pairingPort": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingScan": "Scan QR",
+  "@pairingScan": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingTitle": "Pair with a Mac",
+  "@pairingTitle": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingUnreachable": "Couldn't reach the Mac. Check the network and address.",
+  "@pairingUnreachable": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "pairingWaiting": "Waiting for the Mac to allow…",
+  "@pairingWaiting": {
+    "description": "Shown in pairing with a Mac."
+  },
+  "sessionsAllProjects": "All projects",
+  "@sessionsAllProjects": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsArchive": "Archive",
+  "@sessionsArchive": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsArchivedToast": "Archived {name}",
+  "@sessionsArchivedToast": {
+    "description": "Shown in the Sessions tab. $name is the session name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsComputerNoSessions": "No sessions",
+  "@sessionsComputerNoSessions": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsDaysShort": "{n} d",
+  "@sessionsDaysShort": {
+    "description": "Shown in the Sessions tab. $n is days.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsEmptyBody": "Claude Code sessions on your Mac show up here.",
+  "@sessionsEmptyBody": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsEmptyTitle": "No sessions yet",
+  "@sessionsEmptyTitle": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsFilteredEmpty": "No sessions in this project.",
+  "@sessionsFilteredEmpty": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsGroupLabel": "{count, plural, one{{state}, {count} session} other{{state}, {count} sessions}}",
+  "@sessionsGroupLabel": {
+    "description": "Read aloud by a screen reader for the heading of a group in the session list. $state is the group's name, $count is how many sessions it holds.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      },
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsHeldCancel": "Cancel",
+  "@sessionsHeldCancel": {
+    "description": "Shown in the Sessions tab on a held command. Drops it without sending."
+  },
+  "sessionsHeldDismiss": "Dismiss",
+  "@sessionsHeldDismiss": {
+    "description": "Shown in the Sessions tab on a message that says a held command was dropped. Dismisses the message."
+  },
+  "sessionsHeldFailed": "Couldn't update that command. Try again.",
+  "@sessionsHeldFailed": {
+    "description": "Shown in the Sessions tab under a held command when the Mac did not do what was asked, such as cancelling or sending it."
+  },
+  "sessionsHeldOn": "Held on {name}",
+  "@sessionsHeldOn": {
+    "description": "Shown in the Sessions tab above the list, on a command the phone sent while the Mac could not be reached. $name is the computer that keeps it until it can be sent.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsHeldSend": "Send",
+  "@sessionsHeldSend": {
+    "description": "Shown in the Sessions tab on a held command. Sends it now."
+  },
+  "sessionsHeldStillSend": "Still send?",
+  "@sessionsHeldStillSend": {
+    "description": "Shown in the Sessions tab on a held command that waited over an hour, once the Mac can be reached again. The buttons under it are Send and Cancel."
+  },
+  "sessionsHeldWaiting": "Waiting",
+  "@sessionsHeldWaiting": {
+    "description": "Shown in the Sessions tab on a held command that has waited over an hour and is not sent on its own. Also read aloud."
+  },
+  "sessionsHoursShort": "{n} h",
+  "@sessionsHoursShort": {
+    "description": "Shown in the Sessions tab. $n is hours.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsJustNow": "Just now",
+  "@sessionsJustNow": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsMinutesShort": "{n} min",
+  "@sessionsMinutesShort": {
+    "description": "Shown in the Sessions tab. $n is minutes.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsModelDefault": "Default",
+  "@sessionsModelDefault": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSession": "New session",
+  "@sessionsNewSession": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionConfirmBody": "Claude will run in {folder} on the Mac.",
+  "@sessionsNewSessionConfirmBody": {
+    "description": "Shown in the Sessions tab. $folder is the folder path.",
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsNewSessionConfirmTitle": "Start a new session?",
+  "@sessionsNewSessionConfirmTitle": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionFailed": "Couldn't start a new session. Please try again.",
+  "@sessionsNewSessionFailed": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionFolder": "Folder",
+  "@sessionsNewSessionFolder": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionModel": "Model",
+  "@sessionsNewSessionModel": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionNoProjects": "No recent folders on the Mac.",
+  "@sessionsNewSessionNoProjects": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionOpen": "Start",
+  "@sessionsNewSessionOpen": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNewSessionStarted": "The Mac started a new session.",
+  "@sessionsNewSessionStarted": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsNodeOffline": "Offline",
+  "@sessionsNodeOffline": {
+    "description": "Shown on a session row in the Sessions tab beside the name of its computer, when that computer can't be reached right now. Also read aloud."
+  },
+  "sessionsNodeOn": "On {name}",
+  "@sessionsNodeOn": {
+    "description": "Read aloud by a screen reader for a session that runs on another computer of the cluster. $name is that computer's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsNodeOnOffline": "On {name}, offline",
+  "@sessionsNodeOnOffline": {
+    "description": "Read aloud by a screen reader for a session that runs on another computer of the cluster when that computer can't be reached right now. $name is that computer's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsRunningSubagents": "{count, plural, one{{count} subagent running} other{{count} subagents running}}",
+  "@sessionsRunningSubagents": {
+    "description": "Shown in the Sessions tab. $count is the number of subagents.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsSearchHint": "Search sessions",
+  "@sessionsSearchHint": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsSearchNoMatch": "No sessions match “{query}”.",
+  "@sessionsSearchNoMatch": {
+    "description": "Shown in the Sessions tab. $query is what you typed.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionsStateDone": "Done",
+  "@sessionsStateDone": {
+    "description": "A session that finished its turn. Shown in the Sessions tab."
+  },
+  "sessionsStateExited": "Ended",
+  "@sessionsStateExited": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsStateNeedsInput": "Needs Input",
+  "@sessionsStateNeedsInput": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsStateRunning": "Working",
+  "@sessionsStateRunning": {
+    "description": "A session that is working on a turn. Shown in the Chat screen and the Sessions tab."
+  },
+  "sessionsSubagentsHide": "{count, plural, one{Hide {count} subagent} other{Hide {count} subagents}}",
+  "@sessionsSubagentsHide": {
+    "description": "Shown in the Sessions tab. $count is the number of subagents.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsSubagentsShow": "{count, plural, one{Show {count} subagent} other{Show {count} subagents}}",
+  "@sessionsSubagentsShow": {
+    "description": "Shown in the Sessions tab. $count is the number of subagents.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "sessionsTakeoverShort": "Take over",
+  "@sessionsTakeoverShort": {
+    "description": "Shown in the Sessions tab."
+  },
+  "sessionsUndo": "Undo",
+  "@sessionsUndo": {
+    "description": "Shown in the Sessions tab."
+  },
+  "settingsNotifications": "Notifications",
+  "@settingsNotifications": {
+    "description": "Shown in Settings."
+  },
+  "settingsSound": "Notification sounds",
+  "@settingsSound": {
+    "description": "Shown in Settings."
+  },
+  "settingsSoundHint": "A soft sound for new messages and sessions that need you while the app is open.",
+  "@settingsSoundHint": {
+    "description": "Shown in Settings."
+  },
+  "settingsTheme": "Appearance",
+  "@settingsTheme": {
+    "description": "Shown in Settings."
+  },
+  "settingsThemeDark": "Dark",
+  "@settingsThemeDark": {
+    "description": "Shown in Settings."
+  },
+  "settingsThemeLight": "Light",
+  "@settingsThemeLight": {
+    "description": "Shown in Settings."
+  },
+  "settingsThemeSystem": "System",
+  "@settingsThemeSystem": {
+    "description": "Shown in Settings."
+  },
+  "visualizeBundleMissing": "The viz bundle is missing. Run tool/sync_viz.sh and rebuild.",
+  "@visualizeBundleMissing": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeLoadFailed": "Couldn't load the visualization. Please try again.",
+  "@visualizeLoadFailed": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizePhoneError": "Couldn't show the device: {message}",
+  "@visualizePhoneError": {
+    "description": "Not shown yet. $message is the reason.",
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "visualizePhoneNoPermission": "The Mac hasn't granted Screen Recording to Agent Console.",
+  "@visualizePhoneNoPermission": {
+    "description": "Not shown yet."
+  },
+  "visualizePhoneNoWindow": "No device window is showing on the Mac.",
+  "@visualizePhoneNoWindow": {
+    "description": "Not shown yet."
+  },
+  "visualizePhoneStarting": "Waiting for frames from the Mac…",
+  "@visualizePhoneStarting": {
+    "description": "Not shown yet."
+  },
+  "visualizeSelectSession": "Select a session to see its visualization.",
+  "@visualizeSelectSession": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeSuggested": "Suggested",
+  "@visualizeSuggested": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeTabChart": "Chart",
+  "@visualizeTabChart": {
+    "description": "A tab of the Visualize screen: a chart."
+  },
+  "visualizeTabDiagram": "Diagram",
+  "@visualizeTabDiagram": {
+    "description": "A tab of the Visualize screen: a diagram."
+  },
+  "visualizeTabEntity": "Entity",
+  "@visualizeTabEntity": {
+    "description": "A tab of the Visualize screen: an entity diagram."
+  },
+  "visualizeTabFlow": "Flow",
+  "@visualizeTabFlow": {
+    "description": "A tab of the Visualize screen: a flow chart."
+  },
+  "visualizeTabPhone": "Phone",
+  "@visualizeTabPhone": {
+    "description": "A tab of the Visualize screen: the Mac's device window."
+  },
+  "visualizeTabWeb": "Web",
+  "@visualizeTabWeb": {
+    "description": "A tab of the Visualize screen: a web page captured on the Mac."
+  },
+  "visualizeWebCandidates": "Running on the Mac",
+  "@visualizeWebCandidates": {
+    "description": "Not shown yet."
+  },
+  "visualizeWebFailed": "Couldn't capture the page. Please try again.",
+  "@visualizeWebFailed": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebHint": "Start the dev server on the Mac and refresh, or pick another address below.",
+  "@visualizeWebHint": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebNoUrl": "This session has no web address yet. Enter one above.",
+  "@visualizeWebNoUrl": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebRefresh": "Capture again",
+  "@visualizeWebRefresh": {
+    "description": "Shown in the Visualize tab."
+  },
+  "visualizeWebUrl": "Page address (localhost on the Mac)",
+  "@visualizeWebUrl": {
+    "description": "Shown in the Visualize tab."
+  },
+  "voiceEngineError": "Transcription failed. Try again.",
+  "@voiceEngineError": {
+    "description": "Shown in dictation."
+  },
+  "voiceMicCancel": "Cancel transcription",
+  "@voiceMicCancel": {
+    "description": "Shown in dictation."
+  },
+  "voiceMicStart": "Dictate",
+  "@voiceMicStart": {
+    "description": "Shown in dictation."
+  },
+  "voiceMicStop": "Stop and transcribe",
+  "@voiceMicStop": {
+    "description": "Shown in dictation."
+  },
+  "voiceModelMissing": "The speech model is missing from this app.",
+  "@voiceModelMissing": {
+    "description": "Shown under the reply box when dictation cannot start because the model file was not bundled."
+  },
+  "voiceNoSpeech": "No speech heard. Try speaking closer to the mic.",
+  "@voiceNoSpeech": {
+    "description": "Shown in dictation."
+  },
+  "voiceOpenSettings": "Open settings",
+  "@voiceOpenSettings": {
+    "description": "Shown in dictation."
+  },
+  "voicePermissionDenied": "Microphone access is off.",
+  "@voicePermissionDenied": {
+    "description": "Shown in dictation."
+  },
+  "voiceRecorderError": "Could not record.",
+  "@voiceRecorderError": {
+    "description": "Shown in dictation."
+  },
+  "voiceTooLong": "Stopped at 60 seconds.",
+  "@voiceTooLong": {
+    "description": "Shown in dictation."
+  },
+  "voiceTranscribing": "Transcribing…",
+  "@voiceTranscribing": {
+    "description": "Shown in dictation."
+  }
+}

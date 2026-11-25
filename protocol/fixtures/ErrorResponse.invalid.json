@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "invalid",
+    "message": "No such op \"nope\"."
+  },
+  "id": 9,
+  "ok": false
+}

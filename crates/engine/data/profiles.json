@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "default": "balanced",
+  "floors": {
+    "fix": "sonnet high",
+    "judge": "opus high",
+    "hardest": "opus xhigh"
+  },
+  "presets": {
+    "saver": {
+      "cells": {
+        "read": { "claude": "haiku low", "codex": "gpt-6-luna low", "agy": "gemini-4-hydrogen low" },
+        "code": { "claude": "sonnet medium", "codex": "gpt-6-luna medium", "agy": "gemini-4-hydrogen medium" },
+        "fix": { "claude": "sonnet high", "codex": "gpt-6-sol medium", "agy": "gemini-4-hydrogen high" },
+        "judge": { "claude": "opus high", "codex": "gpt-6-astra high", "agy": "gemini-4-argon high" },
+        "hardest": { "claude": "opus xhigh", "codex": "gpt-6-astra xhigh", "agy": "gemini-4-argon high" },
+        "review": { "claude": "sonnet high", "agy": "gemini-4-hydrogen high" },
+        "image": { "codex": "- low", "agy": "- low" }
+      },
+      "habits": {
+        "handBackTurns": 60,
+        "maxTurns": 100,
+        "builderContext": 120000,
+        "parallelCap": 4,
+        "readLines": 150,
+        "catLines": 300,
+        "waitSecs": 270,
+        "bashOutputMaxChars": 8000,
+        "compactWindow": { "sonnet": 200000, "opus": 200000 }
+      }
+    },
+    "balanced": {
+      "cells": {
+        "read": { "claude": "haiku medium", "codex": "gpt-6-luna medium", "agy": "gemini-4-hydrogen low" },
+        "code": { "claude": "sonnet high", "codex": "gpt-6-sol medium", "agy": "gemini-4-hydrogen medium" },
+        "fix": { "claude": "sonnet xhigh", "codex": "gpt-6-sol high", "agy": "gemini-4-hydrogen high" },
+        "judge": { "claude": "opus xhigh", "codex": "gpt-6-astra xhigh", "agy": "gemini-4-argon high" },
+        "hardest": { "claude": "fable xhigh", "codex": "gpt-6-astra xhigh", "agy": "gemini-4-argon xhigh" },
+        "review": { "claude": "sonnet high", "agy": "gemini-4-hydrogen high" },
+        "image": { "codex": "- low", "agy": "- low" }
+      },
+      "habits": {
+        "handBackTurns": 80,
+        "maxTurns": 140,
+        "builderContext": 150000,
+        "parallelCap": 5,
+        "readLines": 150,
+        "catLines": 300,
+        "waitSecs": 270,
+        "bashOutputMaxChars": 12000,
+        "compactWindow": { "sonnet": 250000, "opus": 300000 }
+      }
+    },
+    "quality": {
+      "cells": {
+        "read": { "claude": "sonnet medium", "codex": "gpt-6-sol medium", "agy": "gemini-4-hydrogen medium" },
+        "code": { "claude": "sonnet xhigh", "codex": "gpt-6-sol high", "agy": "gemini-4-hydrogen high" },
+        "fix": { "claude": "opus high", "codex": "gpt-6-astra high", "agy": "gemini-4-hydrogen xhigh" },
+        "judge": { "claude": "opus xhigh", "codex": "gpt-6-astra xhigh", "agy": "gemini-4-argon xhigh" },
+        "hardest": { "claude": "fable xhigh", "codex": "gpt-6-astra xhigh", "agy": "gemini-4-argon xhigh" },
+        "review": { "claude": "sonnet high", "codex": "gpt-6-astra high", "agy": "gemini-4-hydrogen high" },
+        "image": { "codex": "- medium", "agy": "- medium" }
+      },
+      "habits": {
+        "handBackTurns": 120,
+        "maxTurns": 200,
+        "builderContext": 200000,
+        "parallelCap": 6,
+        "readLines": 200,
+        "catLines": 400,
+        "waitSecs": 270,
+        "bashOutputMaxChars": 20000,
+        "compactWindow": { "sonnet": 350000, "opus": 350000 }
+      }
+    }
+  },
+  "pstack": [
+    { "role": "feature, refactoring", "use": ["code"] },
+    { "role": "bug-fix", "use": ["fix"] },
+    { "role": "perf-issue", "use": ["judge"] },
+    { "role": "hillclimb", "use": ["judge"] },
+    { "role": "judgment and prose", "use": ["judge"] },
+    { "role": "hardest tasks", "use": ["hardest"] },
+    { "role": "how explorer", "use": ["read"] },
+    { "role": "how explainer", "use": ["judge"] },
+    { "role": "why investigators", "use": ["code"] },
+    { "role": "why synthesizer", "use": ["judge"] },
+    { "role": "reflect tooling", "use": ["code"] },
+    { "role": "reflect judgment, divergent, synthesizer", "use": ["judge"] },
+    { "role": "arena runners", "use": ["judge", "code"] },
+    { "role": "arena cross-judge pool", "use": ["hardest", "code"] },
+    { "role": "swarm workers", "use": ["code"] },
+    { "role": "architect runners", "use": ["judge", "code"] },
+    { "role": "interrogate reviewers", "use": ["judge", "code"] }
+  ],
+  "importWords": [
+    { "role": "hardest", "words": ["hardest", "cross-cutting", "subtle concurrency"] },
+    { "role": "fix", "words": ["bug fix", "bugfix"] },
+    { "role": "read", "words": ["bulk reading", "search", "listing", "log scanning", "running a check"] },
+    { "role": "judge", "words": ["judgment", "design", "root-causing", "prose", "synthesis"] },
+    { "role": "code", "words": ["routine code", "specified edits", "small features", "refactor", "tests"] }
+  ]
+}

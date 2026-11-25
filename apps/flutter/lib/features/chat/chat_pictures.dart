@@ -1,0 +1,400 @@
+import 'dart:async';
+import 'dart:collection';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/theme/tokens.dart';
+import '../../core/net/bridge_client.dart';
+import '../../core/protocol/models.dart';
+import '../../l10n/app_localizations.dart';
+import '../connection/connection.dart';
+import '../macs/computers.dart';
+import '../../app/widgets/common.dart';
+import 'chat_cache.dart';
+import 'markup_editor.dart';
+import 'photo_send.dart';
+
+const int thumbnailWidth = 480;
+const int viewerWidth = 1600;
+
+class ChatPictureLoader {
+  ChatPictureLoader(this._cache, this._client, {this.memoryLimit = 48});
+  final ChatCache _cache;
+  final BridgeClient? Function() _client;
+  final int memoryLimit;
+
+  final LinkedHashMap<String, Uint8List> _memory = LinkedHashMap<String, Uint8List>();
+  final Map<String, Future<Uint8List>> _inFlight = <String, Future<Uint8List>>{};
+
+  Future<Uint8List> load(String sessionId, ChatImage image, {int width = thumbnailWidth}) {
+    final String key = '$sessionId|${image.id}|$width';
+    final Uint8List? hit = _memory.remove(key);
+    if (hit != null) {
+      _memory[key] = hit;
+      return Future<Uint8List>.value(hit);
+    }
+    return _inFlight[key] ??= _fetch(key, sessionId, image, width).whenComplete(() {
+      _inFlight.remove(key);
+    });
+  }
+
+  Future<Uint8List> _fetch(String key, String sessionId, ChatImage image, int width) async {
+    Uint8List? bytes = await _cache.loadImage(sessionId, image.id, width);
+    if (bytes == null) {
+      final BridgeClient? client = _client();
+      if (client == null || !client.isConnected) throw const BridgeException('disconnected', '');
+      bytes = await client.chatImage(sessionId, image.id, maxWidth: width);
+      unawaited(_cache.saveImage(sessionId, image.id, width, bytes));
+    }
+    _memory[key] = bytes;
+    while (_memory.length > memoryLimit) {
+      _memory.remove(_memory.keys.first);
+    }
+    return bytes;
+  }
+}
+
+final Provider<ChatPictureLoader> chatPictureLoaderProvider = Provider<ChatPictureLoader>((Ref ref) {
+  final ChatCache cache = ref.watch(scopedChatCacheProvider);
+  return ChatPictureLoader(cache, () => ref.read(bridgeClientProvider));
+});
+
+class MessagePictures extends StatelessWidget {
+  const MessagePictures({super.key, required this.sessionId, required this.images, this.alignEnd = false});
+  final String sessionId;
+  final List<ChatImage> images;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    if (images.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.sm),
+      child: Wrap(
+        spacing: Space.sm,
+        runSpacing: Space.sm,
+        alignment: alignEnd ? WrapAlignment.end : WrapAlignment.start,
+        children: <Widget>[
+          for (final ChatImage image in images)
+            PictureThumbnail(key: ValueKey<String>(image.id), sessionId: sessionId, image: image, siblings: images),
+        ],
+      ),
+    );
+  }
+}
+
+enum PictureLoad { loading, ready, failed }
+
+class PictureThumbnail extends ConsumerStatefulWidget {
+  const PictureThumbnail({super.key, required this.sessionId, required this.image, this.siblings = const <ChatImage>[]});
+  final String sessionId;
+  final ChatImage image;
+  final List<ChatImage> siblings;
+
+  @override
+  ConsumerState<PictureThumbnail> createState() => _PictureThumbnailState();
+}
+
+class _PictureThumbnailState extends ConsumerState<PictureThumbnail> {
+  PictureLoad _phase = PictureLoad.loading;
+  Uint8List? _bytes;
+
+  static const double _maxWidth = 220;
+  static const double _maxHeight = 260;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    if (_phase != PictureLoad.loading) setState(() => _phase = PictureLoad.loading);
+    try {
+      final Uint8List bytes = await ref.read(chatPictureLoaderProvider).load(widget.sessionId, widget.image);
+      if (!mounted) return;
+      setState(() {
+        _bytes = bytes;
+        _phase = PictureLoad.ready;
+      });
+    } on BridgeException catch (error) {
+      debugPrint('PictureThumbnail(${widget.image.id}): ${error.code} ${error.message}');
+      if (mounted) setState(() => _phase = PictureLoad.failed);
+    }
+  }
+
+  Size get _box {
+    final double aspect = widget.image.aspect ?? 4 / 3;
+    double width = _maxWidth;
+    double height = width / aspect;
+    if (height > _maxHeight) {
+      height = _maxHeight;
+      width = height * aspect;
+    }
+    return Size(width.clamp(72, _maxWidth), height.clamp(48, _maxHeight));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    final Size box = _box;
+    final Widget child = switch (_phase) {
+      PictureLoad.ready => Image.memory(_bytes!,
+          fit: widget.image.aspect == null ? BoxFit.contain : BoxFit.cover,
+          gaplessPlayback: true,
+          cacheWidth: (box.width * 2).round()),
+      PictureLoad.loading => const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+      PictureLoad.failed => Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
+            Icon(Icons.broken_image_outlined, size: 20, color: Kit.of(context).textMuted),
+            const SizedBox(height: 2),
+            Text(l10n.chatPictureFailed, style: Kit.of(context).labelSm, textAlign: TextAlign.center),
+          ]),
+        ),
+    };
+    return Semantics(
+      button: true,
+      label: l10n.chatPictureOpen,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Radii.md),
+        onTap: switch (_phase) {
+          PictureLoad.ready => () => unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
+                fullscreenDialog: true,
+                builder: (_) {
+                  final List<ChatImage> images = widget.siblings.isEmpty ? <ChatImage>[widget.image] : widget.siblings;
+                  final int at = images.indexWhere((ChatImage other) => other.id == widget.image.id);
+                  return PictureViewer(sessionId: widget.sessionId, images: images, initial: at < 0 ? 0 : at, preview: _bytes);
+                },
+              ))),
+          PictureLoad.failed => () => unawaited(_load()),
+          PictureLoad.loading => null,
+        },
+        child: Container(
+          width: box.width,
+          height: box.height,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(color: Kit.of(context).sidebar, borderRadius: BorderRadius.circular(Radii.md), border: Border.all(color: Kit.of(context).hairline)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class PictureViewer extends ConsumerStatefulWidget {
+  const PictureViewer({super.key, required this.sessionId, required this.images, this.initial = 0, this.preview});
+  final String sessionId;
+  final List<ChatImage> images;
+  final int initial;
+  final Uint8List? preview;
+
+  @override
+  ConsumerState<PictureViewer> createState() => _PictureViewerState();
+}
+
+class _PictureViewerState extends ConsumerState<PictureViewer> {
+  late final PageController _pages = PageController(initialPage: widget.initial);
+  late int _index = widget.initial;
+  bool _zoomed = false;
+  final Map<String, Uint8List> _sharp = <String, Uint8List>{};
+
+  Future<void> _markup() async {
+    final Uint8List? bytes = _sharp[widget.images[_index].id];
+    if (bytes == null) return;
+    final bool sent =
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute<bool>(
+            fullscreenDialog: true,
+            builder: (_) => MarkupEditor(sessionId: widget.sessionId, bytes: bytes),
+          ),
+        ) ??
+        false;
+    if (sent && mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _reply() async {
+    final Uint8List? bytes = _sharp[widget.images[_index].id];
+    if (bytes == null) return;
+    final bool sent = await previewAndSend(context, ref, widget.sessionId, bytes);
+    if (sent && mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    final int count = widget.images.length;
+    return Scaffold(
+      backgroundColor: Kit.dark.sidebar,
+      appBar: AppBar(
+        backgroundColor: Kit.dark.sidebar,
+        leading: IconButton(tooltip: l10n.chatPictureClose, icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+        title: count > 1 ? Text(<int>[_index + 1, count].join(' / '), style: Kit.of(context).label) : null,
+        centerTitle: true,
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(Space.md),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: SecondaryButton(
+                  key: const ValueKey<String>('picture-reply'),
+                  label: l10n.chatPictureReply,
+                  icon: Icons.reply,
+                  onPressed: _sharp.containsKey(widget.images[_index].id) ? () => unawaited(_reply()) : null,
+                ),
+              ),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: SecondaryButton(
+                  key: const ValueKey<String>('picture-markup'),
+                  label: l10n.chatPictureMarkup,
+                  icon: Icons.draw_outlined,
+                  onPressed: _sharp.containsKey(widget.images[_index].id) ? () => unawaited(_markup()) : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      body: PageView.builder(
+        controller: _pages,
+        physics: _zoomed ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
+        itemCount: count,
+        onPageChanged: (int index) => setState(() {
+          _index = index;
+          _zoomed = false;
+        }),
+        itemBuilder: (BuildContext context, int index) => _PicturePage(
+          key: ValueKey<String>(widget.images[index].id),
+          sessionId: widget.sessionId,
+          image: widget.images[index],
+          preview: index == widget.initial ? widget.preview : null,
+          onZoom: (bool zoomed) {
+            if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+          },
+          onSharp: (Uint8List bytes) => setState(() => _sharp[widget.images[index].id] = bytes),
+        ),
+      ),
+    );
+  }
+}
+
+class _PicturePage extends ConsumerStatefulWidget {
+  const _PicturePage({super.key, required this.sessionId, required this.image, required this.preview, required this.onZoom, required this.onSharp});
+  final String sessionId;
+  final ChatImage image;
+  final Uint8List? preview;
+  final ValueChanged<bool> onZoom;
+  final ValueChanged<Uint8List> onSharp;
+
+  @override
+  ConsumerState<_PicturePage> createState() => _PicturePageState();
+}
+
+class _PicturePageState extends ConsumerState<_PicturePage> {
+  late Uint8List? _shown = widget.preview;
+  bool _sharp = false;
+  bool _sharpFailed = false;
+  final TransformationController _transform = TransformationController();
+
+  @override
+  void initState() {
+    super.initState();
+    _transform.addListener(_reportZoom);
+    unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _transform
+      ..removeListener(_reportZoom)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _reportZoom() => widget.onZoom(_transform.value.getMaxScaleOnAxis() > 1.01);
+
+  Future<void> _load() async {
+    final ChatPictureLoader loader = ref.read(chatPictureLoaderProvider);
+    if (_sharpFailed) setState(() => _sharpFailed = false);
+    if (_shown == null) {
+      try {
+        final Uint8List thumb = await loader.load(widget.sessionId, widget.image);
+        if (mounted && !_sharp) setState(() => _shown = thumb);
+      } on BridgeException catch (error) {
+        debugPrint('PictureViewer thumbnail(${widget.image.id}): ${error.code} ${error.message}');
+      }
+    }
+    try {
+      final Uint8List bytes = await loader.load(widget.sessionId, widget.image, width: viewerWidth);
+      if (mounted) {
+        setState(() {
+          _shown = bytes;
+          _sharp = true;
+        });
+        widget.onSharp(bytes);
+      }
+    } on BridgeException catch (error) {
+      debugPrint('PictureViewer(${widget.image.id}): ${error.code} ${error.message}');
+      if (mounted) setState(() => _sharpFailed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    final Kit kit = Kit.of(context);
+    final Uint8List? shown = _shown;
+    final Widget retry = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Flexible(child: Text(l10n.chatPictureFailed, style: kit.labelSm, textAlign: TextAlign.center)),
+        const SizedBox(width: Space.sm),
+        TextButton(
+          key: const ValueKey<String>('picture-retry'),
+          style: TextButton.styleFrom(minimumSize: const Size(Metric.minTarget, Metric.minTarget)),
+          onPressed: () => unawaited(_load()),
+          child: Text(l10n.appRetry),
+        ),
+      ],
+    );
+    final Widget picture = shown != null
+        ? InteractiveViewer(
+            transformationController: _transform,
+            minScale: 1,
+            maxScale: 6,
+            child: Center(child: Image.memory(shown, fit: BoxFit.contain, gaplessPlayback: true)),
+          )
+        : Center(
+            child: _sharpFailed
+                ? retry
+                : const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        picture,
+        if (!_sharp && shown != null && !_sharpFailed) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+        if (_sharpFailed && shown != null)
+          Positioned(
+            left: Space.md,
+            right: Space.md,
+            bottom: Space.sm,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: kit.sidebar, borderRadius: BorderRadius.circular(Radii.md)),
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: Space.md), child: retry),
+            ),
+          ),
+      ],
+    );
+  }
+}

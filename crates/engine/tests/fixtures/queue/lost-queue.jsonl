@@ -1,0 +1,16 @@
+{"type":"user","message":{"role":"user","content":"Tidy the reply box"},"uuid":"u-1","timestamp":"2026-11-13T13:10:00.000Z","sessionId":"s-2","cwd":"/work/demo"}
+{"type":"assistant","message":{"id":"m-1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Reading the view."},{"type":"tool_use","id":"t-1","name":"Read","input":{"file_path":"/work/demo/view.rs"}}]},"uuid":"a-1","timestamp":"2026-11-13T13:10:20.000Z","sessionId":"s-2"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-13T13:14:42.100Z","sessionId":"s-2","content":"the context under the reply box should have no background"}
+{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"text","text":"[Image #20]why?"}]},"uuid":"u-2","timestamp":"2026-11-13T13:15:52.300Z","sessionId":"s-2","cwd":"/work/demo"}
+{"type":"assistant","message":{"id":"m-2","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"That is the shade the box draws."}]},"uuid":"a-2","timestamp":"2026-11-13T13:16:20.000Z","sessionId":"s-2"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-13T13:16:35.100Z","sessionId":"s-2","content":"when we switch accounts can you trust the folder for me"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-13T13:16:35.400Z","sessionId":"s-2"}
+{"type":"user","message":{"role":"user","content":"when we switch accounts can you trust the folder for me"},"uuid":"u-3","timestamp":"2026-11-13T13:16:35.500Z","sessionId":"s-2","cwd":"/work/demo"}
+{"type":"assistant","message":{"id":"m-3","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Looking at the switch."}]},"uuid":"a-3","timestamp":"2026-11-13T13:18:40.000Z","sessionId":"s-2"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-13T13:18:45.100Z","sessionId":"s-2","content":"yes"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-13T13:18:46.200Z","sessionId":"s-2","content":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>"}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"yes","commandMode":"prompt"},"uuid":"x-1","timestamp":"2026-11-13T13:18:50.000Z","sessionId":"s-2"}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>","commandMode":"task-notification"},"uuid":"x-2","timestamp":"2026-11-13T13:18:50.100Z","sessionId":"s-2"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-11-13T13:18:50.200Z","sessionId":"s-2","content":"yes"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-11-13T13:18:50.300Z","sessionId":"s-2","content":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>"}
+{"type":"assistant","message":{"id":"m-4","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Done."}]},"uuid":"a-4","timestamp":"2026-11-13T13:19:30.000Z","sessionId":"s-2"}

@@ -1,0 +1,202 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "consent-allow-once" : {
+      "comment" : "Button that allows one use.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Once"
+          }
+        }
+      }
+    },
+    "consent-deny" : {
+      "comment" : "Button that refuses.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deny"
+          }
+        }
+      }
+    },
+    "consent-secret-approval" : {
+      "comment" : "Title of a secret approval. $names are the secrets, $command what runs.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow %1$@ for %2$@"
+          }
+        }
+      }
+    },
+    "item-number-sign" : {
+      "comment" : "A label with a number sign. $count is how many.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "# of items: %1$@"
+          }
+        }
+      }
+    },
+    "language-name" : {
+      "comment" : "The language's own name, as its speakers write it.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "English"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Português"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Português (Brasil)"
+          }
+        }
+      }
+    },
+    "pairing-cant-find" : {
+      "comment" : "Shown when no Mac answers.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't find your Mac"
+          }
+        }
+      }
+    },
+    "pairing-files" : {
+      "comment" : "Files a device shared. $count is how many, $name the device.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@count@"
+          },
+          "substitutions" : {
+            "count" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ shared %arg file, 100%% done"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ shared %arg files, 100%% done"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pairing-step" : {
+      "comment" : "Step counter. $total is the number of steps.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step # of %1$@"
+          }
+        }
+      }
+    },
+    "pairing-title" : {
+      "comment" : "Title of the pairing screen.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair with your Mac"
+          }
+        }
+      }
+    },
+    "session-subagents-running" : {
+      "comment" : "Title of the Subagents section while some still run. $count is how many run.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld subagent running"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld subagents running"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "state-not-running" : {
+      "comment" : "Shown when the app is not running.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notchling isn't running"
+          }
+        }
+      }
+    },
+    "state-working" : {
+      "comment" : "Shown while a session works.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Working"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A trabalhar"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

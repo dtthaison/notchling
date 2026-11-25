@@ -1,0 +1,337 @@
+### The phone: the Chat screen.
+
+# Shown in the Chat screen.
+chat-view-only-reason = Opened outside Console, view only
+
+# Shown in the Chat screen.
+chat-control-console = Console
+
+# Shown in the Chat screen.
+chat-control-job = Background job
+
+# Shown in the Chat screen.
+chat-select-session = Select a session to see its chat.
+
+# Shown in the Chat screen.
+chat-empty = No messages yet.
+
+# Shown in the Chat screen.
+chat-load-older = Load older messages
+
+# Shown in the Chat screen.
+chat-new-messages = New messages
+
+# Shown in the Chat screen.
+chat-composer-hint = Message this session
+
+# Shown in the Chat screen.
+chat-send = Send
+
+# Shown in the Chat screen.
+chat-send-busy = Sending
+
+# Shown in the Chat screen.
+chat-send-error = Couldn't send the message. Please try again.
+
+# Shown in the Chat screen.
+# $tool is the tool Claude wants to use.
+chat-pending-permission = Permission needed: { $tool }
+
+# Shown in the Chat screen.
+chat-pending-question = Question from Claude
+
+# Not shown yet.
+chat-answer-on-mac = Answer on the Mac
+
+# Shown in the Chat screen.
+chat-multi-select-on-mac = This question allows several answers. Answer it on the Mac.
+
+# Shown in the Chat screen.
+chat-answer-failed = Couldn't send the answer. Please try again.
+
+# Not shown yet.
+chat-tools-expand = Expand
+
+# Not shown yet.
+chat-tools-collapse = Collapse
+
+# Shown in the Chat screen.
+chat-takeover-hint = Opened outside Console, view only. Take it over to message it from your phone.
+
+# Shown in the Chat screen.
+chat-takeover-title = Take over this session?
+
+# Shown in the Chat screen.
+chat-takeover-body = The Mac will reopen this session in Console's Terminal (claude --resume). The original must be closed. If Claude asks anything, answer on the Mac.
+
+# Shown in the Chat screen.
+chat-takeover-running = Taking over…
+
+# Shown in the Chat screen.
+chat-mute-session = Mute notifications for this session
+
+# Shown in the Chat screen.
+chat-unmute-session = Unmute this session
+
+# Shown in the Chat screen.
+chat-takeover-stop-body = Stop the session on the Mac (Claude desktop / VS Code) and reopen it in Console so you can message it from the phone?
+
+# Shown in the Chat screen.
+chat-takeover-busy-title = Session is running
+
+# Shown in the Chat screen.
+chat-takeover-busy-body = The session is running; the current turn will be cut off.
+
+# Shown in the Chat screen.
+chat-queued = waiting
+
+# Shown in the Chat screen.
+chat-send-now = Send now
+
+# Shown in the Chat screen.
+chat-send-now-title = Interrupt the running turn to send now?
+
+# Shown in the Chat screen.
+chat-send-now-body = Claude stops the current turn and runs this waiting message right away.
+
+# Shown in the Chat screen.
+chat-send-now-failed = Could not interrupt
+
+# Shown in the Chat screen.
+chat-sending = sending
+
+# Shown in the Chat screen.
+chat-sent = sent
+
+# Shown in the Chat screen.
+chat-send-failed = Not sent
+
+# Shown in the Chat screen.
+chat-updating = Updating
+
+# Shown in the Chat screen.
+chat-picture-failed = Could not load the picture
+
+# Shown in the Chat screen.
+chat-picture-close = Close picture
+
+# Shown in the Chat screen.
+chat-picture-open = Open picture
+
+# Shown in the Chat screen.
+chat-context = Context
+
+# Not shown yet.
+chat-limit-five-hours = 5h
+
+# Shown in the Chat screen.
+chat-limit-week = Week
+
+# Shown in the Chat screen.
+chat-shell-header = Shell command
+
+# Shown in the Chat screen.
+# $folder is the folder path.
+chat-shell-runs-in = runs in { $folder } · Claude sees the output
+
+# Shown in the Chat screen.
+chat-shell-hint = Send runs it like ! in the terminal · delete the ! to send a message instead
+
+# Shown in the Chat screen.
+chat-shell-will-run = Will run
+
+# Shown in the Chat screen.
+chat-slash-header = Commands
+
+# Shown in the Chat screen.
+# $count is the number of tool steps.
+chat-tool-steps-count = { $count ->
+    [one] { NUMBER($count) } tool step
+   *[other] { NUMBER($count) } tool steps
+}
+
+# Shown in the Chat screen.
+chat-tool-step-one = 1 tool step
+
+# Shown in the Chat screen.
+chat-compaction-title = Conversation compacted
+
+# Shown in the Chat screen.
+chat-show-output = Show output
+
+# Shown in the Chat screen.
+chat-copy-code = Copy
+
+# Shown in the Chat screen.
+chat-copied = Copied
+
+# Not shown yet.
+chat-activity-idle = Idle
+
+# Not shown yet.
+chat-view-only-chip = View only
+
+# Not shown yet.
+chat-new-messages-below = New messages
+
+# Shown in the Chat screen.
+chat-attach-photo = Attach a photo
+
+# Shown in the Chat screen.
+chat-photo-camera = Take a photo
+
+# Shown in the Chat screen.
+chat-photo-gallery = Choose from library
+
+# Shown in the Chat screen.
+chat-photo-pick-failed = Could not open the camera or library.
+
+# Shown in the Chat screen.
+chat-photo-sent = Photo sent
+
+# Shown in the Chat screen.
+chat-photo-title = Send a photo
+
+# Shown in the Chat screen.
+chat-photo-caption-hint = Add a caption (optional)
+
+# What the /clear command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-clear = Clear the conversation and start fresh
+
+# What the /compact command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-compact = Summarise the conversation to free up context
+
+# What the /context command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-context = Show how much context is used
+
+# What the /cost command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-cost = Show the cost of this session
+
+# What the /usage command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-usage = Show plan usage limits
+
+# What the /model command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-model = Change the model
+
+# What the /effort command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-effort = Change the effort level
+
+# What the /review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-review = Review a pull request
+
+# What the /security-review command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-security-review = Security review of pending changes
+
+# What the /init command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-init = Write a CLAUDE.md for this project
+
+# What the /memory command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-memory = Edit memory files
+
+# What the /rewind command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-rewind = Go back to an earlier point
+
+# What the /rename command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-rename = Rename this session
+
+# What the /status command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-status = Show version, model and account
+
+# What the /todos command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-todos = Show the current task list
+
+# What the /help command does, in the list of commands the Chat screen shows while the Mac has not sent its own. Don't translate the command or file names.
+chat-slash-help = Show help
+
+# Shown in the Chat screen under a permission or question card while the phone checks whether an earlier answer was already delivered, before it sends a different one. The answer buttons wait until it is done.
+chat-answer-checking = Checking your earlier answer…
+
+# Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer while the first one may still be delivered. $answer is the earlier answer, such as Allow. Tapping an answer again sends it anyway.
+chat-answer-may-deliver = Your earlier answer ({ $answer }) may still be delivered. Tap again to send this one instead.
+
+# Shown in the Chat screen under a permission or question card when the phone is asked to send a different answer but the first one was already delivered to the Mac, so nothing more is sent. $answer is the earlier answer, such as Allow.
+chat-answer-delivered = Your earlier answer ({ $answer }) was already delivered. Nothing more was sent.
+
+# The Model button in the Chat composer, before a model is known.
+chat-model-chip = Model
+
+# The Effort button in the Chat composer, before a level is known.
+chat-effort-chip = Effort
+
+# Tooltip of the Compact button in the Chat composer and the confirm button of its dialog.
+chat-compact-tooltip = Compact
+
+# Title of the dialog that asks before compacting a session.
+chat-compact-title = Compact context
+
+# Body of the dialog that asks before compacting a session.
+chat-compact-confirm = Compact this session's context? Claude summarises the conversation so far to free room. This cannot be undone.
+
+# Title of the sheet that lists models in the Chat composer.
+chat-model-sheet-title = Choose a model
+
+# Title of the sheet that lists effort levels in the Chat composer.
+chat-effort-sheet-title = Choose an effort level
+
+# Heading of the older models in the model sheet.
+chat-model-older = More models
+
+# Beside the model or effort the user just picked in the Chat composer, until the session reports it back.
+chat-pick-pending = Applying
+
+# An effort level in the Chat composer.
+chat-effort-low = Low
+
+# An effort level in the Chat composer.
+chat-effort-medium = Medium
+
+# An effort level in the Chat composer.
+chat-effort-high = High
+
+# An effort level in the Chat composer.
+chat-effort-xhigh = Extra High
+
+# An effort level in the Chat composer.
+chat-effort-max = Max
+
+# Title of the picture editor and the button that opens it in the picture viewer.
+chat-picture-markup = Mark up
+
+# Button in the picture viewer that sends the picture as it is, with a caption.
+chat-picture-reply = Reply
+
+# A drawing tool in the picture editor.
+chat-mark-pen = Pen
+
+# A drawing tool in the picture editor.
+chat-mark-circle = Circle
+
+# A drawing tool in the picture editor.
+chat-mark-box = Box
+
+# A drawing tool in the picture editor.
+chat-mark-arrow = Arrow
+
+# Tooltip of the button that removes the last mark in the picture editor.
+chat-mark-undo = Undo
+
+# Tooltip of the button that removes every mark in the picture editor.
+chat-mark-clear = Clear
+
+# Button of the picture editor that goes on to the caption and Send.
+chat-mark-next = Next
+
+# Shown in the picture editor while the marks are drawn into the picture.
+chat-mark-rendering = Preparing the picture
+
+# Shown in the picture editor when the marked picture could not be made.
+chat-mark-failed = Could not prepare the picture
+
+# Name of a mark colour in the picture editor.
+chat-mark-red = Red
+
+# Name of a mark colour in the picture editor.
+chat-mark-yellow = Yellow
+
+# Name of a mark colour in the picture editor.
+chat-mark-white = White

@@ -1,0 +1,4 @@
+cursor 0 0 false
+  Pick a job to open
+  1. first job
+  2. second job

@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": "Tidy the README's install section."}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Done: the install section is three steps now, with the Homebrew line first."}]}}

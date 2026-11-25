@@ -1,0 +1,363 @@
+use std::collections::BTreeSet;
+use std::sync::{Arc, Mutex};
+
+use super::feed::SwitchFeed;
+use super::Switch;
+use crate::actions::Actions;
+use crate::phone::bridge::Bridge;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Area {
+    Acting,
+    Bridge,
+    Accounts,
+    Vault,
+    Install,
+    Machines,
+}
+
+impl Area {
+    pub const ALL: [Area; 6] = [
+        Area::Acting,
+        Area::Bridge,
+        Area::Accounts,
+        Area::Vault,
+        Area::Install,
+        Area::Machines,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Area::Acting => "Sessions",
+            Area::Bridge => "Phone Bridge",
+            Area::Accounts => "Logins",
+            Area::Vault => "Vault",
+            Area::Install => "Install",
+            Area::Machines => "Machines",
+        }
+    }
+
+    pub fn meaning(self) -> &'static str {
+        match self {
+            Area::Acting => "Sessions: this app replies, answers and acts on live sessions.",
+            Area::Bridge => "Phone Bridge: paired phones can connect to this Mac.",
+            Area::Accounts => {
+                "Logins: this app switches accounts, manages lanes and watches limits."
+            }
+            Area::Vault => "Vault: agents can ask to use your saved secrets.",
+            Area::Install => "Install: this app may write hooks and skills.",
+            Area::Machines => "Machines: agents may ask to reach and change your machines.",
+        }
+    }
+
+    pub fn of(switch: Switch) -> Area {
+        match switch {
+            Switch::Accounts => Area::Accounts,
+            Switch::Vault => Area::Vault,
+            Switch::Install => Area::Install,
+            Switch::Machines => Area::Machines,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Said {
+    Detached,
+    On,
+    Off,
+}
+
+impl Said {
+    pub fn from_bool(on: bool) -> Said {
+        if on {
+            Said::On
+        } else {
+            Said::Off
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Confirm {
+    pub title: &'static str,
+    pub lines: Vec<String>,
+    pub ok: &'static str,
+    pub areas: Vec<Area>,
+}
+
+pub const NOTICE_BUTTON: &str = "Turn Back On";
+
+pub const VIEWS: [crate::views::ViewSpec; 2] = [
+    crate::views::ViewSpec {
+        name: "restart-notice",
+        size: super::restart_view::NOTICE_SIZE,
+        about:
+            "the notice after a daemon restart: Sessions, Logins and Vault were on (made-up state)",
+    },
+    crate::views::ViewSpec {
+        name: "restart-notice-confirm",
+        size: super::restart_view::CONFIRM_SIZE,
+        about: "the restart notice's one confirmation, naming each switch (made-up state)",
+    },
+];
+pub const CONFIRM_TITLE: &str = "Turn These Back On?";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Restart {
+    seen_on: BTreeSet<Area>,
+    offered: BTreeSet<Area>,
+    quiet: BTreeSet<Area>,
+}
+
+impl Restart {
+    pub fn observe(&mut self, area: Area, said: Said, remembered: bool) {
+        match said {
+            Said::Detached => {}
+            Said::On => {
+                self.seen_on.insert(area);
+                self.offered.remove(&area);
+                self.quiet.remove(&area);
+            }
+            Said::Off => {
+                if (self.seen_on.contains(&area) || remembered) && !self.quiet.contains(&area) {
+                    self.offered.insert(area);
+                }
+            }
+        }
+    }
+
+    pub fn chose(&mut self, area: Area, on: bool) {
+        self.offered.remove(&area);
+        if on {
+            self.seen_on.insert(area);
+            self.quiet.remove(&area);
+        } else {
+            self.seen_on.remove(&area);
+            self.quiet.insert(area);
+        }
+    }
+
+    pub fn dismiss(&mut self) {
+        let offered = std::mem::take(&mut self.offered);
+        self.quiet.extend(offered);
+    }
+
+    pub fn offer(&self) -> Vec<Area> {
+        self.offered.iter().copied().collect()
+    }
+
+    pub fn banner(&self) -> Option<String> {
+        let names: Vec<&str> = self.offered.iter().map(|a| a.title()).collect();
+        match names.len() {
+            0 => None,
+            1 => Some(format!("Notchling restarted: {} is off", names[0])),
+            _ => Some(format!("Notchling restarted: {} are off", names.join(", "))),
+        }
+    }
+
+    pub fn confirm(&self) -> Option<Confirm> {
+        if self.offered.is_empty() {
+            return None;
+        }
+        let mut lines: Vec<String> = self
+            .offered
+            .iter()
+            .map(|a| a.meaning().to_owned())
+            .collect();
+        lines.push(
+            "Each one was off because the daemon started again. Nothing is turned on until you confirm here."
+                .into(),
+        );
+        Some(Confirm {
+            title: CONFIRM_TITLE,
+            lines,
+            ok: NOTICE_BUTTON,
+            areas: self.offer(),
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct RestartNotice(Mutex<Restart>);
+
+impl RestartNotice {
+    fn with<T>(&self, f: impl FnOnce(&mut Restart) -> T) -> T {
+        f(&mut self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    pub fn observe(&self, area: Area, said: Said, remembered: bool) {
+        self.with(|r| r.observe(area, said, remembered));
+    }
+
+    pub fn chose(&self, area: Area, on: bool) {
+        self.with(|r| r.chose(area, on));
+    }
+
+    pub fn dismiss(&self) {
+        self.with(Restart::dismiss);
+    }
+
+    pub fn state(&self) -> Restart {
+        self.with(|r| r.clone())
+    }
+}
+
+pub trait TurnOn: Send + Sync {
+    fn turn_on(&self, area: Area) -> Result<(), String>;
+
+    fn restore(&self, area: Area) -> Result<(), String> {
+        self.turn_on(area)
+    }
+}
+
+pub struct LiveTurnOn {
+    pub actions: Arc<Actions>,
+    pub bridge: Arc<Bridge>,
+    pub feed: Arc<SwitchFeed>,
+}
+
+impl LiveTurnOn {
+    pub fn set(&self, area: Area, on: bool) -> Result<(), String> {
+        self.put(area, on, false)
+    }
+
+    fn put(&self, area: Area, on: bool, restored: bool) -> Result<(), String> {
+        let switch = match area {
+            Area::Acting => return self.actions.choose_as(on, restored).map(|_| ()),
+            Area::Bridge => return self.bridge.choose_as(on, restored),
+            Area::Accounts => Switch::Accounts,
+            Area::Vault => Switch::Vault,
+            Area::Install => Switch::Install,
+            Area::Machines => Switch::Machines,
+        };
+        self.feed.choose_as(switch, on, restored).map(|_| ())
+    }
+}
+
+impl TurnOn for LiveTurnOn {
+    fn turn_on(&self, area: Area) -> Result<(), String> {
+        self.put(area, true, false)
+    }
+
+    fn restore(&self, area: Area) -> Result<(), String> {
+        self.put(area, true, true)
+    }
+}
+
+pub fn restore(areas: &[Area], with: &dyn TurnOn, notice: &RestartNotice) -> Vec<String> {
+    areas
+        .iter()
+        .filter_map(|a| match with.restore(*a) {
+            Ok(()) => {
+                notice.chose(*a, true);
+                None
+            }
+            Err(e) => Some(format!("{}: {e}", a.title())),
+        })
+        .collect()
+}
+
+pub fn turn_back_on(areas: &[Area], with: &dyn TurnOn) -> Vec<String> {
+    areas
+        .iter()
+        .filter_map(|a| {
+            with.turn_on(*a)
+                .err()
+                .map(|e| format!("{}: {e}", a.title()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Recorder(Mutex<Vec<Area>>);
+
+    impl TurnOn for Recorder {
+        fn turn_on(&self, area: Area) -> Result<(), String> {
+            self.0.lock().unwrap().push(area);
+            if area == Area::Install {
+                Err("app tier only".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn a_remembered_choice_only_offers_and_the_confirm_turns_on_exactly_those() {
+        let mut r = Restart::default();
+        for area in Area::ALL {
+            r.observe(area, Said::Off, true);
+        }
+        assert_eq!(r.offer(), Area::ALL.to_vec());
+        assert_eq!(
+            r.banner().as_deref(),
+            Some("Notchling restarted: Sessions, Phone Bridge, Logins, Vault, Install, Machines are off")
+        );
+        let confirm = r.confirm().unwrap();
+        assert_eq!(confirm.ok, NOTICE_BUTTON);
+        assert_eq!(confirm.areas, Area::ALL.to_vec());
+        assert!(confirm.lines[3].starts_with("Vault"), "{:?}", confirm.lines);
+        let recorder = Recorder(Mutex::new(Vec::new()));
+        let failed = turn_back_on(&confirm.areas, &recorder);
+        assert_eq!(*recorder.0.lock().unwrap(), Area::ALL.to_vec());
+        assert_eq!(failed, ["Install: app tier only"]);
+    }
+
+    #[test]
+    fn a_restart_turns_back_on_what_was_on_and_offers_only_what_failed() {
+        let notice = RestartNotice::default();
+        for area in Area::ALL {
+            notice.observe(area, Said::Off, true);
+        }
+        let recorder = Recorder(Mutex::new(Vec::new()));
+        let failed = restore(&notice.state().offer(), &recorder, &notice);
+        assert_eq!(*recorder.0.lock().unwrap(), Area::ALL.to_vec());
+        assert_eq!(failed, ["Install: app tier only"]);
+        assert_eq!(notice.state().offer(), [Area::Install]);
+        notice.chose(Area::Vault, false);
+        notice.observe(Area::Vault, Said::Off, false);
+        assert!(!notice.state().offer().contains(&Area::Vault));
+    }
+
+    #[test]
+    fn on_in_memory_then_off_is_a_restart_and_nothing_known_is_not() {
+        let mut r = Restart::default();
+        r.observe(Area::Vault, Said::On, false);
+        r.observe(Area::Acting, Said::Off, false);
+        r.observe(Area::Bridge, Said::Detached, true);
+        assert_eq!(r.banner(), None, "never on, never chosen: nothing to offer");
+        r.observe(Area::Vault, Said::Detached, false);
+        assert_eq!(r.offer(), []);
+        r.observe(Area::Vault, Said::Off, false);
+        assert_eq!(r.offer(), [Area::Vault]);
+        assert_eq!(
+            r.banner().as_deref(),
+            Some("Notchling restarted: Vault is off")
+        );
+        r.observe(Area::Vault, Said::On, false);
+        assert_eq!(r.offer(), []);
+    }
+
+    #[test]
+    fn the_users_off_and_a_dismissal_quiet_it_until_seen_on_again() {
+        let mut r = Restart::default();
+        r.observe(Area::Accounts, Said::On, true);
+        r.chose(Area::Accounts, false);
+        r.observe(Area::Accounts, Said::Off, true);
+        assert_eq!(r.offer(), [], "the user turned it off here");
+        r.chose(Area::Accounts, true);
+        r.observe(Area::Accounts, Said::Off, false);
+        assert_eq!(r.offer(), [Area::Accounts]);
+        r.dismiss();
+        assert_eq!(r.offer(), []);
+        r.observe(Area::Accounts, Said::Off, true);
+        assert_eq!(r.offer(), [], "dismissed");
+        r.observe(Area::Accounts, Said::On, true);
+        r.observe(Area::Accounts, Said::Off, true);
+        assert_eq!(r.offer(), [Area::Accounts], "on again, then a restart");
+        assert_eq!(Restart::default().confirm(), None);
+    }
+}

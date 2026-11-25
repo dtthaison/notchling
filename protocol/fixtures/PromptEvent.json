@@ -1,0 +1,13 @@
+{
+  "event": "prompt",
+  "prompt": {
+    "created": 1793541465000,
+    "kind": "permission",
+    "questions": [],
+    "requestId": "req-0003",
+    "sessionId": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11",
+    "summary": "Write /Users/example/src/app/notes.md",
+    "toolName": "Write"
+  },
+  "sessionId": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11"
+}

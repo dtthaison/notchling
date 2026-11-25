@@ -1,0 +1,8 @@
+cursor 6 0 false
+
+  The build finished and every check passed on the first run.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Session is restarting… showing its transcript until it is back. Ctrl+Z to detach
