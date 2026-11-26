@@ -111,6 +111,7 @@ pub fn holds(over: bool, shown: bool, hovered: bool) -> bool {
     over && (shown || hovered)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn list_scrolled(following: bool, offset: f32, max: f32) -> f32 {
     let max = max.max(0.0);
     if following {

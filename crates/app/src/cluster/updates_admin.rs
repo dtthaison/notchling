@@ -6,7 +6,9 @@ use notchling_engine::machines::registry::{AdminAccess, Machine};
 use notchling_engine::vault::entry::{valid_name, Kind, VaultEntry, VaultValue};
 use notchling_locale as t;
 
+#[cfg(target_os = "macos")]
 use crate::switches::Switches;
+#[cfg(target_os = "macos")]
 use crate::vault::store::Vault;
 
 const NAME_MAX: usize = 64;
@@ -20,6 +22,7 @@ pub enum VaultState {
 }
 
 impl VaultState {
+    #[cfg(target_os = "macos")]
     pub fn from_result(result: &Result<Vec<VaultEntry>, String>) -> VaultState {
         match result {
             Ok(entries) => VaultState::Items(entries.iter().map(|e| e.name.clone()).collect()),
@@ -223,11 +226,13 @@ impl AdminLinks for SetupEngine {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub struct VaultSaver<'a> {
     pub vault: &'a Vault,
     pub switches: &'a Switches,
 }
 
+#[cfg(target_os = "macos")]
 impl ItemSaver for VaultSaver<'_> {
     fn save(&self, entry: &VaultEntry, value: &VaultValue) -> Result<(), String> {
         self.vault

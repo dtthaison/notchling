@@ -1,8 +1,9 @@
 use serde_json::{json, Value};
 
-use super::model::{ChangeRoute, InboxModel};
+use super::model::InboxModel;
 use super::renders::NOW_MS;
 use super::triage::Section;
+#[cfg(target_os = "macos")]
 use super::view::InboxPanelView;
 use super::WIDTH;
 use crate::views::ViewSpec;
@@ -74,11 +75,12 @@ pub fn shown(name: &str) -> Option<Section> {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn dress(name: &str, panel: InboxPanelView) -> InboxPanelView {
     match name {
         "inbox-triage-change" => panel.with_change(
             "a1",
-            ChangeRoute::Approval("a1".to_owned()),
+            super::model::ChangeRoute::Approval("a1".to_owned()),
             "Use the read-only token, not the admin one.",
         ),
         "inbox-triage-error" => panel.with_error("a1", "The Vault did not answer. Try again."),

@@ -167,6 +167,7 @@ fn no_dialog_on_screen_is_refused_with_nothing_typed() {
     assert!(s.writes.lock().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_refused_screen_is_kept_private_and_a_typed_answer_keeps_none() {
     use std::os::unix::fs::PermissionsExt;

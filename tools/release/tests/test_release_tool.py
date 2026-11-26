@@ -99,6 +99,8 @@ class ReleaseToolTest(unittest.TestCase):
         sh(root, "git", "init", "-q", "--bare", "-b", "main", str(self.origin))
         sh(root, "git", "clone", "-q", str(self.origin), str(self.repo))
         sh(self.repo, "git", "switch", "-q", "-c", "main")
+        sh(self.repo, "git", "config", "user.name", "T")
+        sh(self.repo, "git", "config", "user.email", "t@example.com")
         (self.repo / "Cargo.toml").write_text(CARGO_TOML)
         (self.repo / "Cargo.lock").write_text(CARGO_LOCK)
         (self.repo / "CHANGELOG.md").write_text(CHANGELOG)

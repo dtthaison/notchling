@@ -182,6 +182,7 @@ fn texts_name_the_tool_the_machine_and_the_cause() {
     assert_eq!(plain, "Claude Code didn't install on m1");
 }
 
+#[cfg(unix)]
 fn run_busy(tool: Tool, ps: &str) -> String {
     use std::os::unix::fs::PermissionsExt;
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

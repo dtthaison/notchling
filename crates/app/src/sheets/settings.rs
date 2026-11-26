@@ -655,7 +655,7 @@ mod tests {
         ));
         assert_eq!(change(row, ""), Some(("checkForUpdates", json!(false))));
         let off = sections(
-            &|k| (k == "checkForUpdates").then(|| json!(false)),
+            &|k| (k == "checkForUpdates").then_some(json!(false)),
             &with(Acting::Off),
         )
         .remove(0);
@@ -677,7 +677,7 @@ mod tests {
         ));
         assert_eq!(change(row, ""), Some(("showInDock", json!(false))));
         let off = sections(
-            &|k| (k == "showInDock").then(|| json!(false)),
+            &|k| (k == "showInDock").then_some(json!(false)),
             &with(Acting::Off),
         )
         .remove(0);

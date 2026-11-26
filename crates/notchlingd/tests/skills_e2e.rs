@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod common;
 
 use common::verified::{run_helper, Session, Step};

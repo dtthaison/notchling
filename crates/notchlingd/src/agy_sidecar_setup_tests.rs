@@ -193,6 +193,7 @@ fn a_config_turning_on_would_refuse_stops_it_before_the_plugin_or_the_hooks_are_
     assert!(!r.roots.hooks_json().exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_read_only_config_or_a_hooks_file_that_is_a_folder_stops_turning_on_before_any_write() {
     use std::os::unix::fs::PermissionsExt;

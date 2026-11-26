@@ -5,11 +5,12 @@ use super::scrollbar::scrollable;
 use super::text_editor::TextEditor;
 use super::widgets::{
     account_line, avatar, brand_mark, button, field, label, option_row, session_row,
-    session_row_marked, status_pill, tool_icon, ToolMark,
+    session_row_marked, status_pill, tool_icon,
 };
 use super::{hsla, window_appearance, KitStyled};
 use crate::metric::{RADIUS_MD, SPINNER_MINI, SPINNER_SMALL, TOOL_ICON};
 use crate::part::{ButtonKind, PartState};
+use crate::tool_mark::ToolMark;
 use crate::{Appearance, Icon, Ink, Status, TypeRole};
 
 pub struct KitGallery {

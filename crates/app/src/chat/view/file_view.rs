@@ -42,12 +42,12 @@ pub fn code(key: &str, code: &Code, a: Appearance) -> AnyElement {
                     .flex_shrink_0()
                     .text_right()
                     .ink(Ink::TextFaint, a)
-                    .child(chunk.gutter.clone()),
+                    .child(SharedString::from(chunk.gutter.clone())),
             )
             .child(markdown::colored(
                 &format!("{key}-c{i}"),
                 &Sel::File,
-                &chunk.text,
+                &SharedString::from(chunk.text.clone()),
                 &parts,
                 a,
             ))

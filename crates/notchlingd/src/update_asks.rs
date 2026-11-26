@@ -286,6 +286,6 @@ impl Cited for UpdateAsks {
 #[path = "update_asks_plan.rs"]
 mod plan;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "update_asks_tests.rs"]
 mod tests;

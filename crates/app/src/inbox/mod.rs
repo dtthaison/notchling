@@ -20,6 +20,7 @@ mod rows;
 mod run;
 #[cfg(target_os = "macos")]
 mod sections;
+#[cfg(any(test, target_os = "macos"))]
 mod tab_reveal;
 #[cfg(test)]
 mod tab_reveal_tests;
@@ -49,5 +50,5 @@ mod triage_tests;
 mod versions_drift_rows_tests;
 #[cfg(test)]
 mod versions_rows_tests;
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod view_tests;

@@ -354,7 +354,7 @@ mod activity_ops_tests;
 mod agent_classes_tests;
 #[cfg(test)]
 mod agy_phone_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod ask_cluster_tests;
 #[cfg(test)]
 mod ask_find_tests;
@@ -390,43 +390,43 @@ mod chat_cli_tests;
 mod chat_ops_tests;
 #[cfg(test)]
 mod chrome_ops_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_fence_keeper_kit;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_fence_keeper_stop_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_fence_keeper_tests;
 #[cfg(test)]
 mod cluster_fence_stale_tests;
 #[cfg(test)]
 mod cluster_fence_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_fence_turn_tests;
 #[cfg(test)]
 mod cluster_fence_write_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_move_fence_fail_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_move_fence_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_move_fix2_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_move_fix_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_move_tests;
 #[cfg(test)]
 mod cluster_node_tools_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_promote_codex_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod cluster_promote_kit;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_promote_ops_tests;
 #[cfg(test)]
 mod cluster_promote_reach_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_promote_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_promote_watch_tests;
 #[cfg(test)]
 mod cluster_reach_tests;
@@ -434,19 +434,19 @@ mod cluster_reach_tests;
 mod cluster_redact_tests;
 #[cfg(test)]
 mod cluster_relay_testkit;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_returns_claim_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod cluster_returns_kit;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_returns_ops_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_returns_step_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_returns_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_returns_touch_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cluster_returns_waiting_tests;
 #[cfg(test)]
 mod cluster_testkit;
@@ -630,13 +630,13 @@ mod vault_ops_lock_tests;
 mod versions_check_tests;
 #[cfg(test)]
 mod versions_drift_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod versions_inbox_tests;
 #[cfg(test)]
 mod versions_ops_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod versions_soak_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod versions_update_tests;
 #[cfg(test)]
 mod wake_loop_tests;

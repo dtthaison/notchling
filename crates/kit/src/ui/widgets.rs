@@ -17,6 +17,7 @@ use crate::metric::{
 use crate::part::{
     button_look, field_look, initials, option_look, row_look, ButtonKind, Look, PartState,
 };
+use crate::tool_mark::ToolMark;
 use crate::{Appearance, Icon, IconSize, Ink, Status, TypeRole};
 
 pub fn label(text: &str, role: TypeRole, ink: Ink, appearance: Appearance) -> Div {
@@ -281,39 +282,6 @@ fn marked_line(mark: impl IntoElement, indent: f32, text: Div) -> Div {
                 .child(mark),
         )
         .elide()
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ToolMark {
-    Claude,
-    Codex,
-    Antigravity,
-}
-
-impl ToolMark {
-    pub fn name(self) -> &'static str {
-        match self {
-            ToolMark::Claude => "Claude Code",
-            ToolMark::Codex => "Codex",
-            ToolMark::Antigravity => "Antigravity CLI",
-        }
-    }
-
-    pub fn bundle_ids(self) -> &'static [&'static str] {
-        match self {
-            ToolMark::Claude => &["com.anthropic.claudefordesktop"],
-            ToolMark::Codex => &["com.openai.codex"],
-            ToolMark::Antigravity => &["com.google.antigravity", "com.google.antigravity-ide"],
-        }
-    }
-
-    fn icon(self) -> Icon {
-        match self {
-            ToolMark::Claude => Icon::Claude,
-            ToolMark::Codex => Icon::Code,
-            ToolMark::Antigravity => Icon::Paperplane,
-        }
-    }
 }
 
 pub fn tool_icon(tool: ToolMark, size: f32, appearance: Appearance) -> Div {

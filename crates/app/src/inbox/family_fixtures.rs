@@ -43,7 +43,7 @@ pub(crate) fn update_view() -> Value {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) fn model_view() -> Value {
     let args = json!({"model": "granite-97m-r2@835ad14/p1"});
     family(

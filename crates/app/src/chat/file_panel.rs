@@ -103,17 +103,19 @@ pub fn regular(path: &Path) -> Option<PathBuf> {
 
 #[cfg(target_os = "macos")]
 const NO_BLOCK: i32 = 0x4;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 const NO_BLOCK: i32 = 0x800;
 
 pub fn open_regular(path: &Path) -> Option<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
     let target = regular(path)?;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(NO_BLOCK)
-        .open(target)
-        .ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(NO_BLOCK);
+    }
+    let file = options.open(target).ok()?;
     file.metadata().ok()?.is_file().then_some(file)
 }
 
@@ -166,8 +168,8 @@ pub struct Code {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
     pub range: Range<usize>,
-    pub text: gpui::SharedString,
-    pub gutter: gpui::SharedString,
+    pub text: std::sync::Arc<str>,
+    pub gutter: std::sync::Arc<str>,
 }
 
 pub const CHUNK_LINES: usize = 80;

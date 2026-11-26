@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Notchling tries to stay small: a notch view of Claude Code agents, keeping the Mac awake, and switching accounts. Please open this before writing code, so we can agree it fits.
+        Notchling shows your Claude Code, Codex and Antigravity sessions in the notch and in Chat, across your own Macs and Linux machines, keeps the Mac awake and switches accounts. What it will never do is in [docs/goals.md](https://github.com/dtthaison/notchling/blob/main/docs/goals.md). Please open this before writing code, so we can agree it fits.
   - type: textarea
     id: moment
     attributes:
@@ -23,3 +23,8 @@ body:
     id: alternatives
     attributes:
       label: What you do today instead
+  - type: textarea
+    id: agent
+    attributes:
+      label: For an agent
+      description: Every feature works for an agent too, with a `notchling` command. What would an agent run, and where would you agree to it (an Inbox or Ask card)? Leave empty if unsure.

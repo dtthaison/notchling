@@ -64,22 +64,36 @@ pub const CAPTURE_LIMIT: usize = 4 * 1024 * 1024;
 
 const CAPTURE_GRACE: Duration = Duration::from_secs(2);
 
+#[cfg(unix)]
 fn kill_group(pid: u32) {
     unsafe {
         libc::killpg(pid as libc::pid_t, libc::SIGKILL);
     }
 }
 
+#[cfg(not(unix))]
+fn kill_group(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
 pub fn capture(program: &Path, args: &[&str], timeout: Duration) -> Option<String> {
-    use std::os::unix::process::CommandExt;
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().ok()?;
     let pid = child.id();
     let mut stdout = child.stdout.take()?;
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();

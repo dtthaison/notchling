@@ -14,6 +14,7 @@ pub mod render_map;
 pub mod resize;
 pub mod scrollbar;
 pub mod text_edit;
+mod tool_mark;
 pub mod typescale;
 #[cfg(target_os = "macos")]
 pub mod ui;
@@ -25,6 +26,7 @@ pub use ink::{Ink, Status};
 pub use motion::{Curve, Motion};
 pub use org_color::{org_color, OrgColor, ORG_COLORS};
 pub use part::{ButtonKind, PartState};
+pub use tool_mark::ToolMark;
 pub use typescale::{sentence, TypeRole, TypeSpec, Weight};
 
 pub fn crate_name() -> &'static str {

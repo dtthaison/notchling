@@ -142,33 +142,42 @@ pub(crate) fn excerpt(screen: &[String]) -> Vec<String> {
 }
 
 fn private_dir(dir: &Path) -> bool {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    let made = std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir);
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    let made = builder.create(dir);
     let plain = std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir());
     if made.is_err() || !plain {
         return false;
     }
-    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
     true
 }
 
 fn write_new(dir: &Path, name: &str, head: &[String], lines: &[String]) {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     let stem = name.strip_suffix(".txt").unwrap_or(name);
     for n in 0..SAME_NAME_TRIES {
         let file = match n {
             0 => dir.join(name),
             _ => dir.join(format!("{stem}-{n}.txt")),
         };
-        let opened = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&file);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let opened = options.open(&file);
         match opened {
             Ok(mut out) => {
                 for line in head {

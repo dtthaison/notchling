@@ -502,6 +502,6 @@ mod cluster_tests;
 #[path = "consent_card_account_tests.rs"]
 mod account_tests;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 #[path = "consent_card_family_tests.rs"]
 mod family_tests;

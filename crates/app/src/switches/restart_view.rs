@@ -6,10 +6,11 @@ use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::ui::{button, hsla, icon, label, window_appearance, KitStyled};
 use notchling_kit::{Icon, Ink, TypeRole};
 
-use super::restart::{turn_back_on, Area, Restart, RestartNotice, Said, TurnOn, NOTICE_BUTTON};
+use super::restart::{
+    turn_back_on, Area, Restart, RestartNotice, Said, TurnOn, CONFIRM_SIZE, NOTICE_BUTTON,
+    NOTICE_SIZE,
+};
 
-pub const NOTICE_SIZE: (f32, f32) = (460.0, 168.0);
-pub const CONFIRM_SIZE: (f32, f32) = (460.0, 300.0);
 const NOTE_HEIGHT: f32 = 28.0;
 
 pub fn window_size(confirming: bool, has_note: bool) -> (f32, f32) {

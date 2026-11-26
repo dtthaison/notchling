@@ -19,7 +19,7 @@ body:
       label: Steps to reproduce
       placeholder: |
         1. Start two background agents with `claude --bg`
-        2. Hover over the notch
+        2. Open Chat and pick the second session
         3. ...
     validations:
       required: true
@@ -36,26 +36,49 @@ body:
       label: Mac model and display
       placeholder: MacBook Pro 14" (notch), plus an external display
   - type: input
-    id: claude
+    id: notchling
     attributes:
-      label: Claude Code version
-      description: Output of `claude --version`.
+      label: Notchling version
+      description: Output of `notchling --version`.
+      placeholder: notchling 2.0.0 (1a2b3c4d5e6f)
+    validations:
+      required: true
+  - type: input
+    id: tools
+    attributes:
+      label: Tool versions
+      description: The tools involved, from `claude --version`, `codex --version` or `agy --version`.
+      placeholder: Claude Code 2.1.324
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it happened
+      multiple: true
+      options:
+        - This Mac
+        - Another Mac in the cluster
+        - A Linux machine
+        - The phone app
   - type: dropdown
     id: area
     attributes:
       label: Area
       options:
-        - Notch panel
+        - Notch
+        - Chat
         - Answering prompts (hook)
-        - Replying to background agents
-        - Claude Code accounts
-        - Claude Desktop accounts
-        - Antigravity accounts
-        - Token cost
+        - Replying to sessions
+        - Inbox and Ask
+        - Accounts and limits
+        - Cluster and Machines
+        - Secret Vault
+        - Codex or Antigravity
         - Keep awake
-        - Pet
+        - Phone app
+        - notchling command line
         - Other
   - type: textarea
     id: extra
     attributes:
       label: Screenshots or anything else
+      description: Logs help, `~/Library/Application Support/Notchling/notchlingd.log` and `logs/crash.log` there. Check them for tokens before pasting.

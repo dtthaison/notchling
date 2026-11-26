@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use notchling_engine::contract::{Registry, Tool};
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::{Status as SubagentStatus, Subagent, Via};
-use notchling_kit::ui::ToolMark;
+use notchling_kit::ToolMark;
 use notchling_kit::{Icon, Ink, Status};
 
 use super::format::tokens;

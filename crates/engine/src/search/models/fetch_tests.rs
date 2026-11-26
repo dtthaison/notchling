@@ -431,6 +431,7 @@ fn a_stream_that_ends_short_keeps_the_part_to_resume() {
     assert!(!tmp.path().join("w.bin").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_model_folder_that_is_a_link_is_refused() {
     let data = body();

@@ -85,18 +85,20 @@ pub struct Confirm {
     pub areas: Vec<Area>,
 }
 
+pub const NOTICE_SIZE: (f32, f32) = (460.0, 168.0);
+pub const CONFIRM_SIZE: (f32, f32) = (460.0, 300.0);
 pub const NOTICE_BUTTON: &str = "Turn Back On";
 
 pub const VIEWS: [crate::views::ViewSpec; 2] = [
     crate::views::ViewSpec {
         name: "restart-notice",
-        size: super::restart_view::NOTICE_SIZE,
+        size: NOTICE_SIZE,
         about:
             "the notice after a daemon restart: Sessions, Logins and Vault were on (made-up state)",
     },
     crate::views::ViewSpec {
         name: "restart-notice-confirm",
-        size: super::restart_view::CONFIRM_SIZE,
+        size: CONFIRM_SIZE,
         about: "the restart notice's one confirmation, naming each switch (made-up state)",
     },
 ];

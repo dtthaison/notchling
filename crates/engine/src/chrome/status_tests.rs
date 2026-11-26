@@ -22,6 +22,7 @@ fn the_flag_edit_changes_only_the_flags_text() {
     assert_eq!(status::read_flags(&file).unwrap(), flags);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_linked_state_file_is_left_alone_and_the_copy_is_private() {
     use std::os::unix::fs::PermissionsExt;

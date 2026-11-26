@@ -55,6 +55,7 @@ pub mod trust;
 #[cfg(target_os = "macos")]
 mod trust_view;
 pub mod updates;
+#[cfg(any(test, target_os = "macos"))]
 mod updates_admin;
 mod updates_state;
 #[cfg(target_os = "macos")]

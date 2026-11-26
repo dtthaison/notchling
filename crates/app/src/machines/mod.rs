@@ -11,6 +11,7 @@ pub mod cluster_feed;
 pub mod data;
 #[cfg(target_os = "macos")]
 pub mod diff_view;
+#[cfg(target_os = "macos")]
 pub(crate) mod editors;
 pub mod forms;
 #[cfg(target_os = "macos")]

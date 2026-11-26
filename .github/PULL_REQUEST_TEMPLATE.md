@@ -12,7 +12,9 @@
 - [ ] `tools/bundle-next.sh` builds without warnings I added
 - [ ] If `apps/flutter/` changed: `flutter analyze` and `flutter test` pass
 - [ ] If users would see it: tried in the running app (macOS version: )
-- [ ] Changelog: a line under [Unreleased] in CHANGELOG.md, if users would notice (per-PR fragments replace this in Phase 6)
+- [ ] A new feature has its `notchling` command and agent-tier op with `--json` (docs/goals.md, goal 6)
+- [ ] If `protocol/` changed: additive only, types regenerated, not edited by hand
+- [ ] Changelog: a fragment in `changes/` if this changes `crates/**/src/**` or `apps/flutter/lib/**` ([changes/README.md](../changes/README.md); `internal` when users won't notice)
 - [ ] No secrets in the diff or screenshots: tokens, cookies, `~/.claude.json` contents, vault values
 - [ ] Every commit is signed off (`git commit -s`)
 

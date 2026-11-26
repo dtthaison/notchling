@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 pub mod agy_card;
 pub mod answer;
+#[cfg(target_os = "macos")]
 pub mod answer_editor;
 #[cfg(target_os = "macos")]
 pub mod answering;

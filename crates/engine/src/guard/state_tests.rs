@@ -208,6 +208,7 @@ fn age(path: &std::path::Path, days: u64) {
     file.set_modified(when).expect("time");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_sweep_takes_old_files_with_their_lock_and_leaves_used_ones() {
     let dir = TempDir::new("guard-state");
@@ -294,6 +295,7 @@ fn an_old_file_without_a_lock_is_swept_under_a_lock_and_leaves_none_behind() {
     assert!(!dir.path("sessions/gone.lock").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_file_with_a_lock_somebody_holds_is_left_for_later() {
     let dir = TempDir::new("guard-state");

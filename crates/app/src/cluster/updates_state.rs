@@ -1,8 +1,11 @@
 use std::sync::{Mutex, MutexGuard};
 
+#[cfg(any(test, target_os = "macos"))]
 use notchling_engine::machines::engine::SetupEngine;
+#[cfg(any(test, target_os = "macos"))]
 use notchling_engine::machines::engine_plan::{PlanKind, ShownPlan};
 use notchling_engine::machines::step::FixOutcome;
+#[cfg(any(test, target_os = "macos"))]
 use notchling_locale as t;
 
 use super::updates::NotNow;
@@ -64,6 +67,7 @@ impl UpdateSession {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Default)]
 pub struct Offered {
     names: Option<Vec<String>>,
@@ -71,6 +75,7 @@ pub struct Offered {
     error: Option<String>,
 }
 
+#[cfg(any(test, target_os = "macos"))]
 impl Offered {
     pub fn sync_names(&mut self, engine: &SetupEngine, names: Vec<String>) -> bool {
         if self.names.as_ref() == Some(&names) {
@@ -107,6 +112,7 @@ impl Offered {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub fn admin_machines(&self) -> Vec<String> {
         match &self.shown {
             Some(ShownPlan {

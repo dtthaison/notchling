@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui::Image;
 
-use super::widgets::ToolMark;
+use crate::tool_mark::ToolMark;
 
 fn images() -> &'static Mutex<HashMap<ToolMark, Arc<Image>>> {
     static IMAGES: OnceLock<Mutex<HashMap<ToolMark, Arc<Image>>>> = OnceLock::new();

@@ -12,6 +12,7 @@ mod text_editor;
 mod tool_images;
 mod widgets;
 
+pub use crate::tool_mark::ToolMark;
 pub use code_block::{code_block, code_line, code_size};
 pub use gallery::KitGallery;
 pub use icons::{icon, icon_in, spinner, spinner_in, KitAssets};
@@ -31,7 +32,7 @@ pub use tool_images::{first_installed, set_tool_image};
 pub use widgets::{
     account_line, avatar, brand_image, brand_mark, button, button_with, card, editor_field, field,
     icon_button, icon_button_small, label, node_line, option_row, option_row_plain, phone_mark,
-    session_row, session_row_marked, status_pill, tool_icon, ToolMark,
+    session_row, session_row_marked, status_pill, tool_icon,
 };
 
 use gpui::{px, FontWeight, Hsla, Rgba, Styled, Window, WindowAppearance};

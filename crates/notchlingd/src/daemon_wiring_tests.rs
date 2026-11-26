@@ -628,6 +628,7 @@ fn an_agent_search_with_no_organization_or_no_reads_answers_empty_with_no_sessio
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_closed_wiring_holds_no_file_under_its_data_folder() {
     let root = std::env::temp_dir().join(format!("nl-wiring-fds-{}", std::process::id()));
