@@ -16,6 +16,21 @@ impl Drop for Dir {
     }
 }
 
+pub fn spawn_retrying(command: &mut Command) -> Child {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match command.spawn() {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            other => return other.unwrap(),
+        }
+    }
+}
+
 pub fn scratch(tag: &str) -> Dir {
     let dir = PathBuf::from(format!("/tmp/nl-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

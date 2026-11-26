@@ -37,7 +37,14 @@ fn a_child_has_its_own_start_time_argv_and_stdout_file() {
     let seen = procs
         .stdout_path(pid)
         .and_then(|p| std::fs::canonicalize(p).ok());
-    let argv = procs.argv(pid);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut argv = procs.argv(pid);
+    while argv.as_ref().is_none_or(|a| !a[0].ends_with("sleep"))
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        argv = procs.argv(pid);
+    }
     let started = procs.start_time(pid);
     let mine = procs.start_time(std::process::id());
     let _ = child.kill();

@@ -552,3 +552,19 @@ fn due_follows_the_last_refresh() {
     assert!(!index.due(1004.0, 8.0));
     assert!(index.due(1008.0, 8.0));
 }
+
+#[test]
+fn a_stamp_survives_the_database_exactly() {
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    for _ in 0..200_000 {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let secs = 1_700_000_000 + (seed >> 40) % 100_000_000;
+        let nanos = (seed >> 8) % 1_000_000_000;
+        let modified = Duration::new(secs, nanos as u32).as_secs_f64();
+        let text = serde_json::to_string(&modified).unwrap();
+        let back: f64 = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, modified, "{text}");
+    }
+}

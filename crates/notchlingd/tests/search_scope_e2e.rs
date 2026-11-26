@@ -48,17 +48,17 @@ fn as_session(world: &World, steps: &[&[&str]]) -> Vec<Value> {
     let claude = claude_dir.join("claude");
     let _ = std::fs::remove_file(&claude);
     std::fs::copy(std::env::current_exe().unwrap(), &claude).unwrap();
-    let mut parent = Command::new(&claude)
-        .args(["--exact", HELPER, "--nocapture", "--test-threads=1"])
-        .env("NL_SCOPE_E2E_BIN", env!("CARGO_BIN_EXE_notchling"))
-        .env("NL_SCOPE_E2E_STEPS", serde_json::to_string(steps).unwrap())
-        .env("NOTCHLING_DATA_ROOT", &world.root)
-        .env("HOME", &world.home)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut parent = common::spawn_retrying(
+        Command::new(&claude)
+            .args(["--exact", HELPER, "--nocapture", "--test-threads=1"])
+            .env("NL_SCOPE_E2E_BIN", env!("CARGO_BIN_EXE_notchling"))
+            .env("NL_SCOPE_E2E_STEPS", serde_json::to_string(steps).unwrap())
+            .env("NOTCHLING_DATA_ROOT", &world.root)
+            .env("HOME", &world.home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+    );
     let sessions = world.root.join("claude/sessions");
     std::fs::create_dir_all(&sessions).unwrap();
     let file = json!({

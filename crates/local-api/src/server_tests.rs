@@ -510,6 +510,7 @@ fn the_last_slots_are_kept_for_the_app() {
     let limits = Limits {
         max_clients: 4,
         app_reserved: 2,
+        idle_within: Duration::from_secs(30),
         ..fast()
     };
     let agents = start_with(Allowlist::empty(), limits);

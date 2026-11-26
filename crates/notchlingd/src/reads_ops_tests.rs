@@ -811,11 +811,11 @@ fn accounts_summary_lists_claude_code_accounts_by_opaque_id() {
     let text = reply.to_string();
     for planted in [
         "cats-private-lane",
-        "a1a1",
-        "a2a2",
-        "a3a3",
-        "a4a4",
-        "a5a5",
+        "a1a1:0101",
+        "a2a2:0202",
+        "a3a3:0303",
+        "a4a4:0404",
+        "a5a5:0505",
         "ann@",
         "bob@",
         "cat@",

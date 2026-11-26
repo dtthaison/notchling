@@ -36,9 +36,9 @@ impl World {
             N.fetch_add(1, Ordering::SeqCst)
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        let project = dir.join("claude/projects/-work-app");
+        let project = dir.join("claude").join("projects").join("-work-app");
         std::fs::create_dir_all(&project).expect("folder");
-        std::fs::create_dir_all(dir.join("claude/sessions")).expect("folder");
+        std::fs::create_dir_all(dir.join("claude").join("sessions")).expect("folder");
         let mut chain = Vec::new();
         for n in 0..transcripts {
             let id = if n + 1 == transcripts {
@@ -65,7 +65,7 @@ impl World {
         }
         let pid = std::process::id();
         std::fs::write(
-            dir.join(format!("claude/sessions/{pid}.json")),
+            dir.join("claude").join("sessions").join(format!("{pid}.json")),
             format!(
                 r#"{{"sessionId":"{CURRENT}","pid":{pid},"cwd":"/work/app","status":"idle","name":"{NAME}","startedAt":1794160000000}}"#
             ),
