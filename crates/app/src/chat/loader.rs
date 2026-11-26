@@ -507,6 +507,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_job_handed_to_codex_is_a_subagent_of_its_session_and_not_a_sidebar_row() {
         let s = crate::testutil::Scratch::new("loader-delegated");

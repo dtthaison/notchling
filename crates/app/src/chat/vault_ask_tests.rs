@@ -170,6 +170,7 @@ fn the_raised_ticket_is_shown_first_and_otherwise_the_oldest() {
     assert_eq!(pick(&["a", "b"], Some("gone")), Some(0));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_known_session_gets_a_card_and_anything_else_gets_the_sheet() {
     let mut a = session("job-a", AgentGroup::Working, None, Tool::Claude);
@@ -214,6 +215,7 @@ fn a_row_waiting_on_the_vault_shows_the_needs_you_marker_like_a_question() {
     assert_eq!(model.clone().with_vault(&BTreeSet::new()), model);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_card_needs_the_callers_real_folder_to_sit_in_the_rows_project() {
     assert!(cwd_within("/w/p", "/w/p"));

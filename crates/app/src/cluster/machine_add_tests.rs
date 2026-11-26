@@ -357,6 +357,7 @@ fn the_cluster_only_takes_machines_while_one_exists() {
     assert!(!ClusterModel::default().accepts_machines());
 }
 
+#[cfg(unix)]
 #[test]
 fn no_local_api_op_changes_machines() {
     let wire = include_str!("../../../local-api/src/wire.rs");

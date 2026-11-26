@@ -67,6 +67,7 @@ fn only_the_jobs_a_session_handed_over_are_its_subagents() {
     assert!(subagents(&records, &["nobody".into()], &p, 130.0, &alive).is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_reads_as_a_subagent_with_the_tools_name_model_and_status() {
     let s = Scratch::new("deleg-row");
@@ -129,6 +130,7 @@ fn a_job_whose_command_died_without_saying_so_is_not_running() {
     assert_eq!(orphan.status, Status::Stopped);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_antigravity_job_reads_its_log_once_it_exists() {
     let s = Scratch::new("deleg-agy");

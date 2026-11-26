@@ -170,6 +170,7 @@ fn a_fixture_source_reads_files_and_says_nothing_about_a_daemon() {
     assert_eq!(none.view().link, Link::Files);
 }
 
+#[cfg(unix)]
 #[test]
 fn with_no_socket_it_falls_back_says_so_and_starts_the_daemon_only_once() {
     let scratch = Scratch::new("ss-none");

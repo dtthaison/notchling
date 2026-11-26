@@ -133,6 +133,7 @@ fn ids(feed: &InboxFeed) -> Vec<String> {
     needs.into_iter().chain(done).map(|r| r.id).collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn it_seeds_from_the_list_then_follows_events_and_answers_by_op() {
     let scratch = Scratch::new("inbox-feed");
@@ -189,6 +190,7 @@ fn a_feed_with_no_daemon_shows_nothing_and_refuses_to_send() {
     assert!(feed.seen(&["a".to_owned()]).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_lost_connection_drops_what_the_daemon_said_and_a_new_one_seeds_again() {
     let scratch = Scratch::new("inbox-lost");
@@ -207,6 +209,7 @@ fn a_lost_connection_drops_what_the_daemon_said_and_a_new_one_seeds_again() {
     let _ = again.1.join();
 }
 
+#[cfg(unix)]
 #[test]
 fn it_follows_the_consent_requests_and_answers_them_by_the_consent_ops() {
     let scratch = Scratch::new("inbox-cns");

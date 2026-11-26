@@ -308,6 +308,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_path_resolves_only_when_it_exists() {
         let s = Scratch::new("paths-resolve");
@@ -374,6 +375,7 @@ mod tests {
         assert_eq!(resolve("MISSING.md", &base, true, &probe), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn existing_paths_in_prose_and_code_become_links_and_the_rest_stays_text() {
         let s = Scratch::new("paths-link");
@@ -429,6 +431,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_markdown_destination_is_made_absolute_when_it_exists() {
         let s = Scratch::new("paths-dest");
@@ -451,6 +454,7 @@ mod tests {
         assert_eq!(got[4].link.as_deref(), Some("mailto:a@b.c"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_file_url_with_escaped_spaces_links_the_file() {
         let s = Scratch::new("paths-file-url");

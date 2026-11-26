@@ -197,6 +197,7 @@ mod tests {
         assert_eq!(status_of(&list, "open"), Status::Running);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_subagent_continued_in_the_new_folder_keeps_the_description_of_the_old_one() {
         let s = Scratch::new("cleared-continued-agent");

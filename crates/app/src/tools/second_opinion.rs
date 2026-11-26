@@ -433,6 +433,20 @@ mod tests {
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
                 .expect("executable");
         }
+        let sibling = bin.join("notchling");
+        let ready = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while let Err(e) = std::process::Command::new(&sibling)
+            .arg("probe")
+            .stdout(std::process::Stdio::null())
+            .status()
+        {
+            assert!(
+                e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && std::time::Instant::now() < ready,
+                "the script runs: {e}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         let store = store_for_run(Some(&root), Some(&bin.join("notchling-app"))).expect("a store");
         store.start(&request_in(&scratch));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);

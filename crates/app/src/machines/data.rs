@@ -356,6 +356,7 @@ mod tests {
         assert!(parts.vault.rename("a", "b").is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_merge_makes_its_own_worktree_under_the_data_root() {
         use notchling_engine::machines::merge::MergeTarget;

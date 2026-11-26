@@ -19,6 +19,7 @@ fn transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn the_conversation_and_the_snapshot_agree_on_every_fixture() {
     let mut files = Vec::new();

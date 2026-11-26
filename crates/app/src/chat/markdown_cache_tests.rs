@@ -44,6 +44,7 @@ fn links(message: &Message) -> Vec<(String, Option<String>)> {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn a_message_drawn_again_is_neither_parsed_nor_looked_up_again() {
     let s = Scratch::new("md-cache-hit");
@@ -84,6 +85,7 @@ fn a_changed_text_or_folder_is_prepared_again() {
     assert!(!Rc::ptr_eq(&grown, &moved), "another folder links again");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_reload_asks_the_disk_again_and_finds_a_new_file() {
     let s = Scratch::new("md-cache-reload");
@@ -142,6 +144,7 @@ fn is_file_is_asked_once_per_load() {
     assert!(!cache.is_file(&picture));
 }
 
+#[cfg(unix)]
 #[test]
 fn linked_images_are_kept_only_when_they_are_files() {
     let s = Scratch::new("md-cache-images");

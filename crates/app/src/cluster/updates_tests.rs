@@ -167,12 +167,20 @@ fn needs_build_row_says_build_nodes_first() {
 
 #[test]
 fn busy_row_offers_update_anyway() {
-    let machines = [node("m1", MachineOs::MacOs)];
+    let machines = [node("m1", MachineOs::Linux)];
     let busy = model(
-        vec![member(M1, "m1", "macos", "aarch64", Some(OTHER))],
+        vec![member(M1, "m1", "linux", "x86_64", Some(OTHER))],
         json!([{"id": "j1", "node": M1, "tool": "shell", "state": "running"}]),
     );
-    let got = rows(&busy, &machines);
+    let got = rows_for(
+        Some(OURS),
+        &busy,
+        &machines,
+        &none,
+        Some(&manifest(OURS)),
+        &BTreeSet::new(),
+        false,
+    );
     assert!(matches!(got[0].state, UpdateState::Busy(_)));
     let mut anyway = BTreeSet::new();
     let shown = lines(&got, &anyway);

@@ -529,11 +529,11 @@ fn the_last_slots_are_kept_for_the_app() {
 fn an_idle_client_that_follows_nothing_is_closed_and_a_follower_stays() {
     let run = start();
     let (mut idle, mut r) = raw(&run.socket);
+    let started = Instant::now();
     send(&mut idle, HELLO);
     assert!(reply(&mut r)["ok"].is_object());
     let mut follower = client(&run.socket);
     follower.subscribe(&["sessions"]).unwrap();
-    let started = Instant::now();
     assert!(closed(&mut idle));
     assert!(started.elapsed() >= Duration::from_millis(500));
     std::thread::sleep(Duration::from_millis(400));

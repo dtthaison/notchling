@@ -131,6 +131,7 @@ fn recorded(calls: &Calls) -> Vec<(String, Value)> {
     calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+#[cfg(unix)]
 #[test]
 fn the_feed_reads_the_status_and_turns_the_switch_on_only_when_asked() {
     let scratch = Scratch::new("cluster-feed");
@@ -177,6 +178,7 @@ fn without_a_daemon_the_model_is_empty_and_a_call_says_so() {
     assert!(feed.token().is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_join_goes_to_the_daemon_and_an_error_never_carries_the_token() {
     let scratch = Scratch::new("cl-join");
@@ -257,6 +259,7 @@ fn an_event_keeps_the_readiness_and_set_facts_it_does_not_carry() {
     assert!(fresh.get("replication").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_feed_with_no_daemon_says_it_is_down_and_recovers_when_one_answers() {
     let scratch = Scratch::new("cf-down");
