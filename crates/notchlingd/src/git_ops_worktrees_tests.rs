@@ -75,6 +75,21 @@ fn read_all(rig: &RepoRig, cwd: &str) -> Value {
     panic!("work never read");
 }
 
+fn placed(rig: &RepoRig) -> Value {
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        let got = reply(rig);
+        let pending = got["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["missing"] == false && w["base"].is_null());
+        if !pending || Instant::now() >= end {
+            return got;
+        }
+    }
+}
+
 fn settled(rig: &RepoRig) -> Value {
     let got = read_all(rig, &rig.cwd());
     idle(rig, &key_of(rig));
@@ -435,7 +450,7 @@ fn fetched_at_from_fetch_head() {
 fn old_git_falls_back_to_rev_list() {
     let rig = RepoRig::new("wt-old-git");
     rig.launcher.old_git(true);
-    let got = reply(&rig);
+    let got = placed(&rig);
     let lane = entry(&got, "lane-a");
     assert_eq!(lane["base"], "int");
     assert_eq!(

@@ -189,12 +189,14 @@ fn make_id() -> String {
     )
 }
 
+const PROMPT_DIR: &str = "notchling-second-opinion";
+
 pub fn store_for_run(root: Option<&DataRoot>, exe: Option<&Path>) -> Option<SecondOpinionStore> {
     let root = root.filter(|r| r.fixture.is_none())?;
     let program: PathBuf = notchling_binary(exe?)?;
     Some(SecondOpinionStore::new(
         Some(root.data_dir.clone()),
-        std::env::temp_dir(),
+        std::env::temp_dir().join(PROMPT_DIR),
         Arc::new(ProcessHost::new(program)),
         Box::new(now_secs),
         Box::new(make_id),
@@ -433,20 +435,6 @@ mod tests {
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
                 .expect("executable");
         }
-        let sibling = bin.join("notchling");
-        let ready = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while let Err(e) = std::process::Command::new(&sibling)
-            .arg("probe")
-            .stdout(std::process::Stdio::null())
-            .status()
-        {
-            assert!(
-                e.kind() == std::io::ErrorKind::ExecutableFileBusy
-                    && std::time::Instant::now() < ready,
-                "the script runs: {e}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
         let store = store_for_run(Some(&root), Some(&bin.join("notchling-app"))).expect("a store");
         store.start(&request_in(&scratch));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -455,12 +443,13 @@ mod tests {
         {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+        let errors: Vec<_> = store.opinions().into_iter().map(|o| o.error).collect();
         assert_eq!(
             std::fs::read_to_string(bin.join("notchling.arg"))
                 .as_deref()
                 .ok(),
             Some("delegate\n"),
-            "the sibling got `delegate`"
+            "the sibling got `delegate`: {errors:?}"
         );
         assert!(
             !bin.join("notchling-app.arg").exists(),

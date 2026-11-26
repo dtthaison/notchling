@@ -132,6 +132,7 @@ fn the_log_folder_is_made_before_the_service_file_on_a_fresh_machine() {
     }
 }
 
+#[cfg(unix)]
 fn made_by(script: &str, home: &std::path::Path, xdg: Option<&str>) {
     let mut cmd = std::process::Command::new("/bin/sh");
     cmd.arg("-c").arg(script).env_clear().env("HOME", home);
@@ -146,6 +147,7 @@ fn made_by(script: &str, home: &std::path::Path, xdg: Option<&str>) {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_log_folder_script_makes_the_folder_the_daemon_writes_to() {
     let home = TempDir::new("final-home");

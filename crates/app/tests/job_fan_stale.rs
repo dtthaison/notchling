@@ -45,7 +45,9 @@ impl World {
     fn output_of(&self, id: &str) -> PathBuf {
         let tasks = self
             .dir
-            .join("tmp/claude-501/-work-film")
+            .join("tmp")
+            .join("claude-501")
+            .join("-work-film")
             .join(RESUME_ID)
             .join("tasks");
         std::fs::create_dir_all(&tasks).expect("tasks folder");

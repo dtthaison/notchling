@@ -376,7 +376,7 @@ mod slash_tmp {
         let output = tasks.join(format!("{ID}.output"));
         let file = std::fs::File::create(&output).expect("output file");
         let kid = Command::new("sh")
-            .args(["-c", "sleep 60"])
+            .args(["-c", "exec sleep 60"])
             .stdout(file)
             .stderr(Stdio::null())
             .process_group(0)

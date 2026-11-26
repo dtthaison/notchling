@@ -173,6 +173,7 @@ fn a_process_that_exited_but_is_not_reaped_reads_as_lost_though_its_start_time_m
     assert_eq!(state_of(&f.asks, &id), "lost");
 }
 
+#[cfg(unix)]
 fn is_zombie(pid: u32) -> bool {
     let out = std::process::Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -183,6 +184,7 @@ fn is_zombie(pid: u32) -> bool {
         .starts_with('Z')
 }
 
+#[cfg(unix)]
 #[test]
 fn a_real_child_that_died_and_is_not_reaped_reads_as_lost() {
     let mut child = std::process::Command::new("sleep")

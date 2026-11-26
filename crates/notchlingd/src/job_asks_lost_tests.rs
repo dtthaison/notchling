@@ -69,6 +69,7 @@ fn an_old_delegate_job_that_never_ended_reads_as_lost() {
     assert!(got["endedMs"].is_number());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_delegate_whose_process_is_gone_ends_as_lost_and_a_live_one_keeps_running() {
     let f = asks_over("pid", Arc::new(JobBook::in_memory()));

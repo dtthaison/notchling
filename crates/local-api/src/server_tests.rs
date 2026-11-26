@@ -145,6 +145,7 @@ fn connect_as(socket: &Path, kind: ClientKind) -> Client {
     Client::connect_with(socket, kind, "0.1.0", &relaxed()).unwrap()
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn a_client_refuses_a_server_that_is_not_a_notchling_daemon() {
     let run = start();
