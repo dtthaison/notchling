@@ -357,8 +357,11 @@ fn nothing_is_stamped_while_the_tool_scan_has_not_finished() {
     assert_eq!(r.status.count.load(Ordering::SeqCst), 0);
     assert!(r.probe.logins().is_empty());
     std::thread::sleep(Duration::from_millis(50));
-    r.probe
-        .refresh_when_ready(Duration::from_millis(30), Duration::from_millis(5));
+    LoginProbe::wait_then_refresh(
+        Arc::downgrade(&r.probe),
+        Duration::from_millis(30),
+        Duration::from_millis(5),
+    );
     assert_eq!(r.status.count.load(Ordering::SeqCst), 0);
     assert!(lock(&r.probe.inner).running.is_none());
     r.installed.scanned.store(true, Ordering::SeqCst);
@@ -376,11 +379,32 @@ fn a_scan_that_finishes_while_waiting_lets_the_probe_run() {
         std::thread::sleep(Duration::from_millis(60));
         flag.scanned.store(true, Ordering::SeqCst);
     });
-    r.probe
-        .refresh_when_ready(Duration::from_secs(5), Duration::from_millis(10));
+    LoginProbe::wait_then_refresh(
+        Arc::downgrade(&r.probe),
+        Duration::from_secs(5),
+        Duration::from_millis(10),
+    );
     later.join().unwrap();
     assert_eq!(r.status.count.load(Ordering::SeqCst), 1);
     assert_eq!(r.probe.logins().get(&Tool::Codex), Some(&true));
+}
+
+#[test]
+fn a_waiting_probe_lets_go_of_its_owner_when_the_owner_is_dropped() {
+    let r = rig(&[ON], false, no_files());
+    r.installed.scanned.store(false, Ordering::SeqCst);
+    let weak = Arc::downgrade(&r.probe);
+    let started = Instant::now();
+    let waiting = std::thread::spawn(move || {
+        LoginProbe::wait_then_refresh(weak, Duration::from_secs(30), Duration::from_millis(5));
+    });
+    std::thread::sleep(Duration::from_millis(40));
+    let Rig { probe, .. } = r;
+    let held = Arc::downgrade(&probe);
+    drop(probe);
+    waiting.join().unwrap();
+    assert!(held.upgrade().is_none());
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 #[test]

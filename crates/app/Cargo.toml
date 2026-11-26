@@ -43,6 +43,10 @@ wry = { version = "=0.57.1", default-features = false }
 png = "=0.17.16"
 
 
+# The layout tests lay a view out in GPUI's test window and read element bounds back.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { version = "=0.2.2", features = ["runtime_shaders", "test-support"] }
+
 # The phone panel's readers are tested on the engine bridge's real replies, over a test certificate.
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }

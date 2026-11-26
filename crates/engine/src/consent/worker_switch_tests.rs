@@ -36,6 +36,7 @@ fn mirrored(switch: &str) -> Item {
         open: None,
         closed_ms: None,
         switch: Some(switch.to_string()),
+        ..Default::default()
     }
 }
 

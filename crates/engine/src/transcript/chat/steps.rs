@@ -151,6 +151,16 @@ pub fn step(id: &str, name: &str, input: &Map<String, Value>) -> ToolStep {
             s
         }
         "Bash" => ToolStep::new(id, name, summary_line(get("command").unwrap_or(""))),
+        "REPL" => ToolStep::new(
+            id,
+            name,
+            summary_line(
+                get("description")
+                    .filter(|d| !d.trim().is_empty())
+                    .or_else(|| get("code"))
+                    .unwrap_or("Ran a script"),
+            ),
+        ),
         "Read" => {
             let mut s = ToolStep::new(id, name, named(file));
             s.path = file.map(String::from);

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     SecretApproval,
@@ -23,6 +23,7 @@ pub enum Kind {
     Consent,
     ShellStuck,
     #[serde(other)]
+    #[default]
     Notice,
 }
 
@@ -82,9 +83,10 @@ pub struct Action {
     pub primary: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
+    #[default]
     Open,
     Answered,
     Expired,
@@ -98,7 +100,69 @@ pub struct Source {
     pub job: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Waiter {
+    Cli,
+    Ask,
+    Vault,
+    Cluster,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertAction {
+    Allow,
+    Deny,
+    Change,
+    Open,
+    Reply,
+    Dismiss,
+    OpenForm,
+    Cancel,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeState {
+    Applying,
+    Applied,
+    Failed,
+    Withdrawn,
+}
+
+pub const NOTE_MAX: usize = 300;
+pub const REASON_MAX: usize = 300;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Outcome {
+    pub state: OutcomeState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub at_ms: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Place {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Live {
+    pub waiting_since: i64,
+    pub waiter: Waiter,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Item {
     pub id: String,
     pub kind: Kind,
@@ -117,4 +181,39 @@ pub struct Item {
     pub closed_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub switch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocking: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_since: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiter: Option<Waiter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alert_actions: Vec<AlertAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<Place>,
+}
+
+impl Item {
+    pub fn without_live(&self) -> Item {
+        Item {
+            blocking: None,
+            waiting_since: None,
+            waiter: None,
+            ..self.clone()
+        }
+    }
+
+    pub fn clear_live(&mut self) {
+        self.blocking = None;
+        self.waiting_since = None;
+        self.waiter = None;
+    }
+
+    pub fn is_blocking(&self) -> bool {
+        self.blocking == Some(true)
+    }
 }

@@ -1,0 +1,11 @@
+{
+  "session_id": "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c",
+  "cwd": "/tmp/demo",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "REPL",
+  "tool_use_id": "toolu_REPL_ONE",
+  "tool_input": {
+    "code": "await $`ls`.text()",
+    "description": "List the folder"
+  }
+}

@@ -5,7 +5,7 @@ use notchling_engine::cluster::{LocalCmd, NodeId, Qualified};
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 pub const NODE_FOLLOW: &str = "node.follow";
 pub const VAULT_RELAYED: [&str; 3] = [ops::VAULT_LIST, ops::VAULT_SAVE, ops::VAULT_REMOVE];
@@ -228,7 +228,7 @@ pub trait PromptPush: Send + Sync {
 #[derive(Default)]
 pub struct PromptFollowers {
     until: Mutex<BTreeMap<String, i64>>,
-    push: OnceLock<Arc<dyn PromptPush>>,
+    push: Mutex<Option<Arc<dyn PromptPush>>>,
 }
 
 impl PromptFollowers {
@@ -249,7 +249,15 @@ impl PromptFollowers {
     }
 
     pub fn attach(&self, push: Arc<dyn PromptPush>) {
-        let _ = self.push.set(push);
+        let mut slot = self.push.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            *slot = Some(push);
+        }
+    }
+
+    pub fn detach(&self) {
+        let push = self.push.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(push);
     }
 
     pub fn relay(&self, now_ms: i64, topic: &str, event: &str, data: &Value) {
@@ -263,7 +271,7 @@ impl PromptFollowers {
         {
             return;
         }
-        let Some(push) = self.push.get() else {
+        let Some(push) = self.push.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
             return;
         };
         let nodes = self.nodes(now_ms);

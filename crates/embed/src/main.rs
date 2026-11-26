@@ -147,7 +147,10 @@ fn main() -> ExitCode {
                 "chunks/s: {:.1}, at the budget {:.1}",
                 r.chunks_per_s, r.chunks_per_s_at_budget
             );
-            println!("rss {:.0} MB, peak {:.0} MB", r.rss_mb, r.peak_rss_mb);
+            println!(
+                "rss {:.0} MB, peak {:.0} MB, peak footprint {:.0} MB",
+                r.rss_mb, r.peak_rss_mb, r.peak_footprint_mb
+            );
             match serde_json::to_string(&r) {
                 Ok(json) => println!("bench-json: {json}"),
                 Err(e) => eprintln!("{e}"),

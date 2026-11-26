@@ -7,10 +7,9 @@ use gpui::{
 use notchling_engine::sessions::{Agent, AgentGroup};
 use notchling_kit::labels::Corner;
 use notchling_kit::metric::RADIUS_MD;
-use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
-use notchling_kit::ui::{hsla, icon_button, scrollable, status_pill, KitPart, KitStyled};
-use notchling_kit::{Color, Icon, Ink, TypeRole};
+use notchling_kit::ui::{hsla, scrollable, status_pill, KitPart, KitStyled};
+use notchling_kit::{Color, Ink, TypeRole};
 use notchling_locale as t;
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
@@ -48,6 +47,10 @@ pub struct NotchView {
     pub(super) sending: Option<Sending>,
     pub(super) send_error: Option<String>,
     pub(super) answer: AnswerEditor,
+    pub(super) note: AnswerEditor,
+    pub(super) note_at: Option<String>,
+    pub(super) note_for: Option<(String, String)>,
+    pub(super) note_focused: bool,
     pub(super) focused: bool,
     pub(super) prefs: NotchPrefs,
     pub(super) walk: Walk,
@@ -78,6 +81,10 @@ impl NotchView {
             sending: None,
             send_error: None,
             answer: AnswerEditor::new(t::notch::type_else(), cx, NotchView::answer_event),
+            note: AnswerEditor::new(t::consent::change_placeholder(), cx, NotchView::note_event),
+            note_at: None,
+            note_for: None,
+            note_focused: false,
             focused: false,
             prefs: NotchPrefs::default(),
             walk: Walk::default(),
@@ -196,6 +203,8 @@ impl NotchView {
             NotchState::List => Some(self.list(cx)),
             NotchState::Peek(id) => self.peek(id, cx),
             NotchState::Detail(id) => self.detail(id, cx),
+            NotchState::Blocking => Some(self.blocking_panel(cx)),
+            NotchState::Glance => Some(self.blocking_glance()),
         };
         let body = div()
             .w(px(w - 2.0 * f))
@@ -228,6 +237,13 @@ impl NotchView {
         } else {
             Ink::Text
         };
+        let ears = (m.state == NotchState::Collapsed)
+            .then(|| self.blocking_ears(cx))
+            .flatten();
+        let (left_ear, right_ear) = match ears {
+            Some((left, right)) => (Some(left), Some(right)),
+            None => (None, None),
+        };
         div()
             .h(px(m.notch.h as f32))
             .flex_shrink_0()
@@ -236,11 +252,13 @@ impl NotchView {
             .justify_between()
             .px(px(14.0))
             .child(
-                div().children(
-                    m.daemon_note
-                        .filter(|_| m.state == NotchState::List)
-                        .map(|note| text(note, TypeRole::Meta, Ink::TextFaint)),
-                ),
+                div()
+                    .children(
+                        m.daemon_note
+                            .filter(|_| m.state == NotchState::List)
+                            .map(|note| text(note, TypeRole::Meta, Ink::TextFaint)),
+                    )
+                    .children(left_ear),
             )
             .child(
                 div()
@@ -251,7 +269,8 @@ impl NotchView {
                         self.inbox_badge(cx)
                             .filter(|_| m.state != NotchState::Collapsed),
                     )
-                    .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink))),
+                    .children(counted.then(|| text(active.to_string(), TypeRole::Label, ink)))
+                    .children(right_ear),
             )
             .part_inside("Notch Bar", Corner::TopTrailing, A, cx)
     }
@@ -520,65 +539,12 @@ impl NotchView {
                 .part_inside("Notch Detail", Corner::BottomTrailing, A, cx),
         )
     }
-
-    fn header(&self, agent: &Agent, cx: &mut Context<Self>) -> Div {
-        let group_status = status(agent.group);
-        let sub = t::notch::detail_sub(
-            &agent.label,
-            &agent.host,
-            &ago(agent.since_ms, self.model.now_ms),
-        );
-        div()
-            .flex_shrink_0()
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .child(
-                icon_button(
-                    "notch-back",
-                    Icon::ChevronLeft,
-                    ButtonKind::Ghost,
-                    PartState::Rest,
-                    A,
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.model.go(NotchState::List);
-                    cx.notify();
-                })),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(1.0))
-                    .child(text(agent.name.clone(), TypeRole::Heading, Ink::Text).elide())
-                    .child(text(sub, TypeRole::Meta, Ink::TextMuted).elide()),
-            )
-            .child(status_pill(group_status, group_status.word(), A))
-            .children(self.reload_button(agent, cx))
-            .child(
-                icon_button(
-                    "notch-close",
-                    Icon::Close,
-                    ButtonKind::Ghost,
-                    PartState::Rest,
-                    A,
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.model.go(NotchState::Collapsed);
-                    cx.notify();
-                }))
-                .part_at("Hide Button", Corner::BottomTrailing, A, cx),
-            )
-            .part_at("Notch Detail Header", Corner::Bottom, A, cx)
-    }
 }
 
 impl Render for NotchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focused = self.answer.editor().read(cx).is_focused(window);
+        self.sync_note(window, cx);
         let shape = self.shape(cx);
         div()
             .relative()

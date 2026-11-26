@@ -7,7 +7,7 @@ use notchling_local_api::topics;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CHUNK_EVERY: Duration = Duration::from_millis(250);
@@ -158,12 +158,14 @@ impl Shared {
 }
 
 pub(crate) struct DaemonSink {
-    pub shared: Arc<Shared>,
+    pub shared: Weak<Shared>,
 }
 
 impl Sink for DaemonSink {
     fn changed(&self, session: &str, change: Change) {
-        let shared = &self.shared;
+        let Some(shared) = self.shared.upgrade() else {
+            return;
+        };
         match change {
             Change::Chunk => {
                 let mut last = lock(&shared.last_chunk);

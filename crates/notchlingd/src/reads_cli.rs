@@ -38,6 +38,7 @@ fn takes_value(name: &str, flag: &str) -> bool {
                 | "--mode"
         ) | ("facets", "--prefix" | "--limit")
             | ("limits", "--tool" | "--pool")
+            | ("sessions history", "--limit" | "--before")
     )
 }
 
@@ -227,6 +228,19 @@ fn check(name: &str, p: &Parsed) -> Result<Value, Failure> {
             }
             Ok(query)
         }
+        "sessions history" => {
+            let mut query = json!({});
+            if let Some(limit) = flag(p, "--limit") {
+                match limit.parse::<u64>() {
+                    Ok(n) if (1..=100).contains(&n) => query["limit"] = json!(n),
+                    _ => return Err(Failure::usage("--limit takes a whole number, 1 to 100")),
+                }
+            }
+            if let Some(before) = flag(p, "--before") {
+                query["before"] = json!(before);
+            }
+            Ok(query)
+        }
         "awake" => match p.words.as_slice() {
             [] => Ok(json!({})),
             [word] if word == "on" || word == "off" => Ok(json!({"mode": word})),
@@ -275,6 +289,7 @@ pub fn run(name: &str, args: &[String]) -> i32 {
         "orgs" => ask(ops::ORGANIZATIONS_MINE, json!({})),
         "roles" => ask(ops::CATALOG_ROLES, json!({})),
         "limits" => return limits(query, json, &mut ask),
+        "sessions history" => ask(ops::SESSIONS_HISTORY, query),
         "search" => ask(ops::SEARCH_QUERY, query),
         "facets" => ask(ops::SEARCH_FACETS, query),
         "semantic" => ask(ops::EMBED_STATUS, json!({})),

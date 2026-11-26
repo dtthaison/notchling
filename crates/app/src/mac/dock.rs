@@ -1,6 +1,7 @@
 use gpui::{actions, App, KeyBinding, Menu, MenuItem, OsAction};
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSRequestUserAttentionType};
+use objc2_foundation::NSString;
 
 use crate::dock::{main_menu, main_menu_for, MainItem, Policy};
 
@@ -30,6 +31,36 @@ pub fn apply(policy: Policy) {
     if app.activationPolicy() != wanted {
         app.setActivationPolicy(wanted);
     }
+}
+
+pub fn bounce(critical: bool) -> Option<isize> {
+    let mtm = MainThreadMarker::new()?;
+    let kind = if critical {
+        NSRequestUserAttentionType::CriticalRequest
+    } else {
+        NSRequestUserAttentionType::InformationalRequest
+    };
+    Some(NSApplication::sharedApplication(mtm).requestUserAttention(kind))
+}
+
+pub fn cancel_bounce(request: isize) {
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSApplication::sharedApplication(mtm).cancelUserAttentionRequest(request);
+    }
+}
+
+pub fn app_active() -> bool {
+    MainThreadMarker::new().is_some_and(|mtm| NSApplication::sharedApplication(mtm).isActive())
+}
+
+pub fn set_badge(count: Option<u32>) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let label = count.map(|n| NSString::from_str(&n.to_string()));
+    NSApplication::sharedApplication(mtm)
+        .dockTile()
+        .setBadgeLabel(label.as_deref());
 }
 
 pub fn set_main_menu(cx: &mut App, policy: Policy) {

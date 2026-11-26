@@ -109,6 +109,7 @@ mod tests {
                 command: "sleep".into(),
                 title: String::new(),
                 output_path: "/tmp/b1.output".into(),
+                description: String::new(),
                 started: None,
             }],
             ..Conversation::default()

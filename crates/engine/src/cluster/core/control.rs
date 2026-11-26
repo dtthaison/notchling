@@ -5,8 +5,8 @@ use serde_json::{json, Value};
 
 use super::record::Pushed;
 use super::{
-    shown_members, shown_name, Effect, Joining, LocalCmd, NodeCore, Target, Then, ATTACH_CALL_MS,
-    CALL_MS, DELEGATE_CALL_MS,
+    shown_members, shown_name, start_wait, Effect, Joining, LocalCmd, NodeCore, Target, Then,
+    ATTACH_CALL_MS, CALL_MS, DELEGATE_CALL_MS,
 };
 use crate::cluster::failover::armed_at_current;
 use crate::cluster::grants::SecretAllow;
@@ -224,9 +224,9 @@ impl NodeCore {
                     let wait = if spec.is_delegate() {
                         DELEGATE_CALL_MS + CALL_MS
                     } else if spec.secrets.is_empty() {
-                        CALL_MS
+                        start_wait(spec.tool)
                     } else {
-                        ATTACH_CALL_MS + CALL_MS
+                        ATTACH_CALL_MS + start_wait(spec.tool)
                     };
                     let args = json!({"key": key, "spec": spec});
                     self.relay_to_home_within(id, "cluster.dispatch", args, origin, wait, out);

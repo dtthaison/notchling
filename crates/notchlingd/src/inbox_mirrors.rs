@@ -1,6 +1,7 @@
 use notchling_engine::cluster::{qualify, NodeId, Qualified};
 use notchling_engine::inbox::{
-    ActionId, Change, Item, Kind, State, DETAIL_MAX, DONE_KEEP_MS, TITLE_MAX,
+    clean_label, clean_note, clean_place, peer_alert_actions, ActionId, Change, Item, Kind, Place,
+    State, DETAIL_MAX, DONE_KEEP_MS, NOTE_MAX, TITLE_MAX,
 };
 use notchling_local_api::ApiError;
 use serde_json::Value;
@@ -18,7 +19,35 @@ pub trait InboxLink: Send + Sync {
         action: ActionId,
         by: &str,
     ) -> Result<Value, ApiError>;
+    fn answer_noted(
+        &self,
+        owner: &NodeId,
+        id: &str,
+        action: ActionId,
+        by: &str,
+        _note: Option<&str>,
+    ) -> Result<Value, ApiError> {
+        self.answer(owner, id, action, by)
+    }
     fn home_items(&self) -> Home;
+
+    fn machine_name(&self, _node: &NodeId) -> Option<String> {
+        None
+    }
+}
+
+pub fn name_machines(items: &mut [Item], link: &dyn InboxLink) {
+    for item in items {
+        let Some(node) = item.source.node.clone().and_then(|n| NodeId::parse(&n)) else {
+            continue;
+        };
+        let Some(name) = link.machine_name(&node) else {
+            continue;
+        };
+        let place = item.place.get_or_insert_with(Place::default);
+        place.machine = Some(node.to_string());
+        place.machine_name = clean_label(&name, SOURCE_MAX);
+    }
 }
 
 pub enum Home {
@@ -102,12 +131,22 @@ pub fn offered(kind: Kind) -> &'static [ActionId] {
     }
 }
 
-pub fn display(owner: &NodeId, mut item: Item) -> Result<Item, Refusal> {
+pub fn display(owner: &NodeId, item: Item) -> Result<Item, Refusal> {
+    display_named(owner, item, None)
+}
+
+pub fn display_named(
+    owner: &NodeId,
+    mut item: Item,
+    machine_name: Option<String>,
+) -> Result<Item, Refusal> {
     bare_id(owner, &item.id)?;
     item.id = qualify(owner, &item.id);
-    if item.source.node.is_none() {
-        item.source.node = Some(owner.to_string());
-    }
+    Ok(sanitize(owner, item, machine_name))
+}
+
+fn sanitize(owner: &NodeId, mut item: Item, machine_name: Option<String>) -> Item {
+    item.source.node = Some(owner.to_string());
     item.open = None;
     let allowed = offered(item.kind);
     item.actions.retain(|action| allowed.contains(&action.id));
@@ -121,11 +160,47 @@ pub fn display(owner: &NodeId, mut item: Item) -> Result<Item, Refusal> {
         action.label = cut(std::mem::take(&mut action.label), LABEL_MAX);
     }
     let source = &mut item.source;
-    for field in [&mut source.node, &mut source.session, &mut source.job] {
+    for field in [&mut source.session, &mut source.job] {
         *field = field.take().map(|text| cut(text, SOURCE_MAX));
     }
     item.answered_by = item.answered_by.take().map(|by| cut(by, BY_MAX));
-    Ok(item)
+    item.note = item
+        .note
+        .take()
+        .and_then(|note| clean_note(&note, NOTE_MAX));
+    if let Some(outcome) = &mut item.outcome {
+        outcome.reason = outcome
+            .reason
+            .take()
+            .filter(|reason| crate::consent_failure::is_known_line(reason));
+    }
+    item.alert_actions = peer_alert_actions(item.kind, &item.actions);
+    if item.state == State::Open
+        && item.blocking == Some(true)
+        && item.waiter.is_some()
+        && item.waiting_since.is_some()
+    {
+        let now = crate::acting_ops::now_ms();
+        item.waiting_since = item.waiting_since.map(|since| since.min(now));
+    } else {
+        item.clear_live();
+    }
+    let place = item.place.get_or_insert_with(Place::default);
+    place.machine = Some(owner.to_string());
+    place.machine_name = machine_name.and_then(|name| clean_label(&name, SOURCE_MAX));
+    place.session = place
+        .session
+        .take()
+        .and_then(|text| clean_place(&text, SOURCE_MAX, false, true));
+    place.session_name = place
+        .session_name
+        .take()
+        .and_then(|text| clean_place(&text, SOURCE_MAX, false, false));
+    place.branch = place
+        .branch
+        .take()
+        .and_then(|text| clean_place(&text, SOURCE_MAX, true, false));
+    item
 }
 
 #[derive(Default)]
@@ -174,7 +249,16 @@ impl Mirrors {
     }
 
     pub fn changed(&mut self, owner: &NodeId, item: Item) -> Result<Vec<Change>, Refusal> {
-        let shown = display(owner, item)?;
+        self.changed_named(owner, item, None)
+    }
+
+    pub fn changed_named(
+        &mut self,
+        owner: &NodeId,
+        item: Item,
+        machine_name: Option<String>,
+    ) -> Result<Vec<Change>, Refusal> {
+        let shown = display_named(owner, item, machine_name)?;
         let mut changes = Vec::new();
         if !self.items.contains_key(&shown.id) && self.count(owner) >= MAX_PER_NODE {
             changes.extend(self.evict_one(owner));
@@ -193,9 +277,18 @@ impl Mirrors {
     }
 
     pub fn sync(&mut self, owner: &NodeId, open: Vec<Item>) -> Result<Vec<Change>, Refusal> {
+        self.sync_named(owner, open, None)
+    }
+
+    pub fn sync_named(
+        &mut self,
+        owner: &NodeId,
+        open: Vec<Item>,
+        machine_name: Option<String>,
+    ) -> Result<Vec<Change>, Refusal> {
         let mut shown = Vec::new();
         for item in open.into_iter().filter(|item| item.state == State::Open) {
-            shown.push(display(owner, item)?);
+            shown.push(display_named(owner, item, machine_name.clone())?);
         }
         shown.truncate(MAX_PER_NODE);
         let mut changes = Vec::new();
@@ -285,18 +378,15 @@ pub fn localize(me: &NodeId, home: &NodeId, items: Vec<Item>) -> Vec<Item> {
     items
         .into_iter()
         .filter_map(|mut item| {
-            match Qualified::parse(&item.id) {
+            let owner = match Qualified::parse(&item.id) {
                 Some(q) if q.node == *me => return None,
-                Some(_) => {}
+                Some(q) => q.node,
                 None => {
                     item.id = qualify(home, &item.id);
-                    if item.source.node.is_none() {
-                        item.source.node = Some(home.to_string());
-                    }
+                    home.clone()
                 }
-            }
-            item.open = None;
-            Some(item)
+            };
+            Some(sanitize(&owner, item, None))
         })
         .collect()
 }

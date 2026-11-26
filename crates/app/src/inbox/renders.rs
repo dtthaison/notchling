@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use super::model::InboxModel;
+use super::triage::Section;
 use super::WIDTH;
 use crate::views::ViewSpec;
 
@@ -89,7 +90,7 @@ pub const VIEWS: [ViewSpec; 16] = [
     },
 ];
 
-pub fn shown(name: &str) -> Option<bool> {
+pub fn shown(name: &str) -> Option<Section> {
     match name {
         "inbox-panel"
         | "inbox-consent"
@@ -105,10 +106,10 @@ pub fn shown(name: &str) -> Option<bool> {
         | "inbox-consent-account-switch"
         | "inbox-consent-account-add"
         | "inbox-consent-account-move-all"
-        | "inbox-consent-lane-switch" => Some(false),
-        "inbox-panel-done" => Some(true),
-        other if super::renders_p8::has(other) => Some(false),
-        _ => None,
+        | "inbox-consent-lane-switch" => Some(Section::Waiting),
+        "inbox-panel-done" => Some(Section::Done),
+        other if super::renders_p8::has(other) => Some(Section::Waiting),
+        other => super::renders_b2::shown(other),
     }
 }
 

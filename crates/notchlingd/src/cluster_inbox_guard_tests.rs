@@ -462,3 +462,233 @@ fn only_an_inner_op_passes_through_the_inbox_calls() {
     };
     assert!(net.keeps());
 }
+
+fn consent_from_a_peer(id: &str, offers: &[ActionId]) -> inbox::Item {
+    let mut made = item(id);
+    made.kind = inbox::Kind::Consent;
+    made.actions = offers
+        .iter()
+        .map(|id| inbox::Action {
+            id: *id,
+            label: "x".into(),
+            primary: false,
+        })
+        .collect();
+    made
+}
+
+#[test]
+fn a_mirror_recomputes_alert_actions_and_never_trusts_a_peers_allow() {
+    use inbox::AlertAction;
+    let mut made = consent_from_a_peer("g", &[ActionId::Deny]);
+    made.alert_actions = vec![AlertAction::Allow, AlertAction::Deny, AlertAction::Change];
+    let shown = crate::inbox_mirrors::display(&node(9), made).unwrap();
+    assert_eq!(
+        shown.alert_actions,
+        vec![AlertAction::Deny, AlertAction::Open]
+    );
+    let mut notice = item("n");
+    notice.kind = inbox::Kind::Notice;
+    notice.alert_actions = vec![AlertAction::Deny, AlertAction::Dismiss];
+    let shown = crate::inbox_mirrors::display(&node(9), notice).unwrap();
+    assert!(shown.alert_actions.is_empty());
+    let mut approval = item("a");
+    approval.alert_actions = vec![AlertAction::Allow];
+    let shown = crate::inbox_mirrors::display(&node(9), approval).unwrap();
+    assert!(!shown.alert_actions.contains(&AlertAction::Allow));
+}
+
+#[test]
+fn a_mirror_keeps_only_a_reason_from_the_known_lines() {
+    use inbox::{Outcome, OutcomeState};
+    let known = "That machine is busy with another change.";
+    for (reason, kept) in [
+        (known, Some(known)),
+        ("It didn't go through.", Some("It didn't go through.")),
+        ("Couldn't write ~/.claude/x", None),
+        ("That machine is busy with another change. ghp_x", None),
+        ("anything a peer likes", None),
+    ] {
+        let mut made = consent_from_a_peer("g", &[ActionId::Deny]);
+        made.outcome = Some(Outcome {
+            state: OutcomeState::Failed,
+            reason: Some(reason.to_string()),
+            at_ms: 1,
+        });
+        let shown = crate::inbox_mirrors::display(&node(9), made).unwrap();
+        let outcome = shown.outcome.unwrap();
+        assert_eq!(outcome.state, OutcomeState::Failed);
+        assert_eq!(outcome.reason.as_deref(), kept, "{reason}");
+    }
+}
+
+#[test]
+fn a_mirror_cleans_a_peers_note_and_place() {
+    use inbox::Place;
+    let mut made = consent_from_a_peer("g", &[ActionId::Deny]);
+    made.note = Some(format!(
+        "see /Users/x/.ssh/id now\u{7} ghp_abcdefghij\u{200b}klmnopqrstuvwxyz0123 {}",
+        "n ".repeat(450)
+    ));
+    made.place = Some(Place {
+        branch: Some("fix/inbox\u{7}".to_string()),
+        session_name: Some("(~/x)".to_string()),
+        session: Some("0123abcd-4567-89ab-cdef-0123456789ab".to_string()),
+        ..Place::default()
+    });
+    let shown = crate::inbox_mirrors::display(&node(9), made).unwrap();
+    let note = shown.note.unwrap();
+    assert!(note.starts_with("see … now"), "{note}");
+    assert!(
+        !note.contains("abcdefghij") && !note.contains("klmnop"),
+        "{note}"
+    );
+    assert_eq!(note.chars().count(), 300);
+    assert!(!note.chars().any(char::is_control));
+    let place = shown.place.unwrap();
+    assert_eq!(place.branch.as_deref(), Some("fix/inbox"));
+    assert_eq!(place.session_name, None);
+    assert_eq!(
+        place.session.as_deref(),
+        Some("0123abcd-4567-89ab-cdef-0123456789ab")
+    );
+}
+
+#[test]
+fn a_peer_cannot_claim_another_machines_node_or_name() {
+    use inbox::Place;
+    let mut made = item("g");
+    made.source.node = Some(node(7).to_string());
+    made.place = Some(Place {
+        machine: Some(node(7).to_string()),
+        machine_name: Some("the boss".to_string()),
+        ..Place::default()
+    });
+    let shown = crate::inbox_mirrors::display(&node(9), made.clone()).unwrap();
+    let place = shown.place.clone().unwrap();
+    assert_eq!(shown.source.node, Some(node(9).to_string()));
+    assert_eq!(place.machine, Some(node(9).to_string()));
+    assert_eq!(place.machine_name, None);
+    let mut mirrors = crate::inbox_mirrors::Mirrors::default();
+    mirrors
+        .changed_named(&node(9), made, Some("build".to_string()))
+        .unwrap();
+    let place = mirrors.items()[0].place.clone().unwrap();
+    assert_eq!(place.machine_name.as_deref(), Some("build"));
+}
+
+#[test]
+fn the_items_a_home_sends_are_cleaned_like_a_mirror() {
+    let mut made = item("h");
+    made.kind = inbox::Kind::Notice;
+    made.alert_actions = vec![inbox::AlertAction::Allow];
+    made.source.node = Some(node(7).to_string());
+    let shown = crate::inbox_mirrors::localize(&node(1), &node(9), vec![made]);
+    assert!(shown[0].alert_actions.is_empty());
+    assert_eq!(shown[0].source.node, Some(node(9).to_string()));
+}
+
+struct Names;
+
+impl crate::inbox_mirrors::InboxLink for Names {
+    fn me(&self) -> Option<NodeId> {
+        Some(node(1))
+    }
+
+    fn answer(
+        &self,
+        _: &NodeId,
+        _: &str,
+        _: ActionId,
+        _: &str,
+    ) -> Result<Value, notchling_local_api::ApiError> {
+        Err(notchling_local_api::ApiError::new(ErrorCode::Failed, "no"))
+    }
+
+    fn home_items(&self) -> crate::inbox_mirrors::Home {
+        crate::inbox_mirrors::Home::Off
+    }
+
+    fn machine_name(&self, node: &NodeId) -> Option<String> {
+        (*node == self::node(9)).then(|| "build".to_string())
+    }
+}
+
+#[test]
+fn an_item_from_another_machine_names_it_in_its_place() {
+    let mut mine = item("m");
+    let mut theirs = item("t");
+    theirs.source.node = Some(node(9).to_string());
+    let mut items = vec![mine.clone(), theirs];
+    crate::inbox_mirrors::name_machines(&mut items, &Names);
+    mine.place = None;
+    assert_eq!(items[0], mine);
+    let place = items[1].place.clone().unwrap();
+    assert_eq!(place.machine, Some(node(9).to_string()));
+    assert_eq!(place.machine_name, Some("build".to_string()));
+}
+
+#[test]
+fn a_mirror_push_names_the_machine_from_the_cluster() {
+    let r = rig();
+    r.ops.set_link(Arc::new(Names));
+    r.ops.mirror_changed(&node(9), item("p")).unwrap();
+    r.ops.flush();
+    let pushed = r.room.named("inbox.changed");
+    let place = &pushed.last().expect("a push")["item"]["place"];
+    assert_eq!(place["machine_name"], "build", "{place}");
+}
+
+#[test]
+fn a_mirror_keeps_the_owners_live_fields_and_clamps_a_future_waiting_since() {
+    let owner = node(9);
+    let mut made = item("w");
+    made.blocking = Some(true);
+    made.waiter = Some(inbox::Waiter::Cli);
+    made.waiting_since = Some(1_000);
+    let shown = crate::inbox_mirrors::display(&owner, made.clone()).unwrap();
+    assert_eq!(shown.blocking, Some(true));
+    assert_eq!(shown.waiter, Some(inbox::Waiter::Cli));
+    assert_eq!(shown.waiting_since, Some(1_000));
+    made.waiting_since = Some(i64::MAX);
+    let shown = crate::inbox_mirrors::display(&owner, made).unwrap();
+    let now = crate::acting_ops::now_ms();
+    assert!(
+        shown.waiting_since.unwrap() <= now,
+        "{:?}",
+        shown.waiting_since
+    );
+    assert_eq!(shown.blocking, Some(true));
+}
+
+#[test]
+fn a_mirror_drops_live_fields_that_do_not_say_blocking() {
+    let owner = node(9);
+    let mut made = item("w");
+    made.waiter = Some(inbox::Waiter::Ask);
+    made.waiting_since = Some(1_000);
+    let shown = crate::inbox_mirrors::display(&owner, made).unwrap();
+    assert_eq!(shown.blocking, None);
+    assert_eq!(shown.waiter, None);
+    assert_eq!(shown.waiting_since, None);
+}
+
+#[test]
+fn a_mirror_drops_live_fields_from_a_closed_item_or_one_without_a_start() {
+    let owner = node(9);
+    let mut closed = item("w");
+    closed.state = State::Answered;
+    closed.blocking = Some(true);
+    closed.waiter = Some(inbox::Waiter::Cli);
+    closed.waiting_since = Some(1_000);
+    let shown = crate::inbox_mirrors::display(&owner, closed).unwrap();
+    assert_eq!(shown.blocking, None);
+    assert_eq!(shown.waiter, None);
+    assert_eq!(shown.waiting_since, None);
+    let mut open = item("x");
+    open.blocking = Some(true);
+    open.waiter = Some(inbox::Waiter::Cli);
+    let shown = crate::inbox_mirrors::display(&owner, open).unwrap();
+    assert_eq!(shown.blocking, None);
+    assert_eq!(shown.waiter, None);
+}

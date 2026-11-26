@@ -189,6 +189,7 @@ impl ShellsOps {
             "id": shell.id,
             "command": shell.command,
             "title": shell.title,
+            "description": shell.description,
             "state": if running { "running" } else { "ended" },
             "status": status,
             "runningSecs": secs,

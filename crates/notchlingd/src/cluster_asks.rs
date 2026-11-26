@@ -1,7 +1,8 @@
 use crate::acting_ops::now_ms;
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Handler, Opening};
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::net::crypto::sha256_hex;
+use notchling_engine::consent::retry::unretried;
 use notchling_engine::consent::{Consent, CLUSTER};
 use notchling_engine::organizations::PERSONAL_ID;
 use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec};
@@ -310,6 +311,7 @@ impl ClusterAsks {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         };
         if dry_run(args) {
             let would = self.consent.would(&opening)?;
@@ -356,7 +358,7 @@ impl ClusterAsks {
         let now = self
             .plan(action, &args, &mine, Look::Stored)
             .map_err(|e| e.message.clone())?;
-        if now.change == row.change && now.facts == row.facts {
+        if now.change == unretried(&row.change) && now.facts == row.facts {
             Ok(())
         } else {
             Err("the cluster changed since the request".to_string())

@@ -24,6 +24,7 @@ fn a_shell_gets_empty_scoped_reads_with_no_session_and_no_personal_data() {
         vec!["accounts", "--json"],
         vec!["limits", "--json"],
         vec!["orgs", "--json"],
+        vec!["sessions", "history", "--json"],
         vec!["search", "anything", "--json"],
         vec!["search", "anything", "--mode", "hybrid", "--json"],
         vec!["search", "anything", "--mode", "semantic", "--json"],
@@ -52,6 +53,23 @@ fn limits_for_a_tool_exits_1_for_a_shell_with_the_reason_in_the_error() {
 
     let (code, out, _) = run(&root, &home, &["limits", "--pool", "x", "--json"]);
     assert_eq!(code, 2, "{out}");
+}
+
+#[test]
+fn sessions_history_checks_its_flags_before_any_connection() {
+    let dir = scratch("reads-e2e-history-flags");
+    let root = dir.0.join("root");
+    let home = home(&dir.0);
+    for args in [
+        vec!["sessions", "history", "--limit", "0", "--json"],
+        vec!["sessions", "history", "--limit", "101", "--json"],
+        vec!["sessions", "history", "--limit", "x", "--json"],
+        vec!["sessions", "history", "--before", "--json"],
+        vec!["sessions", "history", "extra", "--json"],
+    ] {
+        let (code, out, _) = run(&root, &home, &args);
+        assert_eq!(code, 2, "{args:?} {out}");
+    }
 }
 
 #[test]

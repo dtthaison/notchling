@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use notchling_engine::contract::{Registry, Tool as SubTool};
-use notchling_engine::sessions::job_fan::{state_path, FanEntry, FanReader};
+use notchling_engine::sessions::job_fan::{state_path, FanEntry, FanKind, FanReader};
 use notchling_engine::sessions::{Agent, AgentTarget, Monitor};
 use notchling_engine::tools::agy::elsewhere;
 use notchling_engine::tools::codex::children::{ChildSource, DayFolders};
 use notchling_engine::transcript::codex;
 use notchling_engine::transcript::model::{BackgroundShell, Conversation};
+use notchling_engine::transcript::shell_titles::ShellTitles;
 use notchling_engine::transcript::snapshot::PendingQuestion;
 use notchling_engine::transcript::subagents::{self, Origin, Subagent};
 use notchling_local_api::SOCKET_NAME;
@@ -16,7 +17,7 @@ use notchling_local_api::SOCKET_NAME;
 use super::codex_children::{DaemonChildren, Kept};
 use super::data::{DataRoot, Session, Tool};
 use super::inspector::SubagentRow;
-use super::job_fan::{extra_shells_found, mark_running, FanOutputs};
+use super::job_fan::{earliest_start, extra_shells_described, mark_running, FanOutputs};
 use super::log::{self, Change};
 use super::paging::{Counts, Tree};
 use super::subagent_rows::{decorate, Disk, SubagentRows};
@@ -55,12 +56,14 @@ pub struct Loader {
     pub more_subagents: usize,
     pub open_groups: HashSet<String>,
     pub more_under: HashMap<String, usize>,
+    pub past: Vec<Session>,
     tree: Tree,
     registry: Arc<Registry>,
     children: Arc<dyn ChildSource>,
     peeked: SubagentRows,
     fans: FanReader,
     fan_outputs: FanOutputs,
+    shell_titles: ShellTitles,
     agy_log: Option<AgyLog>,
     last: Option<(String, Arc<Conversation>)>,
 }
@@ -93,10 +96,12 @@ impl Loader {
             more_subagents: 0,
             open_groups: HashSet::new(),
             more_under: HashMap::new(),
+            past: Vec::new(),
             tree: Tree::default(),
             peeked: SubagentRows::new(Disk(registry.clone())),
             fans: FanReader::default(),
             fan_outputs: FanOutputs::default(),
+            shell_titles: ShellTitles::default(),
             agy_log: None,
             last: None,
             root,
@@ -142,7 +147,7 @@ impl Loader {
         );
         let mut agents: Vec<Agent> = listed.iter().map(|s| s.agent.clone()).collect();
         live.overlay(&mut agents);
-        let sessions: Vec<Session> = agents
+        let mut sessions: Vec<Session> = agents
             .into_iter()
             .map(|agent| Session {
                 transcript: listed
@@ -153,6 +158,13 @@ impl Loader {
                 agent,
             })
             .collect();
+        let hidden = super::sidebar_completed::all_ids(&sessions);
+        let held = super::sidebar_completed::without_hidden(self.past.clone(), &hidden);
+        let extra: Vec<Session> = held
+            .into_iter()
+            .filter(|p| !sessions.iter().any(|s| s.agent.id == p.agent.id))
+            .collect();
+        sessions.extend(extra);
         let selected = selected
             .filter(|id| sessions.iter().any(|s| s.agent.id == *id))
             .map(str::to_owned)
@@ -178,8 +190,12 @@ impl Loader {
         if !partial {
             self.fan_outputs.keep_only(&fan);
         }
+        let descriptions = match session {
+            Some(session) if !partial => self.fan_descriptions(session, &fan, &conversation),
+            _ => HashMap::new(),
+        };
         let outputs = &mut self.fan_outputs;
-        let fan_shells = extra_shells_found(&fan, &conversation, &mut |entry| {
+        let fan_shells = extra_shells_described(&fan, &conversation, &descriptions, &mut |entry| {
             outputs.lookup(&tmp, entry, now_ms)
         });
         let (subagents, subagent_rows, subagent_counts) = if partial {
@@ -258,6 +274,26 @@ impl Loader {
 }
 
 impl Loader {
+    fn fan_descriptions(
+        &mut self,
+        session: &Session,
+        fan: &[FanEntry],
+        conversation: &Conversation,
+    ) -> HashMap<String, String> {
+        let known: HashSet<&str> = conversation.shells.iter().map(|s| s.id.as_str()).collect();
+        let wanted: Vec<&FanEntry> = fan
+            .iter()
+            .filter(|e| e.kind == FanKind::Shell && !known.contains(e.id.as_str()))
+            .collect();
+        let Some(transcript) = session.transcript.as_deref().filter(|_| !wanted.is_empty()) else {
+            return HashMap::new();
+        };
+        let since = earliest_start(&wanted);
+        let ids: Vec<String> = wanted.iter().map(|e| e.id.clone()).collect();
+        let dir = subagents::folder(&transcript.to_string_lossy());
+        self.shell_titles.read(Path::new(&dir), &ids, since)
+    }
+
     fn fan_of(&mut self, session: &Session) -> Arc<Vec<FanEntry>> {
         let AgentTarget::Job(short) = &session.agent.target else {
             return Arc::default();

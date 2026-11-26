@@ -175,6 +175,7 @@ fn inbox_item(id: &str) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 

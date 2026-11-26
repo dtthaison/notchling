@@ -5,12 +5,13 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-pub const USAGE: &str = "Usage: notchling watch [--topic <topic>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]\nTopics: mine.consents, mine.asks, settings.changed, settings.switch";
+pub const USAGE: &str = "Usage: notchling watch [--topic <topic>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]\nTopics: mine.consents, mine.asks, mine.inbox (or inbox), settings.changed, settings.switch";
 
 const SLICE: Duration = Duration::from_millis(500);
-const TOPICS: [&str; 4] = [
+const TOPICS: [&str; 5] = [
     topics::MINE_CONSENTS,
     topics::MINE_ASKS,
+    topics::MINE_INBOX,
     "settings.changed",
     "settings.switch",
 ];
@@ -26,6 +27,14 @@ pub struct Args {
     pub socket: Option<PathBuf>,
 }
 
+pub fn canonical(topic: String) -> String {
+    if topic == "inbox" {
+        topics::MINE_INBOX.to_owned()
+    } else {
+        topic
+    }
+}
+
 pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut found: Vec<String> = Vec::new();
     let (mut until, mut count, mut timeout, mut socket, mut json) = (None, None, None, None, false);
@@ -39,7 +48,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         match arg.as_str() {
             "--json" => json = true,
             "--topic" => {
-                let topic = value("--topic")?;
+                let topic = canonical(value("--topic")?);
                 if !TOPICS.contains(&topic.as_str()) {
                     return Err(format!("No topic named {topic}.\n{USAGE}"));
                 }
@@ -76,7 +85,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let explicit = !found.is_empty();
     if until.is_some() && explicit && found.iter().all(|t| !t.starts_with(topics::MINE_PREFIX)) {
         return Err(format!(
-            "--until needs mine.consents or mine.asks: settings events carry no state.\n{USAGE}"
+            "--until needs mine.consents, mine.asks or mine.inbox: settings events carry no state.\n{USAGE}"
         ));
     }
     let topics = if explicit {
@@ -95,7 +104,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     })
 }
 
-fn wire_topics(wanted: &[String], public_only: bool) -> Vec<&'static str> {
+pub fn wire_topics(wanted: &[String], public_only: bool) -> Vec<&'static str> {
     let mut out: Vec<&'static str> = Vec::new();
     for topic in wanted {
         let wire = match topic.as_str() {
@@ -118,6 +127,7 @@ pub fn wanted(topics_in: &[String], event: &str) -> bool {
     let topic = match event {
         "consent.changed" => topics::MINE_CONSENTS,
         "ask.changed" | "ask.removed" => topics::MINE_ASKS,
+        "inbox.changed" => topics::MINE_INBOX,
         "settings.changed" | "settings.switch" => event,
         _ => return false,
     };

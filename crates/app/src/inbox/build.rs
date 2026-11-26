@@ -25,7 +25,7 @@ impl Render for InboxRender {
 }
 
 pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
-    let done_open = shown(name)?;
+    let tab = shown(name)?;
     let consent = name.starts_with("inbox-consent");
     let fixture = match name {
         "inbox-consent" => consent_model(0),
@@ -41,18 +41,20 @@ pub fn build_render(name: &str, cx: &mut gpui::App) -> Option<AnyView> {
         "inbox-consent-account-move-all" => consent_model(11),
         "inbox-consent-lane-switch" => consent_model(12),
         other if super::renders_p8::has(other) => super::renders_p8::model(other),
+        other if super::renders_b2::has(other) => super::renders_b2::model(other),
         _ if consent => consent_model(1),
         _ => model(),
     };
     let feed = Arc::new(InboxFeed::fixed(fixture));
     let vault_off = name == "inbox-consent-vault-off";
     let panel = cx.new(|_| {
-        let panel = InboxPanelView::fixed(feed, NOW_MS, done_open);
-        if vault_off {
+        let panel = InboxPanelView::fixed(feed, NOW_MS, tab);
+        let panel = if vault_off {
             panel.with_vault(false)
         } else {
             panel
-        }
+        };
+        super::renders_b2::dress(name, panel)
     });
     Some(cx.new(|_| InboxRender { panel }).into())
 }

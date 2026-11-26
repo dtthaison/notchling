@@ -50,6 +50,7 @@ fn step(id: &str, kind: ToolKind, input: &str, output: Option<(&str, usize)>) ->
         is_error: false,
         finished: true,
         browser: None,
+        parent: None,
     }
 }
 

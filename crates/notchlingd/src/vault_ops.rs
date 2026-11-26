@@ -2,7 +2,7 @@ use self::release::Who;
 pub use self::release::{was_denied, Looked, ReleaseFor, Released, Still, DENIED};
 use self::vault_events::{Trail, LOG_DOWN};
 use crate::acting_ops::Room;
-use crate::consent_ops::{options, ConsentOps, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Opening};
 use crate::inbox_ops::InboxOps;
 use crate::late_emit::Events;
 use crate::layout::Layout;
@@ -79,6 +79,7 @@ pub struct VaultOps {
     processes: Arc<dyn Processes>,
     inbox: Option<Arc<InboxOps>>,
     sessions: Option<TrustedSession>,
+    pub(crate) presence: Arc<crate::presence::Presence>,
 }
 
 pub type TrustedSession = Arc<dyn Fn(u32) -> Option<String> + Send + Sync>;
@@ -113,6 +114,10 @@ impl VaultOps {
             processes: Arc::new(SystemProcesses),
             inbox: None,
             sessions: None,
+            presence: crate::presence::Presence::new(
+                crate::presence::GRACE_MS,
+                Arc::new(crate::acting_ops::now_ms),
+            ),
         };
         let hook = ops.off_hook();
         ops.switch.subscribe(move |on| {

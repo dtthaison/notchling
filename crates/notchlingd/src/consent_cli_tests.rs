@@ -49,3 +49,25 @@ fn a_request_that_still_waits_is_a_pending_error_that_carries_it() {
     assert_eq!(failure.request, Some(request));
     assert!(failure.line().ends_with("(pending)"), "{}", failure.line());
 }
+
+#[test]
+fn a_deny_with_a_note_prints_the_note_exits_denied_and_the_json_carries_it() {
+    let request = json!({"id": "c1", "kind": "switch", "target": "machines", "state": "denied",
+                         "note": "call it build-box-2 instead"});
+    let failure = failure_of(&request, ops::CONSENT_GET);
+    assert_eq!(failure.exit, 5);
+    assert_eq!(failure.reason, "denied");
+    assert_eq!(
+        failure.message,
+        "The user denied this and asked for a change: call it build-box-2 instead"
+    );
+    assert!(failure
+        .line()
+        .contains("asked for a change: call it build-box-2 instead"));
+    assert_eq!(
+        failure.to_value()["error"]["request"]["note"],
+        "call it build-box-2 instead"
+    );
+    let plain = failure_of(&json!({"id": "c1", "state": "denied"}), ops::CONSENT_GET);
+    assert_eq!(plain.message, "The user denied this request.");
+}

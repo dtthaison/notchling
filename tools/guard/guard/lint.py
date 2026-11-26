@@ -226,7 +226,7 @@ RULES: List[Rule] = [
          ("crates/app/src/**/*.rs", "crates/kit/src/**/*.rs", "apps/flutter/lib/**/*.dart"), locale_lint.literal,
          ("crates/app/src/notch/a.rs", 'fn f() { div().child("Reply to Claude") }\n'),
          ("crates/app/src/notch/a.rs", "fn f() { div().child(t::notch::reply()) }\n"),
-         exclude=EXCLUDE + ("**/*_tests.rs", "**/tests_*.rs", "**/tests/**", "**/renders.rs",
+         exclude=EXCLUDE + ("**/*_tests.rs", "**/tests_*.rs", "**/tests/**", "**/renders*.rs",
                             "crates/app/src/chat/bench_fixture.rs", "crates/app/src/testutil.rs",
                             "apps/flutter/lib/l10n/**", "apps/flutter/lib/core/protocol/generated.dart"),
          probe_files=((locale_lint.AREAS, locale_lint.AREAS_MOVED),)),

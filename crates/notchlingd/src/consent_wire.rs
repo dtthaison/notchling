@@ -1,4 +1,4 @@
-use notchling_engine::consent::Consent;
+use notchling_engine::consent::{Consent, State};
 use serde_json::{json, Map, Value};
 
 pub(crate) fn view(row: &Consent) -> Value {
@@ -49,21 +49,30 @@ pub(crate) fn view(row: &Consent) -> Value {
         out.insert("root".into(), json!(root));
     }
     out.insert("scope".into(), Value::Object(scope));
-    if let Some(result) = &row.result {
-        out.insert("result".into(), result.clone());
+    match &row.result {
+        Some(result) if row.state == State::Failed && result.get("error").is_some() => {
+            out.insert("error".into(), result["error"].clone());
+        }
+        Some(result) => {
+            out.insert("result".into(), result.clone());
+        }
+        None => {}
     }
     if let Some(reason) = &row.reason {
         out.insert("reason".into(), json!(reason));
+    }
+    if let Some(note) = &row.note {
+        out.insert("note".into(), json!(note));
     }
     Value::Object(out)
 }
 
 pub(crate) fn ask_message(row: &Consent) -> &'static str {
-    use notchling_engine::consent::State;
     match row.state {
         State::Waiting | State::Opened => "Waiting for the user to allow it in Notchling.",
         State::Applying => "Allowed; applying it.",
         State::Applied => "The user allowed it, and it's done.",
+        State::Denied if row.note.is_some() => "The user denied it and asked for a change.",
         State::Denied => "The user denied it.",
         State::Expired => "The user didn't answer in time.",
         State::Cancelled => "The request was withdrawn.",

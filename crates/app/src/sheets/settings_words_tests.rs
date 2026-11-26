@@ -76,6 +76,7 @@ fn rows_with_no_setting_key_are_named_by_meaning() {
             t::settings::SECRET_VAULT.english(),
             t::settings::INSTALL_HOOKS_AND_SKILLS.english(),
             t::settings::MACHINES_FOR_AGENTS.english(),
+            t::settings::ATTENTION_SOUND.english(),
         ]
     );
     assert_eq!(
@@ -102,7 +103,7 @@ fn choice_labels_are_per_setting() {
             choices += 1;
         }
     }
-    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4 + 2 + 4 + 3);
+    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4 + 2 + 4 + 3 + 3);
 }
 
 #[test]
@@ -118,6 +119,7 @@ fn section_titles_and_footers_come_from_messages() {
             t::settings::SECTION_DAEMON.get(),
             t::settings::SECTION_KEEP_MAC_AWAKE.get(),
             t::settings::SECTION_NOTCH.get(),
+            t::settings::SECTION_ATTENTION.get(),
             t::settings::SECTION_CHAT.get(),
             t::settings::SECTION_ACCOUNT_LIMIT.get(),
             t::settings::SECTION_CLAUDE_CODE.get(),
@@ -134,6 +136,7 @@ fn section_titles_and_footers_come_from_messages() {
             Some(t::settings::FOOTER_DAEMON.get()),
             Some(t::settings::FOOTER_KEEP_MAC_AWAKE.get()),
             None,
+            Some(t::settings::ATTENTION_FOOTER.get()),
             Some(t::settings::FOOTER_CHAT.get()),
             Some(t::settings::FOOTER_ACCOUNT_LIMIT.get()),
             None,

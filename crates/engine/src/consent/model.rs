@@ -6,6 +6,7 @@ pub const MAX_EXPIRY_MS: i64 = 12 * 3_600_000;
 pub const LONG_EXPIRY_MS: i64 = 3_600_000;
 pub const OPENED_MIN_MS: i64 = 10 * 60_000;
 pub const REASON_CHARS: usize = 300;
+pub const NOTE_CHARS: usize = 300;
 pub const KEEP_CLOSED_MS: i64 = 7 * 24 * 3_600_000;
 pub const IDEM_MS: i64 = 24 * 3_600_000;
 pub const WAITING_PER_SESSION: usize = 3;
@@ -151,6 +152,7 @@ pub struct Consent {
     pub parts: Option<Value>,
     pub parts_allowed: Option<Value>,
     pub reason: Option<String>,
+    pub note: Option<String>,
     pub session: Option<String>,
     pub tool: String,
     pub verified: bool,
@@ -239,6 +241,7 @@ pub enum Refusal {
     Busy { retry_after_ms: i64 },
     LongExpiry,
     KeyReused,
+    RetryRefused(&'static str),
     Db(String),
 }
 
@@ -251,4 +254,16 @@ pub fn clean_reason(text: &str) -> String {
         .filter(|c| *c == '\n' || !c.is_control())
         .take(REASON_CHARS)
         .collect()
+}
+
+pub fn clean_note(text: &str) -> Option<String> {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(NOTE_CHARS).collect())
 }

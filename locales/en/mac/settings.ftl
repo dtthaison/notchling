@@ -29,6 +29,9 @@ settings-section-search = Search
 # Section title on the General page: the daemon's switches.
 settings-section-daemon = Daemon
 
+# Section title on the General page: how hard Notchling tries to reach you when an agent is stopped.
+settings-section-attention = Attention
+
 # Section title on the General page: keeping the Mac awake.
 settings-section-keep-mac-awake = Keep Mac Awake
 
@@ -909,3 +912,35 @@ settings-model-gemma = The Standard model's tokenizer comes from Gemma 3, so the
 
 # Line under the model list: what a download fetches.
 settings-model-hosts = A download asks huggingface.co for the model's files and checks each one before it is kept.
+
+## Attention
+
+# Row in the Attention section: how hard Notchling tries to reach you.
+settings-attention-level = Level
+
+# Choice of the Attention Level row.
+settings-attention-level-calm = Calm
+
+# Choice of the Attention Level row.
+settings-attention-level-normal = Normal
+
+# Choice of the Attention Level row.
+settings-attention-level-urgent = Urgent
+
+# Description under the Attention section. Only agents that are stopped and waiting for an answer get attention.
+settings-attention-footer = Only an agent that is stopped and waiting for you gets attention. Calm opens the notch quietly and posts a silent banner. Normal adds a banner with a sound that returns after 1 and 3 minutes. Urgent keeps the notch open and repeats until you answer.
+
+# Description under the Attention section when the notch is turned off.
+settings-attention-footer-no-notch = The notch is off, so banners lead. Calm posts silent banners. Normal adds a sound that returns after 1 and 3 minutes and bounces the Dock. Urgent repeats the sound and bounces the Dock until you answer.
+
+# Row in the Attention section: the sound a banner plays.
+settings-attention-sound = Sound
+
+# Button on the Attention Sound row that plays the sound once.
+settings-attention-play = Play
+
+# Row in the Attention section when macOS does not allow Notchling's notifications.
+settings-attention-denied = Notifications are off for Notchling
+
+# Button on the denied row that opens the macOS Notifications settings.
+settings-attention-open-settings = Open System Settings

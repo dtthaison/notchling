@@ -1,4 +1,4 @@
-use crate::consent_ops::{options, ConsentOps, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Opening};
 use notchling_engine::bridge::net::crypto::sha256_hex;
 use notchling_engine::consent::Consent;
 use notchling_local_api::{AgentIdentity, ApiError, Caller, ErrorCode};
@@ -83,6 +83,7 @@ pub fn open(
         reason,
         expires_in_ms,
         key,
+        retry_of: retry_of(args),
     };
     if dry_run(args) {
         let would = consent.would(&opening)?;

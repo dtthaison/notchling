@@ -71,3 +71,19 @@ fn the_usage_is_said_when_no_name_is_given() {
         REQUEST_USAGE
     );
 }
+
+#[test]
+fn a_noted_denial_prints_the_note_not_the_dont_ask_again_line() {
+    let mut row = request("denied");
+    row["note"] = json!("call it emqx-dashboard-prod");
+    let failure = ended(&row, "emqx-dashboard-dev-admin");
+    assert_eq!(failure.exit, 5);
+    assert!(
+        failure
+            .message
+            .contains("asked for a change: call it emqx-dashboard-prod"),
+        "{}",
+        failure.message
+    );
+    assert!(!failure.message.contains("Don't ask again"));
+}

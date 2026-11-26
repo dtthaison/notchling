@@ -13,6 +13,7 @@ pub struct Report {
     pub chunks_per_s_at_budget: f64,
     pub rss_mb: f64,
     pub peak_rss_mb: f64,
+    pub peak_footprint_mb: f64,
 }
 
 pub const ROUNDS: usize = 3;
@@ -124,20 +125,35 @@ pub fn run(dir: &Path, data: &Path, budget: f64) -> Result<Report, String> {
         chunks_per_s_at_budget,
         rss_mb: rss_mb(),
         peak_rss_mb: peak_rss_mb(),
+        peak_footprint_mb: peak_footprint_mb(),
     })
 }
 
 #[cfg(target_os = "macos")]
-pub fn rss_mb() -> f64 {
-    let mut info: libc::rusage_info_v0 = unsafe { std::mem::zeroed() };
-    let ptr = &mut info as *mut libc::rusage_info_v0 as *mut libc::rusage_info_t;
+fn usage() -> Option<libc::rusage_info_v4> {
+    let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+    let ptr = &mut info as *mut libc::rusage_info_v4 as *mut libc::rusage_info_t;
     let rc = unsafe {
-        libc::proc_pid_rusage(std::process::id() as libc::c_int, libc::RUSAGE_INFO_V0, ptr)
+        libc::proc_pid_rusage(std::process::id() as libc::c_int, libc::RUSAGE_INFO_V4, ptr)
     };
-    if rc != 0 {
-        return 0.0;
-    }
-    info.ri_resident_size as f64 / (1024.0 * 1024.0)
+    (rc == 0).then_some(info)
+}
+
+#[cfg(target_os = "macos")]
+pub fn rss_mb() -> f64 {
+    usage().map_or(0.0, |u| u.ri_resident_size as f64 / (1024.0 * 1024.0))
+}
+
+#[cfg(target_os = "macos")]
+pub fn peak_footprint_mb() -> f64 {
+    usage().map_or(0.0, |u| {
+        u.ri_lifetime_max_phys_footprint as f64 / (1024.0 * 1024.0)
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn peak_footprint_mb() -> f64 {
+    peak_rss_mb()
 }
 
 #[cfg(target_os = "linux")]

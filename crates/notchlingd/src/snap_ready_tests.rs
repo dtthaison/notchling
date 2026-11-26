@@ -456,7 +456,7 @@ fn a_standby_checks_space_against_its_own_current_set_not_zero() {
     let dir = TempDir::new("primary-sender");
     let sender = Arc::new(lone_sender(&dir));
     sender.offer(manifest(&a.id(), 3 * 1024 * 1024), dir.root().join("s-1"));
-    let _ = slot.set(sender);
+    let _ = slot.set(Arc::downgrade(&sender));
     assert_eq!(on_primary.mb(), 3);
     assert_eq!(on_standby.mb(), 8, "a standby ignores any sender");
 }

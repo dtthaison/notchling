@@ -60,6 +60,9 @@ pub const NAMING_RULE: &str = "Name what you create (a vault entry, a machine, a
 
 pub const REASON_RULE: &str = "Give `--reason` a few plain words that say what you do and why: the user reads them on the card before saying yes.";
 
+pub const NOTE_RULE: &str =
+    "If you were denied with a note, change what it says and ask again with `--retry-of <id>`.";
+
 pub const KEY_RULE: &str = "Give a request `--key <text>` so a retry is safe: the same key with the same request finds the same card instead of making a second one, and the same key with a different request is refused (`key_reused`), so use a new key then.";
 
 pub fn alternatives(usage: &str) -> (Vec<&str>, &str) {
@@ -109,7 +112,7 @@ pub fn minimal(name: &str, description: &str, title: &str, about: &str, binary: 
         for tail in &tails {
             text.push_str(&format!("- {tail}\n"));
         }
-        text.push_str(&format!("\n{REASON_RULE} {KEY_RULE}\n"));
+        text.push_str(&format!("\n{REASON_RULE} {KEY_RULE} {NOTE_RULE}\n"));
     }
     text.push_str(&format!(
         "\nRun `{quoted} help --json` for every flag, exit code and consent rule of these commands.\n"

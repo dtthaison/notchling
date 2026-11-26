@@ -660,3 +660,17 @@ fn only_a_request_in_use_is_reopened_and_only_to_an_open_state() {
     assert!(store.reopen(&id, State::Waiting).unwrap().is_none());
     assert_eq!(store.get(&id).unwrap().unwrap().state, State::Applied);
 }
+
+#[test]
+fn a_database_saved_before_the_note_column_gets_it_and_old_rows_read_none() {
+    let tmp = TempDir::new("consent-note-column");
+    let dir = tmp.root().to_path_buf();
+    {
+        let db = store::open(&dir).unwrap();
+        db.execute_batch("ALTER TABLE consents DROP COLUMN note")
+            .unwrap();
+    }
+    let store = ConsentStore::open(&dir).unwrap();
+    let row = store.insert(&new("s1", "k1"), 1_000).unwrap();
+    assert_eq!(row.row().note, None);
+}

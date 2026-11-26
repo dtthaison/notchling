@@ -365,3 +365,23 @@ fn continuing_records_a_claim_by_this_machine_only() {
     assert_eq!((held.node, held.n), (c.node, c.n));
     assert_eq!(k.link.records.lock().unwrap()[0].1, OriginTier::Node);
 }
+
+#[test]
+fn a_session_waits_item_is_blocking_for_the_cluster_from_its_creation() {
+    let k = kit("waits-blocking", seed_after_promote(&[(S1, 1)]));
+    k.rows
+        .0
+        .lock()
+        .unwrap()
+        .push(crate::cluster_returns_kit::agent_row(
+            S1,
+            "Fix the build",
+            notchling_engine::sessions::AgentGroup::Completed,
+        ));
+    k.returns.add_waiting(S1, &node("m1")).unwrap();
+    k.returns.tick();
+    let item = k.item(&format!("session-waits:{S1}")).unwrap();
+    assert_eq!(item.blocking, Some(true));
+    assert_eq!(item.waiter, Some(notchling_engine::inbox::Waiter::Cluster));
+    assert_eq!(item.waiting_since, Some(item.created_ms));
+}

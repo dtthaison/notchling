@@ -47,7 +47,7 @@ fn changed_event_upserts_and_orders_newest_first() {
     let (needs, _) = model.sections();
     assert_eq!(ids(&needs), ["b", "c", "a"]);
     assert_eq!(needs[1].title, "Changed");
-    assert_eq!(model.unread(), 2);
+    assert_eq!(model.unread(), 3);
 }
 
 #[test]
@@ -157,13 +157,13 @@ fn expired_row_says_expired() {
 }
 
 #[test]
-fn unread_ignores_done() {
+fn unread_counts_what_waits_and_ignores_done_and_unseen() {
     let mut model = InboxModel::default();
     model.apply(&changed(item("a", 1_000, "open", false)));
     model.apply(&changed(item("b", 2_000, "open", true)));
     model.apply(&changed(item("c", 3_000, "answered", false)));
     model.apply(&changed(item("d", 4_000, "expired", false)));
-    assert_eq!(model.unread(), 1);
+    assert_eq!(model.unread(), 2);
     assert_eq!(model.unseen_ids(), ["a"]);
 }
 
@@ -369,6 +369,10 @@ fn a_consent_row_names_its_request_and_the_calls_name_their_arguments() {
     assert_eq!(
         consent_answer_args("c1", false),
         json!({"consentId": "c1", "decision": "deny"})
+    );
+    assert_eq!(
+        consent_deny_with_args("c1", "rename it"),
+        json!({"consentId": "c1", "decision": "deny", "note": "rename it"})
     );
 }
 

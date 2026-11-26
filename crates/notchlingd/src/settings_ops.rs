@@ -1,6 +1,6 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::cluster_failover_setting::{parse, FailoverSink, KEY as FAILOVER_KEY};
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Handler, Opening};
 use crate::consent_wire::ask_message;
 use crate::contract::Failure;
 use crate::late_emit::Events;
@@ -528,6 +528,7 @@ impl SettingsOps {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         }
     }
 

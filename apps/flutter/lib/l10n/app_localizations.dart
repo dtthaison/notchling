@@ -1017,6 +1017,114 @@ abstract class AppL10n {
   /// **'Allow'**
   String get consentAllow;
 
+  /// Shown on a card the agent asked again after a note. $note is what the user wrote.
+  ///
+  /// In en, this message translates to:
+  /// **'Asked again after your note: {note}'**
+  String consentAskedAgain(String note);
+
+  /// Button on a banner: allow what the agent asks.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get consentBannerAllow;
+
+  /// Button on a banner: cancel the request for a secret.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get consentBannerCancel;
+
+  /// Button on a banner: answer the agent with a note instead of allowing or denying.
+  ///
+  /// In en, this message translates to:
+  /// **'Change…'**
+  String get consentBannerChange;
+
+  /// Button on a banner: refuse what the agent asks.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get consentBannerDeny;
+
+  /// Button on a banner: dismiss the agent's question without answering.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get consentBannerDismiss;
+
+  /// Button on the notch's stopped card: stop holding the notch open and answer later.
+  ///
+  /// In en, this message translates to:
+  /// **'Later'**
+  String get consentBannerLater;
+
+  /// Button on a banner: open the request in Notchling.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get consentBannerOpen;
+
+  /// Button on a banner: open the form that asks for a secret.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Form'**
+  String get consentBannerOpenForm;
+
+  /// Button on a banner: reply to the agent's question.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply…'**
+  String get consentBannerReply;
+
+  /// Shown in the Inbox: the third answer of a request. It opens a field where the user writes what the agent should change.
+  ///
+  /// In en, this message translates to:
+  /// **'Change…'**
+  String get consentChange;
+
+  /// Button next to Send that closes the field where you write a note for the agent, and sends nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get consentChangeCancel;
+
+  /// Placeholder of the field that opens with Change…. The user tells the agent what to do differently.
+  ///
+  /// In en, this message translates to:
+  /// **'Say what to change'**
+  String get consentChangePlaceholder;
+
+  /// Button that sends the note and denies the request, so the agent can ask again with the change.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get consentChangeSend;
+
+  /// Result word on a closed row: the request was allowed.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed'**
+  String get consentDecidedAllowed;
+
+  /// Result word on a closed row: the request is always allowed.
+  ///
+  /// In en, this message translates to:
+  /// **'Always Allowed'**
+  String get consentDecidedAllowedAlways;
+
+  /// Result word on a closed row: the request was allowed one time.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed Once'**
+  String get consentDecidedAllowedOnce;
+
+  /// Result word on a closed row: the request was refused.
+  ///
+  /// In en, this message translates to:
+  /// **'Denied'**
+  String get consentDecidedDenied;
+
   /// Shown in the Chat screen.
   ///
   /// In en, this message translates to:
@@ -1035,6 +1143,18 @@ abstract class AppL10n {
   /// **'This time only'**
   String get consentNotchAllowDetail;
 
+  /// Button of a blocking card in the notch for a secret: allow the use this one time.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow Once'**
+  String get consentNotchAllowOnce;
+
+  /// Line of the notch for two seconds after the user allowed a blocked task.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed'**
+  String get consentNotchAllowed;
+
   /// Option of the notch's permission card: allow and stop asking for the same thing. The line under it is the next message.
   ///
   /// In en, this message translates to:
@@ -1047,6 +1167,24 @@ abstract class AppL10n {
   /// **'Don\'t ask again for this'**
   String get consentNotchAlwaysDetail;
 
+  /// Button of a blocking card in the notch: send the agent a note instead of allowing or denying.
+  ///
+  /// In en, this message translates to:
+  /// **'Change…'**
+  String get consentNotchChange;
+
+  /// Line of the notch for two seconds after the user sent the agent a note instead of allowing or denying.
+  ///
+  /// In en, this message translates to:
+  /// **'Changed'**
+  String get consentNotchChanged;
+
+  /// Line of the notch for two seconds after the user denied a blocked task.
+  ///
+  /// In en, this message translates to:
+  /// **'Denied'**
+  String get consentNotchDenied;
+
   /// Option of the notch's permission card: refuse. The line under it is the next message.
   ///
   /// In en, this message translates to:
@@ -1058,6 +1196,24 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Claude tries something else'**
   String get consentNotchDenyDetail;
+
+  /// Button of a blocking card in the notch: leave the question for later and close the notch.
+  ///
+  /// In en, this message translates to:
+  /// **'Later'**
+  String get consentNotchLater;
+
+  /// Button of a blocking card in the notch: open the full card in the Inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get consentNotchOpen;
+
+  /// Button of a blocking card in the notch that asks for a secret: open the form that takes it.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Form'**
+  String get consentNotchOpenForm;
 
   /// Title of the card in the notch that asks to allow a tool.
   ///
@@ -1101,6 +1257,12 @@ abstract class AppL10n {
   /// **'Stop anyway'**
   String get consentStopAnyway;
 
+  /// Item in a Blocking row's submenu in the menu bar menu: send the agent a note instead of allowing or denying.
+  ///
+  /// In en, this message translates to:
+  /// **'Change…'**
+  String get consentTrayChange;
+
   /// Shown in the Inbox. $action is the choice you made, such as Allow.
   ///
   /// In en, this message translates to:
@@ -1112,6 +1274,12 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Answered on the Mac: {action}'**
   String inboxAnsweredOnMac(String action);
+
+  /// Title of the section at the top of the Inbox with the items an agent or a step waits on.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting on You'**
+  String get inboxBlocking;
 
   /// Body of that question.
   ///
@@ -1190,6 +1358,60 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Open on Mac'**
   String get inboxOpenOnMac;
+
+  /// Shown on an answered item once the Mac applied the answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Applied'**
+  String get inboxOutcomeApplied;
+
+  /// Shown on an answered item while the Mac applies the answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying…'**
+  String get inboxOutcomeApplying;
+
+  /// Shown on an answered item the Mac could not apply, when it gave no reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get inboxOutcomeFailed;
+
+  /// Shown on an answered item the Mac could not apply. $reason is the Mac's own explanation.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed: {reason}'**
+  String inboxOutcomeFailedReason(String reason);
+
+  /// Shown on an item that was taken back before it was answered.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdrawn'**
+  String get inboxOutcomeWithdrawn;
+
+  /// Shown on an item that was taken back before it was answered. $reason is the Mac's own explanation.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdrawn: {reason}'**
+  String inboxOutcomeWithdrawnReason(String reason);
+
+  /// Shown on an item that was answered with a note for the agent. $note is what the person wrote.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent back: {note}'**
+  String inboxSentBack(String note);
+
+  /// Shown on an item that waits. $count is how many whole minutes it has waited.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Stopped {count} minute ago} other{Stopped {count} minutes ago}}'**
+  String inboxStoppedMinutes(int count);
+
+  /// Shown on an item that waits, when it began less than a minute ago.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped just now'**
+  String get inboxStoppedNow;
 
   /// Shown in the Inbox.
   ///
@@ -1413,6 +1635,12 @@ abstract class AppL10n {
   /// **'Sessions that need you'**
   String get notificationsChannelNeedsYou;
 
+  /// The name of the Android notification channel for items an agent or a step waits on. Shown in the system's notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting on you'**
+  String get notificationsChannelWaiting;
+
   /// The text of a notification when a session finished.
   ///
   /// In en, this message translates to:
@@ -1442,6 +1670,18 @@ abstract class AppL10n {
   /// In en, this message translates to:
   /// **'Something new'**
   String get notificationsSummaryBody;
+
+  /// The text of a notification a minute before an item that waits runs out.
+  ///
+  /// In en, this message translates to:
+  /// **'Last call: about a minute left'**
+  String get notificationsWaitingLastCall;
+
+  /// The text of a notification when an agent has waited three minutes for an answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Still waiting for you'**
+  String get notificationsWaitingStill;
 
   /// The line of the permanent notification while the app watches and no session is working.
   ///

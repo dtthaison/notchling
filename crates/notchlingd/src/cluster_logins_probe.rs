@@ -8,7 +8,7 @@ use notchling_engine::versions::Tool;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 pub use crate::cluster_logins_run::SystemStatus;
@@ -155,10 +155,10 @@ impl LoginProbe {
             .is_some_and(|since| now.saturating_sub(since) < BUSY_MS);
         if due && !busy {
             inner.running = Some(now);
-            let me = self.clone();
+            let me = Arc::downgrade(self);
             let spawned = std::thread::Builder::new()
                 .name("login-probe".to_string())
-                .spawn(move || me.refresh_when_ready(SCAN_WAIT, SCAN_POLL));
+                .spawn(move || LoginProbe::wait_then_refresh(me, SCAN_WAIT, SCAN_POLL));
             if spawned.is_err() {
                 inner.running = None;
             }
@@ -166,13 +166,20 @@ impl LoginProbe {
         inner.result.clone()
     }
 
-    pub fn refresh_when_ready(&self, wait: Duration, poll: Duration) {
+    pub fn wait_then_refresh(me: Weak<LoginProbe>, wait: Duration, poll: Duration) {
         let until = Instant::now() + wait;
-        while !self.installs.scanned() && Instant::now() < until {
+        loop {
+            let Some(probe) = me.upgrade() else {
+                return;
+            };
+            if probe.installs.scanned() || Instant::now() >= until {
+                if !probe.refresh() {
+                    lock(&probe.inner).running = None;
+                }
+                return;
+            }
+            drop(probe);
             std::thread::sleep(poll);
-        }
-        if !self.refresh() {
-            lock(&self.inner).running = None;
         }
     }
 

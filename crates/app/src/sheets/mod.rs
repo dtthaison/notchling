@@ -49,6 +49,7 @@ pub mod semantic;
 #[cfg(target_os = "macos")]
 pub mod semantic_view;
 pub mod settings;
+pub mod settings_attention;
 pub mod settings_cluster;
 #[cfg(test)]
 mod settings_cluster_tests;

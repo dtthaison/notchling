@@ -49,9 +49,17 @@ pub fn read_from(from: &Store) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     for row in rows {
         let text = row.map_err(|e| e.to_string())?;
-        let Ok(mut item) = serde_json::from_str::<Item>(&text) else {
+        let Ok(item) = serde_json::from_str::<Item>(&text) else {
             continue;
         };
+        let mut item = item.without_live();
+        if let Some(outcome) = item
+            .outcome
+            .as_mut()
+            .filter(|outcome| outcome.state == super::OutcomeState::Applying)
+        {
+            outcome.state = super::OutcomeState::Withdrawn;
+        }
         item.title = cut(item.title, TITLE_MAX);
         item.detail = cut(item.detail, DETAIL_MAX);
         items.push(item);
@@ -72,7 +80,7 @@ pub fn save_to(to: &Store, change: &Change) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     match change {
         Change::Raised(item) | Change::Updated(item) => {
-            let value = serde_json::to_string(item).map_err(|e| e.to_string())?;
+            let value = serde_json::to_string(&item.without_live()).map_err(|e| e.to_string())?;
             let updated_ms = item.closed_ms.unwrap_or(item.created_ms);
             tx.execute(
                 "INSERT INTO inbox (id, value, updated_ms) VALUES (?1, ?2, ?3)

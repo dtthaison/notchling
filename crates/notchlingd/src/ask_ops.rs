@@ -11,6 +11,7 @@ use crate::caller_session::{CallerSession, SessionHit};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use crate::outbox_ops::Clock;
+use crate::presence::{Presence, GRACE_MS};
 use crate::vault_caller::Processes;
 use notchling_engine::ask::{
     answer_text, branch, check_new, may_answer, AnswerError, AskState, AskStore, By, Mode, New,
@@ -79,6 +80,7 @@ pub struct AskOps {
     pub(crate) pending: Mutex<HashSet<String>>,
     saving: bool,
     pub(crate) waiters: Waiters,
+    pub(crate) presence: Arc<Presence>,
     pub(crate) tx: Sender<Msg>,
     pub(crate) rx: Mutex<Option<Receiver<Msg>>>,
     pub(crate) thread: Mutex<Option<JoinHandle<()>>>,
@@ -144,7 +146,9 @@ impl AskOps {
         procs: Arc<dyn Processes>,
     ) -> AskOps {
         let (tx, rx) = queue();
+        let clock: Clock = Arc::new(now_ms);
         AskOps {
+            presence: Presence::new(GRACE_MS, clock.clone()),
             store,
             sessions,
             acting,
@@ -152,7 +156,7 @@ impl AskOps {
             events,
             caller: CallerSession::new(roots, procs.clone()),
             procs,
-            clock: Arc::new(now_ms),
+            clock,
             worker: Arc::new(|| None),
             marks: Mutex::new(HashMap::new()),
             link: OnceLock::new(),
@@ -169,6 +173,7 @@ impl AskOps {
     }
 
     pub fn with_clock(mut self, clock: Clock) -> AskOps {
+        self.presence = Presence::new(GRACE_MS, clock.clone());
         self.clock = clock;
         self
     }

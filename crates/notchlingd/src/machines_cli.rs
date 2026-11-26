@@ -4,7 +4,7 @@ use notchling_local_api::{ops, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::time::Duration;
 
-pub const USAGE: &str = "Usage: notchling machines list\n       notchling machines check [<machine>]\n       notchling machines plan <machine> [<step>]\n       notchling machines peers\n       notchling machines add <user@host> [--name <text>]\n       notchling machines import <peer> --user <user>\n       notchling machines addresses <machine> <address>...\n       notchling machines remove <machine>\n       notchling machines fix <machine> <step>\n       notchling machines setup <machine>\n       notchling machines running <machine> on|off\n       notchling machines network switch <tailnet>\n       the changes take [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]; the user says yes on a card";
+pub const USAGE: &str = "Usage: notchling machines list\n       notchling machines check [<machine>]\n       notchling machines plan <machine> [<step>]\n       notchling machines peers\n       notchling machines add <user@host> [--name <text>]\n       notchling machines import <peer> --user <user>\n       notchling machines addresses <machine> <address>...\n       notchling machines remove <machine>\n       notchling machines fix <machine> <step>\n       notchling machines setup <machine>\n       notchling machines running <machine> on|off\n       notchling machines network switch <tailnet>\n       the changes take [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]; the user says yes on a card";
 
 pub const OWN: [&str; 2] = ["--name", "--user"];
 

@@ -3,8 +3,8 @@ use crate::jobs_cli::{consent_of, scan, through_card, Scanned};
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "Usage: notchling versions update <tool> [--to <version>] [--worker <machine>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
-pub const CHECK_USAGE: &str = "Usage: notchling check-updates [on|off] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
+pub const USAGE: &str = "Usage: notchling versions update <tool> [--to <version>] [--worker <machine>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]";
+pub const CHECK_USAGE: &str = "Usage: notchling check-updates [on|off] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]";
 pub const SETTING: &str = "checkForUpdates";
 
 pub fn request(scanned: &Scanned) -> Result<(&'static str, Value), String> {
@@ -74,7 +74,7 @@ pub fn settings_args(args: &[String]) -> Result<Vec<String>, String> {
             rest.push(arg.clone());
             if matches!(
                 arg.as_str(),
-                "--reason" | "--timeout" | "--expires-in" | "--key" | "--socket"
+                "--reason" | "--timeout" | "--expires-in" | "--key" | "--retry-of" | "--socket"
             ) {
                 rest.extend(flags.next().cloned());
             }

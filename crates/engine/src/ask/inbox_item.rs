@@ -1,6 +1,6 @@
 use super::model::{Asker, Row, CHOICE_LABEL_CHARS, DETAIL_CHARS, MAX_CHOICES, TITLE_CHARS};
 use super::rules::cut;
-use crate::inbox::{Action, ActionId, Item, Kind, Source, State};
+use crate::inbox::{Action, ActionId, AlertAction, Item, Kind, Place, Source, State};
 
 const CHOICE_ACTIONS: [ActionId; MAX_CHOICES] = [
     ActionId::Choice1,
@@ -104,5 +104,13 @@ pub fn item(row: &Row, node: Option<&str>, now_ms: i64) -> Item {
         open: Some(serde_json::json!({"ask": row.id, "session": row.session})),
         closed_ms: None,
         switch: None,
+        alert_actions: vec![AlertAction::Reply, AlertAction::Dismiss],
+        place: Some(Place {
+            session: Some(row.session.clone()),
+            branch: row.branch.clone(),
+            machine_name: node.map(str::to_string),
+            ..Place::default()
+        }),
+        ..Item::default()
     }
 }

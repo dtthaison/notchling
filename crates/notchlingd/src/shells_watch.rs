@@ -303,6 +303,7 @@ impl ShellsWatch {
             open: None,
             closed_ms: None,
             switch: None,
+            ..Default::default()
         };
         let flag = Flag {
             id: id.clone(),

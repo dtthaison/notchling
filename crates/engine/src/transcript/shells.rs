@@ -65,6 +65,10 @@ const LAUNCH_LEADS: [&str; 2] = [
     "Command was moved to the background (ID: ",
 ];
 
+pub fn launch_in(line: &[u8]) -> bool {
+    LAUNCH_LEADS.iter().any(|lead| has(line, lead.as_bytes()))
+}
+
 pub fn launch(result: &str) -> Option<Launch> {
     let after_id = LAUNCH_LEADS
         .iter()

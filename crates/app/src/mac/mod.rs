@@ -1,5 +1,6 @@
 pub mod app_icons;
 pub mod appearance;
+pub mod attention_watch;
 pub mod bench;
 pub mod bench_events;
 pub mod bench_scroll;
@@ -14,7 +15,10 @@ pub mod render;
 pub mod restart_notice;
 pub mod settings_live;
 pub mod shell;
+pub mod sound;
 pub mod tray;
+mod tray_draw;
+mod tray_view;
 pub mod update_watch;
 pub mod vault_prompts;
 pub mod views;

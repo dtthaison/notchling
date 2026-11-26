@@ -45,6 +45,7 @@ impl AskOps {
     }
 
     pub fn tick(&self, now_ms: i64) {
+        self.sweep_live(now_ms);
         if let Ok(rows) = self.store.live() {
             for row in rows {
                 if lock(&self.pending).contains(&row.id) {

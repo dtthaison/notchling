@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use notchling_engine::inbox::Place;
 use notchling_locale as t;
 use serde_json::Value;
 
@@ -22,6 +23,7 @@ pub struct Env {
     pub node: Option<String>,
     pub unticked: HashSet<String>,
     pub admin_ready: bool,
+    pub place: Option<Place>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +70,7 @@ pub struct ConsentCard {
     pub account_apply: Option<AccountApply>,
     pub family_apply: Option<FamilyApply>,
     pub parts: Vec<Part>,
+    pub asked_again: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,12 +119,23 @@ fn job_tool(tool: &str) -> &'static str {
     }
 }
 
-fn who(view: &Value) -> String {
+fn session_words(session: &str, place: Option<&Place>) -> String {
+    let named = place.and_then(|place| {
+        let name = place.session_name.as_deref()?;
+        Some(match place.branch.as_deref() {
+            Some(branch) => t::inbox::chip_session(name, branch),
+            None => name.to_owned(),
+        })
+    });
+    named.unwrap_or_else(|| session.chars().take(SESSION_CHARS).collect())
+}
+
+fn who(view: &Value, place: Option<&Place>) -> String {
     let tool = view.get("tool").and_then(Value::as_str).unwrap_or("");
     let verified = view.get("verified").and_then(Value::as_bool) == Some(true);
     match text(view, "session") {
         Some(session) => {
-            let short: String = session.chars().take(SESSION_CHARS).collect();
+            let short = session_words(session, place);
             if verified {
                 t::consent::card_who_verified(tool_name(tool), &short)
             } else {
@@ -332,7 +346,7 @@ fn facts(view: &Value) -> Vec<String> {
 fn details(view: &Value, env: &Env) -> Vec<Detail> {
     let mut out = vec![Detail {
         label: t::consent::card_label_who().to_owned(),
-        value: who(view),
+        value: who(view, env.place.as_ref()),
     }];
     let mut add = |label: &str, value: Option<String>| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
@@ -464,6 +478,10 @@ impl ConsentCard {
             account_apply: account_apply(view),
             family_apply,
             parts,
+            asked_again: view
+                .get("change")
+                .and_then(|change| text(change, "priorNote"))
+                .map(str::to_owned),
         })
     }
 }

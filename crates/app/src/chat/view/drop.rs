@@ -43,6 +43,41 @@ pub fn hint(preview: bool, a: Appearance) -> Div {
         )
 }
 
+pub const OPEN_ENV: &str = "NOTCHLING_RENDER_DROP_OPEN";
+pub const OPEN_GROUP: &str = "panel-open-drop";
+
+pub fn open_hint(preview: bool, a: Appearance) -> Div {
+    let sentence = card(a)
+        .px(px(14.0))
+        .py(px(8.0))
+        .border_color(hsla(Ink::Accent.color(a).with_alpha(0.6)))
+        .child(label(
+            t::chat::panel_drop_open(),
+            TypeRole::Heading,
+            Ink::Text,
+            a,
+        ));
+    div()
+        .absolute()
+        .inset_0()
+        .p(px(INSET))
+        .opacity(if preview { 1.0 } else { 0.0 })
+        .group_drag_over::<ExternalPaths>(OPEN_GROUP, |style| style.opacity(1.0))
+        .child(
+            div()
+                .size_full()
+                .rounded(px(RADIUS_CARD))
+                .fill(Ink::AccentWash, a)
+                .border(px(EDGE))
+                .border_dashed()
+                .border_color(hsla(Ink::Accent.color(a)))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(sentence),
+        )
+}
+
 impl ChatView {
     pub(super) fn attached(&self, row: &str) -> Vec<PathBuf> {
         drops::attachments_from(self.tools.draft(&drops::attachments_key(row)))
@@ -113,6 +148,12 @@ impl ChatView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_open_hint_is_two_words() {
+        assert_eq!(t::chat::panel_drop_open(), "Drop to Open");
+        assert!(t::chat::panel_drop_folder().lines().count() == 1);
+    }
 
     #[test]
     fn the_hint_is_one_plain_sentence() {

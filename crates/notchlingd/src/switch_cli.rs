@@ -9,7 +9,7 @@ use std::time::Duration;
 const CALL_WAIT: Duration = Duration::from_secs(15);
 const POLL_MS: u64 = 25_000;
 
-pub const USAGE: &str = "Usage: notchling switch on <acting|bridge|accounts|vault|install|cluster|machines> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling switch off <acting|bridge|accounts|vault|install|cluster|machines> [--json]";
+pub const USAGE: &str = "Usage: notchling switch on <acting|bridge|accounts|vault|install|cluster|machines> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling switch off <acting|bridge|accounts|vault|install|cluster|machines> [--json]";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
@@ -38,6 +38,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         match arg.as_str() {
             "--reason" => flags.reason = Some(value("--reason")?),
             "--key" => flags.key = Some(value("--key")?),
+            "--retry-of" => flags.retry_of = Some(value("--retry-of")?),
             "--wait" => flags.wait = true,
             "--no-wait" => flags.wait = false,
             "--dry-run" => flags.dry_run = true,
@@ -86,6 +87,9 @@ pub fn request_body(args: &Args) -> Value {
     }
     if let Some(key) = &args.flags.key {
         consent.insert("key".into(), json!(key));
+    }
+    if let Some(id) = &args.flags.retry_of {
+        consent.insert("retryOf".into(), json!(id));
     }
     let mut body = json!({"switch": args.name, "on": true, "consent": consent});
     if args.flags.dry_run {

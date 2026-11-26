@@ -70,7 +70,7 @@ const OWN_QUIET: [&str; 18] = [
     ops::CONSENT_LIST,
 ];
 
-const NEVER_QUIET: [&str; 183] = [
+const NEVER_QUIET: [&str; 185] = [
     ops::EMBED_REFRESH,
     ops::EMBED_STATUS,
     ops::EMBED_SETTINGS,
@@ -156,6 +156,7 @@ const NEVER_QUIET: [&str; 183] = [
     ops::BRIDGE_REVOKE,
     ops::SEARCH_QUERY,
     ops::SEARCH_FACETS,
+    ops::SESSIONS_HISTORY,
     ops::PAGES_LIST,
     ops::PAGES_FIND,
     ops::INSTALL_PLAN,
@@ -254,6 +255,7 @@ const NEVER_QUIET: [&str; 183] = [
     ops::SHELLS_MINE,
     ops::SHELLS_STUCK,
     ops::SHELLS_STOP,
+    ops::CHAT_OPEN_FILE,
 ];
 
 const NEVER_QUIET_LIMITS: [&str; 3] = ["limits.set_mode", "cost.summary", "cost.report"];

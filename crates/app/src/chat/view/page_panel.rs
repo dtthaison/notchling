@@ -1,5 +1,6 @@
 use notchling_locale as t;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use notchling_kit::{Appearance, Icon, Ink, TypeRole};
 use super::diff_panel::{self, DiffState};
 use super::render_map::WindowRegion;
 use super::ChatView;
-use crate::chat::file_panel::{self, Body, Loaded, Pic};
+use crate::chat::file_panel::{self, Body, Code, Loaded, Pic};
 use crate::chat::html_preview::HtmlView;
 use crate::chat::markdown_cache::Cache as MarkdownCache;
 use crate::chat::page_panel::{
@@ -35,6 +36,8 @@ use crate::search::panel::app_library;
 pub const PAGE_ENV: &str = "NOTCHLING_RENDER_PAGE";
 
 pub const FILE_ENV: &str = "NOTCHLING_RENDER_FILE";
+
+pub const ROWS_ENV: &str = "NOTCHLING_RENDER_FILE_ROWS";
 
 pub const HTML_ENV: &str = "NOTCHLING_RENDER_HTML";
 
@@ -57,6 +60,9 @@ pub struct FileState {
     pub path: PathBuf,
     pub loaded: Loaded,
     image: Option<Arc<gpui::Image>>,
+    pub(super) loading: bool,
+    pub(super) paging: bool,
+    pub(super) opened: BTreeMap<usize, Code>,
 }
 
 impl FileState {
@@ -81,7 +87,32 @@ impl FileState {
             path: path.to_path_buf(),
             loaded,
             image,
+            loading: false,
+            paging: false,
+            opened: BTreeMap::new(),
         }
+    }
+
+    pub(super) fn pending(path: &Path) -> FileState {
+        FileState {
+            path: path.to_path_buf(),
+            loaded: Loaded {
+                stamp: None,
+                body: Body::Loading,
+            },
+            image: None,
+            loading: true,
+            paging: false,
+            opened: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn paging(&self) -> bool {
+        self.paging
+    }
+
+    pub(super) fn opened_row(&self, number: usize) -> Option<&Code> {
+        self.opened.get(&number)
     }
 }
 
@@ -118,7 +149,7 @@ impl State {
             }),
         };
         self.render_only = true;
-        self.shown = Some(shown(opens));
+        self.shown = Some(shown(opens, true));
     }
 
     pub fn preview_file(&mut self, path: &str) {
@@ -128,7 +159,7 @@ impl State {
             opens @ Opens::Html(_) => opens,
             _ => Opens::File(path),
         };
-        self.shown = Some(shown(opens));
+        self.shown = Some(shown(opens, true));
     }
 
     pub fn attach_html(&mut self, html: HtmlView) {
@@ -160,7 +191,7 @@ impl State {
     }
 }
 
-fn shown(opens: Opens) -> Shown {
+fn shown(opens: Opens, sync: bool) -> Shown {
     let (title, link) = match &opens {
         Opens::Saved(page) => (page.title.clone(), page.link.clone()),
         Opens::Live(link) => (t::chat::panel_artifact().to_owned(), link.live_url()),
@@ -171,7 +202,8 @@ fn shown(opens: Opens) -> Shown {
         }
     };
     let file = match &opens {
-        Opens::File(path) => Some(FileState::read(path)),
+        Opens::File(path) if sync => Some(FileState::read(path)),
+        Opens::File(path) => Some(FileState::pending(path)),
         _ => None,
     };
     let html = match &opens {
@@ -179,7 +211,7 @@ fn shown(opens: Opens) -> Shown {
         _ => None,
     };
     let subtitle = match (&opens, &file, &html) {
-        (Opens::File(path), Some(f), _) => {
+        (Opens::File(path), Some(f), _) if !f.loading => {
             file_panel::subtitle(path, home().as_deref(), &f.loaded.body)
         }
         (_, _, Some(h)) => h.page_subtitle.clone(),
@@ -303,11 +335,13 @@ impl ChatView {
         .detach();
     }
 
-    pub(super) fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_page(file_panel::opens(&path), "", window, cx);
-    }
-
-    fn show_page(&mut self, opens: Opens, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_page(
+        &mut self,
+        opens: Opens,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match &opens {
             Opens::Browser => {
                 cx.open_url(url);
@@ -320,7 +354,7 @@ impl ChatView {
             _ => {}
         }
         self.page.web.borrow_mut().take();
-        let mut page = shown(opens);
+        let mut page = shown(opens, self.page.render_only);
         if !self.page.render_only
             && matches!(
                 page.opens,
@@ -332,19 +366,30 @@ impl ChatView {
                 Err(e) => page.error = Some(e),
             }
         }
+        let loads = page
+            .file
+            .as_ref()
+            .filter(|f| f.loading)
+            .map(|f| f.path.clone());
         self.page.shown = Some(page);
+        if let Some(path) = loads {
+            self.load_file(path, cx);
+        }
         cx.notify();
     }
 
     pub(super) fn refresh_file(&mut self, cx: &mut Context<Self>) {
-        if let Some(Shown {
-            file: Some(file), ..
-        }) = self.page.shown.as_mut()
-        {
-            if file_panel::stamp(&file.path) != file.loaded.stamp {
-                *file = FileState::read(&file.path);
-                cx.notify();
+        let stale = match self.page.shown.as_mut() {
+            Some(Shown {
+                file: Some(file), ..
+            }) if !file.loading && file_panel::stamp(&file.path) != file.loaded.stamp => {
+                file.loading = true;
+                Some(file.path.clone())
             }
+            _ => None,
+        };
+        if let Some(path) = stale {
+            self.load_file(path, cx);
         }
         self.refresh_html(cx);
     }
@@ -570,6 +615,7 @@ fn file_body(
         },
         Body::Other => {
             let path = file.path.clone();
+            let reveal = file.path.clone();
             div()
                 .flex()
                 .flex_col()
@@ -577,17 +623,45 @@ fn file_body(
                 .gap(px(10.0))
                 .child(note(t::chat::panel_file_unshown(), Ink::TextMuted))
                 .child(
-                    button(
-                        "file-panel-open-default",
-                        t::chat::panel_open_default(),
-                        ButtonKind::Secondary,
-                        PartState::Rest,
-                        a,
-                    )
-                    .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(
+                            button(
+                                "file-panel-open-default",
+                                t::chat::panel_open_default(),
+                                ButtonKind::Secondary,
+                                PartState::Rest,
+                                a,
+                            )
+                            .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                        )
+                        .child(
+                            button(
+                                "file-panel-reveal",
+                                t::chat::panel_show_in_finder(),
+                                ButtonKind::Secondary,
+                                PartState::Rest,
+                                a,
+                            )
+                            .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
+                        ),
                 )
                 .into_any_element()
         }
+        Body::Code(code) => {
+            cut = code.cut;
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .children(super::file_view::invalid_note(code, a))
+                .child(super::file_view::code(&key, code, a))
+                .into_any_element()
+        }
+        Body::Jsonl(j) => super::file_view::jsonl(&key, file, j, chat.clone(), a),
+        Body::Loading => div().into_any_element(),
         Body::Missing(why) => note(why, Ink::Expired),
     };
     div()
@@ -717,6 +791,18 @@ pub fn render(
         )
         .on_click(move |_, _, cx| cx.reveal_path(&path))
     });
+    let copy_path = file_path.clone().map(|path| {
+        tool(
+            "page-panel-copy-path",
+            Icon::Copy,
+            t::chat::panel_copy_path(),
+        )
+        .on_click(move |_, _, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                path.to_string_lossy().into_owned(),
+            ))
+        })
+    });
     let open_with = file_path.clone().map(|path| {
         tool(
             "page-panel-open",
@@ -752,6 +838,7 @@ pub fn render(
         .children(looks)
         .children(refresh)
         .children(browser)
+        .children(copy_path)
         .children(reveal)
         .children(open_with)
         .child(back);
@@ -778,9 +865,19 @@ pub fn render(
         (None, None) => web_page(view, shown, a),
     };
 
+    let takes_open = shown.file.is_some() || shown.html.is_some();
     Some(
         div()
             .relative()
+            .when(takes_open, |panel| {
+                panel
+                    .group(super::drop::OPEN_GROUP)
+                    .on_drop::<gpui::ExternalPaths>(cx.listener(
+                        |this, paths: &gpui::ExternalPaths, w, cx| {
+                            this.open_dropped(paths.paths(), w, cx);
+                        },
+                    ))
+            })
             .w(px(width))
             .h_full()
             .flex_shrink_0()
@@ -794,6 +891,9 @@ pub fn render(
             .children(hint)
             .child(page)
             .child(resize_edge())
+            .when(takes_open, |panel| {
+                panel.child(super::drop::open_hint(view.drop_open_preview, a))
+            })
             .window_region(a, cx)
             .part_at(
                 if is_file { "File Panel" } else { "Page Panel" },

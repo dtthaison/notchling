@@ -8,6 +8,13 @@ chat-working = Working
 chat-done = Done
 chat-no-sessions = No sessions in the last day
 
+# The link at the foot of the Sidebar list that opens or closes the section of ended and older sessions, the section's title and the row that loads more of them.
+chat-show-completed = Show Completed
+chat-hide-completed = Hide Completed
+chat-completed = Completed
+chat-load-more = Load More
+chat-completed-none = Nothing completed yet
+
 ## Sidebar footer
 
 # Tooltips of the footer buttons at the foot of the Sidebar.
@@ -125,6 +132,7 @@ chat-steps-failed = { NUMBER($count) } failed
 # The title of a step's input box: a shell command, or any other input.
 chat-step-command = Command
 chat-step-input = Input
+chat-step-script = Script
 # Under a cut output; the text above it stays on its own line. $more is how many lines were cut.
 chat-output-more = … +{ $more } lines
 
@@ -174,6 +182,10 @@ chat-steps-used-skills = { $count ->
 chat-steps-used-tools = { $count ->
     [one] used { $count } tool
    *[other] used { $count } tools
+}
+chat-steps-ran-scripts = { $count ->
+    [one] ran { $count } script
+   *[other] ran { $count } scripts
 }
 chat-steps-used-chrome = { $count ->
     [one] used { -brand-chrome } { $count } time
@@ -716,6 +728,16 @@ chat-panel-open-browser = Open in Browser
 chat-panel-show-in-finder = Show in Finder
 chat-panel-show-folder = Show this page's folder in Finder
 chat-panel-close = Close
+chat-panel-copy-path = Copy Path
+chat-panel-drop-open = Drop to Open
+chat-panel-drop-folder = Folders can't be opened here. Drop a file.
+# $line and $column say where the JSON stops making sense.
+chat-panel-json-invalid = Not valid JSON (line { $line }, column { $column }). Showing the text as it is.
+# $count is how many of the file's last lines are shown.
+chat-panel-jsonl-shown = Showing the last { $count } lines
+chat-panel-load-more = Load More
+chat-panel-loading = Loading…
+chat-panel-line-cut = This line is cut at 256 KB.
 chat-panel-back-to-details = Back to Details
 
 ## Terminal panel
@@ -947,3 +969,8 @@ chat-reload-terminal-command = claude --resume { $id }
 
 # The tooltip of the ⋯ button in Chat's session header: it opens the same menu as a right click on the session's row.
 chat-session-menu-tip = Session Menu
+
+# Strip above the reply box when the session's agent is stopped on a card. $title is what the card asks.
+chat-blocked-strip = Waiting for your answer: { $title }. Replies here go to the agent, not the card.
+# Button on that strip: opens the card in the Inbox.
+chat-blocked-open = Open Card

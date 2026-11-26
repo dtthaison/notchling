@@ -4,7 +4,7 @@ use super::test_support::{
     inbox_item, is_ok, scripted_cluster, Plan, RecordingIo, Rig, ScriptedRelay, NOW_MS,
 };
 use super::wire::{self, BridgeFailure};
-use crate::inbox::{ActionId, Kind};
+use crate::inbox::{ActionId, AlertAction, Kind, Outcome, OutcomeState, Place, State, Waiter};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -586,6 +586,49 @@ fn inbox(run: &mut Run) {
     phone.rig.hub.tick(phone.rig.backend.as_ref());
     let removed = phone.io.texts().last().cloned().expect("removed event");
     run.capture("InboxRemovedEvent", &removed, |_| {});
+    phone
+        .rig
+        .backend
+        .with(|s| s.inbox = vec![inbox_item("approval-2", Kind::SecretApproval)]);
+    let noted = run.round_trip_failure(&phone, "InboxAnswerRequest.note", json!({}));
+    assert!(
+        noted.contains("Notes from the phone aren't on yet."),
+        "{noted}"
+    );
+    let mut judged = inbox_item("consent-9", Kind::Consent);
+    judged.title = "Claude Code asks to change a setting".into();
+    judged.detail = String::new();
+    judged.created_ms = NOW_MS as i64 + 5;
+    judged.expires_ms = None;
+    judged.state = State::Answered;
+    judged.answer = Some(ActionId::Allow);
+    judged.answered_by = Some("mac".into());
+    judged.closed_ms = Some(NOW_MS as i64 + 9);
+    judged.seen = true;
+    judged.blocking = Some(true);
+    judged.waiting_since = Some(NOW_MS as i64 + 5);
+    judged.waiter = Some(Waiter::Cli);
+    judged.alert_actions = vec![AlertAction::Allow, AlertAction::Deny, AlertAction::Change];
+    judged.note = Some("use the staging value".into());
+    judged.outcome = Some(Outcome {
+        state: OutcomeState::Failed,
+        reason: Some("The setting could not be changed.".into()),
+        at_ms: NOW_MS as i64 + 9,
+    });
+    judged.place = Some(Place {
+        machine: Some("0123456789abcdef".into()),
+        machine_name: Some("build".into()),
+        session: Some("5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11".into()),
+        session_name: Some("fix login".into()),
+        branch: Some("main".into()),
+    });
+    phone.rig.backend.with(|s| s.inbox = vec![judged]);
+    run.round_trip(
+        &phone,
+        "InboxListRequest",
+        json!({}),
+        Some("InboxListResponse.full"),
+    );
 }
 
 fn machines(run: &mut Run) {

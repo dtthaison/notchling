@@ -105,6 +105,7 @@ fn a_cancel_never_ends_a_consent_that_is_not_a_secret_request() {
                 reason: None,
                 expires_in_ms: None,
                 key: None,
+                retry_of: None,
             },
         )
         .unwrap();

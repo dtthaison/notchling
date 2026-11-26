@@ -192,7 +192,27 @@ fn rig_seen(tag: &str, registry: ProviderRegistry, claude_at: Option<f64>) -> Ri
         it.title = title.into();
         it.detail = detail.into();
         it.source.session = Some(session.into());
-        inbox.raise(it, None);
+        if id == "own" {
+            it.outcome = Some(notchling_engine::inbox::outcome(
+                notchling_engine::inbox::OutcomeState::Failed,
+                Some("It is busy."),
+                7,
+            ));
+            it.place = Some(notchling_engine::inbox::Place {
+                branch: Some("fix/x".into()),
+                ..Default::default()
+            });
+        }
+        let raised = inbox.raise(it, None);
+        if id == "own" {
+            inbox.set_live(
+                &raised,
+                Some(notchling_engine::inbox::Live {
+                    waiting_since: 5,
+                    waiter: notchling_engine::inbox::Waiter::Cli,
+                }),
+            );
+        }
     }
     let providers = Arc::new(ProvidersOps::new(
         SwitchFlag::off(ACCOUNTS, ACCOUNTS_OFF),
@@ -308,6 +328,15 @@ fn a_verified_session_sees_its_own_items_in_full_and_its_organization_by_title()
     let reply = read(&rig, ops::INBOX_MINE, json!({}));
     assert_eq!(reply["own"].as_array().unwrap().len(), 1);
     assert_eq!(reply["own"][0]["detail"], json!("OWN-DETAIL"));
+    assert_eq!(reply["own"][0]["outcome"]["state"], json!("failed"));
+    assert_eq!(reply["own"][0]["outcome"]["reason"], json!("It is busy."));
+    assert_eq!(reply["own"][0]["outcome"]["atMs"], json!(7));
+    assert_eq!(reply["own"][0]["place"]["branch"], json!("fix/x"));
+    assert_eq!(reply["own"][0]["blocking"], json!(true));
+    assert_eq!(reply["own"][0]["waitingSince"], json!(5));
+    assert_eq!(reply["own"][0]["waiter"], json!("cli"));
+    assert!(reply["organization"][0].get("blocking").is_none());
+    assert!(reply["organization"][0].get("outcome").is_none());
     assert_eq!(reply["organization"].as_array().unwrap().len(), 1);
     assert_eq!(reply["organization"][0]["title"], json!("MATE-TITLE"));
     assert_eq!(reply["otherOrganizations"], json!(1));
@@ -815,3 +844,6 @@ fn a_claude_account_with_no_organization_field_is_personal_and_an_unknown_one_is
     assert_eq!(names, ["c***@f***.com", "e***@p***.com"], "{reply}");
     assert!(!reply.to_string().contains("d***@l***.com"));
 }
+
+#[path = "reads_history_tests.rs"]
+mod history_tests;

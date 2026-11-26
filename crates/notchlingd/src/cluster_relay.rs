@@ -249,6 +249,21 @@ impl HeldRelay {
             });
     }
 
+    pub fn stop(&self, wait: Duration) {
+        let until = std::time::Instant::now() + wait;
+        let mut state = lock(&self.signal.state);
+        state.stop = true;
+        self.signal.changed.notify_all();
+        while state.busy && std::time::Instant::now() < until {
+            state = self
+                .signal
+                .changed
+                .wait_timeout(state, Duration::from_millis(50))
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+    }
+
     #[cfg(test)]
     fn settle(&self) {
         let until = std::time::Instant::now() + Duration::from_secs(10);
@@ -321,6 +336,9 @@ impl HeldRelay {
         let mut back = Vec::new();
         let mut stopped = false;
         for held in due {
+            if !stopped && lock(&self.signal.state).stop {
+                stopped = true;
+            }
             if stopped {
                 back.push(held);
                 continue;

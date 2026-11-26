@@ -4,7 +4,7 @@ use crate::cluster_returns::Returns;
 use crate::inbox_ops::Responder;
 use notchling_engine::cluster::text::{plain, NAME_MAX};
 use notchling_engine::cluster::Member;
-use notchling_engine::inbox::{ActionId, Item, Kind, State};
+use notchling_engine::inbox::{ActionId, Item, Kind, Live, State, Waiter};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Weak};
 
@@ -233,6 +233,15 @@ impl Returns {
             returns: Arc::downgrade(self),
             session: session.to_string(),
         });
-        self.p.mover.p.inbox.raise(item, Some(responder));
+        let created = item.created_ms;
+        let inbox = &self.p.mover.p.inbox;
+        let raised = inbox.raise(item, Some(responder));
+        inbox.set_live(
+            &raised,
+            Some(Live {
+                waiting_since: created,
+                waiter: Waiter::Cluster,
+            }),
+        );
     }
 }

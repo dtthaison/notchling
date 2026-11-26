@@ -90,6 +90,7 @@ class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     ref.watch(attentionWatcherProvider);
+    ref.watch(inboxAlertWatcherProvider);
     ref.watch(notificationTapsProvider);
     ref.watch(keepAliveControllerProvider);
     ref.listen<int>(connectedCountProvider, (int? previous, int next) {

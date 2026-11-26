@@ -53,6 +53,7 @@ Then the same line with `--reason "<what and why>" --key <key> --no-wait --json`
 
 - `consent <id> --wait` ends with exit 0 when the user allowed it and it applied, exit 5 when the user said no (stop, and do not ask again at once), exit 6 while it still waits and exit 124 when the time passes (the request is closed).
 - On exit 124 ask again only if you still need it, with a new `--key`.
+- If you were denied with a note, change what it says and ask again with `--retry-of <id>`.
 - `accounts add` opens the login for the user to finish in the tool's own window. You never type or read the login.
 
 ## When it is refused

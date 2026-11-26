@@ -3,7 +3,7 @@ use crate::jobs_cli::{consent_of, scan, through_card, Scanned};
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "Usage: notchling semantic download <model> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
+pub const USAGE: &str = "Usage: notchling semantic download <model> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]";
 
 pub fn request(scanned: &Scanned) -> Result<(&'static str, Value), String> {
     let model = match scanned.words.as_slice() {

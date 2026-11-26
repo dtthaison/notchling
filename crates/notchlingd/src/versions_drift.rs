@@ -137,6 +137,7 @@ impl Drifts {
                 open: Some(json!({ "machines": found.machine })),
                 closed_ms: None,
                 switch: None,
+                ..Default::default()
             },
             None,
         );

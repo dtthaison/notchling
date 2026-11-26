@@ -53,7 +53,7 @@ pub const ROWS: &[Row] = &[
     ),
     waits(row(
         "machines add",
-        "notchling machines add <user@host> [--name <text>] | notchling machines import <peer> --user <user> | notchling machines addresses <machine> <address>... | notchling machines remove <machine> | notchling machines fix <machine> <step> | notchling machines setup <machine> | notchling machines running <machine> on|off | notchling network switch <tailnet>; each takes [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling machines add <user@host> [--name <text>] | notchling machines import <peer> --user <user> | notchling machines addresses <machine> <address>... | notchling machines remove <machine> | notchling machines fix <machine> <step> | notchling machines setup <machine> | notchling machines running <machine> on|off | notchling network switch <tailnet>; each takes [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "change the machines of your organization or switch the Tailscale network; the user says yes on a card on the Mac that names the machine and the change, and for a network switch lists the machines that lose reach",
         &[with_switch(acts("machines.request"), "machines")],
         "request",

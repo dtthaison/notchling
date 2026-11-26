@@ -1,4 +1,5 @@
 use super::queue::Queue;
+use super::repl::{self, Repl};
 use super::tools::{apply_task_result, clip, diff_lines, make_call, result_text, written_lines};
 use super::user::{model_id_in_confirmation, user_item};
 use crate::transcript::browser;
@@ -14,6 +15,7 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 pub(crate) const MAX_LINE: usize = 400_000;
+const TOO_LARGE: &str = "(too large to show)";
 const KEEP_ITEMS: usize = 500;
 const TRIM_AT: usize = 1000;
 
@@ -34,6 +36,7 @@ pub struct Parser {
     last_question: Option<PendingQuestion>,
     last_question_answered: bool,
     image_calls: VecDeque<String>,
+    repl: Repl,
 }
 
 impl LineParser for Parser {
@@ -69,8 +72,26 @@ impl Parser {
 
     fn oversized_result(&mut self, head: &[u8], spot: Option<Spot<'_>>) {
         self.oversized_output(head, spot);
+        self.oversized_event(head);
         if self.oversized_ends_batch(head) {
             self.queue.end_batch();
+        }
+    }
+
+    fn oversized_event(&mut self, head: &[u8]) {
+        let (events, polled) = repl::oversized_events(head);
+        let evals: Vec<u64> = events.iter().map(|e| e.eval).collect();
+        for mut event in events {
+            if !event.closed {
+                if !event.text.is_empty() {
+                    event.text.push('\n');
+                }
+                event.text.push_str(TOO_LARGE);
+            }
+            self.settle(event);
+        }
+        if polled {
+            self.repl.polled(&evals);
         }
     }
 
@@ -115,14 +136,7 @@ impl Parser {
             }
             call.output = None;
         } else {
-            call.output = Some(
-                if id.1 {
-                    "[Image]"
-                } else {
-                    "(too large to show)"
-                }
-                .to_string(),
-            );
+            call.output = Some(if id.1 { "[Image]" } else { TOO_LARGE }.to_string());
         }
         if let Some(queued) = queued {
             self.image_calls.push_back(queued);
@@ -200,7 +214,7 @@ impl Parser {
                 self.user(&obj, date);
                 self.queue.end_batch();
             }
-            "queue-operation" => self.queue.operation(&obj),
+            "queue-operation" => self.queue_operation(&obj),
             "attachment" => self.attachment(&obj, date),
             _ => {}
         }
@@ -411,6 +425,21 @@ impl Parser {
                     .collect();
             }
         }
+        let call = if repl::is_repl(name) {
+            self.repl.started(id);
+            call
+        } else if repl::is_inner(id) {
+            match self.repl.parent_for_inner() {
+                Some(parent) => match self.nest(&parent, call) {
+                    Some(call) => call,
+                    None => return,
+                },
+                None => call,
+            }
+        } else {
+            self.repl.left_script();
+            call
+        };
         let last = self.c.items.len().saturating_sub(1);
         if let Some(ChatItem {
             kind: ItemKind::Tools(calls),
@@ -509,10 +538,19 @@ impl Parser {
         let Some(mut call) = calls.get(index).cloned() else {
             return;
         };
+        if call.kind == ToolKind::Repl {
+            if let Some(eval) = repl::dispatched_eval(result) {
+                self.repl.dispatched(eval, &call.id);
+                return;
+            }
+        }
         let text = result_text(block.get("content"));
         call.finished = true;
         call.is_error = is_error;
         call.output = clip(&text, result);
+        if call.kind == ToolKind::Repl && call.output.is_none() {
+            call.output = clip(&text, None);
+        }
         let patch = result
             .and_then(|r| r.get("structuredPatch"))
             .and_then(Value::as_array)
@@ -545,6 +583,7 @@ impl Parser {
                         command: call.input.clone(),
                         title: call.title.clone(),
                         output_path: launch.path,
+                        description: call.description.clone(),
                         started: date,
                     });
                 }
@@ -560,6 +599,68 @@ impl Parser {
         }
         self.drop_old_images();
         apply_task_result(&name, result, &mut self.c);
+    }
+
+    fn queue_operation(&mut self, obj: &Value) {
+        if str_of(obj, "content").is_some_and(repl::is_event_text) {
+            if str_of(obj, "operation") == Some("enqueue") {
+                for event in repl::queued_event(obj) {
+                    self.settle(event);
+                }
+            }
+            return;
+        }
+        self.queue.operation(obj);
+    }
+
+    fn settle(&mut self, event: repl::Event) {
+        let Some(&(item, index)) = self
+            .repl
+            .call_of(event.eval)
+            .and_then(|id| self.call_index.get(id))
+        else {
+            return;
+        };
+        let Some(ChatItem {
+            kind: ItemKind::Tools(calls),
+            ..
+        }) = self.c.items.get_mut(item)
+        else {
+            return;
+        };
+        let Some(call) = calls.get_mut(index) else {
+            return;
+        };
+        call.finished = true;
+        call.is_error = event.failed;
+        call.output = clip(&event.text, None);
+    }
+
+    fn nest(&mut self, parent: &str, mut call: ToolCall) -> Option<ToolCall> {
+        let Some(&(item, index)) = self.call_index.get(parent) else {
+            return Some(call);
+        };
+        let Some(ChatItem {
+            kind: ItemKind::Tools(calls),
+            ..
+        }) = self.c.items.get_mut(item)
+        else {
+            return Some(call);
+        };
+        let mut at = index + 1;
+        while calls
+            .get(at)
+            .is_some_and(|c| c.parent.as_deref() == Some(parent))
+        {
+            at += 1;
+        }
+        call.parent = Some(parent.to_string());
+        calls.insert(at, call);
+        for (offset, moved) in calls[at..].iter().enumerate() {
+            self.call_index
+                .insert(moved.id.clone(), (item, at + offset));
+        }
+        None
     }
 
     fn drop_old_images(&mut self) {
@@ -588,6 +689,15 @@ impl Parser {
         let Some(a) = obj.get("attachment") else {
             return;
         };
+        if str_of(a, "type") == Some("poll_events") {
+            let events = repl::envelopes(a);
+            let evals: Vec<u64> = events.iter().map(|e| e.eval).collect();
+            for event in events {
+                self.settle(event);
+            }
+            self.repl.polled(&evals);
+            return;
+        }
         if str_of(a, "type") != Some("queued_command")
             || str_of(a, "commandMode").unwrap_or("prompt") != "prompt"
         {
@@ -635,6 +745,8 @@ impl Parser {
             let live = &self.call_index;
             self.image_calls.retain(|id| live.contains_key(id));
         }
+        let live = &self.call_index;
+        self.repl.trim(|id| live.contains_key(id));
         if self.counted_order.len() > 4000 {
             for id in self.counted_order.drain(..2000) {
                 self.counted.remove(&id);

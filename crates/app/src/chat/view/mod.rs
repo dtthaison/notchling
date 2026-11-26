@@ -1,5 +1,6 @@
 mod accounts;
 mod ask_cards;
+mod blocked_strip;
 mod branches;
 mod branches_panel;
 mod bring_back;
@@ -8,6 +9,7 @@ mod changes;
 mod changes_panel;
 mod chrome;
 mod cluster;
+mod completed;
 mod composer;
 mod conversation;
 mod conversation_list;
@@ -17,8 +19,12 @@ mod copy_menu;
 mod dialog_card;
 mod diff_panel;
 mod drop;
+mod file_actions;
+mod file_view;
 mod header;
 mod html_panel;
+#[cfg(test)]
+mod image_shape_tests;
 mod inbox;
 mod inspector;
 mod limit_ring;
@@ -127,6 +133,7 @@ pub const INBOX_ENV: &str = "NOTCHLING_RENDER_INBOX";
 pub const REMOTE_ENV: &str = "NOTCHLING_RENDER_REMOTE";
 pub const SENDING_ENV: &str = "NOTCHLING_RENDER_SENDING";
 pub const OUTBOX_ENV: &str = "NOTCHLING_RENDER_OUTBOX";
+pub const COMPLETED_ENV: &str = "NOTCHLING_RENDER_COMPLETED";
 
 fn switch(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| v == "1")
@@ -143,6 +150,7 @@ pub struct ChatView {
     sessions: Vec<Session>,
     new_drafts: Vec<Session>,
     selected: Option<String>,
+    blocked_preview: bool,
     conversation: Arc<Conversation>,
     subagents: Vec<Subagent>,
     subagent_rows: Vec<crate::chat::inspector::SubagentRow>,
@@ -150,6 +158,8 @@ pub struct ChatView {
     more_subagents: usize,
     open_groups: HashSet<String>,
     more_under: HashMap<String, usize>,
+    completed_open: bool,
+    past: crate::chat::sidebar_completed::Past,
     shells: crate::chat::shell_list::Listing,
     fan_shells: Vec<notchling_engine::transcript::model::BackgroundShell>,
     shell_page: crate::chat::shell_list::ShellPage,
@@ -170,6 +180,7 @@ pub struct ChatView {
     chrome: Entity<pane::Chrome>,
     tasks_open_preview: bool,
     drop_preview: bool,
+    drop_open_preview: bool,
     outbox_preview: Option<Vec<crate::chat::outbox::Bubble>>,
     busy: crate::chat::busy::Reading,
     outbox_second: Option<i64>,
@@ -246,7 +257,11 @@ impl ChatView {
             v.s.run_preview = switch(RUN_ENV);
         });
         view.tasks_open_preview = switch(TASKS_OPEN_ENV);
+        if let Some(mode) = std::env::var_os(COMPLETED_ENV) {
+            view.preview_completed(mode == "more", cx);
+        }
         view.drop_preview = switch(DROP_ENV);
+        view.drop_open_preview = switch(drop::OPEN_ENV);
         view.limit_ring = limit_ring::State::preview(switch(LIMITS_ENV));
         view.preview_composer(
             composer::Preview {
@@ -323,6 +338,9 @@ impl ChatView {
         if switch(INBOX_ENV) {
             view.preview_inbox(cx);
         }
+        if switch(blocked_strip::BLOCKED_ENV) {
+            view.blocked_preview = true;
+        }
         match std::env::var(REMOTE_ENV).as_deref() {
             Ok("1") => view.preview_remote(false),
             Ok("shell") => view.preview_remote(true),
@@ -333,6 +351,11 @@ impl ChatView {
         }
         if let Ok(path) = std::env::var(page_panel::FILE_ENV) {
             view.page.preview_file(&path);
+            if let Ok(rows) = std::env::var(page_panel::ROWS_ENV) {
+                for number in rows.split(',').filter_map(|n| n.trim().parse().ok()) {
+                    view.toggle_line(number, cx);
+                }
+            }
             if let Ok(how) = std::env::var(page_panel::HTML_ENV) {
                 view.preview_html(&how, window, cx);
             }
@@ -404,6 +427,13 @@ impl ChatView {
             if keys.key != "escape" || this.terminal_has_keys(window) {
                 return;
             }
+            let note_escape = this
+                .inbox_panel
+                .clone()
+                .is_some_and(|panel| panel.update(cx, |view, _| view.took_escape()));
+            if note_escape {
+                return;
+            }
             use crate::chat::escape::{escape, Escape, Open};
             let open = Open {
                 parts: parts_on(cx),
@@ -462,6 +492,7 @@ impl ChatView {
             sessions: Vec::new(),
             new_drafts: Vec::new(),
             selected: None,
+            blocked_preview: false,
             conversation: Arc::default(),
             subagents: Vec::new(),
             subagent_rows: Vec::new(),
@@ -469,6 +500,8 @@ impl ChatView {
             more_subagents: 0,
             open_groups: HashSet::new(),
             more_under: HashMap::new(),
+            completed_open: false,
+            past: crate::chat::sidebar_completed::Past::new(),
             shells: Default::default(),
             fan_shells: Vec::new(),
             shell_page: Default::default(),
@@ -491,6 +524,7 @@ impl ChatView {
             chrome: cx.new(|_| pane::Chrome),
             tasks_open_preview: false,
             drop_preview: false,
+            drop_open_preview: false,
             outbox_preview: None,
             busy: crate::chat::busy::Reading::default(),
             outbox_second: None,

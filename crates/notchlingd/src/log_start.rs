@@ -15,7 +15,7 @@ use notchling_events::salt::{load_or_create, SaltChange};
 use notchling_events::spec::{DefaultState, Outcome};
 use notchling_events::{Count, Emit, Event, Hex, Salt, Version};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 const KEY_WAIT: Duration = Duration::from_secs(2);
@@ -28,7 +28,7 @@ pub struct LogStart {
     pub audit: Arc<Mutex<AuditSink>>,
     pub audit_root: PathBuf,
     pub keys: Arc<dyn KeyStore>,
-    health: Arc<OnceLock<Arc<Checker>>>,
+    health: Arc<OnceLock<Weak<Checker>>>,
 }
 
 impl LogStart {
@@ -51,7 +51,7 @@ impl LogStart {
             warnings,
             Arc::new(wall_ms),
         );
-        let _ = self.health.set(checker.clone());
+        let _ = self.health.set(Arc::downgrade(&checker));
         checker
     }
 }
@@ -198,12 +198,12 @@ pub fn start_with(
     )));
     let db = Arc::new(Mutex::new(db));
     let activity = ActivitySink::new(db.clone(), salt, publish);
-    let health: Arc<OnceLock<Arc<Checker>>> = Arc::new(OnceLock::new());
+    let health: Arc<OnceLock<Weak<Checker>>> = Arc::new(OnceLock::new());
     let mut cfg = BusConfig::daemon(host.clone());
     cfg.env = env;
     let late = health.clone();
     cfg.on_health = Some(Arc::new(move |ok| {
-        if let Some(checker) = late.get() {
+        if let Some(checker) = late.get().and_then(Weak::upgrade) {
             checker.write_health(ok);
         }
     }));

@@ -529,6 +529,7 @@ fn a_card_of_another_kind_cited_on_a_machines_op_is_refused_and_not_used() {
                 reason: None,
                 expires_in_ms: None,
                 key: None,
+                retry_of: None,
             },
         )
         .unwrap();
@@ -891,4 +892,34 @@ fn a_generic_name_never_blocks_a_machine_that_exists_and_a_dry_run_tells_nothing
             .is_some_and(|e| e.message.contains("doesn't say which machine")),
         "{known:?}"
     );
+}
+
+#[test]
+fn an_allowed_retry_of_a_noted_denial_applies() {
+    let r = base("retry-applies");
+    let first = r.card("add", json!({"address": "d@newbox.test", "name": "newbox"}));
+    let denied = call_op_app(
+        &r,
+        json!({"consentId": first, "decision": "deny", "note": "call it box2"}),
+    );
+    assert_eq!(denied["answered"], true);
+    let again = r
+        .asks
+        .call(
+            &agent_caller(),
+            ops::MACHINES_REQUEST,
+            &json!({"action": "add", "args": {"address": "d@box2.test", "name": "box2"},
+                    "consent": {"retryOf": first}}),
+        )
+        .unwrap();
+    let id = again["request"]["id"].as_str().unwrap().to_string();
+    let row = r.consent.get_row(&id).unwrap();
+    assert_eq!(row.change["retryOf"], json!(first));
+    r.asks.still_fits(&row).unwrap();
+    r.apply(&id).unwrap();
+    assert!(r.registry_names().contains(&"box2".to_string()));
+}
+
+fn call_op_app(r: &Rig, args: Value) -> Value {
+    crate::consent_testkit::call_op(&r.consent, &app_caller(), ops::CONSENT_ANSWER, args)
 }

@@ -26,6 +26,14 @@ fn launch_line(n: usize, command: &str, id: &str, at: &str) -> String {
     format!("{call}\n{result}\n")
 }
 
+fn described_launch_line(n: usize, command: &str, description: &str, id: &str, at: &str) -> String {
+    let call = json!({"type":"assistant","timestamp":at,"message":{"role":"assistant","content":[
+        {"type":"tool_use","id":format!("toolu_{n}"),"name":"Bash","input":{"command":command,"description":description,"run_in_background":true}}]}});
+    let plain = launch_line(n, command, id, at);
+    let result = plain.lines().nth(1).unwrap();
+    format!("{call}\n{result}\n")
+}
+
 fn stop_line(n: usize, id: &str, at: &str) -> String {
     let call = json!({"type":"assistant","timestamp":at,"message":{"role":"assistant","content":[
         {"type":"tool_use","id":format!("toolu_stop{n}"),"name":"KillShell","input":{"shell_id":id}}]}});
@@ -436,4 +444,28 @@ fn a_shell_that_computes_or_writes_is_not_stuck_and_the_op_needs_a_session() {
         .call(&agent_caller(), ops::SHELLS_STUCK, &json!({}))
         .unwrap_err();
     assert_eq!(err.data.as_ref().unwrap()["reason"], "no_session");
+}
+
+#[test]
+fn a_shell_row_carries_the_description_of_its_bash_call() {
+    let at = "2026-11-21T07:00:00.000Z";
+    let mut text = described_launch_line(1, "cargo watch -x test", "Watch the tests", "bwatch", at);
+    text += &launch_line(2, "sleep 600", "bplain", at);
+    let (_home, roots) = home("described", &text);
+    let ops = ops_with(
+        roots,
+        &["bwatch", "bplain"],
+        Arc::default(),
+        false,
+        Some(SESSION),
+    );
+    let out = ops
+        .call(&agent_caller(), ops::SHELLS_MINE, &json!({}))
+        .unwrap();
+    let rows = out["shells"].as_array().unwrap();
+    let by = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap();
+    assert_eq!(by("bwatch")["description"], "Watch the tests");
+    assert_eq!(by("bwatch")["title"], "Watch the tests");
+    assert_eq!(by("bwatch")["command"], "cargo watch -x test");
+    assert_eq!(by("bplain")["description"], "");
 }

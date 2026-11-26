@@ -16,12 +16,17 @@ pub fn block(
     a: Appearance,
     cx: &mut Context<SettingsView>,
 ) -> Div {
-    let out = div().flex().flex_col().gap(px(4.0)).child(label(
-        t::settings::semantic_search_about(),
-        TypeRole::Meta,
-        Ink::TextFaint,
-        a,
-    ));
+    let out = div()
+        .debug_selector(|| "semantic-block".to_owned())
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(label(
+            t::settings::semantic_search_about(),
+            TypeRole::Meta,
+            Ink::TextFaint,
+            a,
+        ));
     if !model.on {
         return out;
     }
@@ -108,7 +113,9 @@ fn model_line(
             )
         }));
     let text = div()
+        .debug_selector(|| format!("semantic-text-{k}"))
         .flex_1()
+        .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(2.0))
@@ -121,6 +128,7 @@ fn model_line(
         )
         .children(line.fraction.map(|f| bar(f, a)));
     div()
+        .debug_selector(|| format!("semantic-row-{k}"))
         .py(px(6.0))
         .flex()
         .items_center()
@@ -138,6 +146,7 @@ fn model_line(
                 PartState::Rest,
                 a,
             )
+            .debug_selector(|| format!("semantic-button-{k}"))
             .on_click(cx.listener(move |this, _, _, cx| this.semantic_act(&r, &option, cx))),
         )
 }
@@ -156,3 +165,7 @@ fn bar(fraction: f32, a: Appearance) -> Div {
                 .fill(Ink::Accent, a),
         )
 }
+
+#[cfg(test)]
+#[path = "semantic_layout_tests.rs"]
+mod layout_tests;

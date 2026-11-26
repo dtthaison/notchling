@@ -15,7 +15,20 @@ def found(files, path, rule="LINT-LOCALE-LITERAL"):
     return [v for v in lint.run(repo, [path]) if v.rule == rule]
 
 
+INBOX_MOVED = json.dumps({"areas": [{"name": "inbox", "paths": ["crates/app/src/inbox/**"], "moved": True}]})
+INBOX_VIEW = "crates/app/src/inbox/view.rs"
+INBOX_RENDERS = "crates/app/src/inbox/renders_b2.rs"
+
+
 class LiteralTests(unittest.TestCase):
+    def test_a_literal_in_the_moved_inbox_view_trips(self):
+        files = {INBOX_VIEW: BAD_LINE, locale_lint.AREAS: INBOX_MOVED}
+        self.assertEqual(len(found(files, INBOX_VIEW)), 1)
+
+    def test_render_fixture_files_may_hold_made_up_words(self):
+        files = {INBOX_RENDERS: BAD_LINE, locale_lint.AREAS: INBOX_MOVED}
+        self.assertEqual(found(files, INBOX_RENDERS), [])
+
     def test_literal_in_moved_area(self):
         self.assertEqual(len(found({NOTCH: BAD_LINE, locale_lint.AREAS: MOVED}, NOTCH)), 1)
 

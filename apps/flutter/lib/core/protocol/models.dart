@@ -123,6 +123,39 @@ class InboxAction {
   final bool primary;
 }
 
+class InboxOutcome {
+  const InboxOutcome({required this.state, required this.atMs, this.reason});
+
+  factory InboxOutcome.fromJson(Json json) => InboxOutcome(
+    state: json.strOrNull('state') ?? '',
+    atMs: json.integer('atMs', orElse: 0),
+    reason: json.strOrNull('reason'),
+  );
+
+  final String state;
+  final int atMs;
+  final String? reason;
+}
+
+class InboxPlace {
+  const InboxPlace({this.machineName, this.sessionName, this.branch});
+
+  factory InboxPlace.fromJson(Json json) => InboxPlace(
+    machineName: json.strOrNull('machineName'),
+    sessionName: json.strOrNull('sessionName'),
+    branch: json.strOrNull('branch'),
+  );
+
+  final String? machineName;
+  final String? sessionName;
+  final String? branch;
+
+  List<String> get labels => <String>[
+    for (final String? label in <String?>[machineName, sessionName, branch])
+      if (label != null && label.isNotEmpty) label,
+  ];
+}
+
 class InboxItem {
   const InboxItem({
     required this.id,
@@ -136,6 +169,13 @@ class InboxItem {
     this.answer,
     this.answeredBy,
     this.seen = false,
+    this.expiresMs,
+    this.blocking,
+    this.waitingSince,
+    this.waiter,
+    this.note,
+    this.outcome,
+    this.place,
   });
 
   factory InboxItem.fromJson(Json json) => InboxItem(
@@ -150,6 +190,13 @@ class InboxItem {
     answer: json.strOrNull('answer'),
     answeredBy: json.strOrNull('answeredBy'),
     seen: json.boolean('seen'),
+    expiresMs: json['expiresMs'] is num ? json.integer('expiresMs', orElse: 0) : null,
+    blocking: json['blocking'] is bool ? json['blocking'] as bool : null,
+    waitingSince: json['waitingSince'] is num ? json.integer('waitingSince', orElse: 0) : null,
+    waiter: json.strOrNull('waiter'),
+    note: json.strOrNull('note'),
+    outcome: json['outcome'] is Map<Object?, Object?> ? InboxOutcome.fromJson(json.object('outcome')) : null,
+    place: json['place'] is Map<Object?, Object?> ? InboxPlace.fromJson(json.object('place')) : null,
   );
 
   final String id;
@@ -163,8 +210,16 @@ class InboxItem {
   final String? answer;
   final String? answeredBy;
   final bool seen;
+  final int? expiresMs;
+  final bool? blocking;
+  final int? waitingSince;
+  final String? waiter;
+  final String? note;
+  final InboxOutcome? outcome;
+  final InboxPlace? place;
 
   bool get isOpen => state == 'open';
+  bool get isBlocking => isOpen && blocking == true;
 
   InboxItem closed({required String state, String? answer, String? answeredBy}) => InboxItem(
     id: id,
@@ -178,6 +233,13 @@ class InboxItem {
     answer: answer,
     answeredBy: answeredBy,
     seen: seen,
+    expiresMs: expiresMs,
+    blocking: blocking,
+    waitingSince: waitingSince,
+    waiter: waiter,
+    note: note,
+    outcome: outcome,
+    place: place,
   );
 
   String? answerLabel() {

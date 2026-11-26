@@ -524,3 +524,33 @@ fn each_driving_request_has_its_words_and_its_box_heading() {
         assert_eq!(card.value.expect("a box").label, heading, "{line}");
     }
 }
+
+#[test]
+fn who_names_the_session_and_its_branch_not_eight_id_characters() {
+    let mut named = env();
+    named.place = Some(notchling_engine::inbox::Place {
+        session_name: Some("notchling".into()),
+        branch: Some("pr-prep".into()),
+        ..Default::default()
+    });
+    let card = ConsentCard::build(&setting(), &named).expect("card");
+    assert_eq!(
+        card.details[0].value,
+        "Claude Code · verified session notchling · pr-prep"
+    );
+    let plain = ConsentCard::build(&setting(), &env()).expect("card");
+    assert_eq!(
+        plain.details[0].value,
+        "Claude Code · verified session 0b1c2d3e"
+    );
+}
+
+#[test]
+fn a_card_the_agent_asked_again_carries_the_note_that_changed_it() {
+    let mut again = setting();
+    again["change"]["priorNote"] = json!("use k2");
+    let card = ConsentCard::build(&again, &env()).expect("card");
+    assert_eq!(card.asked_again.as_deref(), Some("use k2"));
+    let first = ConsentCard::build(&setting(), &env()).expect("card");
+    assert_eq!(first.asked_again, None);
+}

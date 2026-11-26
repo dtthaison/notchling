@@ -153,6 +153,7 @@ impl OutboxNotice {
             open: None,
             closed_ms: None,
             switch: None,
+            ..Default::default()
         };
         lock(&self.noticed).insert(id, (session, ids));
         let responder = Arc::new(Handoff {

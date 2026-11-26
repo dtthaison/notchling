@@ -23,7 +23,7 @@ pub const ROWS: &[Row] = &[
     ),
     waits(row(
         "semantic download",
-        "notchling semantic download <model> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling semantic download <model> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "ask to download a Semantic Search model, which needs Semantic Search on; the user says yes on a card that names the model and its size, and the download runs in the background",
         &[acts("embed.request")],
         "request",

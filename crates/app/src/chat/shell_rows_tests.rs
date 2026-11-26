@@ -7,6 +7,7 @@ fn shell(id: &str, command: &str, started: Option<f64>) -> BackgroundShell {
         command: command.into(),
         title: String::new(),
         output_path: format!("/tmp/{id}.output"),
+        description: String::new(),
         started,
     }
 }
@@ -71,4 +72,21 @@ fn only_a_running_row_can_look_stuck() {
 fn a_stopped_shell_reads_stopped() {
     let (status, word, _) = ended_look("stopped");
     assert_eq!((status, word.as_str()), (Status::Needs, "Stopped"));
+}
+
+#[test]
+fn a_row_is_titled_by_the_description_and_keeps_the_command() {
+    let mut c = Conversation::default();
+    let mut described = shell("b1", "tail -f /tmp/x.log | grep -m1 done", Some(1000.0));
+    described.title = "Wait for the merge tests".into();
+    described.description = "Wait for the merge tests".into();
+    c.shells.push(described);
+    c.shells.push(shell("b2", "sleep 5", Some(1000.0)));
+    let rows = shell_rows(&c, None, &one);
+    let by = |id: &str| rows.iter().find(|r| r.id == id).unwrap();
+    assert_eq!(by("b1").title, "Wait for the merge tests");
+    assert_eq!(by("b1").description, "Wait for the merge tests");
+    assert_eq!(by("b1").command, "tail -f /tmp/x.log | grep -m1 done");
+    assert_eq!(by("b2").title, "sleep 5");
+    assert_eq!(by("b2").description, "");
 }

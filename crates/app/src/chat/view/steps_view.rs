@@ -401,6 +401,23 @@ fn step_detail(
     Some(detail)
 }
 
+fn script_status(step: &ToolRow, running: bool, a: Appearance) -> Option<Div> {
+    let (text, ink) = if running {
+        (t::chat::status_running(), Ink::TextMuted)
+    } else if !step.finished {
+        return None;
+    } else if step.is_error {
+        (t::chat::status_failed(), Ink::Expired)
+    } else {
+        (t::chat::done(), Ink::TextMuted)
+    };
+    Some(
+        div()
+            .flex_shrink_0()
+            .child(label(text, TypeRole::Label, ink, a)),
+    )
+}
+
 fn step_row(
     input: &ConversationInput,
     s: &ConversationState,
@@ -477,6 +494,11 @@ fn step_row(
                 a,
             ))
         })
+        .children(
+            (step.kind == ToolKind::Repl)
+                .then(|| script_status(step, running, a))
+                .flatten(),
+        )
         .when(!running && step.is_error, |d| {
             d.child(icon(Icon::Failed, 11.0, Ink::Expired, a))
         })
@@ -486,6 +508,7 @@ fn step_row(
         .flex()
         .flex_col()
         .gap(px(6.0))
+        .when(step.parent.is_some(), |d| d.ml(px(20.0)))
         .child(line)
         .children(
             step.browser

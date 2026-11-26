@@ -229,6 +229,7 @@ fn state_uses_notification_first() {
         command: "sleep 9".into(),
         title: "t".into(),
         output_path: "/nonexistent/b1.output".into(),
+        description: String::new(),
         started: None,
     };
     let none = |_: &str| Vec::new();

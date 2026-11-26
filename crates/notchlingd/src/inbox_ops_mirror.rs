@@ -26,9 +26,15 @@ impl InboxOps {
         lock(&self.inner).tap = Some(tap);
     }
 
+    fn machine_name_of(&self, owner: &NodeId) -> Option<String> {
+        let link = lock(&self.link).clone()?;
+        link.machine_name(owner)
+    }
+
     pub fn mirror_changed(&self, owner: &NodeId, item: Item) -> Result<(), Refusal> {
+        let name = self.machine_name_of(owner);
         let mut inner = lock(&self.inner);
-        let changes = inner.mirrors.changed(owner, item)?;
+        let changes = inner.mirrors.changed_named(owner, item, name)?;
         inner.publish(changes);
         Ok(())
     }
@@ -41,8 +47,9 @@ impl InboxOps {
     }
 
     pub fn mirror_sync(&self, owner: &NodeId, open: Vec<Item>) -> Result<(), Refusal> {
+        let name = self.machine_name_of(owner);
         let mut inner = lock(&self.inner);
-        let changes = inner.mirrors.sync(owner, open)?;
+        let changes = inner.mirrors.sync_named(owner, open, name)?;
         inner.publish(changes);
         Ok(())
     }

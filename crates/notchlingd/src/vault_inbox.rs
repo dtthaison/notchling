@@ -2,7 +2,10 @@ use super::vault_events::device_now;
 use super::*;
 use crate::acting_ops::now_ms;
 use crate::inbox_ops::{InboxOps, Responder};
-use notchling_engine::inbox::{Action, ActionId, Item, Kind as ItemKind, Source, State};
+use crate::presence::{Presence, PresenceGuard};
+use notchling_engine::inbox::{
+    Action, ActionId, AlertAction, Item, Kind as ItemKind, Live, Place, Source, State, Waiter,
+};
 use notchling_events::kinds::choices::Answerer;
 use std::time::Instant;
 
@@ -18,38 +21,57 @@ struct ApprovalResponder {
 }
 
 impl ApprovalResponder {
-    fn give(&self, action: ActionId, by: Answerer, device: Option<String>) -> bool {
+    fn give(
+        &self,
+        action: ActionId,
+        by: Answerer,
+        device: Option<String>,
+        note: Option<&str>,
+    ) -> bool {
         let value = match action {
             ActionId::AllowOnce => Decision::Once,
             ActionId::AllowAlways => Decision::Always,
             ActionId::Deny => Decision::Deny,
             _ => return false,
         };
-        self.approvals
-            .answer(&self.ticket, Answered { value, by, device })
+        self.approvals.answer(
+            &self.ticket,
+            Answered {
+                value,
+                by,
+                device,
+                note: note.map(str::to_string),
+            },
+        )
     }
 }
 
 impl Responder for ApprovalResponder {
     fn answered(&self, _item: &Item, action: ActionId) -> bool {
-        self.give(action, Answerer::Mac, None)
+        self.give(action, Answerer::Mac, None, None)
     }
 
     fn answered_by(&self, _item: &Item, action: ActionId, by: &str) -> bool {
-        self.give(action, answerer(by), device_now())
+        self.give(action, answerer(by), device_now(), None)
+    }
+
+    fn answered_with(&self, _item: &Item, action: ActionId, by: &str, note: Option<&str>) -> bool {
+        self.give(action, answerer(by), device_now(), note)
     }
 }
 
 pub(super) struct Raised {
     inbox: Option<Arc<InboxOps>>,
     id: String,
+    here: Option<(Arc<Presence>, PresenceGuard)>,
 }
 
 impl Raised {
-    fn new(inbox: &Arc<InboxOps>, id: String) -> Raised {
+    fn new(inbox: &Arc<InboxOps>, id: String, here: (Arc<Presence>, PresenceGuard)) -> Raised {
         Raised {
             inbox: Some(inbox.clone()),
             id,
+            here: Some(here),
         }
     }
 
@@ -57,10 +79,25 @@ impl Raised {
         Raised {
             inbox: None,
             id: String::new(),
+            here: None,
+        }
+    }
+
+    fn leave(&mut self) {
+        if let Some((presence, guard)) = self.here.take() {
+            drop(guard);
+            presence.forget(&self.id);
+        }
+    }
+
+    pub(super) fn note(&self, note: &str) {
+        if let Some(inbox) = &self.inbox {
+            inbox.note_item(&self.id, note);
         }
     }
 
     pub(super) fn close(mut self, state: State, answer: Option<ActionId>, by: Option<Answerer>) {
+        self.leave();
         if let Some(inbox) = self.inbox.take() {
             let by = by.filter(|_| state == State::Answered).map(Answerer::name);
             inbox.resolve(&self.id, state, answer, by);
@@ -70,6 +107,7 @@ impl Raised {
 
 impl Drop for Raised {
     fn drop(&mut self) {
+        self.leave();
         if let Some(inbox) = self.inbox.take() {
             inbox.resolve(&self.id, State::Withdrawn, None, None);
         }
@@ -101,6 +139,7 @@ fn item(id: String, kind: ItemKind, title: String, detail: String) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 
@@ -123,6 +162,7 @@ impl VaultOps {
         names: &[&str],
         (command, folder): (&str, &str),
         by: Option<&ReleaseFor>,
+        session: Option<String>,
     ) -> Raised {
         let Some(inbox) = &self.inbox else {
             return Raised::none();
@@ -149,12 +189,36 @@ impl VaultOps {
             action(ActionId::AllowAlways, "Always Allow", false),
             action(ActionId::Deny, "Deny", false),
         ];
+        raised.alert_actions = vec![AlertAction::Deny, AlertAction::Open, AlertAction::Change];
+        raised.place = Some(Place {
+            session,
+            machine_name: by.map(|grant| grant.node_name.clone()),
+            ..Place::default()
+        })
+        .filter(|place| place.session.is_some() || place.machine_name.is_some());
         raised.open = Some(json!({"vault_approval": ticket}));
         let responder = ApprovalResponder {
             approvals: self.approvals.clone(),
             ticket: ticket.to_string(),
         };
-        Raised::new(inbox, inbox.raise(raised, Some(Arc::new(responder))))
+        let created = raised.created_ms;
+        raised.blocking = Some(true);
+        raised.waiting_since = Some(created);
+        raised.waiter = Some(Waiter::Vault);
+        let id = inbox.raise(raised, Some(Arc::new(responder)));
+        let guard = self.presence.enter(&id, created);
+        self.sweep_live(inbox);
+        Raised::new(inbox, id, (self.presence.clone(), guard))
+    }
+
+    fn sweep_live(&self, inbox: &Arc<InboxOps>) {
+        for (id, here) in self.presence.sweep(now_ms()) {
+            let live = here.then(|| Live {
+                waiting_since: self.presence.since(&id).unwrap_or_else(now_ms),
+                waiter: Waiter::Vault,
+            });
+            inbox.set_live(&id, live);
+        }
     }
 
     pub(super) fn ended_without_answer(

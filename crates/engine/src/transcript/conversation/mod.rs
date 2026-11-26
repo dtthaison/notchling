@@ -4,6 +4,7 @@ mod parser;
 mod queue;
 #[cfg(test)]
 mod queue_invisible_tests;
+mod repl;
 #[cfg(test)]
 mod stopped_tests;
 mod tools;

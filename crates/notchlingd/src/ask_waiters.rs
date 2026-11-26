@@ -191,6 +191,8 @@ impl AskOps {
         }
         let until = Instant::now() + budget(args);
         let here = self.waiters.enter(id);
+        let waits = !until.saturating_duration_since(Instant::now()).is_zero();
+        let _seen = (waits && first.state == AskState::Open).then(|| self.here(id));
         let reply = loop {
             let seen = here.mark();
             let row = self.row(id)?;
@@ -210,3 +212,7 @@ impl AskOps {
 #[cfg(test)]
 #[path = "ask_waiters_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ask_presence_tests.rs"]
+mod presence_tests;

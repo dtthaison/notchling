@@ -866,6 +866,7 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
         .children(super::ask_cards::cards(view, a, window, cx))
         .children(super::vault_cards::cards(view, a, cx))
         .children(super::login_banner::banner(view, a, cx))
+        .children(super::blocked_strip::strip(view, a, cx))
         .children(permission(view, a, cx))
         .children(view.activity_line().map(|activity| {
             view.activity_drawn.set(Some(super::now_ms()));

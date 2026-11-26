@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{div, prelude::*, px, Context, Div, Entity};
@@ -7,6 +8,7 @@ use super::sidebar::HEADER_ROW;
 use super::ChatView;
 use crate::inbox::feed::InboxFeed;
 use crate::inbox::renders::{model, NOW_MS};
+use crate::inbox::triage::Section;
 use crate::inbox::view::InboxPanelView;
 use crate::inbox::WIDTH;
 use crate::mac::shell::AppInbox;
@@ -21,7 +23,11 @@ impl ChatView {
     pub(super) fn toggle_inbox(&mut self, cx: &mut Context<Self>) {
         if self.inbox_panel.take().is_none() {
             let feed = self.inbox.clone();
-            self.inbox_panel = Some(cx.new(|cx| InboxPanelView::live(feed, cx)));
+            let chat = cx.entity().downgrade();
+            let close: Rc<dyn Fn(&mut gpui::App)> = Rc::new(move |cx| {
+                chat.update(cx, |this, cx| this.close_inbox(cx)).ok();
+            });
+            self.inbox_panel = Some(cx.new(|cx| InboxPanelView::live(feed, close, cx)));
         }
         cx.notify();
     }
@@ -29,6 +35,13 @@ impl ChatView {
     pub fn show_inbox(&mut self, cx: &mut Context<Self>) {
         if self.inbox_panel.is_none() {
             self.toggle_inbox(cx);
+        }
+    }
+
+    pub fn show_inbox_at(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.show_inbox(cx);
+        if let Some(panel) = self.inbox_panel.clone() {
+            panel.update(cx, |view, cx| view.focus_row(id, cx));
         }
     }
 
@@ -48,7 +61,7 @@ impl ChatView {
     pub(super) fn preview_inbox(&mut self, cx: &mut Context<Self>) {
         let feed = Arc::new(InboxFeed::fixed(model()));
         self.inbox = feed.clone();
-        self.inbox_panel = Some(cx.new(|_| InboxPanelView::fixed(feed, NOW_MS, false)));
+        self.inbox_panel = Some(cx.new(|_| InboxPanelView::fixed(feed, NOW_MS, Section::Waiting)));
     }
 }
 

@@ -3,7 +3,7 @@ use crate::commands::{acts, read, row, waits, with_switch, Row, ACT_EXITS, READ_
 pub const ROWS: &[Row] = &[
     waits(row(
         "dispatch",
-        "notchling dispatch <machine> --tool <claude|codex|agy|shell> [--folder <path>] [--model <name>] [--effort <level>] [--text <prompt>] [--command <line>] [--secret <name>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling dispatch <machine> --tool <claude|codex|agy|shell> [--folder <path>] [--model <name>] [--effort <level>] [--text <prompt>] [--command <line>] [--secret <name>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "send a job to a machine of your organization; the user says yes on a card on the Mac, with or without secrets; the same --key sends it once",
         &[with_switch(acts("cluster.dispatch"), "cluster")],
         "request",
@@ -33,7 +33,7 @@ pub const ROWS: &[Row] = &[
     )),
     waits(row(
         "job tail",
-        "notchling job tail <id> [--from <offset>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling job tail <id> [--from <offset>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "the output of a job; free for a job you sent, a card for any other",
         &[with_switch(acts("jobs.tail"), "cluster")],
         "own_free",
@@ -43,7 +43,7 @@ pub const ROWS: &[Row] = &[
     )),
     waits(row(
         "job return",
-        "notchling job return <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling job return <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "bring a job's result back; free for a job you sent, a card for any other",
         &[with_switch(acts("jobs.return"), "cluster")],
         "own_free",
@@ -53,7 +53,7 @@ pub const ROWS: &[Row] = &[
     )),
     waits(row(
         "job stop",
-        "notchling job stop <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling job stop <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "stop a job; free for a job you sent, a card for any other that the Mac or a phone may allow",
         &[with_switch(acts("jobs.stop"), "cluster")],
         "own_free",

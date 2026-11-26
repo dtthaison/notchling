@@ -1,7 +1,8 @@
 use crate::cited::Cited;
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Handler, Opening};
 use crate::op_group::OpGroup;
 use crate::versions_ops::VersionsOps;
+use notchling_engine::consent::retry::unretried;
 use notchling_engine::consent::{Consent, UPDATE};
 use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec};
 use serde_json::{json, Value};
@@ -142,6 +143,7 @@ impl UpdateAsks {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         };
         if dry_run(args) {
             let would = self.consent.would(&opening)?;
@@ -184,7 +186,7 @@ impl UpdateAsks {
         let now = self
             .plan(tool, to, Look::Stored)
             .map_err(|e| e.message.clone())?;
-        if now.change == row.change && now.facts == row.facts {
+        if now.change == unretried(&row.change) && now.facts == row.facts {
             Ok(())
         } else {
             Err("the tool changed since the request".to_string())

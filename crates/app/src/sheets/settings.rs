@@ -44,6 +44,13 @@ pub enum Field {
     Shortcut(shortcut::Setting),
     Categories(Vec<(Category, bool)>),
     Semantic(SemanticModel),
+    Press(Press),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Press {
+    PlaySound,
+    OpenNotificationSettings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -426,6 +433,11 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
             ],
             footer: None,
         },
+        super::settings_attention::section(
+            read,
+            super::settings_attention::notch_shown(read),
+            super::settings_attention::denied(),
+        ),
         Section {
             title: t::settings::section_chat(),
             rows: vec![choice(
@@ -459,7 +471,9 @@ pub fn change(row: &Row, option: &str) -> Option<(&'static str, Value)> {
         }
         Field::Categories(rows) => search_rows::change(rows, option),
         Field::Semantic(model) => semantic::change(model, option),
-        Field::ReadOnly { .. } | Field::Daemon { .. } | Field::Shortcut(_) => None,
+        Field::ReadOnly { .. } | Field::Daemon { .. } | Field::Shortcut(_) | Field::Press(_) => {
+            None
+        }
     }
 }
 
@@ -684,6 +698,7 @@ mod tests {
                 "Daemon",
                 "Keep Mac Awake",
                 "Notch",
+                "Attention",
                 "Chat"
             ]
         );

@@ -11,6 +11,7 @@ mod accounts_signin;
 pub mod acting;
 mod acting_events;
 pub mod acting_ops;
+mod acting_permission;
 pub mod activity_ops;
 pub mod agent_named;
 pub mod agy_app;
@@ -28,6 +29,7 @@ mod ask_cli_run;
 mod ask_events;
 mod ask_find;
 mod ask_inbox;
+mod ask_live;
 mod ask_main;
 pub mod ask_ops;
 mod ask_rows;
@@ -44,6 +46,8 @@ pub mod bridge_ops;
 pub mod caller_session;
 pub mod capabilities_ops;
 pub mod catalog_ops;
+pub mod chat_cli;
+pub mod chat_ops;
 pub mod chrome_ops;
 pub mod cited;
 pub mod cli;
@@ -122,15 +126,22 @@ pub mod codex_ops;
 pub mod commands;
 pub mod commands_accounts;
 pub mod commands_cluster;
+mod commands_inbox;
 pub mod commands_jobs;
 pub mod commands_machines;
 pub mod commands_search;
 pub mod commands_setup;
+mod consent_answers;
+mod consent_apart;
 pub mod consent_cli;
 mod consent_events;
+mod consent_failure;
 mod consent_keyed;
+mod consent_live;
 pub mod consent_ops;
 pub mod consent_parts;
+mod consent_reads;
+mod consent_retry;
 #[cfg(test)]
 pub(crate) mod consent_testkit;
 mod consent_wire;
@@ -150,6 +161,7 @@ pub(crate) mod daemon_wiring_embed;
 pub mod daemon_wiring_install;
 pub mod daemon_wiring_machines;
 pub mod daemon_wiring_phase8;
+mod daemon_wiring_release;
 mod daemon_wiring_search;
 mod daemon_wiring_setup;
 pub mod daemon_wiring_updates;
@@ -236,6 +248,7 @@ pub mod pages_cli;
 pub mod pages_ops;
 pub mod phase8_cli;
 pub mod postmen_wiring;
+mod presence;
 mod process_facts;
 pub mod prompts;
 pub mod providers_cli;
@@ -332,6 +345,8 @@ mod acting_shell_output_tests;
 #[cfg(test)]
 mod acting_signed_out_tests;
 #[cfg(test)]
+mod acting_worker_login_tests;
+#[cfg(test)]
 mod activity_mine_tests;
 #[cfg(test)]
 mod activity_ops_tests;
@@ -369,6 +384,10 @@ mod caller_trusted_tests;
 mod catalog_ops_tests;
 #[cfg(test)]
 mod catalog_roles_tests;
+#[cfg(test)]
+mod chat_cli_tests;
+#[cfg(test)]
+mod chat_ops_tests;
 #[cfg(test)]
 mod chrome_ops_tests;
 #[cfg(test)]
@@ -436,6 +455,8 @@ mod cluster_workspace_testkit;
 #[cfg(test)]
 mod codex_children_tests;
 #[cfg(test)]
+mod control_first_message_tests;
+#[cfg(test)]
 mod control_ops_tests;
 #[cfg(test)]
 mod cost_guard_report_tests;
@@ -463,6 +484,8 @@ mod event_assert;
 mod every_session_cap_tests;
 #[cfg(test)]
 mod every_session_tests;
+#[cfg(all(test, unix))]
+mod fd_testkit;
 #[cfg(all(test, unix))]
 mod git_args_tests;
 #[cfg(test)]
@@ -493,6 +516,8 @@ mod hook_ops_tests;
 mod hook_pages_tests;
 #[cfg(test)]
 mod hook_tests;
+#[cfg(test)]
+mod inbox_mine_tests;
 #[cfg(test)]
 mod inbox_ops_events_tests;
 #[cfg(test)]
@@ -697,6 +722,7 @@ pub fn run(command: Command) -> i32 {
         Command::Watch { args } => watch_cli::run(&args),
         Command::Mine { read, args } => mine_cli::run(read, &args),
         Command::Shells { args } => shells_cli::run(&args),
+        Command::Chat { args } => chat_cli::run(&args),
         Command::Cluster { args } => match args.first().map(String::as_str) {
             Some(word) if cluster_admin_cli::handles(word) => cluster_admin_cli::run(&args),
             _ => cluster_cli::run(&args),

@@ -1,5 +1,5 @@
 use crate::acting_ops::now_ms;
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Handler, Opening};
 use crate::op_group::OpGroup;
 use crate::session_children::{Child, Children};
 use notchling_engine::consent::{Consent, SESSION, SESSION_STOP};
@@ -332,6 +332,7 @@ impl SessionAsks {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         };
         if dry_run(args) {
             let would = self.consent.would(&opening)?;

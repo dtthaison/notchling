@@ -10,6 +10,7 @@ fn conversation(total: usize, running: &[usize]) -> Conversation {
             command: format!("job {n}"),
             title: String::new(),
             output_path: format!("/tmp/s/b{n}.output"),
+            description: String::new(),
             started: None,
         });
         if !running.contains(&n) {
@@ -99,6 +100,7 @@ fn a_new_shell_goes_to_the_top_and_the_shown_ones_stay() {
         command: "new".into(),
         title: String::new(),
         output_path: "/tmp/s/b12.output".into(),
+        description: String::new(),
         started: None,
     });
     let second = show(&mut page, &c, 0);
@@ -358,6 +360,7 @@ fn a_shell_that_starts_after_the_first_page_goes_on_top_and_is_probed() {
         command: "new".into(),
         title: String::new(),
         output_path: "/tmp/s/b5.output".into(),
+        description: String::new(),
         started: None,
     });
     let after = |p: &str| (!p.ends_with("/b5.output")).then(|| p.ends_with("/b1.output"));

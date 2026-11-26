@@ -34,6 +34,7 @@ fn until_needs_a_topic_that_carries_a_state() {
         args(&["--until", "applied"]),
         args(&["--topic", "mine.consents", "--until", "applied"]),
         args(&["--topic", "mine.asks", "--until", "answered"]),
+        args(&["--topic", "mine.inbox", "--until", "answered"]),
         args(&[
             "--topic",
             "settings.switch",
@@ -133,4 +134,44 @@ fn a_reconnect_after_the_timeout_never_starts() {
     );
     assert_eq!(out.unwrap(), None);
     assert_eq!(calls, 0);
+}
+
+#[test]
+fn inbox_is_the_short_name_of_mine_inbox() {
+    let parsed = parse(&args(&["--topic", "inbox"])).unwrap();
+    assert_eq!(parsed.topics, vec!["mine.inbox".to_owned()]);
+    assert!(parsed.explicit);
+    let both = parse(&args(&["--topic", "inbox", "--topic", "mine.inbox"])).unwrap();
+    assert_eq!(both.topics, vec!["mine.inbox".to_owned()]);
+    assert!(parse(&args(&["--topic", "inbox", "--until", "answered"])).is_ok());
+}
+
+#[test]
+fn the_app_only_inbox_topic_is_never_put_on_the_wire() {
+    for list in [
+        &["--topic", "inbox"][..],
+        &["--topic", "mine.inbox"][..],
+        &[][..],
+    ] {
+        let parsed = parse(&args(list)).unwrap();
+        for public_only in [false, true] {
+            let wire = crate::watch_cli::wire_topics(&parsed.topics, public_only);
+            assert!(
+                !wire.contains(&notchling_local_api::topics::INBOX),
+                "{list:?}"
+            );
+        }
+        let wire = crate::watch_cli::wire_topics(&parsed.topics, false);
+        assert!(
+            wire.contains(&notchling_local_api::topics::MINE_INBOX) || list.is_empty(),
+            "{list:?}"
+        );
+    }
+}
+
+#[test]
+fn an_inbox_change_is_wanted_by_the_short_name() {
+    let parsed = parse(&args(&["--topic", "inbox"])).unwrap();
+    assert!(crate::watch_cli::wanted(&parsed.topics, "inbox.changed"));
+    assert!(!crate::watch_cli::wanted(&parsed.topics, "consent.changed"));
 }

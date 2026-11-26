@@ -94,6 +94,11 @@ pub fn line(request: &Value) -> String {
 pub fn failure_of(request: &Value, op: &str) -> Failure {
     let state = state_of(request);
     let code = exit_of(state);
+    let noted = request
+        .get("note")
+        .and_then(Value::as_str)
+        .filter(|note| state == "denied" && !note.is_empty())
+        .map(|note| format!("The user denied this and asked for a change: {note}"));
     let (reason, message) = match state {
         "waiting" | "opened" | "applying" => {
             ("needs_consent", "The request still waits for the user.")
@@ -107,6 +112,11 @@ pub fn failure_of(request: &Value, op: &str) -> Failure {
         ),
         _ => ("failed", "The request didn't go through."),
     };
+    let told = request
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .filter(|text| state == "failed" && !text.trim().is_empty());
+    let message = told.or(noted.as_deref()).unwrap_or(message);
     let mut failure = Failure::new(code, reason, message)
         .with_op(op)
         .with_human(format!("{} ({message})", line(request)));

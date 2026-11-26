@@ -116,6 +116,7 @@ fn describe(input: Option<&Map<String, Value>>) -> String {
     };
     for key in [
         "command",
+        "code",
         "file_path",
         "notebook_path",
         "url",
@@ -477,5 +478,19 @@ mod tests {
         assert!(store
             .open(fixture("permission-request.json"), None, 2)
             .is_none());
+    }
+
+    #[test]
+    fn a_repl_prompt_shows_its_code_not_its_description() {
+        let event = fixture("repl-permission-request.json");
+        assert_eq!(Kind::of(&event), Kind::Permission);
+        let prompt = Prompt::new("p1".into(), event, None, 1);
+        assert!(prompt
+            .summary()
+            .starts_with("const out = await $`rm -rf build"));
+        let json = prompt.to_json();
+        assert_eq!(json["toolName"], "REPL");
+        assert_eq!(json["input"]["description"], "Clean the build folder");
+        assert_eq!(json["canAlwaysAllow"], true);
     }
 }

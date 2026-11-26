@@ -25,6 +25,7 @@ fn item(id: &str, kind: Kind, created_ms: i64, actions: &[ActionId]) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 
@@ -371,4 +372,121 @@ fn an_answered_item_can_still_be_withdrawn_but_an_expired_one_cannot() {
     book.resolve("b", State::Expired, None, None, 2);
     assert!(book.withdraw("b", 3).is_none());
     assert!(book.withdraw("a", 4).is_none());
+}
+
+fn live(since: i64) -> Live {
+    Live {
+        waiting_since: since,
+        waiter: Waiter::Cli,
+    }
+}
+
+#[test]
+fn the_cap_never_evicts_a_blocking_item() {
+    let mut book = Book::new();
+    book.raise(item("blocked", Kind::Notice, 1, &[ActionId::Done]));
+    assert!(book.set_live("blocked", Some(live(1))));
+    for n in 0..MAX_OPEN as i64 - 1 {
+        book.raise(item(
+            &format!("n{n}"),
+            Kind::Notice,
+            10 + n,
+            &[ActionId::Done],
+        ));
+    }
+    assert_eq!(open_count(&book), MAX_OPEN);
+    book.raise(item("extra", Kind::Notice, 1_000, &[ActionId::Done]));
+    let ids: Vec<String> = book.items().into_iter().map(|item| item.id).collect();
+    assert!(ids.contains(&"blocked".to_string()));
+    assert!(!ids.contains(&"n0".to_string()));
+    assert_eq!(open_count(&book), MAX_OPEN);
+}
+
+#[test]
+fn the_cap_leaves_the_book_over_when_every_other_item_is_blocking() {
+    let mut book = Book::new();
+    for n in 0..MAX_OPEN as i64 {
+        let id = format!("n{n}");
+        book.raise(item(&id, Kind::SecretApproval, n, &[ActionId::Deny]));
+        book.set_live(&id, Some(live(n)));
+    }
+    let changes = book.raise(item("extra", Kind::Notice, 1_000, &[ActionId::Done]));
+    assert_eq!(changes.len(), 1);
+    assert_eq!(open_count(&book), MAX_OPEN + 1);
+}
+
+#[test]
+fn set_live_reports_a_change_only_when_the_live_fields_differ() {
+    let mut book = Book::new();
+    book.raise(item("a", Kind::Consent, 1, &[ActionId::Deny]));
+    assert!(book.set_live("a", Some(live(5))));
+    assert!(!book.set_live("a", Some(live(5))));
+    let shown = book.items().remove(0);
+    assert_eq!(shown.blocking, Some(true));
+    assert_eq!(shown.waiting_since, Some(5));
+    assert_eq!(shown.waiter, Some(Waiter::Cli));
+    assert!(book.set_live("a", None));
+    assert!(!book.set_live("a", None));
+    let shown = book.items().remove(0);
+    assert_eq!(shown.blocking, None);
+    assert_eq!(shown.waiter, None);
+    assert!(!book.set_live("missing", Some(live(1))));
+}
+
+#[test]
+fn an_outcome_is_kept_on_the_item_and_returned_as_an_update() {
+    let mut book = Book::new();
+    book.raise(item("a", Kind::Consent, 1, &[ActionId::Allow]));
+    let outcome = Outcome {
+        state: OutcomeState::Failed,
+        reason: Some("nothing changed".to_string()),
+        at_ms: 9,
+    };
+    let change = book.set_outcome("a", outcome.clone()).expect("a change");
+    match change {
+        Change::Updated(item) => assert_eq!(item.outcome, Some(outcome)),
+        other => panic!("{other:?}"),
+    }
+    assert!(book
+        .set_outcome(
+            "missing",
+            Outcome {
+                state: OutcomeState::Applied,
+                reason: None,
+                at_ms: 1
+            }
+        )
+        .is_none());
+}
+
+#[test]
+fn raising_an_open_id_again_keeps_its_live_fields() {
+    let mut book = Book::new();
+    book.raise(item("a", Kind::Consent, 1, &[ActionId::Deny]));
+    book.set_live("a", Some(live(5)));
+    book.raise(item("a", Kind::Consent, 2, &[ActionId::Deny]));
+    let shown = book.items().remove(0);
+    assert_eq!(shown.blocking, Some(true));
+    assert_eq!(shown.waiting_since, Some(5));
+}
+
+#[test]
+fn closing_an_item_clears_its_live_fields() {
+    for close in 0..3 {
+        let mut book = Book::new();
+        book.raise(item("a", Kind::Consent, 1, &[ActionId::Deny]));
+        book.set_live("a", Some(live(5)));
+        let change = match close {
+            0 => book.resolve("a", State::Withdrawn, None, None, 9),
+            1 => Some(book.answer("a", ActionId::Deny, "mac", 9).unwrap()),
+            _ => book.withdraw("a", 9),
+        };
+        let Some(Change::Updated(shown)) = change else {
+            panic!("{close}");
+        };
+        assert_eq!(shown.blocking, None, "{close}");
+        assert_eq!(shown.waiter, None, "{close}");
+        assert_eq!(shown.waiting_since, None, "{close}");
+        assert!(!book.set_live("a", Some(live(7))), "{close}");
+    }
 }

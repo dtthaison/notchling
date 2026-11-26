@@ -18,6 +18,7 @@ log_choice! {
         ShowLastReply = "showLastReply",
         AskedAccessibility = "askedAccessibility",
         NotchWidth = "notchWidth",
+        AttentionLevel = "attentionLevel",
         Dismissed = "dismissed",
         HiddenAgents = "hiddenAgents",
         Accounts = "accounts",
@@ -102,6 +103,9 @@ log_choice! {
         Log = "log",
         Balanced = "balanced",
         Quality = "quality",
+        Calm = "calm",
+        Normal = "normal",
+        Urgent = "urgent",
     }
 }
 

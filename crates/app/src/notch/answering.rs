@@ -137,11 +137,37 @@ impl NotchView {
         sending: Sending,
         cx: &mut Context<Self>,
     ) {
-        if self.sending.is_some() || !self.gate().enabled {
+        let allowed = self.gate().enabled;
+        self.send_when(allowed, key, request, sending, cx);
+    }
+
+    pub(super) fn send_unless_off(
+        &mut self,
+        key: Option<String>,
+        request: Request,
+        sending: Sending,
+        cx: &mut Context<Self>,
+    ) {
+        let allowed = self.acting().control().enabled;
+        self.send_when(allowed, key, request, sending, cx);
+    }
+
+    fn send_when(
+        &mut self,
+        allowed: bool,
+        key: Option<String>,
+        request: Request,
+        sending: Sending,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sending.is_some() || !allowed {
             return;
         }
         self.sending = Some(sending);
         self.send_error = None;
+        if let Some(key) = &key {
+            self.model.blocking.begin(key);
+        }
         let actions = self.actions.clone();
         let shared = self.sessions.clone();
         cx.spawn(async move |this, cx| {
@@ -151,6 +177,15 @@ impl NotchView {
                 .await;
             this.update(cx, |view, cx| {
                 view.sending = None;
+                let sent = matches!(&result, Ok(reply) if super::ask::lost_reply(key.as_deref(), reply).is_none());
+                if let Some(key) = &key {
+                    view.model.blocking.finish(key, sent);
+                    if view.note_for.as_ref().is_some_and(|(prompt, _)| prompt == key) {
+                        if let Some((_, id)) = view.note_for.take() {
+                            view.model.blocking.note_settled(&id, sent);
+                        }
+                    }
+                }
                 match result {
                     Ok(reply) if super::ask::lost_reply(key.as_deref(), &reply).is_some() => {
                         view.send_error = super::ask::lost_reply(key.as_deref(), &reply);

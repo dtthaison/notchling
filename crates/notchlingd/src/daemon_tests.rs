@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,10 @@ fn hold() -> (Arc<dyn Fn() + Send + Sync>, Sender<()>) {
     (hold, release)
 }
 
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
 struct Running {
+    _turn: MutexGuard<'static, ()>,
     layout: Layout,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<Result<(), DaemonError>>>,
@@ -56,6 +59,7 @@ impl Running {
         held: bool,
         prepare: &dyn Fn(&Layout),
     ) -> Running {
+        let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let root = PathBuf::from(format!("/tmp/nl-dt-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         copy_tree(
@@ -76,6 +80,7 @@ impl Running {
             std::thread::spawn(move || run(layout, options, &|| stop.load(Ordering::SeqCst)))
         };
         Running {
+            _turn: turn,
             layout,
             stop,
             thread: Some(thread),
@@ -86,6 +91,14 @@ impl Running {
 
     fn release(&mut self) {
         self.release.take();
+    }
+
+    fn stop(&mut self) {
+        self.release.take();
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 
     fn socket(&self) -> &Path {
@@ -283,4 +296,19 @@ fn a_start_goes_on_when_the_organizations_document_cannot_be_read() {
             .as_deref(),
         Some("{")
     );
+}
+
+#[test]
+fn a_stopped_daemon_holds_no_file_under_its_data_folder() {
+    let mut daemon = Running::start("fds", DaemonOptions::default(), false);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    assert!(daemon.client().status().is_ok());
+    daemon.stop();
+    let mut left = crate::fd_testkit::open_under(&daemon.root);
+    let begun = Instant::now();
+    while !left.is_empty() && begun.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(50));
+        left = crate::fd_testkit::open_under(&daemon.root);
+    }
+    assert!(left.is_empty(), "{left:?}");
 }

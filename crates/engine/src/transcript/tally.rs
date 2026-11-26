@@ -54,6 +54,7 @@ impl ToolTally {
                 bash_kind(input.get("command").and_then(Value::as_str).unwrap_or("")).to_string()
             }
             "WebSearch" | "WebFetch" => "web".to_string(),
+            "REPL" => "script".to_string(),
             "Agent" | "Task" => "agent".to_string(),
             "AskUserQuestion" => "ask".to_string(),
             "TodoWrite" | "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" => {
@@ -104,6 +105,7 @@ impl ToolTally {
                 "bash" => format!("ran {}", count(key, "shell command", "shell commands")),
                 "web" => "searched the web".to_string(),
                 "agent" => format!("ran {}", count(key, "agent", "agents")),
+                "script" => format!("ran {}", count(key, "script", "scripts")),
                 "ask" => "asked you".to_string(),
                 "tasks" => "updated tasks".to_string(),
                 other => format!("used {}", other.strip_prefix("use:").unwrap_or(other)),
@@ -138,6 +140,14 @@ pub fn describe(tool: &str, input: &Map<String, Value>) -> String {
             let d = s("description");
             if d.is_empty() {
                 format!("Running {}", prefix_chars(&s("command"), 60))
+            } else {
+                d
+            }
+        }
+        "REPL" => {
+            let d = s("description");
+            if d.is_empty() {
+                "Running a script".to_string()
             } else {
                 d
             }

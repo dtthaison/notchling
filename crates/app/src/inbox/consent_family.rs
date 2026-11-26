@@ -74,8 +74,8 @@ pub enum Admin {
 impl std::fmt::Debug for Admin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Admin::Password(_) => f.write_str("Admin::Password(..)"),
-            Admin::Vault(name) => write!(f, "Admin::Vault({name})"),
+            Admin::Password(_) => f.write_str("admin_password(..)"),
+            Admin::Vault(name) => write!(f, "admin_vault({name})"),
         }
     }
 }
@@ -251,9 +251,9 @@ fn drops_line(args: &Value) -> Option<String> {
         if let (Some(organization), Some(machines)) =
             (arg(group, "organization"), names(group, "machines"))
         {
-            out = format!(
-                "{out}. {}",
-                t::consent::network_drops_in(&organization, &machines)
+            out = sentence(
+                &out,
+                &t::consent::network_drops_in(&organization, &machines),
             );
         }
     }
@@ -268,10 +268,10 @@ fn machine_line(args: &Value) -> Option<String> {
         &arg(args, "organization")?,
     );
     if let Some(addresses) = names(args, "addresses") {
-        out = format!("{out}. {}", t::consent::machine_address_list(&addresses));
+        out = sentence(&out, &t::consent::machine_address_list(&addresses));
     }
     if let Some(key) = arg(args, "key") {
-        out = format!("{out}. {}", t::consent::machine_key_file(&key));
+        out = sentence(&out, &t::consent::machine_key_file(&key));
     }
     Some(out)
 }
@@ -404,4 +404,8 @@ pub fn applied_note(reply: &Value, parts: &[Part]) -> Option<String> {
     }
     let failed = of("failed");
     (!failed.is_empty()).then(|| t::consent::install_part_failed(&failed.join(", ")))
+}
+
+fn sentence(first: &str, next: &str) -> String {
+    [first, next].join(". ")
 }

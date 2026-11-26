@@ -1,4 +1,4 @@
-use super::model::{ActionId, Item, Kind, State};
+use super::model::{ActionId, Item, Kind, Live, Outcome, State, REASON_MAX};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -64,6 +64,10 @@ impl Book {
                 if self.items[index].state != State::Open {
                     return changes;
                 }
+                let before = &self.items[index];
+                item.blocking = before.blocking;
+                item.waiting_since = before.waiting_since;
+                item.waiter = before.waiter;
                 self.items[index] = item.clone();
                 changes.push(Change::Updated(item));
             }
@@ -95,6 +99,17 @@ impl Book {
         by: &str,
         now_ms: i64,
     ) -> Result<Change, AnswerError> {
+        self.answer_noted(id, action, by, None, now_ms)
+    }
+
+    pub fn answer_noted(
+        &mut self,
+        id: &str,
+        action: ActionId,
+        by: &str,
+        note: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Change, AnswerError> {
         let item = self
             .items
             .iter_mut()
@@ -110,7 +125,18 @@ impl Book {
         item.answer = Some(action);
         item.answered_by = Some(by.to_string());
         item.closed_ms = Some(now_ms);
+        item.clear_live();
+        item.note = note.map(str::to_string);
         Ok(Change::Updated(item.clone()))
+    }
+
+    pub fn set_note(&mut self, id: &str, note: &str) -> Option<Change> {
+        let item = self.items.iter_mut().find(|item| item.id == id)?;
+        if item.state != State::Open {
+            return None;
+        }
+        item.note = Some(note.to_string());
+        Some(Change::Updated(item.clone()))
     }
 
     pub fn resolve(
@@ -129,6 +155,7 @@ impl Book {
         item.answer = answer;
         item.answered_by = by.map(str::to_string);
         item.closed_ms = Some(now_ms);
+        item.clear_live();
         Some(Change::Updated(item.clone()))
     }
 
@@ -139,7 +166,39 @@ impl Book {
         }
         item.state = State::Withdrawn;
         item.closed_ms = Some(now_ms);
+        item.clear_live();
         Some(Change::Updated(item.clone()))
+    }
+
+    pub fn set_live(&mut self, id: &str, live: Option<Live>) -> bool {
+        let Some(item) = self.items.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        if item.state != State::Open {
+            return false;
+        }
+        let (blocking, waiting_since, waiter) = match live {
+            Some(live) => (Some(true), Some(live.waiting_since), Some(live.waiter)),
+            None => (None, None, None),
+        };
+        let changed = item.blocking != blocking
+            || item.waiting_since != waiting_since
+            || item.waiter != waiter;
+        item.blocking = blocking;
+        item.waiting_since = waiting_since;
+        item.waiter = waiter;
+        changed
+    }
+
+    pub fn set_outcome(&mut self, id: &str, mut outcome: Outcome) -> Option<Change> {
+        let item = self.items.iter_mut().find(|item| item.id == id)?;
+        outcome.reason = outcome.reason.map(|reason| cut(reason, REASON_MAX));
+        item.outcome = Some(outcome);
+        Some(Change::Updated(item.clone()))
+    }
+
+    pub fn get(&self, id: &str) -> Option<Item> {
+        self.items.iter().find(|item| item.id == id).cloned()
     }
 
     pub fn remove(&mut self, id: &str) -> Option<Change> {
@@ -160,6 +219,7 @@ impl Book {
                 && !held(&item.id)
             {
                 item.state = State::Expired;
+                item.clear_live();
                 item.closed_ms = Some(now_ms);
                 changes.push(Change::Updated(item.clone()));
             }
@@ -229,6 +289,7 @@ impl Book {
                 .enumerate()
                 .filter(|(_, item)| {
                     item.id != keep
+                        && !item.is_blocking()
                         && item.state == State::Open
                         && (!only_notices || is_notice(item.kind))
                 })

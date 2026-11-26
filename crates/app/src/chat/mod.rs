@@ -22,6 +22,9 @@ mod chrome_tests;
 pub mod claude_picker;
 pub mod cleared;
 pub mod closed;
+pub mod code_tokens;
+#[cfg(test)]
+mod code_tokens_tests;
 pub mod codex_children;
 pub mod codex_list;
 pub mod composer;
@@ -38,6 +41,8 @@ pub mod drafts;
 pub mod drops;
 pub mod escape;
 pub mod file_panel;
+#[cfg(test)]
+mod file_panel_view_tests;
 pub mod follow;
 pub mod format;
 #[cfg(test)]
@@ -52,6 +57,12 @@ mod html_preview_tests;
 pub mod image_size;
 pub mod inspector;
 pub mod job_fan;
+pub mod json_view;
+#[cfg(test)]
+mod json_view_tests;
+pub mod jsonl_view;
+#[cfg(test)]
+mod jsonl_view_tests;
 pub mod lane_limits;
 pub mod limit_ring;
 pub mod link_target;
@@ -135,6 +146,7 @@ mod shell_live_tests;
 pub mod shell_rows;
 pub mod sidebar;
 pub mod sidebar_ask;
+pub mod sidebar_completed;
 pub mod sidebar_node;
 #[cfg(test)]
 mod sidebar_node_tests;

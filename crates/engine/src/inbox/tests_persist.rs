@@ -23,6 +23,7 @@ fn item(id: &str, created_ms: i64, state: State) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 
@@ -411,4 +412,82 @@ fn a_kind_this_build_does_not_know_reads_as_a_notice_and_the_consent_kind_round_
         serde_json::from_value::<Kind>(serde_json::json!("consent")).unwrap(),
         Kind::Consent
     );
+}
+
+#[test]
+fn live_fields_are_not_saved_and_the_rest_of_the_new_fields_are() {
+    let tmp = TempDir::new("inbox-live");
+    let dir = tmp.path("data");
+    let mut a = item("a", 1, State::Answered);
+    a.closed_ms = Some(5);
+    a.blocking = Some(true);
+    a.waiting_since = Some(3);
+    a.waiter = Some(Waiter::Ask);
+    a.alert_actions = vec![AlertAction::Deny, AlertAction::Open, AlertAction::Change];
+    a.note = Some("use the staging one".to_string());
+    a.outcome = Some(Outcome {
+        state: OutcomeState::Failed,
+        reason: Some("not allowed here".to_string()),
+        at_ms: 4,
+    });
+    a.place = Some(Place {
+        machine: Some("0123abcd".to_string()),
+        machine_name: Some("build".to_string()),
+        session: Some("s1".to_string()),
+        session_name: Some("fix login".to_string()),
+        branch: Some("main".to_string()),
+    });
+    save(&dir, &Change::Raised(a.clone())).unwrap();
+    let back = load(&dir, 100).unwrap().items().remove(0);
+    assert_eq!(back.blocking, None);
+    assert_eq!(back.waiting_since, None);
+    assert_eq!(back.waiter, None);
+    assert_eq!(back, a.without_live());
+    assert_eq!(back.note, a.note);
+    assert_eq!(back.outcome, a.outcome);
+    assert_eq!(back.place, a.place);
+    assert_eq!(back.alert_actions, a.alert_actions);
+}
+
+#[test]
+fn an_old_row_without_the_new_fields_still_loads() {
+    let old = r#"{"id":"a","kind":"notice","title":"t","detail":"","source":{"node":null,"session":null,"job":null},"created_ms":1,"expires_ms":null,"actions":[],"state":"answered","answer":null,"answered_by":null,"seen":false,"open":null}"#;
+    let item: Item = serde_json::from_str(old).unwrap();
+    assert_eq!(item.blocking, None);
+    assert!(item.alert_actions.is_empty());
+    assert_eq!(item.outcome, None);
+    assert_eq!(item.place, None);
+    let text = serde_json::to_string(&item).unwrap();
+    for field in [
+        "blocking",
+        "waiting_since",
+        "waiter",
+        "alert_actions",
+        "note",
+        "outcome",
+        "place",
+    ] {
+        assert!(!text.contains(field), "{field}: {text}");
+    }
+}
+
+#[test]
+fn an_applying_outcome_from_a_previous_run_loads_as_withdrawn() {
+    let tmp = TempDir::new("inbox-applying");
+    let dir = tmp.path("data");
+    let mut a = item("a", 1, State::Answered);
+    a.outcome = Some(outcome(OutcomeState::Applying, None, 9));
+    let mut b = item("b", 2, State::Answered);
+    b.outcome = Some(outcome(OutcomeState::Applied, None, 9));
+    save(&dir, &Change::Raised(a)).unwrap();
+    save(&dir, &Change::Raised(b)).unwrap();
+    let items = load(&dir, 100).unwrap().items();
+    let state = |id: &str| {
+        items
+            .iter()
+            .find(|item| item.id == id)
+            .and_then(|item| item.outcome.as_ref().map(|outcome| outcome.state))
+    };
+    assert_eq!(state("a"), Some(OutcomeState::Withdrawn));
+    assert_eq!(state("b"), Some(OutcomeState::Applied));
 }

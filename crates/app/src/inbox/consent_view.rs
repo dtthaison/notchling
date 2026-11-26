@@ -7,35 +7,17 @@ use notchling_locale as t;
 
 use super::consent_card::{ConsentCard, Untrusted};
 use super::model::Row;
+use super::rows::{chips, head};
 
 const LABEL_WIDTH: f32 = 84.0;
-
-fn dot(a: Appearance) -> Div {
-    div()
-        .size(px(7.0))
-        .mt(px(5.0))
-        .flex_shrink_0()
-        .rounded_full()
-        .fill(Ink::Needs, a)
-}
 
 fn header(row: &Row, a: Appearance) -> Div {
     div()
         .flex()
-        .items_start()
-        .gap(px(SPACE[0] + 2.0))
-        .child(dot(a))
-        .child(div().flex_1().min_w(px(0.0)).child(label(
-            &row.title,
-            TypeRole::Heading,
-            Ink::Text,
-            a,
-        )))
-        .child(
-            div()
-                .flex_shrink_0()
-                .child(label(&row.ago, TypeRole::Meta, Ink::TextFaint, a)),
-        )
+        .flex_col()
+        .gap(px(2.0))
+        .child(head(row, true, a))
+        .children(chips(row, a))
 }
 
 fn facts(card: &ConsentCard, a: Appearance) -> Div {
@@ -145,6 +127,14 @@ pub fn card_body(row: &Row, card: &ConsentCard, a: Appearance) -> Div {
         .flex_col()
         .gap(px(SPACE[1]))
         .child(header(row, a))
+        .children(card.asked_again.as_ref().map(|note| {
+            label(
+                &t::consent::asked_again(note),
+                TypeRole::Meta,
+                Ink::TextMuted,
+                a,
+            )
+        }))
         .child(facts(card, a))
         .child(details(card, a));
     if let Some(value) = &card.value {

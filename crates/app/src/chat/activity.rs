@@ -204,6 +204,7 @@ mod tests {
             command: "sleep 60".into(),
             title: String::new(),
             output_path: format!("/tmp/{id}.output"),
+            description: String::new(),
             started: None,
         }
     }

@@ -77,6 +77,30 @@ void main() {
     expect(InboxItem.fromJson(event['item']! as Map<String, Object?>).id, 'vault-approval-1');
   });
 
+  test('the generated item reads the B2 fields of the full fixture and none of them from the old one', () {
+    Map<String, Object?> first(String name) {
+      final Map<String, Object?> data = fixture(name)['data']! as Map<String, Object?>;
+      return (data['items']! as List<Object?>).first! as Map<String, Object?>;
+    }
+
+    final wire.InboxItem full = wire.InboxItem.fromJson(first('InboxListResponse.full'));
+    expect(full.blocking, isTrue);
+    expect(full.waiter, 'cli');
+    expect(full.alertActions, <String>['allow', 'deny', 'change']);
+    expect(full.note, 'use the staging value');
+    expect(full.outcome?.state, 'failed');
+    expect(full.place?.machineName, 'build');
+    expect(full.toJson()['outcome'], first('InboxListResponse.full')['outcome']);
+
+    final wire.InboxItem old = wire.InboxItem.fromJson(first('InboxListResponse'));
+    expect(old.blocking, isNull);
+    expect(old.alertActions, isNull);
+    expect(old.outcome, isNull);
+    expect(old.place, isNull);
+    expect(old.toJson().containsKey('place'), isFalse);
+    expect(InboxItem.fromJson(first('InboxListResponse.full')).id, 'consent-9');
+  });
+
   test('an item from a newer Mac with an unknown kind and no actions still reads', () {
     final InboxItem model = InboxItem.fromJson(<String, Object?>{
       'id': 'x',

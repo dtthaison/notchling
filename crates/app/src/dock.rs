@@ -28,6 +28,13 @@ pub fn policy_for(titled_windows: usize, show_in_dock: bool) -> Policy {
     }
 }
 
+pub fn badge_for(blocking: usize, show_in_dock: bool) -> Option<u32> {
+    if !show_in_dock || blocking == 0 {
+        return None;
+    }
+    Some(u32::try_from(blocking).unwrap_or(u32::MAX))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cause {
     Window,
@@ -151,6 +158,14 @@ pub fn main_menu_for(app_shell: bool) -> Vec<MainMenu> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_badge_counts_blocking_items_and_only_while_the_icon_shows() {
+        assert_eq!(badge_for(0, true), None);
+        assert_eq!(badge_for(1, true), Some(1));
+        assert_eq!(badge_for(7, true), Some(7));
+        assert_eq!(badge_for(7, false), None);
+    }
 
     #[test]
     fn without_show_in_dock_the_icon_is_only_while_a_titled_window_is_open() {

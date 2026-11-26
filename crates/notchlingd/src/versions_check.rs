@@ -398,6 +398,7 @@ impl Checks {
                         open: Some(json!({ "settings": "agents", "tool": tool.name() })),
                         closed_ms: None,
                         switch: None,
+                        ..Default::default()
                     },
                     None,
                 );

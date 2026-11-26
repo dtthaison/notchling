@@ -86,7 +86,13 @@ impl VaultOps {
                         State::Expired => SecretResult::Expired,
                         _ => SecretResult::Cancelled,
                     };
-                    let mut error = said_no("The user didn't allow it.").with_reason(match why {
+                    let said = match asked.note.as_deref() {
+                        Some(note) => {
+                            format!("The user didn't allow it and asked for a change: {note}")
+                        }
+                        None => "The user didn't allow it.".to_string(),
+                    };
+                    let mut error = said_no(&said).with_reason(match why {
                         SecretResult::Denied => "denied",
                         SecretResult::Expired => "expired",
                         _ => "cancelled",

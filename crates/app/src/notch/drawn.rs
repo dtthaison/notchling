@@ -1,4 +1,5 @@
 use super::ask::AskCard;
+use super::blocking::BlockingCards;
 use super::layout::{NotchState, NotchWidth, Size};
 use super::model::{ago, NotchModel};
 use super::requests::HookRequest;
@@ -19,6 +20,7 @@ pub struct Drawn {
     answered: Vec<String>,
     card_height: Option<f64>,
     inbox_unread: usize,
+    blocking: BlockingCards,
     message_needs: Vec<String>,
     asks: Vec<(String, AskCard)>,
     ages: Vec<String>,
@@ -61,6 +63,7 @@ impl NotchModel {
             answered,
             card_height: self.card_height,
             inbox_unread: self.inbox_unread,
+            blocking: self.blocking.clone(),
             message_needs,
             asks,
             ages: self

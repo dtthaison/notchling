@@ -38,6 +38,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$TARGET/notchling-app" "$TARGET/notchling" "$APP/Contents/MacOS/"
 cp "$TARGET/notchling-ptyhost" "$TARGET/notchling-embed" "$APP/Contents/Helpers/"
 cp assets/brand/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+python3 tools/gen_sound.py "$APP/Contents/Resources/stopped.aiff"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

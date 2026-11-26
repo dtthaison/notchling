@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
-use notchling_engine::transcript::snapshot::{PendingQuestion, QuestionItem, Snapshot};
-use notchling_kit::Status;
+use notchling_engine::sessions::{Agent, AgentGroup};
+use notchling_engine::transcript::snapshot::{PendingQuestion, Snapshot};
 use notchling_locale as t;
 
+use notchling_engine::inbox::Item;
+
 use super::ask::{self, AskCard};
+use super::blocking::BlockingCards;
+use crate::attention::Level;
 use crate::chat::asks::{AskFeed, AskRow};
 use crate::chat::outbox::OutboxFeed;
 
@@ -22,10 +25,12 @@ pub const TABS: [AgentGroup; 3] = [
     AgentGroup::Completed,
 ];
 
+pub const HOVER_GRACE_MS: i64 = 1_500;
 const OPEN_DELAY: i64 = 250;
 const CLOSE_DELAY: i64 = 600;
 const PEEK_WAITING: i64 = 45_000;
 const PEEK_PLAIN: i64 = 8_000;
+const DEFAULT_SCREEN_H: f64 = 900.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Card {
@@ -69,6 +74,14 @@ pub struct NotchModel {
     pub card_height: Option<f64>,
     pub answered: HashSet<String>,
     pub inbox_unread: usize,
+    pub blocking: BlockingCards,
+    pub(super) blocking_items: Vec<Item>,
+    pub answer_on: bool,
+    pub level: Level,
+    pub reduce_motion: bool,
+    pub(super) waiting: usize,
+    timed_close: Option<i64>,
+    pub screen_h: f64,
     pub message_needs: HashSet<String>,
     ask_rows: Vec<AskRow>,
     pub(super) ask_cards: HashMap<String, AskCard>,
@@ -94,6 +107,14 @@ impl Default for NotchModel {
             card_height: None,
             answered: HashSet::new(),
             inbox_unread: 0,
+            blocking: BlockingCards::default(),
+            blocking_items: Vec::new(),
+            answer_on: true,
+            level: Level::default(),
+            reduce_motion: false,
+            waiting: 0,
+            timed_close: None,
+            screen_h: DEFAULT_SCREEN_H,
             message_needs: HashSet::new(),
             ask_rows: Vec::new(),
             ask_cards: HashMap::new(),
@@ -277,7 +298,9 @@ impl NotchModel {
 
     pub fn size(&self, state: &NotchState) -> Size {
         match state {
+            NotchState::Collapsed if self.closed_count().is_some() => self.blocking_size(state),
             NotchState::Collapsed => collapsed_size(self.notch),
+            NotchState::Blocking | NotchState::Glance => self.blocking_size(state),
             NotchState::Peek(id) => {
                 let content = match self.card(id) {
                     Some(card) => PeekContent::Card {
@@ -311,6 +334,7 @@ impl NotchModel {
             return;
         }
         self.pending = None;
+        self.timed_close = None;
         let peeking = matches!(self.state, NotchState::Peek(_));
         if state == NotchState::List && (self.state == NotchState::Collapsed || peeking) {
             self.tab = TABS
@@ -329,6 +353,11 @@ impl NotchModel {
         let before = (self.width, self.show_last_reply, self.state.clone());
         self.width = prefs.width;
         self.show_last_reply = prefs.show_last_reply;
+        if self.answer_on != prefs.answer {
+            self.answer_on = prefs.answer;
+            self.rebuild_blocking(self.now_ms);
+        }
+        self.level = prefs.level;
         if !prefs.shown {
             self.go(NotchState::Collapsed);
         }
@@ -363,12 +392,35 @@ impl NotchModel {
             NotchState::List | NotchState::Detail(_) => {
                 self.schedule(NotchState::Collapsed, now_ms + CLOSE_DELAY, true)
             }
+            NotchState::Blocking | NotchState::Glance => {
+                if let Some(due) = self.timed_close {
+                    let at = if due > now_ms {
+                        due
+                    } else {
+                        now_ms + HOVER_GRACE_MS
+                    };
+                    self.schedule(NotchState::Collapsed, at, true);
+                }
+            }
             NotchState::Collapsed => {}
         }
     }
 
     pub fn hovering(&self) -> bool {
         self.hovering
+    }
+
+    pub(super) fn state_to(&mut self, state: NotchState) {
+        self.pending = None;
+        self.timed_close = None;
+        if self.state != state {
+            self.go(state);
+        }
+    }
+
+    pub(super) fn schedule_close(&mut self, due_ms: i64) {
+        self.timed_close = Some(due_ms);
+        self.schedule(NotchState::Collapsed, due_ms, true);
     }
 
     fn schedule(&mut self, state: NotchState, due_ms: i64, when_away: bool) {
@@ -380,19 +432,20 @@ impl NotchModel {
     }
 
     pub fn tick(&mut self, now_ms: i64) -> bool {
+        let cleared = self.blocking_tick(now_ms);
         let Some(p) = self.pending.clone() else {
-            return false;
+            return cleared;
         };
         if now_ms < p.due_ms {
-            return false;
+            return cleared;
         }
         self.pending = None;
         if p.when_away == self.hovering {
-            return false;
+            return cleared;
         }
         let before = self.state.clone();
         self.go(p.state);
-        before != self.state
+        cleared || before != self.state
     }
 
     pub fn peek(&mut self, id: &str, now_ms: i64) {
@@ -429,12 +482,14 @@ impl NotchModel {
         self.snapshots = snapshots;
         self.requests = requests;
         self.refresh_asks();
+        self.rebuild_blocking(self.now_ms);
         for agent in &mut self.agents {
             let held = self
                 .requests
                 .get(&agent.id)
                 .is_some_and(|r| !self.answered.contains(&r.id))
-                || self.ask_cards.contains_key(&agent.id);
+                || self.ask_cards.contains_key(&agent.id)
+                || self.blocking.has_session(&agent.id);
             if held && agent.group != AgentGroup::NeedsInput {
                 agent.group = AgentGroup::NeedsInput;
                 agent.label = t::notch::needs_input().into();
@@ -475,96 +530,10 @@ impl NotchModel {
     }
 }
 
-pub fn status(group: AgentGroup) -> Status {
-    match group {
-        AgentGroup::NeedsInput => Status::Needs,
-        AgentGroup::Working => Status::Working,
-        AgentGroup::Completed => Status::Done,
-    }
-}
-
-pub fn tab_title(group: AgentGroup) -> &'static str {
-    match group {
-        AgentGroup::NeedsInput => t::notch::tab_input(),
-        AgentGroup::Working => t::notch::tab_working(),
-        AgentGroup::Completed => t::notch::tab_done(),
-    }
-}
-
-pub fn tab_id(group: AgentGroup) -> &'static str {
-    match group {
-        AgentGroup::NeedsInput => "input",
-        AgentGroup::Working => "working",
-        AgentGroup::Completed => "done",
-    }
-}
-
-pub fn empty_text(model: &NotchModel) -> String {
-    if model.agents.is_empty() {
-        t::notch::empty_no_agents().to_owned()
-    } else {
-        match model.tab {
-            AgentGroup::NeedsInput => t::notch::empty_input(),
-            AgentGroup::Working => t::notch::empty_working(),
-            AgentGroup::Completed => t::notch::empty_completed(),
-        }
-        .to_owned()
-    }
-}
-
-pub fn short_host(host: &str) -> &str {
-    match host {
-        "Background" => t::notch::host_background(),
-        "claude -p" => "-p",
-        other => other,
-    }
-}
-
-pub fn ago(since_ms: i64, now_ms: i64) -> String {
-    let s = ((now_ms - since_ms) / 1000).max(0);
-    match s {
-        0..=59 => t::notch::age_now().to_owned(),
-        60..=3599 => t::notch::age_minutes(s / 60),
-        3600..=86_399 => t::notch::age_hours(s / 3600),
-        _ => t::notch::age_days(s / 86_400),
-    }
-}
-
-pub fn one_line(text: &str) -> String {
-    text.replace('\n', " ").trim().to_owned()
-}
-
-pub fn last_paragraph(text: &str) -> String {
-    let paragraph = text
-        .rsplit("\n\n")
-        .find(|p| !p.trim().is_empty())
-        .unwrap_or(text);
-    paragraph.chars().take(400).collect()
-}
-
-pub fn question_from_needs(agent: &Agent) -> Option<PendingQuestion> {
-    if agent.group != AgentGroup::NeedsInput || !matches!(agent.target, AgentTarget::Job(_)) {
-        return None;
-    }
-    let needs = agent.detail.as_deref()?;
-    let body = needs.strip_prefix("answer: ")?.strip_suffix(')')?;
-    let (text, options) = body.rsplit_once(" (")?;
-    let options: Vec<String> = options.split(" · ").map(|o| o.trim().to_owned()).collect();
-    if options.len() < 2 || text.contains('(') {
-        return None;
-    }
-    let details = vec![String::new(); options.len()];
-    Some(PendingQuestion {
-        tool_use_id: format!("needs:{}:{needs}", agent.id),
-        items: vec![QuestionItem {
-            header: String::new(),
-            question: text.to_owned(),
-            options,
-            details,
-            multi_select: false,
-        }],
-    })
-}
+pub use super::model_words::{
+    ago, empty_text, last_paragraph, one_line, question_from_needs, short_host, status, tab_id,
+    tab_title,
+};
 
 #[cfg(test)]
 #[path = "model_tests.rs"]

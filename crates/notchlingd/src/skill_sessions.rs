@@ -14,9 +14,10 @@ const STEPS: &str = r#"
 ```sh
 '{binary}' sessions --json
 '{binary}' search <words> --kind sessions --since 7d --json
+'{binary}' sessions history --limit 30 --json
 ```
 
-`sessions` lists the sessions of your organization. `search` finds one by what was said in it; `--since` takes a duration (`30m`, `24h`, `7d`), a date (`2026-11-01`) or epoch seconds. Use the `id` it prints.
+`sessions` lists the sessions of your organization. `search` finds one by what was said in it; `--since` takes a duration (`30m`, `24h`, `7d`), a date (`2026-11-01`) or epoch seconds. Use the `id` it prints. `sessions history` lists what the Chat Sidebar hides: sessions that ended in the last day, then older Claude Code sessions of your organization from the last 14 days, newest first, with masked titles; pass its `next` as `--before <cursor>` for the next page (`--limit` is 1 to 100). It reads only; you cannot resume one from here.
 
 ## Whose session it is
 
@@ -53,6 +54,7 @@ Then the same line with `--reason "<what and why>" --key <key> --no-wait --json`
 - `watch` exits 0 once a request of yours is applied and 124 if none is by `--timeout`. It cannot say no: use it for several requests at once, and `consent <id> --wait` for one.
 - Without `--no-wait`, the command itself waits and exits the same way.
 - On exit 124 the request is closed: ask again only if you still need it, with a new `--key`.
+- If you were denied with a note, change what it says and ask again with `--retry-of <id>`.
 
 ## When it is refused
 

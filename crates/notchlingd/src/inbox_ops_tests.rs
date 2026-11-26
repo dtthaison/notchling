@@ -74,6 +74,7 @@ pub(crate) fn item(id: &str) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 
@@ -566,4 +567,34 @@ fn a_phone_answer_the_responder_refuses_leaves_the_item_open() {
     assert!(!out.answered);
     assert_eq!(out.state, State::Open);
     assert!(r.ops.decide("zzz", ActionId::Allow, "phone").is_err());
+}
+
+#[test]
+fn a_live_change_reaches_the_tap() {
+    let r = rig();
+    r.ops.raise(item("a"), None);
+    r.ops.flush();
+    let seen: Arc<Mutex<Vec<inbox::Change>>> = Arc::default();
+    let sink = seen.clone();
+    r.ops.set_tap(Arc::new(move |changes| {
+        sink.lock().unwrap().extend(changes)
+    }));
+    let live = inbox::Live {
+        waiting_since: NOW,
+        waiter: inbox::Waiter::Cli,
+    };
+    assert!(r.ops.set_live("a", Some(live)));
+    r.ops.flush();
+    {
+        let pushed = seen.lock().unwrap();
+        assert_eq!(pushed.len(), 1);
+        match &pushed[0] {
+            inbox::Change::Updated(item) => assert_eq!(item.blocking, Some(true)),
+            other => panic!("{other:?}"),
+        }
+    }
+    assert!(r.ops.set_live("a", None));
+    assert_eq!(seen.lock().unwrap().len(), 2);
+    assert!(!r.ops.set_live("a", None));
+    assert_eq!(seen.lock().unwrap().len(), 2);
 }

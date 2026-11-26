@@ -48,6 +48,7 @@ pub struct ShellRow {
     pub started: Option<i64>,
     pub title: String,
     pub command: String,
+    pub description: String,
     pub status: Status,
     pub status_word: String,
     pub running: bool,
@@ -331,6 +332,7 @@ mod tests {
                     command: "cargo test".into(),
                     title: "Run tests".into(),
                     output_path: "/tmp/b1.output".into(),
+                    description: String::new(),
                     started: None,
                 },
                 BackgroundShell {
@@ -338,6 +340,7 @@ mod tests {
                     command: "sleep 9".into(),
                     title: String::new(),
                     output_path: "/tmp/b2.output".into(),
+                    description: String::new(),
                     started: None,
                 },
             ],
@@ -581,6 +584,7 @@ mod tests {
                 command: id.into(),
                 title: String::new(),
                 output_path: path.into(),
+                description: String::new(),
                 started: None,
             });
             if ended {
@@ -605,6 +609,7 @@ mod tests {
                 command: id.into(),
                 title: String::new(),
                 output_path: format!("/{id}"),
+                description: String::new(),
                 started: None,
             });
         }

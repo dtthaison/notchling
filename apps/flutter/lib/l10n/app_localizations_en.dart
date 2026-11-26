@@ -527,6 +527,62 @@ class AppL10nEn extends AppL10n {
   String get consentAllow => 'Allow';
 
   @override
+  String consentAskedAgain(String note) {
+    return 'Asked again after your note: $note';
+  }
+
+  @override
+  String get consentBannerAllow => 'Allow';
+
+  @override
+  String get consentBannerCancel => 'Cancel';
+
+  @override
+  String get consentBannerChange => 'Change…';
+
+  @override
+  String get consentBannerDeny => 'Deny';
+
+  @override
+  String get consentBannerDismiss => 'Dismiss';
+
+  @override
+  String get consentBannerLater => 'Later';
+
+  @override
+  String get consentBannerOpen => 'Open';
+
+  @override
+  String get consentBannerOpenForm => 'Open Form';
+
+  @override
+  String get consentBannerReply => 'Reply…';
+
+  @override
+  String get consentChange => 'Change…';
+
+  @override
+  String get consentChangeCancel => 'Cancel';
+
+  @override
+  String get consentChangePlaceholder => 'Say what to change';
+
+  @override
+  String get consentChangeSend => 'Send';
+
+  @override
+  String get consentDecidedAllowed => 'Allowed';
+
+  @override
+  String get consentDecidedAllowedAlways => 'Always Allowed';
+
+  @override
+  String get consentDecidedAllowedOnce => 'Allowed Once';
+
+  @override
+  String get consentDecidedDenied => 'Denied';
+
+  @override
   String get consentDeny => 'Deny';
 
   @override
@@ -536,16 +592,40 @@ class AppL10nEn extends AppL10n {
   String get consentNotchAllowDetail => 'This time only';
 
   @override
+  String get consentNotchAllowOnce => 'Allow Once';
+
+  @override
+  String get consentNotchAllowed => 'Allowed';
+
+  @override
   String get consentNotchAlways => 'Always allow this';
 
   @override
   String get consentNotchAlwaysDetail => 'Don\'t ask again for this';
 
   @override
+  String get consentNotchChange => 'Change…';
+
+  @override
+  String get consentNotchChanged => 'Changed';
+
+  @override
+  String get consentNotchDenied => 'Denied';
+
+  @override
   String get consentNotchDeny => 'Deny';
 
   @override
   String get consentNotchDenyDetail => 'Claude tries something else';
+
+  @override
+  String get consentNotchLater => 'Later';
+
+  @override
+  String get consentNotchOpen => 'Open';
+
+  @override
+  String get consentNotchOpenForm => 'Open Form';
 
   @override
   String get consentNotchPermissionNeeded => 'Permission needed';
@@ -575,6 +655,9 @@ class AppL10nEn extends AppL10n {
   String get consentStopAnyway => 'Stop anyway';
 
   @override
+  String get consentTrayChange => 'Change…';
+
+  @override
   String inboxAnsweredHere(String action) {
     return 'You answered: $action';
   }
@@ -583,6 +666,9 @@ class AppL10nEn extends AppL10n {
   String inboxAnsweredOnMac(String action) {
     return 'Answered on the Mac: $action';
   }
+
+  @override
+  String get inboxBlocking => 'Waiting on You';
 
   @override
   String get inboxConfirmContinueBodyUnnamed =>
@@ -628,6 +714,51 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get inboxOpenOnMac => 'Open on Mac';
+
+  @override
+  String get inboxOutcomeApplied => 'Applied';
+
+  @override
+  String get inboxOutcomeApplying => 'Applying…';
+
+  @override
+  String get inboxOutcomeFailed => 'Failed';
+
+  @override
+  String inboxOutcomeFailedReason(String reason) {
+    return 'Failed: $reason';
+  }
+
+  @override
+  String get inboxOutcomeWithdrawn => 'Withdrawn';
+
+  @override
+  String inboxOutcomeWithdrawnReason(String reason) {
+    return 'Withdrawn: $reason';
+  }
+
+  @override
+  String inboxSentBack(String note) {
+    return 'Sent back: $note';
+  }
+
+  @override
+  String inboxStoppedMinutes(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Stopped $countString minutes ago',
+      one: 'Stopped $countString minute ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get inboxStoppedNow => 'Stopped just now';
 
   @override
   String get inboxUnsupported => 'Notchling on this Mac has no inbox yet.';
@@ -772,6 +903,9 @@ class AppL10nEn extends AppL10n {
   String get notificationsChannelNeedsYou => 'Sessions that need you';
 
   @override
+  String get notificationsChannelWaiting => 'Waiting on you';
+
+  @override
   String get notificationsFinishedBody => 'Done';
 
   @override
@@ -787,6 +921,12 @@ class AppL10nEn extends AppL10n {
 
   @override
   String get notificationsSummaryBody => 'Something new';
+
+  @override
+  String get notificationsWaitingLastCall => 'Last call: about a minute left';
+
+  @override
+  String get notificationsWaitingStill => 'Still waiting for you';
 
   @override
   String get notificationsWatching => 'Watching';

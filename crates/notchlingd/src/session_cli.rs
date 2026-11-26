@@ -8,7 +8,7 @@ use std::time::Duration;
 const CALL_WAIT: Duration = Duration::from_secs(15);
 const POLL_MS: u64 = 25_000;
 
-pub const USAGE: &str = "Usage: notchling session new <folder> [--model <name>] [--message <text>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session reply <id> <text> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session stop <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session interrupt <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session remove <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session answer <id> --answers <json> [--question <json>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session command <id> <command> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session dialog <id> --pick <1-9>|--dismiss [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session chrome <id> on|off [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session options <id> <option> <value> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]\n       notchling session reload <id|self> [--after-turn] [--json]";
+pub const USAGE: &str = "Usage: notchling session new <folder> [--model <name>] [--message <text>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session reply <id> <text> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session stop <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session interrupt <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session remove <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session answer <id> --answers <json> [--question <json>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session command <id> <command> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session dialog <id> --pick <1-9>|--dismiss [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session chrome <id> on|off [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session options <id> <option> <value> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session reload <id|self> [--after-turn] [--json]";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verb {
@@ -91,6 +91,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--reason" => flags.reason = Some(value("--reason")?),
             "--key" => flags.key = Some(value("--key")?),
+            "--retry-of" => flags.retry_of = Some(value("--retry-of")?),
             "--model" => model = Some(value("--model")?),
             "--message" => message = Some(value("--message")?),
             "--answers" => answers = Some(json_of(&value("--answers")?, "--answers")?),
@@ -204,6 +205,9 @@ pub fn request_body(args: &Args) -> Value {
     }
     if let Some(key) = &args.flags.key {
         consent.insert("key".into(), json!(key));
+    }
+    if let Some(id) = &args.flags.retry_of {
+        consent.insert("retryOf".into(), json!(id));
     }
     let mut body = match args.verb {
         Verb::New => {

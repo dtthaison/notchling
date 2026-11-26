@@ -40,6 +40,8 @@ An agent can put a question to you with `notchling ask`. It shows as a card unde
 
 The bell in Chat is the **Inbox**: what needs you, in one list. It holds questions, vault approvals, limit notices and messages that didn't go in. In a cluster it collects items from every machine, and answering one anywhere answers it once.
 
+When an agent stops and waits for your answer, the item is **Blocking**: it shows in red in the notch, the menu bar and the Dock, and as a banner you can answer from. **Attention** in Settings says how hard Notchling tries to reach you: **Calm** is a silent banner and a short notch, **Normal** adds a tone and a few reminders, **Urgent** keeps the notch open and sounds twice until you answer or press Later. **Change…** is a Deny with a note: you say what to do instead, and the agent reads it and asks again.
+
 ### Accounts and limits
 
 Accounts for **Claude Code**, **Claude Desktop**, **Codex** and **Antigravity** are saved, and one click switches to another without signing in again. Each account shows its limits and when they reset. The Accounts window also has a **Token Cost** tab: what your use would cost at API prices.

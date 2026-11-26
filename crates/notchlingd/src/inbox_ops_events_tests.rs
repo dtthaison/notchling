@@ -123,3 +123,48 @@ fn an_outbox_notice_is_logged_as_a_notice() {
     let raised = &of(&sink, "inbox.raised")[0];
     assert_eq!(text(raised, "item_kind").as_deref(), Some("notice"));
 }
+
+#[test]
+fn closing_an_answered_item_with_an_outcome_writes_one_closed_event_and_keeps_closed_ms() {
+    use crate::inbox_ops::Closing;
+    use notchling_engine::inbox::{outcome, OutcomeState};
+    let (r, sink) = watched();
+    r.ops.raise(item("a"), None);
+    r.clock.store(NOW + 4_000, Ordering::SeqCst);
+    answer(&r.ops, "a", "deny");
+    r.clock.store(NOW + 9_000, Ordering::SeqCst);
+    r.ops.close_item(
+        "a",
+        Closing::Resolve {
+            state: State::Answered,
+            answer: Some(ActionId::Deny),
+            by: Some("mac"),
+        },
+        Some(outcome(OutcomeState::Applied, None, NOW + 9_000)),
+    );
+    assert_eq!(of(&sink, "inbox.closed").len(), 1);
+    let item = r.ops.own_items().pop().unwrap();
+    assert_eq!(item.closed_ms, Some(NOW + 4_000));
+    assert_eq!(item.outcome.unwrap().state, OutcomeState::Applied);
+}
+
+#[test]
+fn an_answered_item_withdrawn_before_it_applies_stays_answered_with_one_closed_event() {
+    use crate::inbox_ops::Closing;
+    use notchling_engine::inbox::{outcome, OutcomeState};
+    let (r, sink) = watched();
+    r.ops.raise(item("a"), None);
+    r.clock.store(NOW + 4_000, Ordering::SeqCst);
+    answer(&r.ops, "a", "deny");
+    r.clock.store(NOW + 9_000, Ordering::SeqCst);
+    r.ops.close_item(
+        "a",
+        Closing::Withdraw,
+        Some(outcome(OutcomeState::Withdrawn, None, NOW + 9_000)),
+    );
+    assert_eq!(of(&sink, "inbox.closed").len(), 1);
+    let item = r.ops.own_items().pop().unwrap();
+    assert_eq!(item.state, State::Answered);
+    assert_eq!(item.closed_ms, Some(NOW + 4_000));
+    assert_eq!(item.outcome.unwrap().state, OutcomeState::Withdrawn);
+}

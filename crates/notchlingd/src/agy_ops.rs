@@ -118,7 +118,7 @@ impl AgyOps {
             spawner,
             setup.binary.clone(),
             Arc::new(DaemonSink {
-                shared: shared.clone(),
+                shared: Arc::downgrade(&shared),
             }),
             Arc::new(now_secs),
             setup.timing,

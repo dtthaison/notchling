@@ -3,6 +3,7 @@ use super::model::{
     OPENED_PER_HOUR, ROOT_MAX_EXPIRY_MS, ROOT_PER_HOUR, ROOT_WAITING, WAITING_ALL,
     WAITING_PER_SESSION,
 };
+use super::retry::retry_of;
 
 pub const BAD_EXPIRY: &str = "expiresIn takes 1 minute to 12 hours.";
 
@@ -31,8 +32,10 @@ pub fn check(new: &New, now: i64, rows: &[Consent]) -> Result<(), Refusal> {
         return Err(Refusal::LongExpiry);
     }
     let mine: Vec<&Consent> = rows.iter().filter(|r| r.bucket() == bucket).collect();
+    let noted_denial = |r: &Consent| r.state == State::Denied && r.note.is_some();
     let same_ask = |r: &&Consent| {
         r.state == State::Denied
+            && r.note.is_none()
             && r.kind == new.kind
             && r.target == new.target
             && r.bucket() == bucket
@@ -71,12 +74,19 @@ pub fn check(new: &New, now: i64, rows: &[Consent]) -> Result<(), Refusal> {
     } else {
         ROOT_PER_HOUR
     };
+    let retries_noted = |change: &serde_json::Value| {
+        retry_of(change).is_some_and(|id| {
+            rows.iter()
+                .any(|r| r.id == id && r.bucket() == bucket && noted_denial(r))
+        })
+    };
     let recent: Vec<i64> = mine
         .iter()
+        .filter(|r| !retries_noted(&r.change))
         .map(|r| r.created_ms)
         .filter(|at| *at > now - HOUR_MS)
         .collect();
-    if recent.len() >= hourly {
+    if recent.len() >= hourly && !retries_noted(&new.change) {
         let oldest = recent.iter().copied().min().unwrap_or(now);
         return Err(busy(oldest + HOUR_MS - now));
     }

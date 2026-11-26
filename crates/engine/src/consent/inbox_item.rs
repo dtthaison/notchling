@@ -1,9 +1,10 @@
+use super::alerts::alert_actions;
 use super::kinds::{
     spec, ACCOUNT, CLUSTER, COST_PROFILE, DISPATCH, INSTALL, JOB, JOB_STOP, MACHINE, MODEL,
     SECRET_REQUEST, SESSION, SESSION_STOP, SETTING, SWITCH, UPDATE,
 };
 use super::model::{AnswerOn, Consent};
-use crate::inbox::{Action, ActionId, Item, Kind, Source, State};
+use crate::inbox::{Action, ActionId, Item, Kind, Place, Source, State};
 use serde_json::{json, Value};
 
 pub const TITLE_CHARS: usize = 80;
@@ -234,7 +235,7 @@ pub fn item(row: &Consent, raised_ms: i64) -> Item {
             action(ActionId::Open, "Open on Mac", true),
         ],
     };
-    let mut open = json!({"consent": row.id});
+    let mut open = json!({"consent": row.id, "kind": row.kind});
     if row.kind == SECRET_REQUEST {
         open["vault_request"] = json!(row.id);
     }
@@ -258,5 +259,11 @@ pub fn item(row: &Consent, raised_ms: i64) -> Item {
         open: Some(open),
         closed_ms: None,
         switch: (row.kind == SWITCH).then(|| row.target.clone()),
+        alert_actions: alert_actions(row),
+        place: row.session.clone().map(|session| Place {
+            session: Some(session),
+            ..Place::default()
+        }),
+        ..Item::default()
     }
 }

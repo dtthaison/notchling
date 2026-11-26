@@ -7,7 +7,7 @@ use crate::sessions::{
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-const START_STOP_TIMEOUT_SECS: u64 = 60;
+pub const START_STOP_TIMEOUT_SECS: u64 = 60;
 const REMOVE_TIMEOUT_SECS: u64 = 120;
 pub const STOP_SETTLE_MS: u64 = 1500;
 

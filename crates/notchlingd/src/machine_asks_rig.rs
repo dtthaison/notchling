@@ -32,6 +32,14 @@ use std::sync::{Arc, Mutex};
 pub const LIST: &str = "ID    Tailnet              Account\na1b2  person@example.com   person@example.com*\nc3d4  work.example         work@example.com\n";
 pub const STATUS: &str = r#"{"BackendState":"Running","Self":{"HostName":"mac","DNSName":"mac.tail0a1b2.ts.net.","OS":"macOS","UserID":1001,"TailscaleIPs":["100.64.0.10"],"Online":true},"CurrentTailnet":{"Name":"person@example.com","MagicDNSSuffix":"tail0a1b2.ts.net"},"Peer":{"nodekey:aa":{"ID":"n1","HostName":"fresh","DNSName":"fresh.tail0a1b2.ts.net.","OS":"linux","UserID":1002,"TailscaleIPs":["100.64.0.11"],"Online":true,"Tags":["tag:secret-role"]}},"User":{"1001":{"ID":1001,"LoginName":"person@example.com","DisplayName":"Person"},"1002":{"ID":1002,"LoginName":"friend@example.com","DisplayName":"Friend"}}}"#;
 pub const PASSWORD: &str = "hunter2-admin-pass";
+pub const LEAKY_STEP_MESSAGE: &str = "ssh: connect to host build.test port 22: Connection refused (person@example.com, /Users/sondoan/.ssh/id_ed25519, https://example.com/releases/node.tgz)";
+pub const LEAKS: [&str; 5] = [
+    "person@example.com",
+    "/Users/sondoan",
+    "https://example.com",
+    "id_ed25519",
+    "Connection refused",
+];
 
 pub struct FakeMembers {
     pub node: Mutex<Option<(String, String)>>,
@@ -99,6 +107,7 @@ pub struct Rig {
     pub slow_runs: Arc<AtomicUsize>,
     pub lists: Arc<AtomicUsize>,
     pub drift: Arc<Mutex<Option<(usize, String)>>>,
+    pub breaks: Arc<AtomicBool>,
 }
 
 impl Drop for Rig {
@@ -130,6 +139,7 @@ fn fix_step(
     display: String,
     fixed: Arc<Mutex<Vec<String>>>,
     passwords: Arc<Mutex<Vec<String>>>,
+    breaks: Arc<AtomicBool>,
 ) -> SetupStep {
     let done = fixed.clone();
     SetupStep::new(
@@ -145,6 +155,9 @@ fn fix_step(
             }
         })),
         StepFix::Run(FixPlan::new(display, admin, move |ctx| {
+            if breaks.load(Ordering::SeqCst) {
+                return FixOutcome::fail(LEAKY_STEP_MESSAGE);
+            }
             if let Some(p) = &ctx.admin_password {
                 passwords.lock().unwrap().push(p.expose().to_string());
             }
@@ -202,6 +215,7 @@ fn rig_with(tag: &str, list: Vec<Machine>, standard: bool) -> Rig {
     let slow_runs = Arc::new(AtomicUsize::new(0));
     let lists = Arc::new(AtomicUsize::new(0));
     let drift: Arc<Mutex<Option<(usize, String)>>> = Arc::new(Mutex::new(None));
+    let breaks = Arc::new(AtomicBool::new(false));
     let now = clock.clone();
     let deps = Deps {
         runner: ssh.clone(),
@@ -225,6 +239,7 @@ fn rig_with(tag: &str, list: Vec<Machine>, standard: bool) -> Rig {
             sign_in.clone(),
         );
         let (calls, late, slow) = (lists.clone(), drift.clone(), slow_runs.clone());
+        let broken = breaks.clone();
         Catalog {
             steps: Arc::new(move |_, _| {
                 let n = calls.fetch_add(1, Ordering::SeqCst);
@@ -236,8 +251,15 @@ fn rig_with(tag: &str, list: Vec<Machine>, standard: bool) -> Rig {
                 }
                 let counted = slow.clone();
                 let mut list = vec![
-                    fix_step("plain", false, shown.clone(), f.clone(), p.clone()),
-                    fix_step("rooted", true, shown, f.clone(), p.clone()),
+                    fix_step(
+                        "plain",
+                        false,
+                        shown.clone(),
+                        f.clone(),
+                        p.clone(),
+                        broken.clone(),
+                    ),
+                    fix_step("rooted", true, shown, f.clone(), p.clone(), broken.clone()),
                     SetupStep::new(
                         StepId("slowone".into()),
                         "Slow",
@@ -257,6 +279,7 @@ fn rig_with(tag: &str, list: Vec<Machine>, standard: bool) -> Rig {
                         SIGN_IN.to_string(),
                         f.clone(),
                         p.clone(),
+                        broken.clone(),
                     ));
                 }
                 list
@@ -306,6 +329,7 @@ fn rig_with(tag: &str, list: Vec<Machine>, standard: bool) -> Rig {
         slow_runs,
         lists,
         drift,
+        breaks,
     }
 }
 

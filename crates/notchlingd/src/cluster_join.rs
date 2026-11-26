@@ -73,6 +73,7 @@ pub fn join_item(id: &str, ask: &JoinAsk, created_ms: i64, wait: Duration) -> It
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 

@@ -4,7 +4,7 @@ use crate::cluster_node::{ClusterNode, LocalCalls, DELEGATE_WAIT, LOCAL_WAIT};
 use crate::cluster_workspace_send::{code_mode, Code, CodeSender};
 use crate::op_group::OpGroup;
 use crate::shell_jobs::{Reporter, ShellJobs};
-use notchling_engine::cluster::core::{ATTACH_CALL_MS, CALL_MS};
+use notchling_engine::cluster::core::{start_wait, ATTACH_CALL_MS};
 use notchling_engine::cluster::shell_job::{CODEX_SECRETS, MAX_COMMAND};
 use notchling_engine::cluster::wire::{Origin, OriginTier};
 use notchling_engine::cluster::{JobSpec, JobState, LocalCmd, NodeId, Qualified, Tool};
@@ -70,11 +70,15 @@ fn plain_spec(node: NodeId, args: &Value) -> Result<JobSpec, ApiError> {
     );
     let fields = match tool {
         Tool::Claude => {
-            nothing_else(args, &["text", "command"], "a Claude Code session")?;
-            match model.filter(|m| !m.trim().is_empty()) {
-                Some(m) => json!({"flags": ["--model", m]}),
-                None => json!({}),
+            nothing_else(args, &["command"], "a Claude Code session")?;
+            let mut fields = serde_json::Map::new();
+            if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+                fields.insert("flags".into(), json!(["--model", m]));
             }
+            if text.is_some() {
+                fields.insert("text".into(), json!(nonblank(text, "text", TEXT_MAX)?));
+            }
+            Value::Object(fields)
         }
         Tool::Agy => {
             nothing_else(args, &["model", "command"], "an Antigravity session")?;
@@ -332,9 +336,9 @@ impl DispatchOps {
         let within = if spec.is_delegate() {
             DELEGATE_WAIT + LOCAL_WAIT
         } else if spec.secrets.is_empty() {
-            LOCAL_WAIT + Duration::from_millis(CALL_MS)
+            LOCAL_WAIT + Duration::from_millis(start_wait(spec.tool))
         } else {
-            LOCAL_WAIT + Duration::from_millis(CALL_MS + ATTACH_CALL_MS)
+            LOCAL_WAIT + Duration::from_millis(start_wait(spec.tool) + ATTACH_CALL_MS)
         };
         self.node()?
             .local_within(LocalCmd::Dispatch { key, spec, tier }, within)
@@ -432,3 +436,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cluster_dispatch_masked_tests.rs"]
 mod masked_tests;
+
+#[cfg(test)]
+#[path = "cluster_dispatch_claude_text_tests.rs"]
+mod claude_text_tests;

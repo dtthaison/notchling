@@ -430,3 +430,62 @@ fn decide_holds_no_lock_while_forwarding() {
         .unwrap();
     assert_eq!(mirror.state, State::Open);
 }
+
+struct Recording {
+    calls: std::sync::Mutex<Vec<serde_json::Value>>,
+}
+
+impl crate::cluster_inbox::Net for Recording {
+    fn me(&self) -> Option<notchling_engine::cluster::NodeId> {
+        Some(node(1))
+    }
+
+    fn home(&self) -> Option<notchling_engine::cluster::NodeId> {
+        None
+    }
+
+    fn peers(&self) -> Vec<crate::cluster_inbox::Peer> {
+        vec![crate::cluster_inbox::Peer {
+            id: node(9),
+            name: "worker".to_string(),
+            online: true,
+            keeps: false,
+            consent: true,
+        }]
+    }
+
+    fn is_client(&self) -> bool {
+        false
+    }
+
+    fn keeps(&self) -> bool {
+        false
+    }
+
+    fn call(
+        &self,
+        _to: &notchling_engine::cluster::NodeId,
+        _op: &str,
+        args: serde_json::Value,
+        _tier: notchling_engine::cluster::wire::OriginTier,
+        _within: std::time::Duration,
+    ) -> Result<serde_json::Value, notchling_local_api::ApiError> {
+        self.calls.lock().unwrap().push(args);
+        Ok(json!({"answered": true}))
+    }
+}
+
+#[test]
+fn a_forwarded_answer_carries_the_note_only_when_there_is_one() {
+    let net = Arc::new(Recording {
+        calls: std::sync::Mutex::new(Vec::new()),
+    });
+    let link = crate::cluster_inbox::NetLink::new(net.clone());
+    link.answer_noted(&node(9), "a", ActionId::Deny, "mac", Some("rename it"))
+        .unwrap();
+    link.answer(&node(9), "b", ActionId::Deny, "mac").unwrap();
+    let calls = net.calls.lock().unwrap();
+    assert_eq!(calls[0]["note"], "rename it");
+    assert_eq!(calls[0]["action"], "deny");
+    assert!(calls[1].get("note").is_none());
+}

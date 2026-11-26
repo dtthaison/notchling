@@ -9,6 +9,8 @@ import '../core/net/bridge_client.dart';
 import '../core/protocol/models.dart';
 import '../features/connection/connection.dart';
 import '../features/macs/macs_notifier.dart';
+import '../features/inbox/inbox_alerts.dart';
+import '../features/inbox/inbox_notifier.dart';
 import '../features/macs/session_ref.dart';
 import '../features/sessions/sessions_notifier.dart';
 import '../l10n/app_localizations.dart';
@@ -18,7 +20,7 @@ import 'message_alerts.dart';
 import 'nav_state.dart';
 import '../features/settings/app_settings.dart';
 
-class NotificationService {
+class NotificationService implements InboxAlertSink {
   NotificationService([FlutterLocalNotificationsPlugin? plugin]) : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
   final FlutterLocalNotificationsPlugin _plugin;
   final StreamController<String> _taps = StreamController<String>.broadcast();
@@ -90,6 +92,41 @@ class NotificationService {
 
   static const String _group = 'sessions';
 
+  static int _inboxId(String itemId) => 'inbox:$itemId'.hashCode & 0x7fffffff;
+
+  @override
+  Future<void> showInboxAlert(InboxAlert alert) async {
+    if (!_ready) return;
+    final AppL10n l10n = L10nHolder.current;
+    final String body = switch (alert.rung) {
+      InboxRung.first => alert.item.detail.isEmpty ? l10n.notificationsNeedsBody : alert.item.detail,
+      InboxRung.stronger => l10n.notificationsWaitingStill,
+      InboxRung.lastCall => l10n.notificationsWaitingLastCall,
+    };
+    final AndroidNotificationDetails android = AndroidNotificationDetails(
+      'needs_you_v3',
+      l10n.notificationsChannelWaiting,
+      importance: Importance.high,
+      priority: Priority.high,
+      sound: const RawResourceAndroidNotificationSound('needs_you'),
+      styleInformation: BigTextStyleInformation(body),
+      category: AndroidNotificationCategory.reminder,
+    );
+    await _plugin.show(
+      id: _inboxId(alert.item.id),
+      title: alert.item.title,
+      body: body,
+      notificationDetails: NotificationDetails(android: android, iOS: DarwinNotificationDetails(threadIdentifier: 'inbox')),
+      payload: '$inboxPayloadPrefix${alert.item.id}',
+    );
+  }
+
+  @override
+  Future<void> cancelInboxAlert(String itemId) async {
+    if (!_ready) return;
+    await _plugin.cancel(id: _inboxId(itemId));
+  }
+
   Future<String?> launchSession() async {
     if (!_ready) return null;
     final NotificationAppLaunchDetails? details = await _plugin.getNotificationAppLaunchDetails();
@@ -97,10 +134,18 @@ class NotificationService {
   }
 }
 
+const String inboxPayloadPrefix = 'inbox:';
+
+const int inboxTabIndex = 3;
+
 String alertPayload(AlertEvent event) => event.host.isEmpty ? storageKey('', event.sessionId) : event.session.qualified;
 
 final Provider<void> notificationTapsProvider = Provider<void>((Ref ref) {
   final StreamSubscription<String> taps = ref.read(notificationServiceProvider).taps.listen((String payload) {
+    if (payload.startsWith(inboxPayloadPrefix)) {
+      ref.read(activeTabProvider.notifier).show(inboxTabIndex);
+      return;
+    }
     final String inUse = ref.read(macsProvider).active?.id ?? '';
     ref.read(selectedSessionProvider.notifier).select(SessionRef.fromPayload(payload, fallbackHost: inUse));
     ref.read(activeTabProvider.notifier).show(1);
@@ -172,4 +217,30 @@ final Provider<void> attentionWatcherProvider = Provider<void>((Ref ref) {
       unawaited(service.showAlert(event));
     }
   });
+});
+
+final Provider<void> inboxAlertWatcherProvider = Provider<void>((Ref ref) {
+  final InboxAlerter alerter = InboxAlerter(
+    sink: ref.read(notificationServiceProvider),
+    nowMs: () => DateTime.now().millisecondsSinceEpoch,
+  );
+  String? owner;
+  void sync() {
+    final InboxState state = ref.read(inboxProvider);
+    final String? active = ref.read(macsProvider).active?.id;
+    if (owner != null && (owner != active || state.phase == InboxPhase.unsupported)) {
+      owner = null;
+      unawaited(alerter.sync(const <InboxItem>[]));
+    }
+    if (active == null || state.phase != InboxPhase.ready || state.macId != active) return;
+    if (ref.read(connectionStatusProvider).phase != LinkPhase.connected) return;
+    owner = active;
+    unawaited(alerter.sync(state.items));
+  }
+
+  ref.listen<MacsState>(macsProvider, (MacsState? previous, MacsState next) => sync());
+  ref.listen<InboxState>(inboxProvider, (InboxState? previous, InboxState next) => sync());
+  ref.listen<ConnectionStatus>(connectionStatusProvider, (ConnectionStatus? previous, ConnectionStatus next) => sync());
+  final Timer timer = Timer.periodic(const Duration(seconds: 5), (Timer _) => sync());
+  ref.onDispose(timer.cancel);
 });

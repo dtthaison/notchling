@@ -4,6 +4,8 @@ pub enum NotchState {
     Peek(String),
     List,
     Detail(String),
+    Blocking,
+    Glance,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,6 +64,9 @@ pub const CANVAS_WIDTH: f64 = 560.0;
 pub const CANVAS_SLACK: f64 = 16.0;
 pub const PET_REACH: f64 = 48.0;
 pub const COLLAPSED_SLACK: f64 = 4.0;
+pub const EAR: f64 = 44.0;
+pub const BLOCKING_HEAD: f64 = 30.0;
+pub const GLANCE_ROW: f64 = 28.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PeekContent {
@@ -76,6 +81,50 @@ fn chrome(notch: Size) -> f64 {
 
 pub fn collapsed_size(notch: Size) -> Size {
     Size::new(notch.w + 2.0 * FLARE, notch.h)
+}
+
+pub fn blocked_size(notch: Size) -> Size {
+    let base = collapsed_size(notch);
+    Size::new(base.w + 2.0 * EAR, base.h)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CardDims {
+    pub detail_chars: usize,
+    pub title_chars: usize,
+    pub last_call: bool,
+    pub note: bool,
+    pub mono: bool,
+}
+
+const TITLE_LINE: f64 = 20.0;
+const TITLE_CHARS_PER_LINE: usize = 46;
+const CLOCK_ROW: f64 = 26.0;
+const NOTE_ROW: f64 = 46.0;
+
+pub fn blocking_card_height(dims: CardDims) -> f64 {
+    let per_line = if dims.mono { 50 } else { 62 };
+    let detail = (dims.detail_chars / per_line + 1).min(3) as f64;
+    let title = (dims.title_chars / TITLE_CHARS_PER_LINE + 1).min(2) as f64;
+    let clock = if dims.last_call { CLOCK_ROW } else { 0.0 };
+    let note = if dims.note { NOTE_ROW } else { 0.0 };
+    title * TITLE_LINE + detail * 16.0 + 8.0 + 18.0 + 12.0 + 34.0 + 12.0 + clock + note
+}
+
+pub fn blocking_size(notch: Size, width: NotchWidth, content: f64, screen_h: f64) -> Size {
+    let wanted = chrome(notch) + BLOCKING_HEAD + content;
+    Size::new(
+        width.panel(),
+        wanted.min(blocking_cap(screen_h)).max(chrome(notch)),
+    )
+}
+
+pub fn blocking_cap(screen_h: f64) -> f64 {
+    (screen_h * 0.45).floor()
+}
+
+pub fn glance_size(notch: Size, width: NotchWidth) -> Size {
+    Size::new(width.list(), notch.h + GLANCE_ROW)
 }
 
 pub fn peek_size(

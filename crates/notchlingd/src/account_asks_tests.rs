@@ -464,6 +464,7 @@ fn a_cited_id_that_is_not_an_account_row_is_claimed_and_refused() {
                 reason: None,
                 expires_in_ms: None,
                 key: None,
+                retry_of: None,
             },
         )
         .unwrap();

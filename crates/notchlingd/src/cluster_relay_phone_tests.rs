@@ -337,3 +337,52 @@ fn an_entry_the_worker_is_sending_cannot_be_cancelled() {
     assert_eq!(texts(&rig), [json!("one")], "it went exactly once");
     assert_eq!(rig.relay.cancel_key(DEV, "k-1"), Cancelled::Delivered);
 }
+
+#[test]
+fn a_stopped_relay_finishes_the_item_in_hand_and_keeps_the_rest_held_on_disk() {
+    let rig = rig(M1, M5, false);
+    let session = format!("{M5}/job-7");
+    message(&rig, "1", &session, "one");
+    message(&rig, "2", &session, "two");
+    go(&rig, M1, M5, true);
+    let (entered_tx, entered) = channel();
+    let (release, release_rx) = channel();
+    *rig.net.hang.lock().unwrap() = Some((entered_tx, release_rx));
+    rig.relay.start();
+    rig.relay.tick();
+    entered
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the worker is inside the call");
+    let letting_go = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = release.send(());
+    });
+    rig.relay.stop(Duration::from_secs(10));
+    assert_eq!(
+        texts(&rig),
+        [json!("one")],
+        "stop returns after the item in hand is done and sends no other"
+    );
+    letting_go.join().unwrap();
+    let shown = rig.relay.list(DEV);
+    assert_eq!(shown.entries.len(), 1, "the unsent item is still held");
+    let on_disk = persist::load_held(&rig.dir).unwrap();
+    assert_eq!(
+        on_disk.count(None),
+        1,
+        "and it is on disk for the next start"
+    );
+    let left = on_disk.list();
+    assert_eq!(left[0].id, shown.entries[0].id);
+    assert_eq!(left[0].args["text"], json!("two"));
+    assert!(
+        !on_disk.was_delivered(&left[0].id),
+        "it is not recorded as delivered"
+    );
+    go(&rig, M1, M5, false);
+    message(&rig, "3", &session, "three");
+    go(&rig, M1, M5, true);
+    rig.relay.tick();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(texts(&rig).len(), 1, "a stopped relay flushes no more");
+}

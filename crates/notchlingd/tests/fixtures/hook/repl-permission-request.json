@@ -1,0 +1,19 @@
+{
+  "session_id": "6f1c2a9e-3b7d-4e21-9a0c-5d8e7f6a1b2c",
+  "cwd": "/tmp/demo",
+  "permission_mode": "default",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "REPL",
+  "tool_input": {
+    "code": "const out = await $`rm -rf build && ls`.text();\nreturn out;",
+    "description": "Clean the build folder"
+  },
+  "permission_suggestions": [
+    {
+      "type": "addRules",
+      "rules": [{"toolName": "REPL"}],
+      "behavior": "allow",
+      "destination": "localSettings"
+    }
+  ]
+}

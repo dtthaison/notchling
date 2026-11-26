@@ -50,3 +50,40 @@ inbox-confirm-continue-title = Continue { $title } here?
 
 # Body of that question.
 inbox-confirm-continue-body-unnamed = The newer copy on the other machine is kept beside it.
+
+# Title of the section at the top of the Inbox with the items an agent or a step waits on.
+inbox-blocking = Waiting on You
+
+# Shown on an item that waits, when it began less than a minute ago.
+inbox-stopped-now = Stopped just now
+
+# Shown on an item that waits.
+# $count is how many whole minutes it has waited.
+inbox-stopped-minutes = { $count ->
+    [one] Stopped { $count } minute ago
+   *[other] Stopped { $count } minutes ago
+}
+
+# Shown on an answered item while the Mac applies the answer.
+inbox-outcome-applying = Applying…
+
+# Shown on an answered item once the Mac applied the answer.
+inbox-outcome-applied = Applied
+
+# Shown on an answered item the Mac could not apply, when it gave no reason.
+inbox-outcome-failed = Failed
+
+# Shown on an answered item the Mac could not apply.
+# $reason is the Mac's own explanation.
+inbox-outcome-failed-reason = Failed: { $reason }
+
+# Shown on an item that was taken back before it was answered.
+inbox-outcome-withdrawn = Withdrawn
+
+# Shown on an item that was taken back before it was answered.
+# $reason is the Mac's own explanation.
+inbox-outcome-withdrawn-reason = Withdrawn: { $reason }
+
+# Shown on an item that was answered with a note for the agent.
+# $note is what the person wrote.
+inbox-sent-back = Sent back: { $note }

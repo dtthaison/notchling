@@ -18,11 +18,12 @@ const STEPS: &str = r#"
 Then the same line with `--reason "<what and why>" --key <key> --no-wait --json` instead of `--dry-run`.
 
 - A dispatch always asks the user, for every tool, and only the Mac may allow it. The machine must be in your organization, or it is exit 4 `other_organization`.
-- `--text` names the repo, the branch and the task: `Repo acme/api, branch fix/login: make the login test pass, then stop.` The job starts with nothing else.
+- `--text` names the repo, the branch and the task: `Repo acme/api, branch fix/login: make the login test pass, then stop.` The job starts with nothing else. A Claude Code job gets it as the session's first message; if it couldn't be queued, the job's `detail` says so: send it with `notchling session reply`.
 - `--tool shell` takes `--command <line>` instead of `--text`.
 - Name a secret with `--secret <name>`, never in `--text` or `--command`: the user sees the names on the card and the machine gets the values.
 - The `cluster` switch must be on. Exit 4 with `error.reason` `switch_off` carries `error.ask`: run that command once, never in a loop.
 - The same `--key` sends one job and opens one card, so a retry after exit 124 or a lost answer is safe. A different job needs a new key.
+- If you were denied with a note, change what it says and ask again with `--retry-of <id>`.
 
 ## Follow it
 

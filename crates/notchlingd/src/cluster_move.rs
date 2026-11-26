@@ -916,6 +916,7 @@ pub fn raise_notice(
             open: None,
             closed_ms: None,
             switch: None,
+            ..Default::default()
         },
         None,
     );

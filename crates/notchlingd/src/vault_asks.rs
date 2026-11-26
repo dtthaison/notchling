@@ -9,6 +9,7 @@ pub(super) struct Asked {
     pub(super) by: Answerer,
     pub(super) device: Option<String>,
     pub(super) waited_ms: u64,
+    pub(super) note: Option<String>,
 }
 
 pub(super) struct Refusal {
@@ -63,10 +64,11 @@ impl VaultOps {
         if let Who::Machine(machine) = who {
             event["machine"] = json!(machine);
         }
-        if let Some(session) = match who {
+        let session = match who {
             Who::Caller(caller) => self.trusted_session(caller),
             Who::Grant(_) | Who::Machine(_) => None,
-        } {
+        };
+        if let Some(session) = &session {
             event["session"] = json!(session);
         }
         self.approvals.describe(&id, &event);
@@ -74,7 +76,7 @@ impl VaultOps {
             Who::Grant(grant) => Some(*grant),
             Who::Caller(_) | Who::Machine(_) => None,
         };
-        let raised = self.raise_approval(&id, &names, (command, folder), by);
+        let raised = self.raise_approval(&id, &names, (command, folder), by, session);
         self.room
             .publish(topics::VAULT, topics::VAULT_APPROVAL_PENDING, &event);
         let still = || self.switch.is_on() && self.room.can_follow(topics::VAULT);
@@ -84,6 +86,9 @@ impl VaultOps {
                 .wait(ticket, self.timing.approval_wait, self.timing.slice, &still);
         let (state, answer) = match decided {
             Some(answer) => {
+                if let Some(note) = &answer.note {
+                    raised.note(note);
+                }
                 raised.close(
                     State::Answered,
                     Some(inbox::action_of(answer.value)),
@@ -107,6 +112,7 @@ impl VaultOps {
             decision,
             state,
             by: answer.as_ref().map_or(Answerer::NoOne, |a| a.by),
+            note: answer.as_ref().and_then(|a| a.note.clone()),
             device: answer.and_then(|a| a.device),
             waited_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         })
@@ -116,7 +122,7 @@ impl VaultOps {
         Self::the_app(caller)?;
         let bad = || {
             ApiError::bad_request(
-                "vault.approval.answer takes {id, decision: \"deny\" | \"once\" | \"always\"}",
+                "vault.approval.answer takes {id, decision: \"deny\" | \"once\" | \"always\", note?: text (with deny only)}",
             )
         };
         let id = args.get("id").and_then(Value::as_str).ok_or_else(bad)?;
@@ -125,7 +131,15 @@ impl VaultOps {
             .and_then(Value::as_str)
             .and_then(Decision::parse)
             .ok_or_else(bad)?;
-        Ok(json!({"answered": self.approvals.answer(id, Answered::by_mac(decision))}))
+        let note = match args.get("note") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) if decision == Decision::Deny => Some(
+                notchling_engine::consent::clean_note(text)
+                    .ok_or_else(|| ApiError::bad_request("The note is empty."))?,
+            ),
+            Some(_) => return Err(bad()),
+        };
+        Ok(json!({"answered": self.approvals.answer(id, Answered::by_mac(decision).noted(note))}))
     }
 
     pub(super) fn request(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
@@ -220,6 +234,7 @@ impl VaultOps {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         };
         if dry {
             let would = consent.would(&opening)?;

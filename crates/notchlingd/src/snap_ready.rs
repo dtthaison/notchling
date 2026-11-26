@@ -8,10 +8,10 @@ use notchling_engine::cluster::{LocalCmd, NodeId};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 pub type Ready = Arc<dyn Fn(&NodeId) -> bool + Send + Sync>;
-pub type SenderSlot = Arc<OnceLock<Arc<SnapSender>>>;
+pub type SenderSlot = Arc<OnceLock<Weak<SnapSender>>>;
 
 pub struct LastSet {
     node: Arc<OnceLock<Arc<ClusterNode>>>,
@@ -44,7 +44,10 @@ impl LastSet {
         };
         let status = node.status();
         let bytes = if is_home(&status) {
-            self.sender.get().map_or(0, |s| s.last_set_bytes())
+            self.sender
+                .get()
+                .and_then(Weak::upgrade)
+                .map_or(0, |s| s.last_set_bytes())
         } else {
             status
                 .get("cluster")

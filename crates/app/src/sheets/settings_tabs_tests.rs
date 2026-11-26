@@ -121,6 +121,7 @@ fn every_row_there_was_is_in_exactly_one_place() {
         "antigravityChannel",
         "antigravityRemoteIn",
         "chatHistory",
+        "attentionLevel",
     ];
     let mut places: BTreeMap<&str, usize> = BTreeMap::new();
     let mut count = |rows: Vec<Row>| {
@@ -161,7 +162,11 @@ fn every_row_there_was_is_in_exactly_one_place() {
         .iter()
         .map(|s| s.rows.len())
         .sum();
-    assert_eq!(all, before.len() - 1 + 6, "the six daemon rows have no key");
+    assert_eq!(
+        all,
+        before.len() - 1 + 6 + 1,
+        "the six daemon rows and the sound row have no key"
+    );
 }
 
 #[test]

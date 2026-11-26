@@ -164,4 +164,25 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn a_repl_permission_answers_like_any_other_tool() {
+        let event = fixture("repl-permission-request.json");
+        assert!(is_prompt_event(&event));
+        assert_eq!(
+            output(&json!({"action": "allow"}), &event),
+            Some(fixture("out-allow.json"))
+        );
+        assert_eq!(
+            output(&json!({"action": "deny"}), &event),
+            Some(fixture("out-deny.json"))
+        );
+        let always = output(&json!({"action": "allow", "always": true}), &event).unwrap();
+        assert_eq!(
+            always["hookSpecificOutput"]["decision"]["updatedPermissions"][0]["rules"][0]
+                ["toolName"],
+            "REPL"
+        );
+        assert!(!is_prompt_event(&fixture("repl-pre-tool-use.json")));
+    }
 }

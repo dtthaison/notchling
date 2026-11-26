@@ -32,3 +32,14 @@ fn failover_key_is_class_ask() {
     assert_eq!(key.why, "it changes what runs where");
     assert_eq!(key.access.as_str(), "ask");
 }
+
+#[test]
+fn attention_level_has_three_choices_and_is_free_for_agents() {
+    let key = spec("attentionLevel").expect("the attentionLevel key");
+    assert_eq!(key.default, Fallback::Str("normal"));
+    assert_eq!(key.allowed, ["calm", "normal", "urgent"]);
+    assert!(key.accepts(&json!("urgent")));
+    assert!(!key.accepts(&json!("loud")));
+    assert_eq!(key.access, Access::Free);
+    assert!(!key.from_awake);
+}

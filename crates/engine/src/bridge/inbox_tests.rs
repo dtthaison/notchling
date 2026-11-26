@@ -66,6 +66,30 @@ fn phone_answers_an_open_item() {
 }
 
 #[test]
+fn a_note_from_the_phone_is_refused_and_nothing_is_answered() {
+    let rig = Rig::new();
+    rig.backend
+        .with(|s| s.inbox = vec![inbox_item("a", Kind::SecretApproval)]);
+    let (connection, io, _) = rig.login("test-phone");
+    rig.send(
+        &connection,
+        r#"{"id":6,"op":"inbox.answer","itemId":"a","action":"deny","note":"call it b2"}"#,
+    );
+    let reply = io.last_json().to_string();
+    assert!(
+        reply.contains("Notes from the phone aren't on yet."),
+        "{reply}"
+    );
+    assert!(rig.backend.with(|s| s.inbox_answers.clone()).is_empty());
+    assert!(rig
+        .audit
+        .recent()
+        .iter()
+        .any(|e| e.op == "inbox.answer:refused:note"));
+    assert!(rig.audit.recent().iter().all(|e| !e.op.contains("call it")));
+}
+
+#[test]
 fn the_phone_may_allow_a_secret() {
     let rig = Rig::new();
     rig.backend.with(|s| {
@@ -271,6 +295,75 @@ fn inbox_is_pushed_to_subscribers() {
     rig.hub.tick(rig.backend.as_ref());
     let removed = events(&io, mark);
     assert_eq!(removed, [json!({"event": "inbox", "removed": "a"})]);
+}
+
+#[test]
+fn a_change_of_blocking_alone_pushes_the_item() {
+    let rig = Rig::new();
+    rig.backend
+        .with(|s| s.inbox = vec![inbox_item("a", Kind::Consent)]);
+    let (connection, io, _) = rig.login("test-phone");
+    rig.send(&connection, r#"{"id":2,"op":"subscribe","inbox":true}"#);
+    rig.hub.tick(rig.backend.as_ref());
+    let mark = io.texts().len();
+    rig.hub.tick(rig.backend.as_ref());
+    assert_eq!(io.texts().len(), mark);
+
+    rig.backend.with(|s| {
+        s.inbox[0].blocking = Some(true);
+        s.inbox[0].waiting_since = Some(7);
+        s.inbox[0].waiter = Some(crate::inbox::Waiter::Cli);
+    });
+    rig.hub.tick(rig.backend.as_ref());
+    let pushed = events(&io, mark);
+    assert_eq!(pushed.len(), 1);
+    assert_eq!(pushed[0]["event"], json!("inbox"));
+    assert_eq!(pushed[0]["item"]["blocking"], json!(true));
+    assert_eq!(pushed[0]["item"]["waitingSince"], json!(7));
+    assert_eq!(pushed[0]["item"]["waiter"], json!("cli"));
+}
+
+#[test]
+fn the_new_item_fields_reach_the_wire_in_camel_case_and_stay_off_when_empty() {
+    use crate::inbox::{AlertAction, Outcome, OutcomeState, Place};
+    let mut item = inbox_item("a", Kind::Consent);
+    let bare = serde_json::to_value(wire_item(&item)).unwrap();
+    for field in [
+        "blocking",
+        "waitingSince",
+        "waiter",
+        "alertActions",
+        "note",
+        "outcome",
+        "place",
+    ] {
+        assert!(bare.get(field).is_none(), "{field}");
+    }
+    item.alert_actions = vec![AlertAction::OpenForm, AlertAction::Cancel];
+    item.note = Some("later".to_string());
+    item.outcome = Some(Outcome {
+        state: OutcomeState::Failed,
+        reason: Some("nothing changed".to_string()),
+        at_ms: 3,
+    });
+    item.place = Some(Place {
+        machine: Some("n1".to_string()),
+        machine_name: Some("build".to_string()),
+        session: Some("s1".to_string()),
+        session_name: Some("fix".to_string()),
+        branch: Some("main".to_string()),
+    });
+    let full = serde_json::to_value(wire_item(&item)).unwrap();
+    assert_eq!(full["alertActions"], json!(["open_form", "cancel"]));
+    assert_eq!(full["note"], json!("later"));
+    assert_eq!(
+        full["outcome"],
+        json!({"state": "failed", "reason": "nothing changed", "atMs": 3})
+    );
+    assert_eq!(
+        full["place"],
+        json!({"machine": "n1", "machineName": "build", "session": "s1", "sessionName": "fix", "branch": "main"})
+    );
 }
 
 #[test]

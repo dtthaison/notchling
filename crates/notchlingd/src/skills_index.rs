@@ -1,5 +1,5 @@
 use crate::commands::{rows, Row};
-use crate::skills_family::{minimal, FAMILIES, NAMING_RULE};
+use crate::skills_family::{minimal, FAMILIES, KEY_RULE, NAMING_RULE, NOTE_RULE, REASON_RULE};
 use crate::{skill_accounts, skill_cluster, skill_jobs, skill_machines, skill_sessions};
 use notchling_engine::delegate::skill::SkillTool;
 use notchling_engine::install::skills::SkillSpec;
@@ -61,8 +61,16 @@ fn family_spec(binary: &str, name: &str, make: fn(&str) -> String) -> SkillSpec 
     )
 }
 
+const WATCHING: &str = "`inbox --json` lists this session's Inbox items; one is `blocking` while you wait for its answer, with `waitingSince`, `waiter` and, once closed, an `outcome`. `consent <id> --wait --json` ends with the user's `note` when a denial came back with a change to make (exit 5). `watch --topic inbox` (or `mine.inbox`) follows these items without polling.";
+
 pub fn content(binary: &str) -> String {
-    minimal(NAME, DESCRIPTION, "Notchling", ABOUT, binary)
+    let mut text = minimal(NAME, DESCRIPTION, "Notchling", ABOUT, binary);
+    let at = text.rfind("\nRun `").unwrap_or(text.len());
+    text.insert_str(
+        at,
+        &format!("\n{WATCHING}\n\n{REASON_RULE} {KEY_RULE} {NOTE_RULE}\n"),
+    );
+    text
 }
 
 pub fn extra_specs(binary: &str) -> Vec<SkillSpec> {

@@ -48,6 +48,24 @@ pub fn wire_item(item: &Item) -> wire::InboxItem {
         answer: item.answer.map(|a| name_of(&a)),
         answered_by: item.answered_by.clone(),
         seen: item.seen,
+        blocking: item.blocking,
+        waiting_since: item.waiting_since,
+        waiter: item.waiter.map(|w| name_of(&w)),
+        alert_actions: (!item.alert_actions.is_empty())
+            .then(|| item.alert_actions.iter().map(name_of).collect()),
+        note: item.note.clone(),
+        outcome: item.outcome.as_ref().map(|outcome| wire::InboxItemOutcome {
+            state: name_of(&outcome.state),
+            reason: outcome.reason.clone(),
+            at_ms: outcome.at_ms,
+        }),
+        place: item.place.as_ref().map(|place| wire::InboxItemPlace {
+            machine: place.machine.clone(),
+            machine_name: place.machine_name.clone(),
+            session: place.session.clone(),
+            session_name: place.session_name.clone(),
+            branch: place.branch.clone(),
+        }),
     }
 }
 

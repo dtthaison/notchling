@@ -26,12 +26,20 @@ use super::wire::{Args, Msg, Origin, OriginTier, WireError};
 use crate::sessions::Agent;
 
 pub use forward::call_wait;
+
+pub fn start_wait(tool: Tool) -> u64 {
+    match tool {
+        Tool::Claude => START_CALL_MS,
+        Tool::Codex | Tool::Agy | Tool::Shell => CALL_MS,
+    }
+}
 pub use snap::SnapAsk;
 pub use takeover::{eligible, Takeover, NOT_SENT, REFUSED};
 
 pub const PING_MS: u64 = 5_000;
 pub const OFFLINE_MS: u64 = 20_000;
 pub const CALL_MS: u64 = 30_000;
+pub const START_CALL_MS: u64 = 90_000;
 pub const DELEGATE_CALL_MS: u64 = 36 * 60_000;
 pub const WORKSPACE_CALL_MS: u64 = 20 * 60_000;
 pub const MOVE_CALL_MS: u64 = 5 * 60_000;
@@ -732,6 +740,10 @@ mod core_tests_relay;
 mod core_tests_secrets;
 #[cfg(test)]
 mod core_tests_snap;
+#[cfg(test)]
+mod core_tests_start_wait;
+#[cfg(test)]
+mod core_tests_start_warning;
 #[cfg(test)]
 mod core_tests_takeover;
 #[cfg(test)]

@@ -57,6 +57,7 @@ fn shell(id: &str, command: &str) -> BackgroundShell {
         command: command.into(),
         title: format!("Ran {command}"),
         output_path: format!("/tmp/{id}.output"),
+        description: String::new(),
         started: None,
     }
 }

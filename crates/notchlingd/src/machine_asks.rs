@@ -1,14 +1,15 @@
 use super::machine_asks_plans::{need_word, ACTIONS, USAGE};
 use super::machines_ops::{bad, caller_of, forbidden, never_at, Machines};
 use crate::cited::Cited;
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Failure, Handler, Opening};
 use crate::op_group::OpGroup;
 use notchling_engine::accounts::Secret;
 use notchling_engine::bridge::net::crypto::sha256_hex;
+use notchling_engine::consent::retry::unretried;
 use notchling_engine::consent::{Consent, MACHINE};
 use notchling_engine::machines::agent_plan::digest;
 use notchling_engine::machines::claims::HELD;
-use notchling_engine::machines::engine_plan::AdminAnswer;
+use notchling_engine::machines::engine_plan::{AdminAnswer, ShownPlan};
 use notchling_engine::machines::names::same_name;
 use notchling_engine::organizations::PERSONAL_ID;
 use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec};
@@ -133,6 +134,7 @@ impl MachineAsks {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         };
         if dry_run(args) {
             let mut would = self.consent.would(&opening)?;
@@ -178,7 +180,7 @@ impl MachineAsks {
             .machines
             .plan(action, &args, &mine_of(row))
             .map_err(|e| e.message.clone())?;
-        if now.change == row.change && now.facts == row.facts {
+        if now.change == unretried(&row.change) && now.facts == row.facts {
             Ok(())
         } else {
             Err("the machines changed since the request".to_string())
@@ -305,8 +307,7 @@ impl MachineAsks {
         } else if outcome.message.contains(HELD) {
             Err(forbidden(HELD, "busy"))
         } else {
-            Err(ApiError::new(ErrorCode::Failed, "The step didn't finish.")
-                .with_reason("step_failed"))
+            Err(step_failure(&shown, &outcome.message))
         }
     }
 
@@ -369,7 +370,8 @@ impl MachineAsks {
                 if reason_of(&e) == Some("stale") {
                     self.consent.withdraw_use(&row);
                 } else {
-                    self.consent.finish_use(&row, Err(e.message.clone()));
+                    self.consent
+                        .finish_use_failing(&row, Err(Failure::of_api(&e)));
                 }
                 Err(e)
             }
@@ -465,5 +467,25 @@ impl OpGroup for MachineAsks {
             )),
             _ => Err(ApiError::internal(format!("{op} has no handler"))),
         }
+    }
+}
+
+const STEP_WHY_MAX: usize = 300;
+
+fn step_failure(shown: &ShownPlan, why: &str) -> ApiError {
+    let named = match shown.steps.as_slice() {
+        [only] => only.title.clone(),
+        _ => shown.title.clone(),
+    };
+    let why: String = why.trim().chars().take(STEP_WHY_MAX).collect();
+    let message = if why.is_empty() {
+        format!("{named} didn't finish.")
+    } else {
+        format!("{named} didn't finish: {why}")
+    };
+    let error = ApiError::new(ErrorCode::Failed, message).with_reason("step_failed");
+    match shown.steps.as_slice() {
+        [only] => error.with_field("step", json!(only.id.0.as_ref())),
+        _ => error,
     }
 }

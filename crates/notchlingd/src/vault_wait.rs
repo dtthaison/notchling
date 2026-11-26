@@ -12,6 +12,7 @@ pub(crate) struct Answered<T> {
     pub value: T,
     pub by: Answerer,
     pub device: Option<String>,
+    pub note: Option<String>,
 }
 
 impl<T> Answered<T> {
@@ -20,7 +21,13 @@ impl<T> Answered<T> {
             value,
             by: Answerer::Mac,
             device: None,
+            note: None,
         }
+    }
+
+    pub(crate) fn noted(mut self, note: Option<String>) -> Answered<T> {
+        self.note = note;
+        self
     }
 }
 

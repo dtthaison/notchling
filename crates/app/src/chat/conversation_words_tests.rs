@@ -24,6 +24,7 @@ fn step(id: &str, kind: ToolKind, input: &str) -> ToolRow {
         is_error: false,
         finished: true,
         browser: None,
+        parent: None,
     }
 }
 

@@ -627,3 +627,146 @@ fn an_agent_search_with_no_organization_or_no_reads_answers_empty_with_no_sessio
         assert_eq!(reply["sessions"], json!([]));
     }
 }
+
+#[test]
+fn a_closed_wiring_holds_no_file_under_its_data_folder() {
+    let root = std::env::temp_dir().join(format!("nl-wiring-fds-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+    for _ in 0..3 {
+        let sessions = Arc::new(Mutex::new(json!([])));
+        let w = Wired::build(&layout, sessions, Arc::new(FakeRoom::default()), (0, 0));
+        w.close();
+    }
+    let left = crate::fd_testkit::open_under(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(left.is_empty(), "{left:?}");
+}
+
+type Strong = Box<dyn Fn() -> usize>;
+
+#[test]
+fn a_closed_wiring_is_freed_with_nothing_holding_its_parts() {
+    let root = std::env::temp_dir().join(format!("nl-wiring-freed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let w = Wired::build(&layout, sessions, Arc::new(FakeRoom::default()), (0, 0));
+    let mut held: Vec<(&str, Strong)> = Vec::new();
+    macro_rules! watch {
+        ($($part:ident),*) => {{
+            $({
+                let weak = Arc::downgrade(&w.$part);
+                held.push((stringify!($part), Box::new(move || weak.strong_count())));
+            })*
+        }};
+    }
+    watch!(
+        acting,
+        codex,
+        bridge,
+        agy,
+        every,
+        switches,
+        accounts,
+        providers,
+        limits,
+        catalog,
+        inbox,
+        outbox,
+        ask,
+        outbox_notice,
+        shells_watch,
+        vault,
+        consent,
+        switch_asks,
+        install,
+        models,
+        sidecar,
+        settings,
+        versions,
+        awake,
+        events,
+        wake,
+        codex_children,
+        account_follow
+    );
+    w.close();
+    w.release();
+    drop(w);
+    let _ = std::fs::remove_dir_all(&root);
+    let alive: Vec<&str> = held
+        .iter()
+        .filter(|(_, strong)| strong() > 0)
+        .map(|(name, _)| *name)
+        .collect();
+    assert!(alive.is_empty(), "{alive:?}");
+}
+
+struct OneRemoteRow;
+
+impl crate::outbox_ops::RemoteRows for OneRemoteRow {
+    fn rows(&self, _session: Option<&str>) -> Vec<Value> {
+        vec![json!({"id": "remote-1"})]
+    }
+}
+
+#[test]
+fn a_closed_wiring_still_answers_the_way_it_did_until_it_is_released() {
+    let root = std::env::temp_dir().join(format!("nl-wiring-order-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let layout = Layout::resolve(None, Some(root.as_os_str()), || None).unwrap();
+    let sessions = Arc::new(Mutex::new(json!([])));
+    let w = Wired::build(&layout, sessions, Arc::new(FakeRoom::default()), (0, 0));
+    w.outbox.set_remote(Arc::new(OneRemoteRow));
+    let listed = |w: &Wired| {
+        let rows = w.outbox.call(&app(), ops::OUTBOX_LIST, &json!({}));
+        rows.unwrap().as_array().unwrap().len()
+    };
+    let rows = listed(&w);
+    assert!(rows >= 1);
+    assert!(w.bridge.cluster().attached());
+    w.close();
+    assert!(
+        w.bridge.cluster().attached(),
+        "close leaves the cluster attached"
+    );
+    assert_eq!(listed(&w), rows, "close leaves the outbox's callbacks");
+    w.release();
+    assert!(!w.bridge.cluster().attached());
+    assert_eq!(listed(&w), rows - 1);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_second_release_returns_at_once_while_a_flush_still_hangs() {
+    use crate::cluster_relay_testkit::{go, message, rig, M1, M5};
+    use notchling_engine::bridge::relay::Relay;
+    let (_root, _layout, w) = wired("release-once");
+    let rig = rig(M1, M5, false);
+    message(&rig, "1", &format!("{M5}/job-7"), "one");
+    go(&rig, M1, M5, true);
+    let (entered_tx, entered) = std::sync::mpsc::channel();
+    let (let_go, let_go_rx) = std::sync::mpsc::channel();
+    *rig.net.hang.lock().unwrap() = Some((entered_tx, let_go_rx));
+    rig.relay.start();
+    rig.relay.tick();
+    entered
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the worker is inside the call");
+    let wait = std::time::Duration::from_millis(300);
+    let first = std::time::Instant::now();
+    w.release_within(Some(&rig.relay), wait);
+    assert!(
+        first.elapsed() >= wait,
+        "the first release waits for the flush"
+    );
+    let second = std::time::Instant::now();
+    w.release_within(Some(&rig.relay), std::time::Duration::from_secs(3));
+    let waited = second.elapsed();
+    let _ = let_go.send(());
+    assert!(
+        waited < std::time::Duration::from_secs(1),
+        "the second release waited {waited:?} for the flush"
+    );
+}

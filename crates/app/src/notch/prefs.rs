@@ -5,6 +5,7 @@ use notchling_locale as t;
 
 use super::layout::NotchWidth;
 use crate::acting::Control;
+use crate::attention::Level;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NotchPrefs {
@@ -13,6 +14,7 @@ pub struct NotchPrefs {
     pub show_pet: bool,
     pub show_last_reply: bool,
     pub answer: bool,
+    pub level: Level,
 }
 
 impl Default for NotchPrefs {
@@ -23,6 +25,7 @@ impl Default for NotchPrefs {
             show_pet: true,
             show_last_reply: true,
             answer: true,
+            level: Level::default(),
         }
     }
 }
@@ -39,6 +42,10 @@ impl NotchPrefs {
             show_pet: s.get_bool("showPet").unwrap_or(d.show_pet),
             show_last_reply: s.get_bool("showLastReply").unwrap_or(d.show_last_reply),
             answer: s.get_bool("answerFromNotch").unwrap_or(d.answer),
+            level: s
+                .get_str("attentionLevel")
+                .and_then(|v| Level::parse(&v))
+                .unwrap_or(d.level),
         }
     }
 
@@ -94,6 +101,7 @@ mod tests {
             ("showPet", json!(false)),
             ("showLastReply", json!(false)),
             ("answerFromNotch", json!(false)),
+            ("attentionLevel", json!("urgent")),
         ] {
             s.set(key, value).unwrap();
         }
@@ -105,6 +113,7 @@ mod tests {
                 show_pet: false,
                 show_last_reply: false,
                 answer: false,
+                level: Level::Urgent,
             })
         );
     }

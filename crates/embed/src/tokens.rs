@@ -105,8 +105,10 @@ fn template(processor: &Value) -> Option<(Vec<u32>, Vec<u32>)> {
 
 impl Tokens {
     pub fn from_tokenizer_json(path: &Path) -> Result<Tokens, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Self::from_tokenizer_slice(&bytes)
+        let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let map =
+            unsafe { memmap2::Mmap::map(&file) }.map_err(|e| format!("{}: {e}", path.display()))?;
+        Self::from_tokenizer_slice(&map)
     }
 
     pub fn from_tokenizer_slice(bytes: &[u8]) -> Result<Tokens, String> {

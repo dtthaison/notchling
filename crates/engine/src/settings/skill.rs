@@ -8,7 +8,7 @@ pub const WAIT_SECS: u64 = 900;
 
 const TEMPLATE: &str = r#"---
 name: notchling-settings
-description: Use when the user asks to check or change a Notchling setting — the theme or appearance, how much Chat history to load, a shortcut, the notch (width, pet, last reply), keeping the Mac awake, limit watching — or asks what Notchling's settings are. Reads and changes them through Notchling, and the app shows a change at once.
+description: Use when the user asks to check or change a Notchling setting — the theme or appearance, how much Chat history to load, a shortcut, the notch (width, pet, last reply), how hard Notchling tries to reach you when an agent is stopped (attention: calm, normal or urgent), keeping the Mac awake, limit watching — or asks what Notchling's settings are. Reads and changes them through Notchling, and the app shows a change at once.
 ---
 
 # Notchling settings
@@ -41,7 +41,7 @@ Give a value the list shows: `true` or `false`, a number, or one of the choices.
 - 2: an unknown key or a value it doesn't take, or the command was wrong. The message says which, and what the key takes.
 - 3: Notchling isn't running.
 - 4: refused: a key agents can't change.
-- 5: the user denied the change.
+- 5: the user denied the change. If you were denied with a note, change what it says and ask again with `--retry-of <id>`.
 - 6: the request still waits for the user (with `--json`, the reply holds the request).
 - 124: the user didn't answer in time.
 

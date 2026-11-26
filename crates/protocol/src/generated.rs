@@ -566,6 +566,27 @@ pub struct InboxItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered_by: Option<String>,
     pub seen: bool,
+    /// True while something waits on this item: an agent, a vault request, a cluster step. Live: a Mac does not keep it across a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocking: Option<bool>,
+    /// When the wait began, in ms. Live, like blocking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_since: Option<i64>,
+    /// What waits: cli, ask, vault or cluster. Live, like blocking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiter: Option<String>,
+    /// What a banner, a notch card or a menu may offer, as action names: allow, deny, change, open, reply, dismiss, open_form or cancel. Mac only; actions is what a phone may press.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alert_actions: Option<Vec<String>>,
+    /// The user's note with the answer, at most 300 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// How an answered item ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<InboxItemOutcome>,
+    /// Where the item came from, for a person to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<InboxItemPlace>,
 }
 
 /// Where the item came from.
@@ -577,6 +598,34 @@ pub struct InboxItemSource {
     pub session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job: Option<String>,
+}
+
+/// How an answered item ended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxItemOutcome {
+    /// applying, applied, failed or withdrawn.
+    pub state: String,
+    /// Why it failed or was withdrawn, at most 300 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub at_ms: i64,
+}
+
+/// Where the item came from, for a person to read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxItemPlace {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// First message on a connection from a paired phone.
@@ -909,6 +958,9 @@ pub struct InboxAnswerRequest {
     pub item_id: String,
     /// An action id the item offers; open is refused.
     pub action: String,
+    /// A note with the answer, at most 300 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// The connection is authenticated.

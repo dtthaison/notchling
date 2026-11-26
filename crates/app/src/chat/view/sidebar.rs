@@ -5,10 +5,10 @@ use notchling_kit::metric::{OFFLINE_OPACITY, TOOL_ICON};
 use notchling_kit::part::{ButtonKind, PartState};
 use notchling_kit::scrollbar::GUTTER;
 use notchling_kit::ui::{
-    account_line, hsla, icon_button, label, node_line, scrollable, session_row_marked, tool_icon,
-    KitPart, KitStyled, ToolMark,
+    account_line, button, hsla, icon_button, label, node_line, scrollable, session_row_marked,
+    tool_icon, KitPart, KitStyled, ToolMark,
 };
-use notchling_kit::{Appearance, Icon, Ink, TypeRole};
+use notchling_kit::{Appearance, Icon, Ink, Status, TypeRole};
 use notchling_locale as t;
 
 use super::ChatView;
@@ -137,6 +137,97 @@ pub(super) fn model(view: &ChatView, _: &App) -> SidebarModel {
     .with_asks(&view.source.asks(), &view.sessions)
     .with_vault(view.vault.waiting())
     .with_reload(&view.reload)
+    .with_completed(view.completed_open, &view.sessions, &view.past, view.now_ms)
+}
+
+fn completed(
+    mut list: gpui::Stateful<Div>,
+    m: &SidebarModel,
+    a: Appearance,
+    cx: &mut Context<ChatView>,
+) -> gpui::Stateful<Div> {
+    let c = &m.completed;
+    if c.open {
+        let heading = label(t::chat::completed(), TypeRole::Section, Ink::TextFaint, a);
+        let heading = heading.part_at("Completed Heading", Corner::Trailing, a, cx);
+        let count = label(&c.rows.len().to_string(), TypeRole::Meta, Ink::TextFaint, a);
+        list = list.child(
+            div()
+                .px(px(8.0))
+                .pt(px(12.0))
+                .pb(px(4.0))
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(heading)
+                .child(count.part_at("Completed Count", Corner::Bottom, a, cx)),
+        );
+        if c.rows.is_empty() {
+            list = list.child(div().px(px(8.0)).child(label(
+                t::chat::completed_none(),
+                TypeRole::Meta,
+                Ink::TextMuted,
+                a,
+            )));
+        }
+        for row in &c.rows {
+            let id = row.id.clone();
+            let state = if m.selected.as_deref() == Some(row.id.as_str()) {
+                PartState::Selected
+            } else {
+                PartState::Rest
+            };
+            let tool = tool_icon(ToolMark::Claude, TOOL_ICON, a);
+            let row_el = session_row_marked(
+                SharedString::from(format!("completed-{}", row.id)),
+                &row.name,
+                tool,
+                None::<gpui::Empty>,
+                &row.folder,
+                &row.age,
+                Status::Done,
+                state,
+                false,
+                a,
+            )
+            .opacity(OFFLINE_OPACITY)
+            .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)));
+            list = list.child(row_el.part_at("Completed Row", Corner::Trailing, a, cx));
+        }
+        if c.more {
+            let more = button(
+                "completed-more",
+                t::chat::load_more(),
+                ButtonKind::Ghost,
+                PartState::Rest,
+                a,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.load_more_past(cx)));
+            let more = more.part_at("Load More Button", Corner::Bottom, a, cx);
+            list = list.child(div().px(px(8.0)).child(more));
+        }
+    }
+    let title = if c.open {
+        t::chat::hide_completed()
+    } else {
+        t::chat::show_completed()
+    };
+    let link = button(
+        "completed-toggle",
+        title,
+        ButtonKind::Ghost,
+        PartState::Rest,
+        a,
+    )
+    .on_click(cx.listener(|this, _, _, cx| this.toggle_completed(cx)));
+    list.child(
+        div()
+            .px(px(8.0))
+            .pt(px(8.0))
+            .pb(px(8.0))
+            .flex()
+            .child(link.part_at("Completed Toggle", Corner::Bottom, a, cx)),
+    )
 }
 
 pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>) -> AnyElement {
@@ -241,6 +332,7 @@ pub(super) fn render(m: &SidebarModel, a: Appearance, cx: &mut Context<ChatView>
             list = list.child(row_el.part_at("Session Row", Corner::Trailing, a, cx));
         }
     }
+    list = completed(list, m, a, cx);
     div()
         .size_full()
         .fill(Ink::Sidebar, a)

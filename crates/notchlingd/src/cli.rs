@@ -133,6 +133,9 @@ pub enum Command {
     Shells {
         args: Vec<String>,
     },
+    Chat {
+        args: Vec<String>,
+    },
     Version,
     Help {
         json: bool,
@@ -173,6 +176,14 @@ fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<PathBuf,
 
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
     let args: Vec<String> = args.into_iter().collect();
+    if let [first, second, rest @ ..] = args.as_slice() {
+        if first == "sessions" && second == "history" {
+            return Ok(Command::Read {
+                name: "sessions history".to_string(),
+                args: rest.to_vec(),
+            });
+        }
+    }
     if args == ["hook", "--fence"] {
         return Ok(Command::HookFence);
     }
@@ -366,6 +377,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
         "shells" => {
             return Ok(Command::Shells {
+                args: args.collect(),
+            })
+        }
+        "chat" => {
+            return Ok(Command::Chat {
                 args: args.collect(),
             })
         }

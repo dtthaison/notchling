@@ -1330,6 +1330,13 @@ class InboxItem {
     this.answer,
     this.answeredBy,
     required this.seen,
+    this.blocking,
+    this.waitingSince,
+    this.waiter,
+    this.alertActions,
+    this.note,
+    this.outcome,
+    this.place,
   });
 
   factory InboxItem.fromJson(JsonMap json) => InboxItem(
@@ -1346,6 +1353,13 @@ class InboxItem {
     answer: _maybe(json, 'answer', _asString),
     answeredBy: _maybe(json, 'answeredBy', _asString),
     seen: _need(json, 'seen', _asBool),
+    blocking: _maybe(json, 'blocking', _asBool),
+    waitingSince: _maybe(json, 'waitingSince', _asInt),
+    waiter: _maybe(json, 'waiter', _asString),
+    alertActions: _maybe(json, 'alertActions', (Object? v) => _asList<String>(v, _asString)),
+    note: _maybe(json, 'note', _asString),
+    outcome: _maybe(json, 'outcome', (Object? v) => InboxItemOutcome.fromJson(_asMap(v))),
+    place: _maybe(json, 'place', (Object? v) => InboxItemPlace.fromJson(_asMap(v))),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -1362,6 +1376,13 @@ class InboxItem {
     if (answer != null) 'answer': answer,
     if (answeredBy != null) 'answeredBy': answeredBy,
     'seen': seen,
+    if (blocking != null) 'blocking': blocking,
+    if (waitingSince != null) 'waitingSince': waitingSince,
+    if (waiter != null) 'waiter': waiter,
+    if (alertActions != null) 'alertActions': alertActions,
+    if (note != null) 'note': note,
+    if (outcome != null) 'outcome': outcome!.toJson(),
+    if (place != null) 'place': place!.toJson(),
   };
 
   final String id;
@@ -1391,6 +1412,27 @@ class InboxItem {
   /// mac or phone.
   final String? answeredBy;
   final bool seen;
+
+  /// True while something waits on this item: an agent, a vault request, a cluster step. Live: a Mac does not keep it across a restart.
+  final bool? blocking;
+
+  /// When the wait began, in ms. Live, like blocking.
+  final int? waitingSince;
+
+  /// What waits: cli, ask, vault or cluster. Live, like blocking.
+  final String? waiter;
+
+  /// What a banner, a notch card or a menu may offer, as action names: allow, deny, change, open, reply, dismiss, open_form or cancel. Mac only; actions is what a phone may press.
+  final List<String>? alertActions;
+
+  /// The user's note with the answer, at most 300 characters.
+  final String? note;
+
+  /// How an answered item ended.
+  final InboxItemOutcome? outcome;
+
+  /// Where the item came from, for a person to read.
+  final InboxItemPlace? place;
 }
 
 /// Where the item came from.
@@ -1416,6 +1458,67 @@ class InboxItemSource {
   final String? node;
   final String? session;
   final String? job;
+}
+
+/// How an answered item ended.
+class InboxItemOutcome {
+  const InboxItemOutcome({
+    required this.state,
+    this.reason,
+    required this.atMs,
+  });
+
+  factory InboxItemOutcome.fromJson(JsonMap json) => InboxItemOutcome(
+    state: _need(json, 'state', _asString),
+    reason: _maybe(json, 'reason', _asString),
+    atMs: _need(json, 'atMs', _asInt),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    'state': state,
+    if (reason != null) 'reason': reason,
+    'atMs': atMs,
+  };
+
+  /// applying, applied, failed or withdrawn.
+  final String state;
+
+  /// Why it failed or was withdrawn, at most 300 characters.
+  final String? reason;
+  final int atMs;
+}
+
+/// Where the item came from, for a person to read.
+class InboxItemPlace {
+  const InboxItemPlace({
+    this.machine,
+    this.machineName,
+    this.session,
+    this.sessionName,
+    this.branch,
+  });
+
+  factory InboxItemPlace.fromJson(JsonMap json) => InboxItemPlace(
+    machine: _maybe(json, 'machine', _asString),
+    machineName: _maybe(json, 'machineName', _asString),
+    session: _maybe(json, 'session', _asString),
+    sessionName: _maybe(json, 'sessionName', _asString),
+    branch: _maybe(json, 'branch', _asString),
+  );
+
+  JsonMap toJson() => <String, Object?>{
+    if (machine != null) 'machine': machine,
+    if (machineName != null) 'machineName': machineName,
+    if (session != null) 'session': session,
+    if (sessionName != null) 'sessionName': sessionName,
+    if (branch != null) 'branch': branch,
+  };
+
+  final String? machine;
+  final String? machineName;
+  final String? session;
+  final String? sessionName;
+  final String? branch;
 }
 
 /// First message on a connection from a paired phone.
@@ -2188,6 +2291,7 @@ class InboxAnswerRequest {
     this.op = 'inbox.answer',
     required this.itemId,
     required this.action,
+    this.note,
   });
 
   factory InboxAnswerRequest.fromJson(JsonMap json) => InboxAnswerRequest(
@@ -2195,6 +2299,7 @@ class InboxAnswerRequest {
     op: _need(json, 'op', _asString),
     itemId: _need(json, 'itemId', _asString),
     action: _need(json, 'action', _asString),
+    note: _maybe(json, 'note', _asString),
   );
 
   JsonMap toJson() => <String, Object?>{
@@ -2202,6 +2307,7 @@ class InboxAnswerRequest {
     'op': op,
     'itemId': itemId,
     'action': action,
+    if (note != null) 'note': note,
   };
 
   final Object? id;
@@ -2212,6 +2318,9 @@ class InboxAnswerRequest {
 
   /// An action id the item offers; open is refused.
   final String action;
+
+  /// A note with the answer, at most 300 characters.
+  final String? note;
 }
 
 /// The connection is authenticated.

@@ -43,6 +43,7 @@ pub fn open_item(id: &str, kind: Kind, (title, detail): (String, String), now: i
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 

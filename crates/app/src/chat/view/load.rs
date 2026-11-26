@@ -38,6 +38,7 @@ impl ChatView {
 
     pub(super) fn start_load(&mut self, cx: &mut Context<Self>) {
         self.gate.reloaded(now_ms());
+        self.refresh_past(cx);
         let Some(mut loader) = self.loader.take() else {
             self.load_again = true;
             return;
@@ -56,6 +57,7 @@ impl ChatView {
         loader.more_subagents = std::mem::take(&mut self.more_subagents);
         loader.open_groups = self.open_groups.clone();
         loader.more_under = std::mem::take(&mut self.more_under);
+        loader.past = self.past.sessions();
         loader.subagent_path = self.open_subagent.as_ref().map(|o| o.agent.path.clone());
         loader.subagent_origin = self
             .open_subagent
@@ -78,13 +80,15 @@ impl ChatView {
     pub(super) fn apply(
         &mut self,
         asked: Option<String>,
-        loader: Loader,
+        mut loader: Loader,
         loaded: Loaded,
         cx: &mut Context<Self>,
     ) {
+        let stale = std::mem::take(&mut loader.past);
         self.loader = Some(loader);
         self.now_ms = loaded.now_ms;
-        let mut all = loaded.sessions;
+        let mut all =
+            crate::chat::sidebar_completed::with_past(loaded.sessions, &stale, &self.past);
         self.delegated = loaded.delegated;
         let (selected, starting) = (self.selected.clone(), &self.tools.starting);
         self.new_drafts.retain(|d| {

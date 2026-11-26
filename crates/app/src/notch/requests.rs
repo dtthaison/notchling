@@ -160,6 +160,7 @@ impl HookRequest {
 pub fn describe(input: &Map<String, Value>) -> String {
     for key in [
         "command",
+        "code",
         "file_path",
         "notebook_path",
         "url",
@@ -323,5 +324,25 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found["s1"].id, "new");
         assert!(read_dir(Path::new("/nonexistent/notchling"), 0.0).is_empty());
+    }
+
+    #[test]
+    fn a_repl_permission_shows_its_code_and_keeps_its_description() {
+        let v = json!({
+            "id": "r9", "session_id": "s1", "pid": 42, "created": 10.0,
+            "hook_event_name": "PermissionRequest", "tool_name": "REPL",
+            "tool_input": {"code": "await $`ls`.text()", "description": "List the folder"},
+            "permission_suggestions": [{"type": "addRules"}]
+        });
+        let r = HookRequest::parse(&v).unwrap();
+        assert_eq!(r.kind, RequestKind::Permission);
+        assert_eq!(
+            (
+                r.tool_name.as_str(),
+                r.summary.as_str(),
+                r.description.as_str()
+            ),
+            ("REPL", "await $`ls`.text()", "List the folder")
+        );
     }
 }

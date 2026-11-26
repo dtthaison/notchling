@@ -68,7 +68,8 @@ pub fn build(
             .or_else(|| crate::costs::view::build_render(other, cx))
             .or_else(|| crate::welcome::view::build_render(other, cx))
             .or_else(|| crate::switches::restart_view::build_render(other, cx))
-            .or_else(|| crate::machines::view::build_render(other, cx)),
+            .or_else(|| crate::machines::view::build_render(other, cx))
+            .or_else(|| super::tray_view::build_render(other, appearance, cx)),
     }
 }
 

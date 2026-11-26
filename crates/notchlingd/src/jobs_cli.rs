@@ -11,9 +11,9 @@ const POLL_MS: u64 = 25_000;
 const JOB_POLL: Duration = Duration::from_secs(2);
 const TERMINAL: [&str; 4] = ["done", "failed", "interrupted", "lost"];
 
-pub const DISPATCH_USAGE: &str = "Usage: notchling dispatch <machine> --tool <claude|codex|agy|shell> [--folder <path>] [--model <name>] [--effort <level>] [--text <prompt>] [--command <line>] [--secret <name>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
+pub const DISPATCH_USAGE: &str = "Usage: notchling dispatch <machine> --tool <claude|codex|agy|shell> [--folder <path>] [--model <name>] [--effort <level>] [--text <prompt>] [--command <line>] [--secret <name>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]";
 pub const JOBS_USAGE: &str = "Usage: notchling jobs [--json] [--socket <path>]";
-pub const JOB_USAGE: &str = "Usage: notchling job <id> [--wait] [--timeout <seconds>] [--json] [--socket <path>]\n       notchling job tail|return|stop <id> [--from <offset>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
+pub const JOB_USAGE: &str = "Usage: notchling job <id> [--wait] [--timeout <seconds>] [--json] [--socket <path>]\n       notchling job tail|return|stop <id> [--from <offset>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Scanned {
@@ -62,6 +62,7 @@ pub fn scan(args: &[String], usage: &str, own: &[&str]) -> Result<Scanned, Strin
         match arg.as_str() {
             "--reason" => out.flags.reason = Some(value("--reason")?),
             "--key" => out.flags.key = Some(value("--key")?),
+            "--retry-of" => out.flags.retry_of = Some(value("--retry-of")?),
             "--wait" => out.flags.wait = true,
             "--no-wait" => out.flags.wait = false,
             "--dry-run" => out.flags.dry_run = true,
@@ -97,6 +98,9 @@ pub fn consent_of(scanned: &Scanned) -> Value {
     }
     if let Some(key) = &scanned.flags.key {
         consent.insert("key".into(), json!(key));
+    }
+    if let Some(id) = &scanned.flags.retry_of {
+        consent.insert("retryOf".into(), json!(id));
     }
     Value::Object(consent)
 }

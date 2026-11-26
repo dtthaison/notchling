@@ -690,6 +690,83 @@
   "@consentAllow": {
     "description": "Shown in the Chat screen."
   },
+  "consentAskedAgain": "Asked again after your note: {note}",
+  "@consentAskedAgain": {
+    "description": "Shown on a card the agent asked again after a note. $note is what the user wrote.",
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "consentBannerAllow": "Allow",
+  "@consentBannerAllow": {
+    "description": "Button on a banner: allow what the agent asks."
+  },
+  "consentBannerCancel": "Cancel",
+  "@consentBannerCancel": {
+    "description": "Button on a banner: cancel the request for a secret."
+  },
+  "consentBannerChange": "Change…",
+  "@consentBannerChange": {
+    "description": "Button on a banner: answer the agent with a note instead of allowing or denying."
+  },
+  "consentBannerDeny": "Deny",
+  "@consentBannerDeny": {
+    "description": "Button on a banner: refuse what the agent asks."
+  },
+  "consentBannerDismiss": "Dismiss",
+  "@consentBannerDismiss": {
+    "description": "Button on a banner: dismiss the agent's question without answering."
+  },
+  "consentBannerLater": "Later",
+  "@consentBannerLater": {
+    "description": "Button on the notch's stopped card: stop holding the notch open and answer later."
+  },
+  "consentBannerOpen": "Open",
+  "@consentBannerOpen": {
+    "description": "Button on a banner: open the request in Notchling."
+  },
+  "consentBannerOpenForm": "Open Form",
+  "@consentBannerOpenForm": {
+    "description": "Button on a banner: open the form that asks for a secret."
+  },
+  "consentBannerReply": "Reply…",
+  "@consentBannerReply": {
+    "description": "Button on a banner: reply to the agent's question."
+  },
+  "consentChange": "Change…",
+  "@consentChange": {
+    "description": "Shown in the Inbox: the third answer of a request. It opens a field where the user writes what the agent should change."
+  },
+  "consentChangeCancel": "Cancel",
+  "@consentChangeCancel": {
+    "description": "Button next to Send that closes the field where you write a note for the agent, and sends nothing."
+  },
+  "consentChangePlaceholder": "Say what to change",
+  "@consentChangePlaceholder": {
+    "description": "Placeholder of the field that opens with Change…. The user tells the agent what to do differently."
+  },
+  "consentChangeSend": "Send",
+  "@consentChangeSend": {
+    "description": "Button that sends the note and denies the request, so the agent can ask again with the change."
+  },
+  "consentDecidedAllowed": "Allowed",
+  "@consentDecidedAllowed": {
+    "description": "Result word on a closed row: the request was allowed."
+  },
+  "consentDecidedAllowedAlways": "Always Allowed",
+  "@consentDecidedAllowedAlways": {
+    "description": "Result word on a closed row: the request is always allowed."
+  },
+  "consentDecidedAllowedOnce": "Allowed Once",
+  "@consentDecidedAllowedOnce": {
+    "description": "Result word on a closed row: the request was allowed one time."
+  },
+  "consentDecidedDenied": "Denied",
+  "@consentDecidedDenied": {
+    "description": "Result word on a closed row: the request was refused."
+  },
   "consentDeny": "Deny",
   "@consentDeny": {
     "description": "Shown in the Chat screen."
@@ -702,6 +779,14 @@
   "@consentNotchAllowDetail": {
     "description": "Line under the Allow option of the notch's permission card."
   },
+  "consentNotchAllowOnce": "Allow Once",
+  "@consentNotchAllowOnce": {
+    "description": "Button of a blocking card in the notch for a secret: allow the use this one time."
+  },
+  "consentNotchAllowed": "Allowed",
+  "@consentNotchAllowed": {
+    "description": "Line of the notch for two seconds after the user allowed a blocked task."
+  },
   "consentNotchAlways": "Always allow this",
   "@consentNotchAlways": {
     "description": "Option of the notch's permission card: allow and stop asking for the same thing. The line under it is the next message."
@@ -710,6 +795,18 @@
   "@consentNotchAlwaysDetail": {
     "description": "Line under the Always allow option of the notch's permission card."
   },
+  "consentNotchChange": "Change…",
+  "@consentNotchChange": {
+    "description": "Button of a blocking card in the notch: send the agent a note instead of allowing or denying."
+  },
+  "consentNotchChanged": "Changed",
+  "@consentNotchChanged": {
+    "description": "Line of the notch for two seconds after the user sent the agent a note instead of allowing or denying."
+  },
+  "consentNotchDenied": "Denied",
+  "@consentNotchDenied": {
+    "description": "Line of the notch for two seconds after the user denied a blocked task."
+  },
   "consentNotchDeny": "Deny",
   "@consentNotchDeny": {
     "description": "Option of the notch's permission card: refuse. The line under it is the next message."
@@ -717,6 +814,18 @@
   "consentNotchDenyDetail": "Claude tries something else",
   "@consentNotchDenyDetail": {
     "description": "Line under the Deny option of the notch's permission card."
+  },
+  "consentNotchLater": "Later",
+  "@consentNotchLater": {
+    "description": "Button of a blocking card in the notch: leave the question for later and close the notch."
+  },
+  "consentNotchOpen": "Open",
+  "@consentNotchOpen": {
+    "description": "Button of a blocking card in the notch: open the full card in the Inbox."
+  },
+  "consentNotchOpenForm": "Open Form",
+  "@consentNotchOpenForm": {
+    "description": "Button of a blocking card in the notch that asks for a secret: open the form that takes it."
   },
   "consentNotchPermissionNeeded": "Permission needed",
   "@consentNotchPermissionNeeded": {
@@ -761,6 +870,10 @@
   "@consentStopAnyway": {
     "description": "Shown in the Chat screen."
   },
+  "consentTrayChange": "Change…",
+  "@consentTrayChange": {
+    "description": "Item in a Blocking row's submenu in the menu bar menu: send the agent a note instead of allowing or denying."
+  },
   "inboxAnsweredHere": "You answered: {action}",
   "@inboxAnsweredHere": {
     "description": "Shown in the Inbox. $action is the choice you made, such as Allow.",
@@ -778,6 +891,10 @@
         "type": "String"
       }
     }
+  },
+  "inboxBlocking": "Waiting on You",
+  "@inboxBlocking": {
+    "description": "Title of the section at the top of the Inbox with the items an agent or a step waits on."
   },
   "inboxConfirmContinueBodyUnnamed": "The newer copy on the other machine is kept beside it.",
   "@inboxConfirmContinueBodyUnnamed": {
@@ -835,6 +952,63 @@
   "inboxOpenOnMac": "Open on Mac",
   "@inboxOpenOnMac": {
     "description": "Shown in the Inbox."
+  },
+  "inboxOutcomeApplied": "Applied",
+  "@inboxOutcomeApplied": {
+    "description": "Shown on an answered item once the Mac applied the answer."
+  },
+  "inboxOutcomeApplying": "Applying…",
+  "@inboxOutcomeApplying": {
+    "description": "Shown on an answered item while the Mac applies the answer."
+  },
+  "inboxOutcomeFailed": "Failed",
+  "@inboxOutcomeFailed": {
+    "description": "Shown on an answered item the Mac could not apply, when it gave no reason."
+  },
+  "inboxOutcomeFailedReason": "Failed: {reason}",
+  "@inboxOutcomeFailedReason": {
+    "description": "Shown on an answered item the Mac could not apply. $reason is the Mac's own explanation.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxOutcomeWithdrawn": "Withdrawn",
+  "@inboxOutcomeWithdrawn": {
+    "description": "Shown on an item that was taken back before it was answered."
+  },
+  "inboxOutcomeWithdrawnReason": "Withdrawn: {reason}",
+  "@inboxOutcomeWithdrawnReason": {
+    "description": "Shown on an item that was taken back before it was answered. $reason is the Mac's own explanation.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxSentBack": "Sent back: {note}",
+  "@inboxSentBack": {
+    "description": "Shown on an item that was answered with a note for the agent. $note is what the person wrote.",
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "inboxStoppedMinutes": "{count, plural, one{Stopped {count} minute ago} other{Stopped {count} minutes ago}}",
+  "@inboxStoppedMinutes": {
+    "description": "Shown on an item that waits. $count is how many whole minutes it has waited.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "inboxStoppedNow": "Stopped just now",
+  "@inboxStoppedNow": {
+    "description": "Shown on an item that waits, when it began less than a minute ago."
   },
   "inboxUnsupported": "Notchling on this Mac has no inbox yet.",
   "@inboxUnsupported": {
@@ -1042,6 +1216,10 @@
   "@notificationsChannelNeedsYou": {
     "description": "The name of the Android notification channel for sessions that need an answer. Shown in the system's notification settings."
   },
+  "notificationsChannelWaiting": "Waiting on you",
+  "@notificationsChannelWaiting": {
+    "description": "The name of the Android notification channel for items an agent or a step waits on. Shown in the system's notification settings."
+  },
   "notificationsFinishedBody": "Done",
   "@notificationsFinishedBody": {
     "description": "The text of a notification when a session finished."
@@ -1066,6 +1244,14 @@
   "notificationsSummaryBody": "Something new",
   "@notificationsSummaryBody": {
     "description": "The text of the grouped notification that stands for several new ones."
+  },
+  "notificationsWaitingLastCall": "Last call: about a minute left",
+  "@notificationsWaitingLastCall": {
+    "description": "The text of a notification a minute before an item that waits runs out."
+  },
+  "notificationsWaitingStill": "Still waiting for you",
+  "@notificationsWaitingStill": {
+    "description": "The text of a notification when an agent has waited three minutes for an answer."
   },
   "notificationsWatching": "Watching",
   "@notificationsWatching": {

@@ -157,8 +157,7 @@ pub(super) fn image_shape(path: &str) -> Option<(u32, u32)> {
     let shape = (|| {
         use std::io::Read;
         let mut head = Vec::with_capacity(64 * 1024);
-        std::fs::File::open(path)
-            .ok()?
+        crate::chat::file_panel::open_regular(std::path::Path::new(path))?
             .take(64 * 1024)
             .read_to_end(&mut head)
             .ok()?;
@@ -328,6 +327,37 @@ fn plain_links(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {
         runs.push(run_of(text.len() - at, false));
     }
     linked_text(key, sel, text.to_owned(), runs, links, a)
+}
+
+pub fn colored(
+    key: &str,
+    sel: &Sel,
+    text: &SharedString,
+    parts: &[(usize, Option<crate::chat::code_tokens::Class>)],
+    a: Appearance,
+) -> AnyElement {
+    let runs: Vec<TextRun> = parts
+        .iter()
+        .map(|(len, class)| TextRun {
+            len: *len,
+            font: font(MONO_FONT),
+            color: hsla(super::file_view::ink_of(*class).color(a)),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        })
+        .collect();
+    let styled = StyledText::new(text.clone()).with_runs(runs);
+    let layout = styled.layout().clone();
+    selectable(
+        sel,
+        key.to_owned(),
+        text.to_string(),
+        layout,
+        styled.into_any_element(),
+        a,
+        Vec::new(),
+    )
 }
 
 pub fn plain(key: &str, sel: &Sel, text: &str, a: Appearance) -> AnyElement {

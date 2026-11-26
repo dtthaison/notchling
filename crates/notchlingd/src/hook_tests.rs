@@ -467,3 +467,72 @@ fn an_event_over_the_line_cap_passes_at_once() {
     );
     assert!(d.ops.prompts().list().is_empty());
 }
+
+fn answering_app_seen(socket: &Path, args: Value) -> std::thread::JoinHandle<(Value, Value)> {
+    let mut app = connect(socket, ClientKind::App);
+    app.subscribe(&[topics::PROMPTS]).unwrap();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Ok(Some(e)) = app.next_event(Duration::from_millis(100)) {
+                if e.event == topics::PROMPT_PENDING {
+                    let seen = e.data.clone();
+                    let mut args = args.clone();
+                    args["id"] = e.data["id"].clone();
+                    return (seen, app.call(ops::SESSION_PERMISSION, args).unwrap());
+                }
+            }
+        }
+        panic!("no prompt arrived");
+    })
+}
+
+#[test]
+fn a_repl_permission_reaches_the_app_with_its_code_and_both_answers_return() {
+    let d = daemon(true, true);
+    claim_session(&d);
+    let cli = fixtures().join("cli/claude");
+    for (decision, expected) in [("allow", "out-allow.json"), ("deny", "out-deny.json")] {
+        let app = answering_app_seen(&d.socket, json!({"decision": decision}));
+        let out = decide(
+            &input("repl-permission-request.json"),
+            &options(&d.socket, &cli, 10_000),
+        );
+        assert_eq!(out, Some(fixture(expected)));
+        let (seen, _) = app.join().unwrap();
+        assert_eq!(seen["toolName"], "REPL");
+        assert_eq!(seen["kind"], "permission");
+        assert!(seen["summary"]
+            .as_str()
+            .unwrap()
+            .starts_with("const out = await $`rm -rf build"));
+        assert_eq!(seen["input"]["description"], "Clean the build folder");
+    }
+}
+
+#[test]
+fn a_repl_pre_tool_use_passes_at_once_and_holds_no_prompt() {
+    let d = daemon(true, true);
+    claim_session(&d);
+    let cli = fixtures().join("cli/claude");
+    let started = Instant::now();
+    let out = decide(
+        &input("repl-pre-tool-use.json"),
+        &options(&d.socket, &cli, 10_000),
+    );
+    assert_eq!(out, None);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(d.ops.prompts().list().is_empty());
+}
+
+#[test]
+fn a_repl_permission_passes_at_once_with_no_daemon() {
+    let dir = scratch("repl-none");
+    let started = Instant::now();
+    let out = decide(
+        &input("repl-permission-request.json"),
+        &options(&dir.0.join("missing.sock"), &dir.0, 10_000),
+    );
+    assert_eq!(out, None);
+    assert!(started.elapsed() < Duration::from_millis(200));
+}

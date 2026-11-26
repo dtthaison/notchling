@@ -383,7 +383,7 @@ fn bad_arguments_are_refused_before_anything_is_sent() {
         with("node", json!("nope")),
         with("cwd", json!("relative")),
         with("tool", json!("emacs")),
-        with("text", json!("hello")),
+        with("text", json!("   ")),
         with("command", json!("id")),
         json!({"node": node, "tool": "shell", "cwd": "/srv", "key": "k"}),
         json!({"node": node, "tool": "shell", "cwd": "/srv", "key": "k", "command": "id", "model": "x"}),

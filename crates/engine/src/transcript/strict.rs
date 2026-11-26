@@ -28,6 +28,8 @@ const CLAUDE_LINES: &[&str] = &[
     "agent-color",
     "permission-mode",
     "mode",
+    "repl-mode",
+    "data-flow-records",
     "pr-link",
     "continued-in",
     "worktree-state",

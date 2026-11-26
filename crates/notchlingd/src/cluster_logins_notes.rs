@@ -73,6 +73,7 @@ pub(crate) fn notice(
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 

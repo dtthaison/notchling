@@ -11,6 +11,11 @@ impl Render for ChatView {
         let a = window_appearance(window);
         super::render_map::sync(self.chrome.entity_id(), cx);
         self.take_terminal_focus(window);
+        if let Some(path) = self.source.take_open() {
+            cx.defer_in(window, move |view, window, cx| {
+                view.open_file(path, window, cx)
+            });
+        }
         self.keys.hold(window, cx);
         if let Some(text) = self.slash_preview.clone() {
             if self.selected_session().is_some() && self.tools.editor.read(cx).text() != text {
@@ -185,6 +190,11 @@ impl Render for ChatView {
 
 fn details_column(view: &ChatView, width: f32, a: Appearance, cx: &mut Context<ChatView>) -> Div {
     div()
+        .relative()
+        .group(drop::OPEN_GROUP)
+        .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, w, cx| {
+            this.open_dropped(paths.paths(), w, cx);
+        }))
         .w(px(width))
         .h_full()
         .flex_shrink_0()
@@ -207,4 +217,8 @@ fn details_column(view: &ChatView, width: f32, a: Appearance, cx: &mut Context<C
                 .window_region(a, cx)
                 .part_at("Details Footer", Corner::TopLeading, a, cx),
         )
+        .child(drop::open_hint(
+            view.drop_open_preview && !view.page.is_open(),
+            a,
+        ))
 }

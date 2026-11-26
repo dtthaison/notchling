@@ -240,7 +240,7 @@ fn request_raises_an_item_the_app_opens() {
     );
     assert_eq!(
         item["open"],
-        json!({"consent": event["id"], "vault_request": event["id"]})
+        json!({"consent": event["id"], "kind": "secret_request", "vault_request": event["id"]})
     );
     assert_eq!(
         item["actions"],
@@ -354,7 +354,9 @@ fn inbox_events_follow_the_item() {
     let changed = r.inbox_room.named("inbox.changed");
     assert_eq!(changed.len(), 2);
     assert_eq!(changed[0]["item"]["state"], "open");
+    assert_eq!(changed[0]["item"]["blocking"], true);
     assert_eq!(changed[1]["item"]["state"], "answered");
+    assert!(changed[1]["item"]["blocking"].is_null());
 }
 
 #[test]
@@ -466,4 +468,119 @@ fn a_clock_past_expiry_never_expires_a_wait_still_open() {
     assert_eq!(item["answer"], "allow_once");
     assert_eq!(item["answered_by"], "mac");
     assert_eq!(item["closed_ms"], expires + 60_000);
+}
+
+#[test]
+fn an_approval_names_the_session_and_the_worker_it_comes_from() {
+    let r = rig("inbox-place", None);
+    let grant = ReleaseFor {
+        node_name: "worker".to_string(),
+        job: "j-1".to_string(),
+        command: "make".to_string(),
+        folder: "/w/app".to_string(),
+    };
+    let held =
+        r.s.ops
+            .raise_approval("t-grant", &["gh"], ("make", "/w/app"), Some(&grant), None);
+    let local = r.s.ops.raise_approval(
+        "t-local",
+        &["gh"],
+        ("make", "/w/app"),
+        None,
+        Some("sess-1".to_string()),
+    );
+    let bare =
+        r.s.ops
+            .raise_approval("t-bare", &["gh"], ("make", "/w/app"), None, None);
+    r.inbox.flush();
+    assert_eq!(
+        r.item("vault-approval:t-grant")["place"],
+        json!({"machine_name": "worker"})
+    );
+    assert_eq!(
+        r.item("vault-approval:t-local")["place"],
+        json!({"session": "sess-1"})
+    );
+    assert!(r.item("vault-approval:t-bare").get("place").is_none());
+    drop((held, local, bare));
+}
+
+#[test]
+fn a_waiting_approval_is_blocking_for_the_vault_and_cancelling_clears_it() {
+    let r = rig("inbox-blocking", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    let id = approval_item_id(&event);
+    let item = r.item(&id);
+    assert_eq!(item["blocking"], true);
+    assert_eq!(item["waiter"], "vault");
+    assert_eq!(item["waiting_since"], item["created_ms"]);
+    r.s.switch.set(false);
+    let _ = user.join();
+    let closed = r.closed_item(&id);
+    assert!(closed["blocking"].is_null());
+    assert!(closed["waiter"].is_null());
+    assert!(closed["waiting_since"].is_null());
+}
+
+#[test]
+fn an_answered_approval_keeps_no_live_mark() {
+    let r = rig("inbox-blocking-answered", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    let id = approval_item_id(&event);
+    assert_eq!(r.item(&id)["blocking"], true);
+    r.answer(&id, "deny");
+    let _ = user.join();
+    let closed = r.closed_item(&id);
+    assert!(closed["blocking"].is_null());
+}
+
+#[test]
+fn a_raised_approval_is_blocking_in_its_first_event() {
+    let r = rig("inbox-first-event", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    r.inbox.flush();
+    let first = r.inbox_room.named("inbox.changed");
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0]["item"]["blocking"], true);
+    assert_eq!(first[0]["item"]["waiter"], "vault");
+    r.answer(&approval_item_id(&event), "deny");
+    let _ = user.join();
+}
+
+#[test]
+fn a_finished_approval_leaves_no_presence_behind() {
+    let r = rig("inbox-presence-left", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    let id = approval_item_id(&event);
+    assert!(r.s.ops.presence.present(&id, crate::acting_ops::now_ms()));
+    r.answer(&id, "deny");
+    let _ = user.join();
+    assert!(!r.s.ops.presence.present(&id, crate::acting_ops::now_ms()));
+}
+
+#[test]
+fn a_window_deny_with_a_note_puts_the_note_on_the_item_and_in_the_refusal() {
+    let r = rig("inbox-window-note", None);
+    seed(&r.s, true);
+    let (user, event) = pending_use(&r.s);
+    r.s.ops
+        .call(
+            &app(),
+            ops::VAULT_APPROVAL_ANSWER,
+            &json!({"id": event["id"], "decision": "deny", "note": "use the staging token"}),
+        )
+        .unwrap();
+    let refused = user.join().unwrap().unwrap_err();
+    assert!(
+        refused.message.contains("use the staging token"),
+        "{}",
+        refused.message
+    );
+    let item = r.item(&approval_item_id(&event));
+    assert_eq!(item["state"], "answered");
+    assert_eq!(item["note"], "use the staging token");
 }

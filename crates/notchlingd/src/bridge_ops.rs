@@ -222,6 +222,10 @@ impl BridgeOps {
         let status = self.bridge.set(false);
         self.remember(&status);
     }
+
+    pub fn release(&self) {
+        self.cluster().detach();
+    }
 }
 
 #[cfg(test)]

@@ -187,6 +187,17 @@ impl InboxLink for NetLink {
         action: ActionId,
         by: &str,
     ) -> Result<Value, ApiError> {
+        self.answer_noted(owner, id, action, by, None)
+    }
+
+    fn answer_noted(
+        &self,
+        owner: &NodeId,
+        id: &str,
+        action: ActionId,
+        by: &str,
+        note: Option<&str>,
+    ) -> Result<Value, ApiError> {
         let peer = self.net.peers().into_iter().find(|p| p.id == *owner);
         match peer {
             None => return Err(failed("That machine isn't in the cluster.")),
@@ -198,7 +209,10 @@ impl InboxLink for NetLink {
             }
             Some(_) => {}
         }
-        let args = json!({"id": id, "action": action, "by": by});
+        let mut args = json!({"id": id, "action": action, "by": by});
+        if let Some(note) = note {
+            args["note"] = json!(note);
+        }
         self.net.call(
             owner,
             ops::INBOX_ANSWER,
@@ -206,6 +220,14 @@ impl InboxLink for NetLink {
             OriginTier::App,
             FORWARD_WAIT,
         )
+    }
+
+    fn machine_name(&self, node: &NodeId) -> Option<String> {
+        self.net
+            .peers()
+            .into_iter()
+            .find(|peer| peer.id == *node)
+            .map(|peer| peer.name)
     }
 
     fn home_items(&self) -> Home {

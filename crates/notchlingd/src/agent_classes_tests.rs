@@ -41,7 +41,7 @@ fn rig() -> (Root, Ops) {
     (Root(root), ops)
 }
 
-const READS: [&str; 50] = [
+const READS: [&str; 51] = [
     ops::MACHINES_LIST,
     ops::MACHINES_CHECK,
     ops::MACHINES_PLAN,
@@ -67,6 +67,7 @@ const READS: [&str; 50] = [
     ops::PAGES_FIND,
     ops::SEARCH_QUERY,
     ops::SEARCH_FACETS,
+    ops::SESSIONS_HISTORY,
     ops::EMBED_STATUS,
     ops::AGY_SESSIONS,
     ops::ASK_WAIT,
@@ -94,7 +95,7 @@ const READS: [&str; 50] = [
     COST_REPORT,
 ];
 
-const ACTS: [&str; 35] = [
+const ACTS: [&str; 36] = [
     ops::MACHINES_REQUEST,
     ops::INSTALL_REQUEST,
     ops::COST_REQUEST,
@@ -121,6 +122,7 @@ const ACTS: [&str; 35] = [
     ops::SWITCH_REQUEST,
     ops::SWITCH_OFF,
     ops::SHELLS_STOP,
+    ops::CHAT_OPEN_FILE,
     ops::SESSION_START,
     ops::SESSION_SAY,
     ops::SESSION_HALT,

@@ -92,6 +92,7 @@ pub fn invite_item(joined: &InviteJoin, created_ms: i64) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 

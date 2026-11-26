@@ -281,6 +281,7 @@ pub fn tool_summary(calls: &[ToolCall]) -> String {
             ToolKind::Ask => "asked you".into(),
             ToolKind::Skill => format!("used {}", n(total, "skill", "skills")),
             ToolKind::Browser => "used Chrome".into(),
+            ToolKind::Repl => format!("ran {}", n(total, "script", "scripts")),
             ToolKind::Other => format!("used {}", n(total, "tool", "tools")),
         })
         .collect();

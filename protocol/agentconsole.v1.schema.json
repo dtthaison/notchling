@@ -1117,6 +1117,74 @@
         },
         "seen": {
           "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean",
+          "description": "True while something waits on this item: an agent, a vault request, a cluster step. Live: a Mac does not keep it across a restart."
+        },
+        "waitingSince": {
+          "type": "integer",
+          "description": "When the wait began, in ms. Live, like blocking."
+        },
+        "waiter": {
+          "type": "string",
+          "description": "What waits: cli, ask, vault or cluster. Live, like blocking."
+        },
+        "alertActions": {
+          "type": "array",
+          "description": "What a banner, a notch card or a menu may offer, as action names: allow, deny, change, open, reply, dismiss, open_form or cancel. Mac only; actions is what a phone may press.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string",
+          "description": "The user's note with the answer, at most 300 characters."
+        },
+        "outcome": {
+          "type": "object",
+          "description": "How an answered item ended.",
+          "properties": {
+            "state": {
+              "type": "string",
+              "description": "applying, applied, failed or withdrawn."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why it failed or was withdrawn, at most 300 characters."
+            },
+            "atMs": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "atMs"
+          ],
+          "additionalProperties": true
+        },
+        "place": {
+          "type": "object",
+          "description": "Where the item came from, for a person to read.",
+          "properties": {
+            "machine": {
+              "type": "string"
+            },
+            "machineName": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            },
+            "sessionName": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
         }
       },
       "required": [
@@ -1763,6 +1831,10 @@
         "action": {
           "type": "string",
           "description": "An action id the item offers; open is refused."
+        },
+        "note": {
+          "type": "string",
+          "description": "A note with the answer, at most 300 characters."
         }
       },
       "required": [

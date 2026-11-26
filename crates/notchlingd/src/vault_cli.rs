@@ -14,7 +14,7 @@ const USE_TIMEOUT: Duration = Duration::from_secs(300 + 15);
 const CALL_WAIT: Duration = Duration::from_secs(15);
 const POLL_MS: u64 = 25_000;
 
-pub const REQUEST_USAGE: &str = "Usage: notchling secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--how <steps to get or renew it>] [--expires YYYY-MM-DD] [--reason <why now>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run]";
+pub const REQUEST_USAGE: &str = "Usage: notchling secret-request <name> [--kind token|login] [--url <url>] [--note <what for>] [--how <steps to get or renew it>] [--expires YYYY-MM-DD] [--reason <why now>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run]";
 
 pub fn usage() -> String {
     format!(
@@ -120,6 +120,12 @@ pub fn parse_request_flags(
             "--key" => {
                 flags.key =
                     Some(value.ok_or_else(|| format!("--key needs a value.\n{REQUEST_USAGE}"))?);
+                continue;
+            }
+            "--retry-of" => {
+                flags.retry_of = Some(
+                    value.ok_or_else(|| format!("--retry-of needs a value.\n{REQUEST_USAGE}"))?,
+                );
                 continue;
             }
             _ => {}
@@ -382,6 +388,9 @@ pub fn secret_request(args: &[String]) -> i32 {
     if let Some(key) = &flags.key {
         consent.insert("key".into(), json!(key));
     }
+    if let Some(id) = &flags.retry_of {
+        consent.insert("retryOf".into(), json!(id));
+    }
     body["consent"] = Value::Object(consent);
     if flags.dry_run {
         body["dryRun"] = json!(true);
@@ -454,8 +463,14 @@ pub fn secret_request(args: &[String]) -> i32 {
 pub fn ended(request: &Value, asked: &str) -> Failure {
     let mut failure = crate::consent_cli::failure_of(request, ops::VAULT_REQUEST);
     if state_of(request) == "denied" {
-        let message =
-            format!("The user declined to save {asked}. Don't ask again until they tell you why.");
+        let message = match request.get("note").and_then(Value::as_str) {
+            Some(note) if !note.is_empty() => {
+                format!("The user declined to save {asked} and asked for a change: {note}")
+            }
+            _ => format!(
+                "The user declined to save {asked}. Don't ask again until they tell you why."
+            ),
+        };
         failure.human = Some(format!("{} ({message})", crate::consent_cli::line(request)));
         failure.message = message;
     }

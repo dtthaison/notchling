@@ -116,6 +116,16 @@ pub const BASE: &[Row] = &[
         "notchling-sessions",
     ),
     row(
+        "sessions history",
+        "notchling sessions history [--limit <n>] [--before <cursor>] [--json] [--socket <path>]",
+        "the sessions Notchling no longer lists, newest first: the ones that ended in the last day, then older Claude Code sessions of this session's organization from the last 14 days (title masked); --before takes the next cursor of an earlier reply",
+        &[read("sessions.history")],
+        "none",
+        true,
+        READ_EXITS,
+        "notchling-sessions",
+    ),
+    row(
         "providers",
         "notchling providers [--json]",
         "what Notchling can do for each tool: native, fallback, not applicable, gap",
@@ -237,7 +247,7 @@ pub const BASE: &[Row] = &[
     ),
     idempotent(waits(row(
         "secret-request",
-        "notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling secret-request <name> [--kind token|login --url --note --how --expires YYYY-MM-DD] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "ask the user to add or update a secret, named <service or host>-<env>-<what> in lowercase with dashes (emqx-dashboard-dev-admin), never a generic word like dashboards, api or login; the request is saved even with the Vault off, and waits for the user",
         &[acts("vault.request")],
         "request",
@@ -267,8 +277,8 @@ pub const BASE: &[Row] = &[
     ),
     idempotent(waits(row(
         "settings set",
-        "notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
-        "change a setting; an Ask key waits for the user's yes in the Inbox",
+        "notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
+        "change a setting (attentionLevel takes calm, normal or urgent, free); an Ask key waits for the user's yes in the Inbox",
         &[acts("settings.set"), acts("settings.asked")],
         "by_key_class",
         true,
@@ -277,7 +287,7 @@ pub const BASE: &[Row] = &[
     ))),
     idempotent(waits(row(
         "switch on",
-        "notchling switch on <acting|bridge|accounts|vault|install|cluster|machines> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling switch on <acting|bridge|accounts|vault|install|cluster|machines> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "ask the user to turn a switch on for this run; only the Mac's app turns it on, when the user allows",
         &[acts("switch.request")],
         "request",
@@ -295,96 +305,9 @@ pub const BASE: &[Row] = &[
         READ_EXITS,
         "notchling",
     ),
-    row(
-        "consent",
-        "notchling consent <id> [--wait] [--timeout <seconds>] [--json]",
-        "one request for the user's yes: its state, and its result once it ends",
-        &[read("consent.get")],
-        "none",
-        true,
-        &[0, 1, 2, 3, 4, 5, 6, 124],
-        "notchling",
-    ),
-    row(
-        "consents",
-        "notchling consents [--json]",
-        "this session's requests for the user's yes, newest first",
-        &[read("consent.mine")],
-        "none",
-        true,
-        READ_EXITS,
-        "notchling",
-    ),
-    row(
-        "watch",
-        "notchling watch [--topic <topic>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]",
-        "follow events as one JSON line each: mine.consents, mine.asks, settings.changed, settings.switch",
-        &[read("events.subscribe")],
-        "none",
-        true,
-        &[0, 1, 2, 3, 4, 124],
-        "notchling",
-    ),
-    row(
-        "outbox",
-        "notchling outbox [--json]",
-        "this session's queued messages in full, other sessions as counts",
-        &[read("outbox.mine")],
-        "none",
-        true,
-        READ_EXITS,
-        "notchling-sessions",
-    ),
-    row(
-        "receipts",
-        "notchling receipts [--json]",
-        "delivery receipts of this session's messages, without their text",
-        &[],
-        "none",
-        true,
-        READ_EXITS,
-        "notchling-sessions",
-    ),
-    row(
-        "activity",
-        "notchling activity [--kind <event>]... [--since <ms>] [--limit <n>] [--json]",
-        "this session's own events",
-        &[read("activity.mine")],
-        "none",
-        true,
-        READ_EXITS,
-        "notchling",
-    ),
-    row(
-        "prompts",
-        "notchling prompts [--json]",
-        "this session's pending prompts, never an answer",
-        &[read("prompts.mine")],
-        "none",
-        true,
-        READ_EXITS,
-        "notchling-sessions",
-    ),
-    row(
-        "consent cancel",
-        "notchling consent cancel <id> [--json]",
-        "withdraw a request this session opened",
-        &[acts("consent.cancel")],
-        "none",
-        true,
-        &[0, 1, 2, 3, 4],
-        "notchling",
-    ),
-    row(
-        "inbox",
-        "notchling inbox [--json] [--socket <path>]",
-        "this session's own items in full; others of its organization by kind, state and title; other organizations as a count",
-        &[read("inbox.mine")],
-        "none",
-        true,
-        READ_EXITS,
-        "notchling",
-    ),
+];
+
+const BASE_REST: &[Row] = &[
     row(
         "shells",
         "notchling shells [--stuck] [--json] [--socket <path>]",
@@ -476,6 +399,16 @@ pub const BASE: &[Row] = &[
         "notchling",
     ),
     row(
+        "chat open-file",
+        "notchling chat open-file <path> [--session <id>] [--json] [--socket <path>]",
+        "open a regular file on this Mac in the file panel of Notchling's Chat window (code with line numbers, JSON pretty-printed, JSONL as one row per line, images, Markdown, text); --session is accepted, but the file opens in the window's one file panel, whichever session is selected; a pipe, device or folder is refused and another machine can't ask for it",
+        &[acts("chat.open_file")],
+        "none",
+        true,
+        READ_EXITS,
+        "notchling",
+    ),
+    row(
         "shells stop",
         "notchling shells stop <id> [--json] [--socket <path>]",
         "end the processes writing one of this session's background shells (SIGTERM, then SIGKILL after 3 s)",
@@ -497,7 +430,7 @@ pub const BASE: &[Row] = &[
     ),
     waits(row(
         "session new",
-        "notchling session new <folder> [--model <name>] [--message <text>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session new <folder> [--model <name>] [--message <text>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "start a Claude Code session in a folder; the user says yes on a card, and the session becomes yours",
         &[with_switch(acts("session.start"), "acting")],
         "request",
@@ -507,7 +440,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session reply",
-        "notchling session reply <id> <text> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session reply <id> <text> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "send a message to a session; free to one you started (30 an hour), a card for any other",
         &[with_switch(acts("session.say"), "acting")],
         "own_free",
@@ -517,7 +450,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session stop",
-        "notchling session stop|interrupt <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session stop|interrupt <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "stop a session, or interrupt its turn; free for yourself and sessions you started, a card for any other",
         &[with_switch(acts("session.halt"), "acting")],
         "own_free",
@@ -527,7 +460,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session remove",
-        "notchling session remove <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session remove <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "remove a stopped session you started; a card for any other",
         &[with_switch(acts("session.discard"), "acting")],
         "own_free",
@@ -537,7 +470,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session answer",
-        "notchling session answer <id> --answers <json> [--question <json>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session answer <id> --answers <json> [--question <json>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "answer the question a session is asking; the user says yes on a card that shows the question and the answers",
         &[with_switch(acts("session.choose"), "acting")],
         "request",
@@ -547,7 +480,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session command",
-        "notchling session command <id> <command> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session command <id> <command> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "run a slash command in a Claude Code session; the user says yes on a card, and a command that loosens permissions is refused",
         &[with_switch(acts("session.run"), "acting")],
         "request",
@@ -557,7 +490,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session dialog",
-        "notchling session dialog <id> --pick <1-9>|--dismiss [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session dialog <id> --pick <1-9>|--dismiss [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "pick an option in the dialog a session shows, or dismiss it; the user says yes on a card that shows the dialog",
         &[with_switch(acts("session.pick"), "acting")],
         "request",
@@ -567,7 +500,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session chrome",
-        "notchling session chrome <id> on|off [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session chrome <id> on|off [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "turn Chrome on or off for a Claude Code session; the user says yes on a card",
         &[with_switch(acts("session.browse"), "acting")],
         "request",
@@ -577,7 +510,7 @@ pub const BASE: &[Row] = &[
     )),
     waits(row(
         "session options",
-        "notchling session options <id> <option> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]",
+        "notchling session options <id> <option> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "set an option of an Antigravity session; the user says yes on a card",
         &[with_switch(acts("session.tune"), "acting")],
         "request",
@@ -868,6 +801,8 @@ pub const INTERNAL: &[Internal] = &[
 
 pub fn rows() -> impl Iterator<Item = &'static Row> {
     BASE.iter()
+        .chain(crate::commands_inbox::ROWS.iter())
+        .chain(BASE_REST.iter())
         .chain(crate::commands_jobs::ROWS.iter())
         .chain(crate::commands_cluster::ROWS.iter())
         .chain(crate::commands_accounts::ROWS.iter())

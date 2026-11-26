@@ -1,4 +1,3 @@
-use super::super::system::Detached;
 use super::*;
 use crate::session_source::Backoff;
 use crate::testutil::Scratch;
@@ -6,7 +5,6 @@ use notchling_local_api::{
     Allowlist, ApiError, Caller, Handler, Limits, OpSpec, Server, ServerConfig, ServerHandle, Tier,
     SOCKET_NAME,
 };
-use notchling_platform::notify::{Notifier, RecordingNotifier};
 use std::path::Path;
 use std::thread::JoinHandle;
 
@@ -105,10 +103,6 @@ impl Transport for Direct {
 }
 
 fn start(socket: &Path) -> InboxFeed {
-    start_with(socket, Arc::new(RecordingNotifier::new()))
-}
-
-fn start_with(socket: &Path, notifier: Arc<dyn Notifier>) -> InboxFeed {
     let config = FeedConfig {
         socket: socket.to_path_buf(),
         version: "test".into(),
@@ -123,7 +117,6 @@ fn start_with(socket: &Path, notifier: Arc<dyn Notifier>) -> InboxFeed {
         Arc::new(Direct {
             socket: socket.to_path_buf(),
         }),
-        notifier,
     )
 }
 
@@ -214,54 +207,6 @@ fn a_lost_connection_drops_what_the_daemon_said_and_a_new_one_seeds_again() {
     let _ = again.1.join();
 }
 
-fn wait_for_banners(notifier: &RecordingNotifier, count: usize) {
-    wait_until("the banners", || notifier.sent().len() >= count);
-}
-
-#[test]
-fn only_an_event_notifies_never_a_seed_or_a_reseed() {
-    let scratch = Scratch::new("inbox-banner");
-    let socket = scratch.path().join(SOCKET_NAME);
-    let calls: Calls = Arc::default();
-    let daemon = serve(&socket, &calls);
-    let notifier = Arc::new(RecordingNotifier::new());
-    let feed = start_with(&socket, Arc::new(Detached::new(notifier.clone())));
-    wait_until("the seed", || ids(&feed) == ["early"]);
-    std::thread::sleep(Duration::from_millis(100));
-    assert!(notifier.sent().is_empty());
-
-    daemon.0.publish(
-        "inbox",
-        "inbox.changed",
-        &json!({"item": item("late", 3_000, "open")}),
-    );
-    wait_for_banners(&notifier, 1);
-    assert_eq!(notifier.sent()[0].title, "Title late");
-
-    daemon.0.shutdown();
-    let _ = daemon.1.join();
-    wait_until("the loss", || ids(&feed).is_empty());
-    let _ = std::fs::remove_file(&socket);
-    let again = serve(&socket, &calls);
-    wait_until("the reseed", || ids(&feed) == ["early"]);
-    again.0.publish(
-        "inbox",
-        "inbox.changed",
-        &json!({"item": item("late", 3_000, "open")}),
-    );
-    again.0.publish(
-        "inbox",
-        "inbox.changed",
-        &json!({"item": item("later", 4_000, "open")}),
-    );
-    wait_for_banners(&notifier, 2);
-    std::thread::sleep(Duration::from_millis(100));
-    let titles: Vec<String> = notifier.sent().into_iter().map(|n| n.title).collect();
-    assert_eq!(titles, ["Title late", "Title later"]);
-    again.0.shutdown();
-    let _ = again.1.join();
-}
-
 #[test]
 fn it_follows_the_consent_requests_and_answers_them_by_the_consent_ops() {
     let scratch = Scratch::new("inbox-cns");
@@ -290,9 +235,10 @@ fn it_follows_the_consent_requests_and_answers_them_by_the_consent_ops() {
 
     assert_eq!(feed.consent_answer("c1", true), Ok(true));
     assert_eq!(feed.consent_answer("c1", false), Ok(false));
+    assert_eq!(feed.consent_deny_with("c1", "rename it"), Ok(false));
     assert_eq!(feed.consent_opened("c1"), Ok(()));
     let sent: Vec<(String, Value)> = calls.lock().unwrap().clone();
-    let last: Vec<_> = sent.iter().rev().take(3).rev().cloned().collect();
+    let last: Vec<_> = sent.iter().rev().take(4).rev().cloned().collect();
     assert_eq!(
         last,
         [
@@ -303,6 +249,10 @@ fn it_follows_the_consent_requests_and_answers_them_by_the_consent_ops() {
             (
                 "consent.answer".to_owned(),
                 json!({"consentId": "c1", "decision": "deny"})
+            ),
+            (
+                "consent.answer".to_owned(),
+                json!({"consentId": "c1", "decision": "deny", "note": "rename it"})
             ),
             ("consent.opened".to_owned(), json!({"consentId": "c1"})),
         ]

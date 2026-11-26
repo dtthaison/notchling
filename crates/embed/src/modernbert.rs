@@ -1,4 +1,6 @@
-use candle_core::{DType, Device, Result, Tensor, D};
+use candle_core::{
+    CpuStorage, CustomOp1, CustomOp2, DType, Device, Layout, Result, Shape, Tensor, D,
+};
 use candle_nn::{
     embedding, layer_norm_no_bias, ops::softmax_last_dim, Embedding, LayerNorm, Module, VarBuilder,
 };
@@ -123,6 +125,21 @@ impl Rotary {
         let k = candle_nn::rotary_emb::rope(&k.contiguous()?, &self.cos, &self.sin)?;
         Ok((q, k))
     }
+
+    fn apply_first(&self, q: &Tensor, k: &Tensor) -> Result<(Tensor, Tensor)> {
+        let cos = self.cos.narrow(0, 0, 1)?;
+        let sin = self.sin.narrow(0, 0, 1)?;
+        let q = candle_nn::rotary_emb::rope(&q.narrow(2, 0, 1)?.contiguous()?, &cos, &sin)?;
+        let k = candle_nn::rotary_emb::rope(&k.contiguous()?, &self.cos, &self.sin)?;
+        Ok((q, k))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Path {
+    Full,
+    Fast,
+    First,
 }
 
 #[derive(Clone)]
@@ -149,7 +166,7 @@ impl Attention {
         })
     }
 
-    fn forward(&self, xs: &Tensor, mask: &Tensor) -> Result<Tensor> {
+    fn forward(&self, xs: &Tensor, mask: Option<&Tensor>, path: Path) -> Result<Tensor> {
         let (b, seq, d) = xs.dims3()?;
         let qkv = xs
             .apply(&self.qkv)?
@@ -158,12 +175,32 @@ impl Attention {
         let q = qkv.get(0)?;
         let k = qkv.get(1)?;
         let v = qkv.get(2)?;
-        let (q, k) = self.rotary.apply(&q, &k)?;
+        let (q, k) = if path == Path::First {
+            self.rotary.apply_first(&q, &k)?
+        } else {
+            self.rotary.apply(&q, &k)?
+        };
+        let rows = q.dim(2)?;
         let q = (q * (self.head_size as f64).powf(-0.5))?;
-        let att = matmul(&q, &k.transpose(D::Minus2, D::Minus1)?.contiguous()?)?;
-        let att = softmax_last_dim(&att.broadcast_add(mask)?)?;
+        let kt = k.transpose(D::Minus2, D::Minus1)?;
+        let kt = if path == Path::Full {
+            kt.contiguous()?
+        } else {
+            kt
+        };
+        let att = matmul(&q, &kt)?;
+        let mask = match mask {
+            Some(mask) if mask.dim(2)? > rows => Some(mask.narrow(2, 0, rows)?),
+            Some(mask) => Some(mask.clone()),
+            None => None,
+        };
+        let att = match (path, mask) {
+            (Path::Full, Some(mask)) => softmax_last_dim(&att.broadcast_add(&mask)?)?,
+            (Path::Full, None) => softmax_last_dim(&att)?,
+            (_, mask) => masked_softmax(&att, mask.as_ref())?,
+        };
         let xs = matmul(&att, &v.contiguous()?)?;
-        xs.transpose(1, 2)?.reshape((b, seq, d))?.apply(&self.proj)
+        xs.transpose(1, 2)?.reshape((b, rows, d))?.apply(&self.proj)
     }
 }
 
@@ -240,15 +277,152 @@ impl Layer {
         })
     }
 
-    fn forward(&self, xs: &Tensor, global: &Tensor, local: &Tensor) -> Result<Tensor> {
+    fn forward(
+        &self,
+        xs: &Tensor,
+        global: Option<&Tensor>,
+        local: Option<&Tensor>,
+        path: Path,
+    ) -> Result<Tensor> {
         let normed = match &self.attn_norm {
             Some(norm) => xs.apply(norm)?,
             None => xs.clone(),
         };
         let mask = if self.local { local } else { global };
-        let xs = (self.attn.forward(&normed, mask)? + xs)?;
+        let rest = if path == Path::First {
+            xs.narrow(1, 0, 1)?
+        } else {
+            xs.clone()
+        };
+        let xs = (self.attn.forward(&normed, mask, path)? + rest)?;
         let mlp = xs.apply(&self.mlp_norm)?.apply(&self.mlp)?;
         xs + mlp
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "Accelerate", kind = "framework")]
+extern "C" {
+    fn vvexpf(dst: *mut f32, src: *const f32, len: *const i32);
+}
+
+fn exp_in_place(values: &mut [f32]) {
+    #[cfg(target_os = "macos")]
+    for chunk in values.chunks_mut(1 << 24) {
+        let len = chunk.len() as i32;
+        let ptr = chunk.as_mut_ptr();
+        unsafe { vvexpf(ptr, ptr, &len) };
+    }
+    #[cfg(not(target_os = "macos"))]
+    values.iter_mut().for_each(|v| *v = v.exp());
+}
+
+struct Mask<'a> {
+    values: &'a [f32],
+    rows_per_text: usize,
+    rows: usize,
+    heads: usize,
+}
+
+fn softmax_rows(src: &[f32], cols: usize, mask: Option<Mask>) -> Vec<f32> {
+    let mut dst = src.to_vec();
+    if cols == 0 {
+        return dst;
+    }
+    for (i, row) in dst.chunks_mut(cols).enumerate() {
+        if let Some(m) = &mask {
+            let r = if m.rows_per_text == 1 { 0 } else { i % m.rows };
+            let start = ((i / (m.rows * m.heads)) * m.rows_per_text + r) * cols;
+            row.iter_mut()
+                .zip(&m.values[start..start + cols])
+                .for_each(|(x, v)| *x += v);
+        }
+        let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        row.iter_mut().for_each(|x| *x -= max);
+    }
+    exp_in_place(&mut dst);
+    for row in dst.chunks_mut(cols) {
+        let scale = 1.0 / row.iter().sum::<f32>();
+        row.iter_mut().for_each(|x| *x *= scale);
+    }
+    dst
+}
+
+fn f32_slice<'a>(storage: &'a CpuStorage, layout: &Layout) -> Result<&'a [f32]> {
+    let CpuStorage::F32(values) = storage else {
+        candle_core::bail!("softmax takes f32")
+    };
+    let Some((start, end)) = layout.contiguous_offsets() else {
+        candle_core::bail!("softmax takes a contiguous tensor")
+    };
+    Ok(&values[start..end])
+}
+
+struct Softmax;
+
+impl CustomOp1 for Softmax {
+    fn name(&self) -> &'static str {
+        "notchling-softmax"
+    }
+
+    fn cpu_fwd(&self, storage: &CpuStorage, layout: &Layout) -> Result<(CpuStorage, Shape)> {
+        let src = f32_slice(storage, layout)?;
+        let cols = layout.dims().last().copied().unwrap_or(1).max(1);
+        let out = softmax_rows(src, cols, None);
+        Ok((CpuStorage::F32(out), layout.shape().clone()))
+    }
+}
+
+struct MaskedSoftmax;
+
+impl CustomOp2 for MaskedSoftmax {
+    fn name(&self) -> &'static str {
+        "notchling-masked-softmax"
+    }
+
+    fn cpu_fwd(
+        &self,
+        s1: &CpuStorage,
+        l1: &Layout,
+        s2: &CpuStorage,
+        l2: &Layout,
+    ) -> Result<(CpuStorage, Shape)> {
+        let src = f32_slice(s1, l1)?;
+        let values = f32_slice(s2, l2)?;
+        let &[b, heads, rows, cols] = l1.dims() else {
+            candle_core::bail!("softmax takes scores of rank 4")
+        };
+        let &[mb, 1, rows_per_text, mcols] = l2.dims() else {
+            candle_core::bail!("softmax takes a mask of shape (b, 1, r, c)")
+        };
+        if mb != b || mcols != cols || (rows_per_text != 1 && rows_per_text != rows) {
+            candle_core::bail!("mask {:?} does not fit scores {:?}", l2.dims(), l1.dims())
+        }
+        let mask = Mask {
+            values,
+            rows_per_text,
+            rows,
+            heads,
+        };
+        let out = softmax_rows(src, cols, Some(mask));
+        Ok((CpuStorage::F32(out), l1.shape().clone()))
+    }
+}
+
+pub(crate) fn masked_softmax(att: &Tensor, mask: Option<&Tensor>) -> Result<Tensor> {
+    if att.dtype() != DType::F32 || !att.device().is_cpu() {
+        let att = match mask {
+            Some(mask) => att.broadcast_add(mask)?,
+            None => att.clone(),
+        };
+        return softmax_last_dim(&att);
+    }
+    let att = att.contiguous()?;
+    match mask {
+        Some(mask) => {
+            att.apply_op2_no_bwd(&mask.to_dtype(DType::F32)?.contiguous()?, &MaskedSoftmax)
+        }
+        None => att.apply_op1_no_bwd(&Softmax),
     }
 }
 
@@ -369,8 +543,40 @@ impl ModernBert {
         let (global, local) = attention_masks(mask, self.window, self.dtype)?;
         let mut xs = embedded.to_dtype(self.dtype)?.apply(&self.norm)?;
         for layer in &self.layers {
-            xs = layer.forward(&xs, &global, &local)?;
+            xs = layer.forward(&xs, Some(&global), Some(&local), Path::Full)?;
         }
         xs.apply(&self.final_norm)
+    }
+
+    pub fn forward_first(&self, embedded: &Tensor, mask: &Tensor) -> Result<Tensor> {
+        let (b, seq) = mask.dims2()?;
+        let (eb, eseq, _) = embedded.dims3()?;
+        if (b, seq) != (eb, eseq) {
+            candle_core::bail!("mask is {b} by {seq}, the embedded texts are {eb} by {eseq}")
+        }
+        let padded = mask
+            .to_dtype(DType::F32)?
+            .flatten_all()?
+            .to_vec1::<f32>()?
+            .iter()
+            .any(|&m| m <= 0.0);
+        let (global, local) = match (padded, seq > self.window + 1) {
+            (false, false) => (None, None),
+            (false, true) => (
+                None,
+                Some(attention_masks(mask, self.window, self.dtype)?.1),
+            ),
+            (true, _) => {
+                let (global, local) = attention_masks(mask, self.window, self.dtype)?;
+                (Some(global), Some(local))
+            }
+        };
+        let mut xs = embedded.to_dtype(self.dtype)?.apply(&self.norm)?;
+        let last = self.layers.len().saturating_sub(1);
+        for (i, layer) in self.layers.iter().enumerate() {
+            let path = if i == last { Path::First } else { Path::Fast };
+            xs = layer.forward(&xs, global.as_ref(), local.as_ref(), path)?;
+        }
+        xs.apply(&self.final_norm)?.squeeze(1)
     }
 }

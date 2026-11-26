@@ -21,16 +21,38 @@ impl AwakeMode {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlockingRow {
+    pub id: String,
+    pub title: String,
+    pub who: String,
+    pub waited: String,
+    pub allow_from_menu: bool,
+    pub deny_from_menu: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuState {
     pub account: Option<String>,
     pub awake: AwakeMode,
     pub keep_display_on: bool,
     pub holding: bool,
     pub update: Option<String>,
+    pub blocking: Vec<BlockingRow>,
+    pub waiting_count: usize,
+    pub working: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockAct {
+    Allow,
+    Deny,
+    Change,
+    OpenInbox,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    Blocking(BlockAct, String),
     Accounts,
     OpenChat,
     SetAwake(AwakeMode),
@@ -68,6 +90,36 @@ fn action(title: &str, command: Command, key: Option<char>, checked: bool) -> En
     }
 }
 
+fn blocking_entries(rows: &[BlockingRow]) -> Vec<Entry> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut entries = vec![Entry::Header(t::tray::blocking_header(rows.len()))];
+    for row in rows {
+        let title = if row.who.is_empty() {
+            t::tray::blocking_row_alone(&row.title, &row.waited)
+        } else {
+            t::tray::blocking_row(&row.title, &row.who, &row.waited)
+        };
+        let act = |title: &str, act: BlockAct| {
+            action(title, Command::Blocking(act, row.id.clone()), None, false)
+        };
+        let mut items = Vec::new();
+        if row.allow_from_menu {
+            items.push(act(t::consent::allow(), BlockAct::Allow));
+        }
+        if row.deny_from_menu {
+            items.push(act(t::consent::deny(), BlockAct::Deny));
+        }
+        items.push(act(t::consent::tray_change(), BlockAct::Change));
+        items.push(Entry::Separator);
+        items.push(act(t::tray::open_in_inbox(), BlockAct::OpenInbox));
+        entries.push(Entry::Submenu { title, items });
+    }
+    entries.push(Entry::Separator);
+    entries
+}
+
 pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
     let account = match &state.account {
         Some(email) => action(email, Command::Accounts, None, false),
@@ -91,7 +143,8 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
         None,
         state.keep_display_on,
     ));
-    let mut entries = vec![
+    let mut entries = blocking_entries(&state.blocking);
+    entries.extend([
         Entry::Header("Claude Code".to_owned()),
         account,
         Entry::Separator,
@@ -110,7 +163,7 @@ pub fn tray_menu(state: &MenuState) -> Vec<Entry> {
         },
         Entry::Separator,
         action("Quit Notchling", Command::Quit, Some('q'), false),
-    ];
+    ]);
     if let Some(version) = &state.update {
         entries.insert(
             entries.len() - 2,
@@ -136,6 +189,72 @@ pub fn tray_glyph(state: &MenuState) -> TrayGlyph {
         TrayGlyph::Filled
     } else {
         TrayGlyph::Outline
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dots {
+    Idle,
+    Working,
+    Waiting,
+    Blocked,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TrayLook {
+    pub glyph: TrayGlyph,
+    pub dots: Dots,
+    pub pulse: bool,
+    pub count: usize,
+}
+
+pub fn tray_look(state: &MenuState, reduce_motion: bool) -> TrayLook {
+    let (dots, count) = if !state.blocking.is_empty() {
+        (Dots::Blocked, state.blocking.len())
+    } else if state.waiting_count > 0 {
+        (Dots::Waiting, state.waiting_count)
+    } else if state.working {
+        (Dots::Working, 0)
+    } else {
+        (Dots::Idle, 0)
+    };
+    TrayLook {
+        glyph: tray_glyph(state),
+        dots,
+        pulse: dots == Dots::Blocked && !reduce_motion,
+        count,
+    }
+}
+
+pub fn pulse_due(before: Option<&TrayLook>, now: &TrayLook) -> bool {
+    now.pulse && before.is_none_or(|b| b.dots != Dots::Blocked || now.count > b.count)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PulseAction {
+    Start,
+    Keep,
+    Stop,
+}
+
+pub fn pulse_action(running: bool, before: Option<&TrayLook>, now: &TrayLook) -> PulseAction {
+    if !now.pulse || now.dots != Dots::Blocked {
+        PulseAction::Stop
+    } else if pulse_due(before, now) {
+        PulseAction::Start
+    } else if running {
+        PulseAction::Keep
+    } else {
+        PulseAction::Stop
+    }
+}
+
+pub fn a11y(look: &TrayLook) -> String {
+    match look.dots {
+        Dots::Blocked => t::tray::a11y_blocked(&look.count.to_string()),
+        Dots::Waiting => t::tray::a11y_waiting(look.count),
+        Dots::Working => t::tray::a11y_working().to_owned(),
+        Dots::Idle => t::tray::a11y_idle().to_owned(),
     }
 }
 
@@ -257,3 +376,7 @@ mod tests {
         assert_eq!(tray_glyph(&held), TrayGlyph::Filled);
     }
 }
+
+#[cfg(test)]
+#[path = "menu_tray_tests.rs"]
+mod tray_tests;

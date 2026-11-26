@@ -550,6 +550,7 @@ pub fn inbox_item(id: &str, kind: Kind) -> Item {
         open: None,
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 

@@ -1,6 +1,8 @@
 use super::*;
 use crate::notch::layout::{NotchState, Size, MAX_LIST};
+use notchling_engine::sessions::AgentTarget;
 use notchling_engine::transcript::snapshot::{ChatLine, LineKind};
+use notchling_kit::Status;
 
 fn agent(id: &str, group: AgentGroup) -> Agent {
     Agent {
@@ -500,4 +502,57 @@ fn message_hint_is_drawn_and_leaves_the_row_alone() {
     assert_ne!(m.drawn(), quiet.drawn());
     assert_eq!(m.row_height(&agent), quiet.row_height(&agent));
     assert_eq!(m.agent("a").map(|a| a.group), Some(AgentGroup::Working));
+}
+
+#[test]
+fn a_blocking_consent_lifts_its_session_to_needs_input() {
+    use notchling_engine::inbox::{Item, Kind, Place, State};
+    let blocking = Item {
+        id: "c1".into(),
+        kind: Kind::Consent,
+        state: State::Open,
+        blocking: Some(true),
+        place: Some(Place {
+            session: Some("s1".into()),
+            ..Place::default()
+        }),
+        ..Item::default()
+    };
+    let mut m = model(Vec::new());
+    m.set_inbox_items(&[blocking], 0);
+    m.update(
+        vec![
+            agent("s1", AgentGroup::Working),
+            agent("s2", AgentGroup::Working),
+        ],
+        HashMap::new(),
+        HashMap::new(),
+    );
+    let group = |id: &str| m.agent(id).unwrap().group;
+    assert_eq!(group("s1"), AgentGroup::NeedsInput);
+    assert_eq!(group("s2"), AgentGroup::Working);
+}
+
+#[test]
+fn a_consent_that_blocks_by_source_session_lifts_it_too() {
+    use notchling_engine::inbox::{Item, Kind, Source, State};
+    let blocking = Item {
+        id: "c1".into(),
+        kind: Kind::Consent,
+        state: State::Open,
+        blocking: Some(true),
+        source: Source {
+            session: Some("s1".into()),
+            ..Source::default()
+        },
+        ..Item::default()
+    };
+    let mut m = model(Vec::new());
+    m.set_inbox_items(&[blocking], 0);
+    m.update(
+        vec![agent("s1", AgentGroup::Working)],
+        HashMap::new(),
+        HashMap::new(),
+    );
+    assert_eq!(m.agent("s1").unwrap().group, AgentGroup::NeedsInput);
 }

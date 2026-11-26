@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/net/bridge_client.dart';
 import '../../core/protocol/models.dart';
 import '../connection/connection.dart';
+import '../macs/macs_notifier.dart';
 
 enum InboxPhase { loading, ready, unsupported }
 
@@ -15,6 +16,7 @@ class InboxState {
     this.busy = const <String>{},
     this.errors = const <String, BridgeException>{},
     this.declined = const <String>{},
+    this.macId,
   });
 
   final InboxPhase phase;
@@ -22,9 +24,13 @@ class InboxState {
   final Set<String> busy;
   final Map<String, BridgeException> errors;
   final Set<String> declined;
+  final String? macId;
 
   List<InboxItem> get needsYou => _newestFirst(items.where((InboxItem i) => i.isOpen));
   List<InboxItem> get done => _newestFirst(items.where((InboxItem i) => !i.isOpen));
+  List<InboxItem> get blockingNow =>
+      items.where((InboxItem i) => i.isBlocking).toList()..sort((InboxItem a, InboxItem b) => (a.waitingSince ?? a.createdMs).compareTo(b.waitingSince ?? b.createdMs));
+  List<InboxItem> get needsYouRest => _newestFirst(items.where((InboxItem i) => i.isOpen && !i.isBlocking));
   int get openCount => items.where((InboxItem i) => i.isOpen).length;
 
   static List<InboxItem> _newestFirst(Iterable<InboxItem> items) =>
@@ -42,6 +48,7 @@ class InboxState {
     busy: busy ?? this.busy,
     errors: errors ?? this.errors,
     declined: declined ?? this.declined,
+    macId: macId,
   );
 }
 
@@ -52,11 +59,13 @@ final Provider<int> inboxOpenCountProvider = Provider<int>((Ref ref) => ref.watc
 class InboxNotifier extends Notifier<InboxState> {
   List<InboxItem> _kept = const <InboxItem>[];
   BridgeClient? _keptFor;
+  int _generation = 0;
 
   @override
   InboxState build() {
     final BridgeClient? client = ref.watch(bridgeClientProvider);
     ref.watch(connectedCountProvider);
+    _generation++;
     if (client == null) return const InboxState();
     final List<InboxItem> kept = identical(client, _keptFor) ? _kept : const <InboxItem>[];
     _keptFor = client;
@@ -66,7 +75,7 @@ class InboxNotifier extends Notifier<InboxState> {
     });
     ref.onDispose(events.cancel);
     if (client.isConnected) unawaited(_load(client));
-    return InboxState(phase: kept.isEmpty ? InboxPhase.loading : InboxPhase.ready, items: kept);
+    return InboxState(phase: kept.isEmpty ? InboxPhase.loading : InboxPhase.ready, items: kept, macId: ref.read(macsProvider).activeId);
   }
 
   @override
@@ -91,15 +100,19 @@ class InboxNotifier extends Notifier<InboxState> {
     state = state.copyWith(phase: InboxPhase.ready, items: items);
   }
 
+  bool _current(BridgeClient client, int generation) =>
+      ref.mounted && generation == _generation && identical(ref.read(bridgeClientProvider), client);
+
   Future<void> _load(BridgeClient client) async {
+    final int generation = ++_generation;
     try {
       final List<InboxItem> items = await client.inboxList();
-      if (!ref.mounted) return;
+      if (!_current(client, generation)) return;
       state = state.copyWith(phase: InboxPhase.ready, items: items);
     } on BridgeException catch (error) {
-      if (!ref.mounted) return;
+      if (!_current(client, generation)) return;
       if (error.code == 'invalid' || error.code == 'not_found') {
-        state = const InboxState(phase: InboxPhase.unsupported);
+        state = InboxState(phase: InboxPhase.unsupported, macId: state.macId);
       } else {
         state = state.copyWith(phase: InboxPhase.ready);
       }

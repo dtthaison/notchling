@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use super::{
-    Effect, NodeCore, Target, Then, CALL_MS, DELEGATE_CALL_MS, GRANT_ATTACH, GRANT_REVOKE_JOB,
+    start_wait, Effect, NodeCore, Target, Then, DELEGATE_CALL_MS, GRANT_ATTACH, GRANT_REVOKE_JOB,
 };
 use crate::cluster::grants::attachable;
 use crate::cluster::id::{NodeId, Tool};
@@ -210,7 +210,7 @@ impl NodeCore {
                 node: self.me.clone(),
                 tier: OriginTier::App,
             };
-            (Self::tool_op(spec.tool), origin, CALL_MS)
+            (Self::tool_op(spec.tool), origin, start_wait(spec.tool))
         };
         let args = start_args(&spec, &job);
         let then = Then::Dispatch {
@@ -464,6 +464,12 @@ impl NodeCore {
                 return Err(e);
             }
         };
+        let warning = warning.or_else(|| {
+            reply
+                .get("warning")
+                .and_then(Value::as_str)
+                .map(|w| text::clean(w, DETAIL_MAX))
+        });
         let codex = found_tool == Some(Tool::Codex);
         let first = if codex { "id" } else { "session" };
         let second = if codex { "session" } else { "id" };

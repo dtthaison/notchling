@@ -100,14 +100,17 @@ impl ChatView {
         html.stamp = file_panel::stamp(&html.path);
         let (path, changes) = (html.path.clone(), html.changes);
         shown.error = None;
+        let mut loads = None;
         match (look, changes) {
             (Look::Source, true) => {}
             (Look::Source, false) => {
-                let file = FileState::read(&path);
-                shown.subtitle = file_panel::subtitle(&path, home().as_deref(), &file.loaded.body);
-                shown.file = Some(file);
+                shown.file = Some(FileState::pending(&path));
+                loads = Some(path);
             }
             (Look::Page, _) => shown.file = None,
+        }
+        if let Some(path) = loads {
+            self.load_file(path, cx);
         }
         self.page.web.borrow_mut().take();
         super::select::clear();

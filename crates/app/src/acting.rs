@@ -296,6 +296,13 @@ impl Request {
         )
     }
 
+    pub fn permission_deny_with(id: &str, message: &str) -> Request {
+        Request::new(
+            ops::SESSION_PERMISSION,
+            json!({ "id": id, "decision": Decision::Deny.wire(), "message": message }),
+        )
+    }
+
     pub fn permission_on_screen(
         row: &str,
         decision: Decision,

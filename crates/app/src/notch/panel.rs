@@ -48,6 +48,33 @@ fn screen_info(mtm: MainThreadMarker) -> Option<ScreenInfo> {
     })
 }
 
+pub struct NotchWindow(pub WindowHandle<NotchView>);
+
+impl gpui::Global for NotchWindow {}
+
+pub fn apply_effects(cx: &mut App, effects: &[crate::attention::Effect]) {
+    let Some(handle) = cx.try_global::<NotchWindow>().map(|w| w.0) else {
+        return;
+    };
+    let now = now_ms();
+    let items = cx
+        .try_global::<AppInbox>()
+        .map(|inbox| inbox.0.snapshot(now).items().to_vec());
+    handle
+        .update(cx, |view, _, cx| {
+            if !view.prefs.shown {
+                return;
+            }
+            view.model.now_ms = now;
+            if let Some(items) = &items {
+                view.model.set_inbox_items(items, now);
+            }
+            view.model.apply_effects(effects, now);
+            cx.notify();
+        })
+        .ok();
+}
+
 pub fn open(
     cx: &mut App,
     source: Source,
@@ -145,6 +172,9 @@ fn tick(view: &mut NotchView, cx: &mut gpui::Context<NotchView>) {
     }
     let was = view.model.hovering();
     view.model.hover(inside, now);
+    if view.model.blocking.count() > 0 || view.model.blocking.farewell.is_some() {
+        view.model.now_ms = now;
+    }
     let moved = view.model.tick(now);
     let pet = on_screen && view.step_pet(now as f64 / 1000.0);
     if moved || pet || was != inside {
@@ -235,11 +265,18 @@ async fn poll_forever(this: WeakEntity<NotchView>, cx: &mut AsyncApp) {
                 view.model.set_inbox_unread(unread);
                 let now = now_ms();
                 view.model.now_ms = now;
+                view.model.reduce_motion = crate::mac::tray::reduce_motion();
                 if let Some(info) = MainThreadMarker::new().and_then(screen_info) {
                     let g = geometry(&info);
                     view.model.notch = g.notch;
+                    view.model.screen_h = g.screen.h;
                     view.geometry = Some(g);
                 }
+                let items = cx
+                    .try_global::<AppInbox>()
+                    .map(|inbox| inbox.0.snapshot(now).items().to_vec())
+                    .unwrap_or_default();
+                view.model.set_inbox_items(&items, now);
                 view.model.set_asks(&asks);
                 let peek = view
                     .model

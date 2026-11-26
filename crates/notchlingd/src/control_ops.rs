@@ -1,5 +1,6 @@
 use crate::acting_ops::{bad, text_arg, ActingOps, NoLog};
 use crate::catalog_ops::CatalogService;
+use crate::outbox_ops::{SendArgs, NO_SESSION};
 use notchling_engine::catalog::Tool;
 use notchling_engine::cluster::grant_files::GrantValue;
 use notchling_engine::control::session::home_of;
@@ -9,6 +10,8 @@ use notchling_engine::control::{
     plan_trust_folder, ControlError, NewSession, Outcome, Plan, PlanError, Step, LOGIN_TOKEN_VAR,
 };
 use notchling_engine::delegate::agy_trust::claude_trusts;
+use notchling_engine::limits::renew::renew_command;
+use notchling_engine::outbox::Via;
 use notchling_engine::reply::plan as keys_plan;
 use notchling_engine::sessions::lanes::lane_at_path;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode};
@@ -17,6 +20,32 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub const TRUST_WINDOW: Duration = Duration::from_secs(10 * 60);
+pub const SIGNED_OUT: &str = "worker_claude_signed_out";
+const SIGNED_OUT_TEXT: &str =
+    "Claude Code isn't signed in on this machine. Sign in there, then dispatch again.";
+const STATUS_WAIT: Duration = Duration::from_secs(15);
+const FIRST_MESSAGE_TRIES: u32 = 20;
+const FIRST_MESSAGE_GAP_MS: u64 = 250;
+
+#[cfg(test)]
+const _: () = assert!(
+    notchling_engine::cluster::core::START_CALL_MS
+        > notchling_engine::control::session::START_STOP_TIMEOUT_SECS * 1000
+            + STATUS_WAIT.as_millis() as u64
+            + FIRST_MESSAGE_TRIES as u64 * FIRST_MESSAGE_GAP_MS
+);
+
+const FIRST_MESSAGE_LOST: &str =
+    "The session started but its first message wasn't queued. Send it with notchling session reply.";
+
+fn first_message<'a>(caller: &Caller, args: &'a Value) -> Option<&'a str> {
+    if caller.client != ClientKind::Node {
+        return None;
+    }
+    args.get("text")
+        .and_then(Value::as_str)
+        .filter(|t| !t.trim().is_empty())
+}
 
 fn failed(e: ControlError) -> ApiError {
     ApiError::new(ErrorCode::Failed, e.to_string())
@@ -140,7 +169,15 @@ impl ActingOps {
                 if let (Some(token), Some(job), Some(login)) = (&token, &job, self.login.get()) {
                     let _ = login.launched(job, token);
                 }
-                Ok(json!({"jobId": job}))
+                let mut reply = json!({"jobId": job});
+                if let (Some(text), Some(job)) = (first_message(caller, args), &job) {
+                    let queued = self.queue_first_message(job, text);
+                    reply["messageQueued"] = json!(queued);
+                    if !queued {
+                        reply["warning"] = json!(FIRST_MESSAGE_LOST);
+                    }
+                }
+                Ok(reply)
             }
             Err(e) => {
                 if matches!(e, ControlError::Untrusted(_)) {
@@ -150,9 +187,48 @@ impl ActingOps {
                         refusals.insert(real, Instant::now());
                     }
                 }
+                if caller.client == ClientKind::Node
+                    && token.is_none()
+                    && matches!(e, ControlError::Failed(_))
+                    && self.claude_signed_out(dir.as_deref())
+                {
+                    return Err(ApiError::new(ErrorCode::Failed, SIGNED_OUT_TEXT)
+                        .with_reason(SIGNED_OUT)
+                        .with_field("wire", json!(SIGNED_OUT)));
+                }
                 Err(failed(e))
             }
         }
+    }
+
+    fn queue_first_message(&self, job: &str, text: &str) -> bool {
+        let Some(outbox) = self.outbox() else {
+            return false;
+        };
+        let send = SendArgs {
+            id: job.to_string(),
+            text: text.to_string(),
+            clear_box: false,
+            options: None,
+            via: Via::Agent,
+        };
+        for _ in 0..FIRST_MESSAGE_TRIES {
+            match outbox.send(&send) {
+                Ok(_) => return true,
+                Err(e) if e.message == NO_SESSION => (self.pause)(FIRST_MESSAGE_GAP_MS),
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+
+    fn claude_signed_out(&self, config_dir: Option<&str>) -> bool {
+        let Ok(out) = self.launcher.run(&renew_command(config_dir), STATUS_WAIT) else {
+            return false;
+        };
+        serde_json::from_str::<Value>(out.output.trim())
+            .ok()
+            .is_some_and(|status| status["loggedIn"] == json!(false))
     }
 
     fn with_login(&self, caller: &Caller, plan: Plan) -> (Plan, Option<GrantValue>) {

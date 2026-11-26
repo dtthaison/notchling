@@ -158,6 +158,7 @@ pub const VALUE_FLAGS: &[&str] = &[
     "--for",
     "--key",
     "--expires-in",
+    "--retry-of",
     "--tool",
     "--pool",
     "--since",

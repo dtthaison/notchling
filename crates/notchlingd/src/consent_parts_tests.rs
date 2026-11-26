@@ -59,6 +59,7 @@ fn opening(kind: &'static str, parts: Option<Value>) -> Opening {
         reason: None,
         expires_in_ms: None,
         key: None,
+        retry_of: None,
     }
 }
 

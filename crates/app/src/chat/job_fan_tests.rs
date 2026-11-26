@@ -21,6 +21,7 @@ fn shell(id: &str, started: Option<f64>) -> BackgroundShell {
         command: format!("run {id}"),
         title: String::new(),
         output_path: format!("/tmp/{id}.output"),
+        description: String::new(),
         started,
     }
 }
@@ -129,6 +130,7 @@ fn a_fan_shell_shows_as_a_running_row_with_no_output_to_open() {
         command: "sleep 600".into(),
         title: String::new(),
         output_path: String::new(),
+        description: String::new(),
         started: Some(20.0),
     }];
     let mut page = ShellPage::default();
@@ -163,4 +165,31 @@ fn without_a_listing_the_rows_and_total_count_the_fan_shells_too() {
     assert_eq!(i.shell_counts.total, 2);
     assert_eq!(i.shells.len(), 2);
     assert!(i.shells[0].running, "the fan shell, running first");
+}
+
+#[test]
+fn a_fan_shell_takes_the_description_found_for_it() {
+    let c = Conversation::default();
+    let fan = [
+        entry("b2", FanKind::Shell, "sleep 600", 20.0),
+        entry("b3", FanKind::Shell, "cargo test", 30.0),
+    ];
+    let found: HashMap<String, String> =
+        HashMap::from([("b2".to_string(), "Wait for the render".to_string())]);
+    let extra = extra_shells_described(&fan, &c, &found, &mut |_| Output::Unknown);
+    assert_eq!(extra[0].description, "Wait for the render");
+    assert_eq!(extra[0].title, "Wait for the render");
+    assert_eq!(extra[0].command, "sleep 600");
+    assert_eq!(extra[1].description, "");
+    assert_eq!(extra[1].title, "");
+}
+
+#[test]
+fn a_fan_shell_with_no_start_time_leaves_no_file_out_of_reach() {
+    let dated = entry("b1", FanKind::Shell, "sleep 1", 500.0);
+    let mut undated = entry("b2", FanKind::Shell, "sleep 2", 0.0);
+    undated.started = None;
+    assert_eq!(earliest_start(&[&dated]), 500.0);
+    assert_eq!(earliest_start(&[&dated, &undated]), 0.0);
+    assert_eq!(earliest_start(&[&undated]), 0.0);
 }

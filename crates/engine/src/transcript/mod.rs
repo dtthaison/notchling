@@ -17,6 +17,7 @@ pub mod queue_state;
 pub mod restart;
 pub mod scan;
 pub mod sent;
+pub mod shell_titles;
 pub mod shells;
 pub mod shells_guard;
 mod shells_orphans;

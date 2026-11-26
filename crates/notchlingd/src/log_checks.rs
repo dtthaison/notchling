@@ -441,6 +441,7 @@ impl Warnings for InboxWarnings {
                 open: Some(json!({"settings": "logs"})),
                 closed_ms: None,
                 switch: None,
+                ..Default::default()
             },
             None,
         );

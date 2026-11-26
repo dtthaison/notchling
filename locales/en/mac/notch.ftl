@@ -105,6 +105,56 @@ notch-submit = Submit
 # Shown under a card when the setting that lets the notch answer is off.
 notch-answer-off = Answering from the notch is off in Settings.
 
+## Blocking cards in the notch
+
+# Name of the open blocking card in the ? map that labels the parts of a window.
+notch-blocking-part = Notch Blocking
+
+# Title of the red header of the notch while one task is stopped and waits for an answer.
+notch-blocking-title = Blocking
+
+# Title of the red header of the notch while several tasks are stopped. $n is how many.
+notch-blocking-title-count = Blocking { NUMBER($n) }
+
+# Title of the red header in the last minute before the request ends.
+notch-blocking-ends-soon = Ends soon
+
+# How long a task has been stopped. $time is a short time like 2m or 0:04.
+notch-blocking-stopped = stopped { $time }
+
+# How long is left in the last minute before a request ends. $time is minutes and seconds like 0:52.
+notch-blocking-ends-in = ends in { $time }
+
+# Line of a blocking card that says what stopped. $who is the agent, session and branch, joined.
+notch-blocking-who = Stopped: { $who }
+
+# Position of the shown card among the blocked tasks. $n is its place and $total how many there are.
+notch-blocking-step = { NUMBER($n) } of { NUMBER($total) }
+
+# Line of the notch for the two seconds after a blocked task was answered somewhere.
+notch-blocking-answered = Answered
+
+# Line of the notch for the four seconds after a blocked task's request ran out.
+notch-blocking-expired = Expired
+
+# Line under the clock of a last call. The agent gives up when the clock reaches zero.
+notch-blocking-left = left to answer, then the agent gives up
+
+# Spoken label of a button on a blocking card. $action is the button's word and $title what is asked.
+notch-blocking-button-for = { $action } { $title }
+
+# Spoken label of the stepper's buttons. $label is Previous or Next blocked task and $step the place it leads to.
+notch-blocking-stepper-label = { $label }, { $step }
+
+# Tooltip of the button that shows the previous blocked task.
+notch-blocking-previous = Previous blocked task
+
+# Tooltip of the button that shows the next blocked task.
+notch-blocking-next = Next blocked task
+
+# Line under a blocking card when the note could not be sent. The note stays in the field.
+notch-blocking-note-kept = The note did not go through. It is still here.
+
 ## The picture behind the notch in a render
 
 # Title of the made-up window behind the notch in a render.

@@ -1,14 +1,15 @@
 use std::path::Path;
 
+use notchling_engine::inbox::{Action, ActionId, AlertAction, Item, Kind, Place, State};
 use notchling_engine::sessions::AgentGroup;
 use notchling_engine::transcript::snapshot::PendingQuestion;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::layout::{collapsed_size, NotchState, Rect};
 use super::model::{Card, NotchModel};
 use super::perch::{self, AxFrame, Perch, PetMode};
 use super::pet::{Motion, Track};
-use super::requests::HookRequest;
+use super::requests::{HookRequest, RequestKind};
 use super::source::{fixture_clock, DataRoot, Source};
 use crate::acting::Acting;
 use crate::views::ViewSpec;
@@ -26,11 +27,19 @@ pub enum Shown {
     Pet,
     Perch,
     Inbox,
+    Blocking,
+    BlockingMany,
+    BlockingClosed,
+    BlockingGlance,
+    BlockingLastCall,
+    BlockingChange,
+    BlockingHook,
+    BlockingSecret,
 }
 
 pub const INBOX_UNREAD: usize = 3;
 
-pub const VIEWS: [ViewSpec; 11] = [
+pub const VIEWS: [ViewSpec; 19] = [
     ViewSpec {
         name: "notch-collapsed",
         size: (560.0, 96.0),
@@ -86,6 +95,46 @@ pub const VIEWS: [ViewSpec; 11] = [
         size: (560.0, 300.0),
         about: "the open notch with the inbox badge, three unread (fixture data)",
     },
+    ViewSpec {
+        name: "notch-blocking",
+        size: (560.0, 300.0),
+        about: "the notch open on one stopped task: red header, who, Allow, Deny, Change and Later (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-many",
+        size: (560.0, 300.0),
+        about: "three stopped tasks: one card and a 1 of 3 stepper, soonest end first (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-closed",
+        size: (560.0, 96.0),
+        about: "the notch closed while a task is stopped: ears with the wait and a red count (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-glance",
+        size: (560.0, 120.0),
+        about: "the notch grown for a moment to name the stopped task and how long it waited (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-last-call",
+        size: (560.0, 300.0),
+        about: "the last call: the seconds left to answer, with Allow and Deny (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-change",
+        size: (560.0, 340.0),
+        about: "Change… opened on a stopped task: a one-line note field and Send under the buttons (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-hook",
+        size: (560.0, 340.0),
+        about: "an agent's permission prompt in the blocking card: the command, Allow, Deny, Change… and Later (fixture data)",
+    },
+    ViewSpec {
+        name: "notch-blocking-secret",
+        size: (560.0, 300.0),
+        about: "a secret use: Allow Once, Deny, Change… and Later (fixture data)",
+    },
 ];
 
 pub fn shown(name: &str) -> Option<Shown> {
@@ -101,6 +150,14 @@ pub fn shown(name: &str) -> Option<Shown> {
         "notch-pet" => Shown::Pet,
         "notch-perch" => Shown::Perch,
         "notch-inbox" => Shown::Inbox,
+        "notch-blocking" => Shown::Blocking,
+        "notch-blocking-many" => Shown::BlockingMany,
+        "notch-blocking-closed" => Shown::BlockingClosed,
+        "notch-blocking-glance" => Shown::BlockingGlance,
+        "notch-blocking-last-call" => Shown::BlockingLastCall,
+        "notch-blocking-change" => Shown::BlockingChange,
+        "notch-blocking-hook" => Shown::BlockingHook,
+        "notch-blocking-secret" => Shown::BlockingSecret,
         _ => return None,
     })
 }
@@ -132,6 +189,121 @@ fn tabs_request(session: &str) -> Option<HookRequest> {
     let mut value: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     value["session_id"] = Value::String(session.to_owned());
     HookRequest::parse(&value)
+}
+
+fn blocking_item(id: &str, title: &str, now: i64, ends_in_ms: i64, stopped_ms: i64) -> Item {
+    Item {
+        id: id.to_owned(),
+        kind: Kind::Consent,
+        title: title.to_owned(),
+        detail: "For this run only.".to_owned(),
+        state: State::Open,
+        created_ms: now - stopped_ms,
+        waiting_since: Some(now - stopped_ms),
+        expires_ms: Some(now + ends_in_ms),
+        blocking: Some(true),
+        alert_actions: vec![AlertAction::Allow, AlertAction::Deny, AlertAction::Change],
+        place: Some(Place {
+            session_name: Some("Claude Code".to_owned()),
+            branch: Some("notchling".to_owned()),
+            machine_name: Some("pr-prep-merge".to_owned()),
+            ..Place::default()
+        }),
+        ..Item::default()
+    }
+}
+
+fn secret_item(now: i64) -> Item {
+    let action = |id, label: &str, primary| Action {
+        id,
+        label: label.to_owned(),
+        primary,
+    };
+    Item {
+        kind: Kind::SecretApproval,
+        title: "Allow npm-token for cargo publish".to_owned(),
+        actions: vec![
+            action(ActionId::AllowOnce, "Allow Once", true),
+            action(ActionId::AllowAlways, "Always Allow", false),
+            action(ActionId::Deny, "Deny", false),
+        ],
+        alert_actions: vec![AlertAction::Deny, AlertAction::Open, AlertAction::Change],
+        open: Some(json!({"vault_approval": "ticket-1"})),
+        ..blocking_item(
+            "b1",
+            "Allow npm-token for cargo publish",
+            now,
+            9 * 60_000,
+            60_000,
+        )
+    }
+}
+
+fn hook_request(now: i64) -> HookRequest {
+    HookRequest {
+        id: "r-hook".to_owned(),
+        session_id: "s-hook".to_owned(),
+        created: (now - 20_000) as f64 / 1000.0,
+        kind: RequestKind::Permission,
+        tool_name: "Bash".to_owned(),
+        summary: "cargo test --workspace --locked".to_owned(),
+        description: String::new(),
+        can_always_allow: true,
+        agy: None,
+    }
+}
+
+fn blocking_scene(model: &mut NotchModel, shown: Shown) -> NotchState {
+    let now = model.now_ms;
+    let min = 60_000;
+    let items = match shown {
+        Shown::BlockingMany => vec![
+            blocking_item("b1", "Turn on Machines", now, 12 * min, 2 * min),
+            blocking_item("b2", "Run cargo test on m1", now, 5 * min, 3 * min),
+            blocking_item("b3", "Stop the session pr-prep", now, 9 * min, min),
+        ],
+        Shown::BlockingLastCall => vec![blocking_item(
+            "b1",
+            "Turn on Machines",
+            now,
+            52_000,
+            14 * min,
+        )],
+        Shown::BlockingGlance => vec![blocking_item("b1", "Turn on Machines", now, 14 * min, min)],
+        Shown::BlockingClosed => vec![blocking_item("b1", "Turn on Machines", now, 14 * min, min)],
+        Shown::BlockingHook => Vec::new(),
+        Shown::BlockingSecret => vec![secret_item(now)],
+        _ => vec![blocking_item(
+            "b1",
+            "Turn on Machines",
+            now,
+            14 * min,
+            4_000,
+        )],
+    };
+    model.requests.clear();
+    if shown == Shown::BlockingHook {
+        model
+            .requests
+            .insert("s-hook".to_owned(), hook_request(now));
+    }
+    model.set_inbox_items(&items, now);
+    model.blocking.farewell = None;
+    if shown != Shown::BlockingMany {
+        model.blocking.select("b1");
+    }
+    model.blocking.shown_ms = now - 10_000;
+    if shown == Shown::BlockingChange {
+        model.blocking.open_note("b1");
+        model
+            .blocking
+            .set_draft("b1", "Use the staging key instead");
+    }
+    match shown {
+        Shown::BlockingClosed => NotchState::Collapsed,
+        Shown::BlockingGlance => NotchState::Glance,
+        _ => NotchState::Blocking,
+    }
 }
 
 pub fn model(shown: Shown) -> NotchModel {
@@ -220,6 +392,17 @@ pub fn scene(shown: Shown) -> Scene {
             scene.tab = 1;
             id.map(NotchState::Peek)
         }
+        Shown::Blocking
+        | Shown::BlockingMany
+        | Shown::BlockingClosed
+        | Shown::BlockingGlance
+        | Shown::BlockingLastCall
+        | Shown::BlockingChange
+        | Shown::BlockingHook
+        | Shown::BlockingSecret => {
+            scene.acting = Acting::On;
+            Some(blocking_scene(&mut model, shown))
+        }
         Shown::Pet => {
             scene.pet = Some(PetMode::Walking);
             let track = Track::new(collapsed_size(model.notch));
@@ -271,6 +454,14 @@ mod tests {
                     matches!(m.state, NotchState::Collapsed)
                 }
                 Shown::List | Shown::Inbox => m.state == NotchState::List,
+                Shown::Blocking
+                | Shown::BlockingMany
+                | Shown::BlockingLastCall
+                | Shown::BlockingChange
+                | Shown::BlockingHook
+                | Shown::BlockingSecret => m.state == NotchState::Blocking,
+                Shown::BlockingClosed => m.state == NotchState::Collapsed,
+                Shown::BlockingGlance => m.state == NotchState::Glance,
                 Shown::Peek
                 | Shown::Permission
                 | Shown::PermissionActions

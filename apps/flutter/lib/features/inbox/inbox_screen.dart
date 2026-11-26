@@ -13,6 +13,7 @@ import '../connection/bridge_errors.dart';
 import '../connection/connection.dart';
 import '../machines/machines_notifier.dart';
 import '../machines/machines_sheet.dart';
+import 'inbox_alerts.dart';
 import 'inbox_notifier.dart';
 import 'promote_confirm.dart';
 
@@ -34,27 +35,35 @@ class InboxScreen extends ConsumerWidget {
         body: l10n.inboxEmptyBody,
       );
     }
-    final List<InboxItem> needsYou = state.needsYou;
+    final List<InboxItem> blocking = state.blockingNow;
+    final List<InboxItem> needsYou = state.needsYouRest;
     final List<InboxItem> done = state.done;
+    final String? leadId = blocking.isNotEmpty ? blocking.first.id : (needsYou.isNotEmpty ? needsYou.first.id : null);
+    Widget card(InboxItem item) => Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: InboxCard(
+        item: item,
+        busy: state.busy.contains(item.id),
+        error: state.errors[item.id],
+        declined: state.declined.contains(item.id),
+        lead: item.id == leadId,
+      ),
+    );
     return RefreshIndicator(
       onRefresh: () => ref.read(inboxProvider.notifier).refresh(),
       child: ListView(
         padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, Space.xl),
         children: <Widget>[
+          if (blocking.isNotEmpty) ...<Widget>[
+            PanelTitle(l10n.inboxBlocking),
+            const SizedBox(height: Space.sm),
+            for (final InboxItem item in blocking) card(item),
+          ],
           if (needsYou.isNotEmpty) ...<Widget>[
+            if (blocking.isNotEmpty) const SizedBox(height: Space.md),
             PanelTitle(l10n.inboxNeedsYou),
             const SizedBox(height: Space.sm),
-            for (final InboxItem item in needsYou)
-              Padding(
-                padding: const EdgeInsets.only(bottom: Space.md),
-                child: InboxCard(
-                  item: item,
-                  busy: state.busy.contains(item.id),
-                  error: state.errors[item.id],
-                  declined: state.declined.contains(item.id),
-                  lead: item.id == needsYou.first.id,
-                ),
-              ),
+            for (final InboxItem item in needsYou) card(item),
           ],
           if (done.isNotEmpty) ...<Widget>[
             const SizedBox(height: Space.md),
@@ -94,6 +103,25 @@ class _InboxCardState extends ConsumerState<InboxCard> {
   bool get declined => widget.declined;
   bool get lead => widget.lead;
 
+  String? _outcome(AppL10n l10n) {
+    final InboxOutcome? outcome = item.outcome;
+    if (outcome == null) return null;
+    final String reason = outcome.reason ?? '';
+    switch (outcome.state) {
+      case 'applying':
+        return l10n.inboxOutcomeApplying;
+      case 'applied':
+        return l10n.inboxOutcomeApplied;
+      case 'failed':
+        return reason.isEmpty ? l10n.inboxOutcomeFailed : l10n.inboxOutcomeFailedReason(reason);
+      case 'withdrawn':
+        if (reason.isNotEmpty) return l10n.inboxOutcomeWithdrawnReason(reason);
+        return item.state == 'withdrawn' ? null : l10n.inboxOutcomeWithdrawn;
+      default:
+        return null;
+    }
+  }
+
   String _result(AppL10n l10n) {
     switch (item.state) {
       case 'answered':
@@ -126,13 +154,26 @@ class _InboxCardState extends ConsumerState<InboxCard> {
               const SizedBox(height: Space.xs),
               Text(item.detail, style: kit.bodySm),
             ],
+            if (item.isBlocking && item.waitingSince != null) ...<Widget>[
+              const SizedBox(height: Space.xs),
+              StoppedFor(item: item),
+            ],
+            if (item.place != null && item.place!.labels.isNotEmpty) ...<Widget>[
+              const SizedBox(height: Space.sm),
+              Wrap(
+                spacing: Space.sm,
+                runSpacing: Space.xs,
+                children: <Widget>[for (final String label in item.place!.labels) PlaceChip(label: label)],
+              ),
+            ],
             const SizedBox(height: Space.md),
             if (item.isOpen)
               Wrap(
                 spacing: Space.sm,
                 runSpacing: Space.sm,
                 children: <Widget>[
-                  for (final InboxAction action in item.actions) _button(context, l10n, action),
+                  for (final InboxAction action in item.actions)
+                    if (action.id != 'change') _button(context, l10n, action),
                   if (noPrimaryKinds.contains(item.kind))
                     SecondaryButton(
                       label: l10n.machinesChoose,
@@ -141,8 +182,17 @@ class _InboxCardState extends ConsumerState<InboxCard> {
                     ),
                 ],
               )
-            else
+            else ...<Widget>[
               Text(_result(l10n), style: kit.bodySm),
+              if (_outcome(l10n) case final String line) ...<Widget>[
+                const SizedBox(height: Space.xs),
+                Text(line, style: kit.bodySm.copyWith(color: item.outcome?.state == 'failed' ? kit.danger : null)),
+              ],
+              if (item.answer == 'deny' && (item.note ?? '').isNotEmpty) ...<Widget>[
+                const SizedBox(height: Space.xs),
+                Text(l10n.inboxSentBack(item.note!), style: kit.bodySm),
+              ],
+            ],
             if (declined) ...<Widget>[
               const SizedBox(height: Space.sm),
               Text(l10n.inboxDeclined, style: kit.bodySm),
@@ -178,5 +228,62 @@ class _InboxCardState extends ConsumerState<InboxCard> {
     return action.primary && lead
         ? PrimaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press)
         : SecondaryButton(label: action.label, semanticLabel: '${action.label}, ${item.title}', onPressed: press);
+  }
+}
+
+class PlaceChip extends StatelessWidget {
+  const PlaceChip({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final Kit kit = Kit.of(context);
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 220),
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.xs),
+      decoration: BoxDecoration(color: kit.raised, borderRadius: BorderRadius.circular(999)),
+      child: Text(label, style: kit.meta.copyWith(color: kit.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
+}
+
+class StoppedFor extends StatefulWidget {
+  const StoppedFor({super.key, required this.item, this.nowMs});
+
+  final InboxItem item;
+  final int Function()? nowMs;
+
+  @override
+  State<StoppedFor> createState() => _StoppedForState();
+}
+
+class _StoppedForState extends State<StoppedFor> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 15), (Timer _) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    final int now = (widget.nowMs ?? () => DateTime.now().millisecondsSinceEpoch)();
+    final int minutes = inboxMinutesWaiting(widget.item, now);
+    final Kit kit = Kit.of(context);
+    return Text(
+      minutes < 1 ? l10n.inboxStoppedNow : l10n.inboxStoppedMinutes(minutes),
+      style: kit.meta.copyWith(color: kit.needs),
+    );
   }
 }

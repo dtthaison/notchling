@@ -62,12 +62,13 @@ impl FanOutputs {
 }
 
 pub fn extra_shells(fan: &[FanEntry], conversation: &Conversation) -> Vec<BackgroundShell> {
-    extra_shells_found(fan, conversation, &mut |_| Output::Unknown)
+    extra_shells_described(fan, conversation, &HashMap::new(), &mut |_| Output::Unknown)
 }
 
-pub fn extra_shells_found(
+pub fn extra_shells_described(
     fan: &[FanEntry],
     conversation: &Conversation,
+    descriptions: &HashMap<String, String>,
     output: &mut dyn FnMut(&FanEntry) -> Output,
 ) -> Vec<BackgroundShell> {
     let known: HashSet<&str> = conversation.shells.iter().map(|s| s.id.as_str()).collect();
@@ -79,15 +80,24 @@ pub fn extra_shells_found(
                 Output::At(path) => path,
                 Output::Gone => return None,
             };
+            let description = descriptions.get(&e.id).cloned().unwrap_or_default();
             Some(BackgroundShell {
                 id: e.id.clone(),
                 command: e.label.clone(),
-                title: String::new(),
+                title: description.clone(),
                 output_path,
+                description,
                 started: e.started,
             })
         })
         .collect()
+}
+
+pub fn earliest_start(entries: &[&FanEntry]) -> f64 {
+    let starts: Option<Vec<f64>> = entries.iter().map(|e| e.started).collect();
+    starts
+        .and_then(|starts| starts.into_iter().reduce(f64::min))
+        .unwrap_or(0.0)
 }
 
 pub fn mark_running(subagents: &mut [Subagent], fan: &[FanEntry]) {

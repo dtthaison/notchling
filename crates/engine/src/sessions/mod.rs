@@ -2,6 +2,7 @@ pub mod agent;
 pub mod command_job;
 pub mod exited_store;
 pub mod fresh;
+pub mod history;
 pub mod iso;
 pub mod job_fan;
 pub mod jobs;

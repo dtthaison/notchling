@@ -19,6 +19,7 @@ fn phrase(kind: ToolKind, n: usize) -> String {
         ToolKind::Ask => t::chat::steps_asked_questions(n),
         ToolKind::Skill => t::chat::steps_used_skills(n),
         ToolKind::Browser => t::chat::steps_used_chrome(n),
+        ToolKind::Repl => t::chat::steps_ran_scripts(n),
         ToolKind::Other => t::chat::steps_used_tools(n),
     }
 }
@@ -118,6 +119,8 @@ pub fn detail(step: &ToolRow) -> Detail {
     let input_title = (!step.input.is_empty() && step.kind != ToolKind::Read).then(|| {
         if step.kind == ToolKind::Shell {
             t::chat::step_command()
+        } else if step.kind == ToolKind::Repl {
+            t::chat::step_script()
         } else {
             t::chat::step_input()
         }
@@ -183,6 +186,7 @@ mod tests {
             is_error: false,
             finished: true,
             browser: None,
+            parent: None,
         }
     }
 

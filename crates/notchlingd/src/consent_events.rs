@@ -139,6 +139,7 @@ pub(crate) fn event_of(row: &Consent, then: ConsentThen, now_ms: i64) -> Event {
             parts: parts(&row.parts),
             parts_allowed: parts(&row.parts_allowed),
             waited: Millis(u64::try_from(waited).unwrap_or(0)),
+            noted: row.note.as_ref().map(|_| true),
         },
         outcome_of(then),
         now_ms,

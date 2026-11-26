@@ -4,7 +4,7 @@ use notchling_local_api::{ops, CALL_TIMEOUT};
 use serde_json::{json, Value};
 use std::io::Write;
 
-pub const USAGE: &str = "Usage: notchling accounts switch <account>\n       notchling accounts add claude|codex|agy\n       notchling accounts remove <account>\n       notchling accounts move-all <account>|main\n       notchling accounts move <session> <lane>|main\n       notchling lanes list [--json]\n       notchling lanes create <account>\n       notchling lanes remove <lane>\n       notchling lanes switch <lane> <account>\n       each change takes [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]; the user says yes on a card";
+pub const USAGE: &str = "Usage: notchling accounts switch <account>\n       notchling accounts add claude|codex|agy\n       notchling accounts remove <account>\n       notchling accounts move-all <account>|main\n       notchling accounts move <session> <lane>|main\n       notchling lanes list [--json]\n       notchling lanes create <account>\n       notchling lanes remove <lane>\n       notchling lanes switch <lane> <account>\n       each change takes [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]; the user says yes on a card";
 
 pub const WORDS: [&str; 5] = ["switch", "add", "remove", "move-all", "move"];
 

@@ -189,6 +189,7 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              parts TEXT,
              parts_allowed TEXT,
              reason TEXT,
+             note TEXT,
              session TEXT,
              tool TEXT NOT NULL,
              verified INTEGER NOT NULL DEFAULT 0,
@@ -213,7 +214,10 @@ pub(crate) fn migrate(db: &Connection) -> Result<(), String> {
              closed_ms INTEGER
          );
          CREATE INDEX IF NOT EXISTS consents_state ON consents(state);
-         CREATE INDEX IF NOT EXISTS consents_session ON consents(session, n);",
+         CREATE INDEX IF NOT EXISTS consents_session ON consents(session, n);
+         CREATE UNIQUE INDEX IF NOT EXISTS consents_retry
+             ON consents(json_extract(change, '$.retryOf'))
+             WHERE json_extract(change, '$.retryOf') IS NOT NULL;",
         )
     })?;
     let finished = add_missing_columns(db).and_then(|()| {
@@ -240,6 +244,7 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("outbox", "unsent", "INTEGER NOT NULL DEFAULT 0"),
     ("consents", "request", "TEXT NOT NULL DEFAULT 'null'"),
     ("consents", "extended", "INTEGER NOT NULL DEFAULT 0"),
+    ("consents", "note", "TEXT"),
 ];
 
 fn add_missing_columns(db: &Connection) -> Result<(), String> {

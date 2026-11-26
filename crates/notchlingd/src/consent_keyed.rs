@@ -55,6 +55,7 @@ impl ConsentOps {
                 reason: None,
                 expires_in_ms: None,
                 key: Some(key.to_string()),
+                retry_of: None,
             },
         )?;
         self.store

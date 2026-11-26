@@ -13,7 +13,9 @@ use crate::actions::Actions;
 use crate::chat::data::DataRoot;
 use crate::chat::view::ChatView;
 use crate::dock::{plan, policy_for, Cause, Policy};
-use crate::menu::{Command, MenuState};
+use crate::inbox::tray_rows::{deny_route, Attention, DenyRoute};
+use crate::menu::{tray_look, BlockAct, Command, MenuState};
+use crate::notch::blocking::{allow_route, AllowRoute, NoteRoute};
 use crate::pages::window::AppPagesDir;
 use crate::phone::bridge::Bridge;
 use crate::phone::pairing::PairingFeed;
@@ -25,12 +27,16 @@ use crate::search::wire::SessionRef;
 use crate::session_source::SessionSource;
 use crate::switches::restart::{LiveTurnOn, RestartNotice};
 use crate::tools::second_opinion::store_for_run;
+use crate::tray_sync::TraySync;
 use crate::welcome::window::{self as welcome_window, WelcomeSetup, Which};
 use notchling_engine::delegate::second_opinion_store::SecondOpinionStore;
 
 struct Shell {
     state: MenuState,
     tray: Option<Tray>,
+    sync: TraySync,
+    reduce_motion: bool,
+    badge: Option<u32>,
     titled: HashSet<WindowId>,
     chat: Option<WindowHandle<ChatView>>,
     root: Option<DataRoot>,
@@ -133,6 +139,7 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         let exe = std::env::current_exe().ok();
         let sessions = Arc::new(SessionSource::for_run(root.as_ref(), exe.as_deref()));
         let for_notch = sessions.clone();
+        let for_tray = sessions.clone();
         let restart = Arc::new(RestartNotice::default());
         let actions = Arc::new(Actions::for_run(root.as_ref()).with_restart(restart.clone()));
         cx.set_global(AppActions(actions.clone()));
@@ -234,6 +241,9 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
         cx.set_global(Shell {
             state,
             tray,
+            sync: TraySync::default(),
+            reduce_motion: false,
+            badge: None,
             titled: HashSet::new(),
             chat: None,
             root,
@@ -245,9 +255,23 @@ pub fn run(data_root: Option<PathBuf>, open_chat_now: bool) -> i32 {
             dock_retry: false,
         });
         apply_dock(cx, Cause::Quiet);
+        let inbox_feed = cx.global::<AppInbox>().0.clone();
+        let data_dir = cx
+            .global::<Shell>()
+            .root
+            .as_ref()
+            .map(|r| r.data_dir.clone());
+        super::attention_watch::watch(cx, inbox_feed, for_tray, data_dir);
+        cx.on_app_quit(|_| {
+            dock::set_badge(None);
+            async {}
+        })
+        .detach();
         cx.on_window_closed(update_dock).detach();
         if let Some(source) = notch {
-            crate::notch::panel::open(cx, source, for_notch, actions);
+            if let Some(handle) = crate::notch::panel::open(cx, source, for_notch, actions) {
+                cx.set_global(crate::notch::panel::NotchWindow(handle));
+            }
         }
         if let Some(root) = update_root.as_ref().filter(|r| r.fixture.is_none()) {
             super::update_watch::watch(cx, root);
@@ -348,7 +372,132 @@ fn handle(command: Command, cx: &mut App) {
         Command::OpenUpdate => super::update_watch::open_release_page(cx),
         Command::SetAwake(_) | Command::ToggleDisplay => change_awake(command, cx),
         Command::Quit => cx.quit(),
+        Command::Blocking(act, id) => blocking_act(act, &id, cx).detach(),
     }
+}
+
+pub(crate) fn blocking_act(act: BlockAct, id: &str, cx: &mut App) -> gpui::Task<bool> {
+    let Some(feed) = cx.try_global::<AppInbox>().map(|inbox| inbox.0.clone()) else {
+        return gpui::Task::ready(false);
+    };
+    let item = feed
+        .snapshot(crate::phone::bridge::now_ms())
+        .item(id)
+        .cloned();
+    let (Some(item), true) = (item, feed.is_live()) else {
+        open_chat_inbox_at(cx, id);
+        return gpui::Task::ready(false);
+    };
+    if !crate::inbox::banners::answerable(&item) {
+        open_chat_inbox_at(cx, id);
+        return gpui::Task::ready(false);
+    }
+    match act {
+        BlockAct::Allow => match allow_route(&item) {
+            Some(route) => {
+                let row = id.to_owned();
+                cx.spawn(async move |cx| {
+                    let refused = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let result = match route {
+                                AllowRoute::Consent(consent) => feed.consent_answer(&consent, true),
+                                AllowRoute::Switch { consent, switch } => {
+                                    feed.allow_switch(&consent, &switch).map(|_| true)
+                                }
+                                AllowRoute::ApprovalOnce(ticket) => {
+                                    feed.approval_allow_once(&ticket)
+                                }
+                            };
+                            crate::inbox::banners::allow_refused(&result)
+                        })
+                        .await;
+                    if refused {
+                        cx.update(|cx| open_chat_inbox_at(cx, &row)).ok();
+                    }
+                    !refused
+                })
+            }
+            None => {
+                open_chat_inbox_at(cx, id);
+                gpui::Task::ready(false)
+            }
+        },
+        BlockAct::Deny => match deny_route(&item) {
+            Some(route) => {
+                let id = item.id.clone();
+                cx.spawn(async move |cx| {
+                    let refused = cx
+                        .background_executor()
+                        .spawn({
+                            let id = id.clone();
+                            async move {
+                                let result = match route {
+                                    DenyRoute::Consent(consent) => {
+                                        feed.consent_answer(&consent, false)
+                                    }
+                                    DenyRoute::Answer(action) => feed.answer(&id, action),
+                                };
+                                crate::inbox::banners::allow_refused(&result)
+                            }
+                        })
+                        .await;
+                    if refused {
+                        cx.update(|cx| open_chat_inbox_at(cx, &id)).ok();
+                    }
+                    !refused
+                })
+            }
+            None => {
+                open_chat_inbox_at(cx, id);
+                gpui::Task::ready(false)
+            }
+        },
+        BlockAct::Change | BlockAct::OpenInbox => {
+            open_chat_inbox_at(cx, id);
+            gpui::Task::ready(false)
+        }
+    }
+}
+
+pub fn pulse_tray(cx: &mut App) {
+    if let Some(tray) = cx.try_global::<Shell>().and_then(|s| s.tray.as_ref()) {
+        tray.pulse_again();
+    }
+}
+
+pub fn on_notch_effect(cx: &mut App, effect: &crate::attention::Effect) {
+    crate::notch::panel::apply_effects(cx, std::slice::from_ref(effect));
+}
+
+pub(crate) fn blocking_note(
+    route: NoteRoute,
+    note: String,
+    cx: &mut App,
+) -> Option<gpui::Task<Result<bool, String>>> {
+    let feed = cx.try_global::<AppInbox>().map(|inbox| inbox.0.clone())?;
+    if !feed.is_live() {
+        return None;
+    }
+    Some(cx.background_executor().spawn(async move {
+        match route {
+            NoteRoute::Consent(consent) => feed.consent_deny_with(&consent, &note),
+            NoteRoute::Approval(ticket) => feed.approval_deny_with(&ticket, &note),
+            NoteRoute::Hook(_) => Ok(false),
+        }
+    }))
+}
+
+pub fn on_attention(cx: &mut App, attention: &Attention, working: bool, reduce_motion: bool) {
+    if !cx.has_global::<Shell>() {
+        return;
+    }
+    let shell = cx.global_mut::<Shell>();
+    shell.reduce_motion = reduce_motion;
+    shell.state.blocking = attention.blocking.clone();
+    shell.state.waiting_count = attention.waiting_count;
+    shell.state.working = working;
+    refresh_tray(shell);
 }
 
 fn change_awake(command: Command, cx: &mut App) {
@@ -398,9 +547,19 @@ pub fn on_awake_hold(cx: &mut App, held: bool) {
     }
 }
 
-fn refresh_tray(shell: &Shell) {
-    if let Some(tray) = &shell.tray {
-        tray.update(&shell.state);
+fn refresh_tray(shell: &mut Shell) {
+    let look = tray_look(&shell.state, shell.reduce_motion);
+    if let Some(tray) = shell.tray.as_mut() {
+        shell.sync.refresh(tray, look, &shell.state);
+    }
+    refresh_badge(shell);
+}
+
+fn refresh_badge(shell: &mut Shell) {
+    let wanted = crate::dock::badge_for(shell.state.blocking.len(), shell.show_in_dock);
+    if shell.badge != wanted {
+        shell.badge = wanted;
+        dock::set_badge(wanted);
     }
 }
 
@@ -493,6 +652,16 @@ pub fn open_chat_inbox(cx: &mut App) {
     open_chat(cx);
     if let Some(handle) = chat_window(cx) {
         handle.update(cx, |view, _, cx| view.show_inbox(cx)).ok();
+    }
+}
+
+pub fn open_chat_inbox_at(cx: &mut App, id: &str) {
+    open_chat(cx);
+    if let Some(handle) = chat_window(cx) {
+        let id = id.to_owned();
+        handle
+            .update(cx, |view, _, cx| view.show_inbox_at(&id, cx))
+            .ok();
     }
 }
 
@@ -589,7 +758,9 @@ pub fn on_dock_setting(cx: &mut App, key: &str, value: &serde_json::Value) {
     if cx.global::<Shell>().show_in_dock == wanted {
         return;
     }
-    cx.global_mut::<Shell>().show_in_dock = wanted;
+    let shell = cx.global_mut::<Shell>();
+    shell.show_in_dock = wanted;
+    refresh_badge(shell);
     cx.spawn(async move |cx| {
         cx.update(|cx| apply_dock(cx, Cause::Quiet)).ok();
     })

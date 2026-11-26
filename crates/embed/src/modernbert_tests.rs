@@ -115,3 +115,105 @@ fn a_bad_config_is_refused_not_a_panic() {
         }
     }
 }
+
+#[test]
+fn the_first_row_path_matches_the_full_forward_on_a_padded_batch() {
+    for layers in [2, 3] {
+        let mut config = tiny_config();
+        config.num_hidden_layers = layers;
+        let vb = VarBuilder::from_tensors(tiny_weights(&config, 5), DType::F32, &Device::Cpu);
+        let model = ModernBert::load_encoder(vb, &config).expect("encoder");
+        let mut rng = crate::testing::Lcg::new(9);
+        let (b, seq) = (3, 20);
+        let values: Vec<f32> = (0..b * seq * config.hidden_size)
+            .map(|_| rng.next())
+            .collect();
+        let embedded =
+            Tensor::from_vec(values, (b, seq, config.hidden_size), &Device::Cpu).expect("embedded");
+        let lens = [20u32, 7, 13];
+        let mask: Vec<u32> = lens
+            .iter()
+            .flat_map(|&n| (0..seq as u32).map(move |i| u32::from(i < n)))
+            .collect();
+        let mask = Tensor::from_vec(mask, (b, seq), &Device::Cpu).expect("mask");
+        let full: Vec<Vec<f32>> = model
+            .forward_embedded(&embedded, &mask)
+            .expect("full")
+            .narrow(1, 0, 1)
+            .expect("narrow")
+            .squeeze(1)
+            .expect("squeeze")
+            .to_vec2()
+            .expect("rows");
+        let first: Vec<Vec<f32>> = model
+            .forward_first(&embedded, &mask)
+            .expect("first")
+            .to_vec2()
+            .expect("rows");
+        for (a, c) in full.iter().zip(&first) {
+            let cos = cosine(a, c);
+            assert!(cos >= 0.9999, "{layers} layers: cosine {cos}");
+        }
+    }
+}
+
+fn same_or_both_nan(a: &[f32], b: &[f32]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| (x.is_nan() && y.is_nan()) || (x - y).abs() < 1e-6)
+}
+
+#[test]
+fn the_fast_softmax_matches_candle_including_an_all_masked_row() {
+    let mut rng = crate::testing::Lcg::new(3);
+    let mut values: Vec<f32> = (0..2 * 3 * 4).map(|_| rng.next()).collect();
+    values[4..8].fill(f32::NEG_INFINITY);
+    let att = Tensor::from_vec(values, (1, 2, 3, 4), &Device::Cpu).expect("att");
+    let floor = crate::modernbert::mask_floor(DType::F32);
+    let row = Tensor::from_vec(vec![0f32, 0.0, floor, 0.0], (1, 1, 1, 4), &Device::Cpu)
+        .expect("row mask");
+    let square: Vec<f32> = (0..12)
+        .map(|i| if i % 5 == 0 { floor } else { 0.0 })
+        .collect();
+    let square = Tensor::from_vec(square, (1, 1, 3, 4), &Device::Cpu).expect("square mask");
+    let flat = |t: Tensor| {
+        t.flatten_all()
+            .and_then(|t| t.to_vec1::<f32>())
+            .expect("flat")
+    };
+    let ours = flat(crate::modernbert::masked_softmax(&att, None).expect("ours"));
+    let theirs = flat(candle_nn::ops::softmax_last_dim(&att).expect("candle"));
+    assert!(same_or_both_nan(&ours, &theirs), "{ours:?} {theirs:?}");
+    for mask in [row, square] {
+        let ours = flat(crate::modernbert::masked_softmax(&att, Some(&mask)).expect("ours"));
+        let added = att.broadcast_add(&mask).expect("add");
+        let theirs = flat(candle_nn::ops::softmax_last_dim(&added).expect("candle"));
+        assert!(same_or_both_nan(&ours, &theirs), "{ours:?} {theirs:?}");
+    }
+}
+
+#[test]
+fn a_softmax_over_no_columns_is_empty_not_a_panic() {
+    let att = Tensor::zeros((1, 1, 1, 0), DType::F32, &Device::Cpu).expect("att");
+    let mask = Tensor::zeros((1, 1, 1, 0), DType::F32, &Device::Cpu).expect("mask");
+    let out = crate::modernbert::masked_softmax(&att, Some(&mask)).expect("masked");
+    assert_eq!(out.elem_count(), 0);
+    let out = crate::modernbert::masked_softmax(&att, None).expect("plain");
+    assert_eq!(out.elem_count(), 0);
+}
+
+#[test]
+fn the_first_row_path_refuses_a_mask_that_does_not_fit() {
+    let config = tiny_config();
+    let vb = VarBuilder::from_tensors(tiny_weights(&config, 5), DType::F32, &Device::Cpu);
+    let model = ModernBert::load_encoder(vb, &config).expect("encoder");
+    let embedded =
+        Tensor::zeros((1, 5, config.hidden_size), DType::F32, &Device::Cpu).expect("embedded");
+    let short = Tensor::ones((1, 3), DType::U32, &Device::Cpu).expect("mask");
+    assert!(model.forward_first(&embedded, &short).is_err());
+    let two = Tensor::ones((2, 5), DType::U32, &Device::Cpu).expect("mask");
+    assert!(model.forward_first(&embedded, &two).is_err());
+    let fits = Tensor::ones((1, 5), DType::U32, &Device::Cpu).expect("mask");
+    assert!(model.forward_first(&embedded, &fits).is_ok());
+}

@@ -198,3 +198,146 @@ fn granite_ranks_a_paraphrase_first() {
     assert!(cosine(&v[0], &v[1]) > cosine(&v[0], &v[2]) + 0.1);
     assert!(cosine(&v[3], &v[4]) > cosine(&v[3], &v[2]) + 0.1);
 }
+
+fn tiny_granite_with(layers: usize) -> Granite {
+    let mut config = tiny_config();
+    config.num_hidden_layers = layers;
+    let mut weights = tiny_weights(&config, 23);
+    let table = weights
+        .remove("embeddings.tok_embeddings.weight")
+        .expect("word table");
+    let rows: Vec<Vec<f32>> = table.to_vec2().expect("rows");
+    let bytes: Vec<u8> = rows
+        .iter()
+        .flatten()
+        .flat_map(|&x| x.to_le_bytes())
+        .collect();
+    let words = Words::from_bytes(
+        Box::new(bytes),
+        0,
+        config.vocab_size,
+        config.hidden_size,
+        DType::F32,
+    )
+    .expect("words");
+    let vb = VarBuilder::from_tensors(weights, DType::F32, &Device::Cpu);
+    let model = ModernBert::load_encoder(vb, &config).expect("encoder");
+    let tokens = Tokens::from_tokenizer_slice(TINY.as_bytes()).expect("tokens");
+    Granite::from_parts(model, words, tokens, 64)
+}
+
+#[test]
+fn the_first_row_path_matches_the_full_forward() {
+    let texts = [
+        "a",
+        "abc",
+        "abc ab c",
+        LONG,
+        "c b a abc ab c a b c abc abc ab ab c c a b abc ab c a abc b c ab abc abc ab c a b c abc abc ab ab c c a b abc ab c",
+    ];
+    for layers in [1, 2, 3, 4] {
+        let g = tiny_granite_with(layers);
+        let fast = g.embed(&texts).expect("fast");
+        for (text, v) in texts.iter().zip(&fast) {
+            let full = g.embed_padded(&[text]).expect("full");
+            let c = cosine(v, &full[0]);
+            assert!(
+                c >= 0.9999,
+                "{layers} layers, {} tokens: cosine {c}",
+                g.tokens(text)
+            );
+        }
+        let padded = g.embed_padded(&texts).expect("padded");
+        for (a, b) in fast.iter().zip(&padded) {
+            assert!(cosine(a, b) >= 0.9999);
+        }
+    }
+}
+
+#[test]
+fn a_model_folder_reads_the_same_weights_as_a_memory_map() {
+    let dir = Scratch::new("nl-granite-test").expect("scratch");
+    write_tiny_model(dir.path(), 1024);
+    let loaded = Granite::load(dir.path()).expect("load");
+    let file = dir.join("model.safetensors");
+    let bytes = std::fs::read(&file).expect("read");
+    let st = safetensors::SafeTensors::deserialize(&bytes).expect("safetensors");
+    let view = st
+        .tensor("embeddings.tok_embeddings.weight")
+        .expect("word table");
+    let offset = view.data().as_ptr() as usize - bytes.as_ptr() as usize;
+    let config = tiny_config();
+    let words = Words::from_bytes(
+        Box::new(bytes.clone()),
+        offset,
+        config.vocab_size,
+        config.hidden_size,
+        DType::F32,
+    )
+    .expect("words");
+    let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[&file], DType::F32, &Device::Cpu) }
+        .expect("map");
+    let model = ModernBert::load_encoder(vb, &config).expect("encoder");
+    let tokens = Tokens::from_tokenizer_slice(TINY.as_bytes()).expect("tokens");
+    let mapped = Granite::from_parts(model, words, tokens, 1024);
+    let texts = ["abc", LONG];
+    let a = loaded.embed(&texts).expect("loaded");
+    let b = mapped.embed_padded(&texts).expect("mapped");
+    for (x, y) in a.iter().zip(&b) {
+        assert!(cosine(x, y) >= 0.9999);
+    }
+}
+
+#[test]
+#[ignore = "needs NOTCHLING_EMBED_MODELS"]
+fn granite_fast_path_matches_the_mapped_full_forward_on_bench_texts() {
+    let root =
+        PathBuf::from(std::env::var("NOTCHLING_EMBED_MODELS").expect("NOTCHLING_EMBED_MODELS"));
+    let dir = root.join("ibm-granite__granite-embedding-97m-multilingual-r2");
+    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/embed-eval/data");
+    let g = Granite::load(&dir).expect("load");
+    let file = dir.join("model.safetensors");
+    let bytes = std::fs::read(&file).expect("read");
+    let st = safetensors::SafeTensors::deserialize(&bytes).expect("safetensors");
+    let view = st
+        .tensor("embeddings.tok_embeddings.weight")
+        .expect("word table");
+    let offset = view.data().as_ptr() as usize - bytes.as_ptr() as usize;
+    let (rows, dims) = (view.shape()[0], view.shape()[1]);
+    let words =
+        Words::from_bytes(Box::new(bytes.clone()), offset, rows, dims, DType::BF16).expect("words");
+    let text = std::fs::read_to_string(dir.join("config.json")).expect("config");
+    let mut config: crate::modernbert::Config = serde_json::from_str(&text).expect("config");
+    config.max_position_embeddings = config
+        .max_position_embeddings
+        .min(crate::granite::MAX_TOKENS);
+    let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[&file], DType::F32, &Device::Cpu) }
+        .expect("map");
+    let model = ModernBert::load_encoder(vb, &config).expect("encoder");
+    let tokens = Tokens::from_tokenizer_json(&dir.join("tokenizer.json")).expect("tokens");
+    let mapped = Granite::from_parts(model, words, tokens, config.max_position_embeddings);
+    let mut texts = bench::chunks(&data, bench::CHUNKS, bench::CHUNK_CHARS).expect("chunks");
+    texts.extend(bench::queries(&data).expect("queries"));
+    let mut worst = 1.0f32;
+    for t in &texts {
+        let a = g.embed(&[t.as_str()]).expect("fast");
+        let b = mapped.embed_padded(&[t.as_str()]).expect("full");
+        worst = worst.min(cosine(&a[0], &b[0]));
+    }
+    println!("worst cosine {worst} over {} texts", texts.len());
+    assert!(worst >= 0.9999, "worst cosine {worst}");
+}
+
+#[test]
+fn an_unused_integer_tensor_in_the_model_file_is_ignored() {
+    let dir = Scratch::new("nl-granite-test").expect("scratch");
+    write_tiny_model(dir.path(), 1024);
+    let mut weights = tiny_weights(&tiny_config(), 11);
+    weights.insert(
+        "embeddings.position_ids".to_string(),
+        candle_core::Tensor::arange(0i64, 16, &Device::Cpu).expect("ids"),
+    );
+    candle_core::safetensors::save(&weights, dir.join("model.safetensors")).expect("save");
+    let g = Granite::load(dir.path()).expect("load with an integer buffer");
+    assert_eq!(g.embed(&[LONG]).expect("embed")[0].len(), 32);
+}

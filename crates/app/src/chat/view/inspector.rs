@@ -480,7 +480,7 @@ fn shell_row(index: usize, s: &ShellRow, a: Appearance, chat: &WeakEntity<ChatVi
                 .line_height(px(ROW_LINE))
                 .w_full()
                 .elide()
-                .line_clamp(2),
+                .line_clamp(if s.description.is_empty() { 2 } else { 1 }),
             )
             .child(
                 div()
@@ -679,6 +679,7 @@ mod tests {
                 command: "cargo test".into(),
                 title: String::new(),
                 output_path: "/tmp/b1.output".into(),
+                description: String::new(),
                 started: None,
             }],
             ..Conversation::default()

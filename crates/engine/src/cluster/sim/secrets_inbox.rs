@@ -62,6 +62,7 @@ impl World {
             open: None,
             closed_ms: None,
             switch: None,
+            ..Default::default()
         }
     }
 
@@ -322,6 +323,7 @@ impl World {
             open: None,
             closed_ms: None,
             switch: None,
+            ..Default::default()
         }
     }
 }

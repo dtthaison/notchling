@@ -127,6 +127,7 @@ struct State {
     outbox: OutboxFeed,
     asks: AskFeed,
     reloads: ReloadFeed,
+    opens: Vec<PathBuf>,
     catalog: HashMap<CatalogTool, Vec<ModelInfo>>,
     catalog_generation: u64,
     answered: HashSet<String>,
@@ -229,6 +230,13 @@ impl Shared {
                     state.generation += 1;
                 }
             }
+            topics::CHAT_OPEN_FILE => {
+                if let Some(path) = event.data.get("path").and_then(Value::as_str) {
+                    let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    state.opens.push(PathBuf::from(path));
+                    state.generation += 1;
+                }
+            }
             topics::CODEX_TURN | topics::SESSION_CHANGED => {
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if state.tools.apply(&event) {
@@ -319,6 +327,7 @@ impl SessionSource {
                     outbox: OutboxFeed::default(),
                     asks: AskFeed::default(),
                     reloads: ReloadFeed::default(),
+                    opens: Vec::new(),
                     catalog: HashMap::new(),
                     catalog_generation: 0,
                     answered: HashSet::new(),
@@ -348,6 +357,15 @@ impl SessionSource {
             Some(config) => SessionSource::start(config),
             None => SessionSource::files(),
         }
+    }
+
+    pub fn working(&self) -> bool {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state
+            .agents
+            .iter()
+            .flatten()
+            .any(|agent| agent.group == notchling_engine::sessions::AgentGroup::Working)
     }
 
     pub fn view(&self) -> View {
@@ -404,6 +422,14 @@ impl SessionSource {
     pub fn asks(&self) -> AskFeed {
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.asks.clone()
+    }
+
+    pub fn take_open(&self) -> Option<PathBuf> {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        match state.opens.is_empty() {
+            true => None,
+            false => Some(state.opens.remove(0)),
+        }
     }
 
     pub fn reloads(&self) -> ReloadFeed {
@@ -580,6 +606,10 @@ fn connect(config: &SourceConfig, tried_start: &mut bool) -> Result<Connected, C
         Err(ClientError::Api(_)) => false,
         Err(e) => return Err(e),
     };
+    match client.subscribe(&[topics::CHAT]) {
+        Ok(_) | Err(ClientError::Api(_)) => {}
+        Err(e) => return Err(e),
+    }
     let outboxed = match client.subscribe(&[topics::OUTBOX]) {
         Ok(_) => true,
         Err(ClientError::Api(_)) => false,

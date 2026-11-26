@@ -217,6 +217,8 @@ pub const KEYS: &[KeySpec] = &[
         .never("Accessibility asked", "The Accessibility prompt was shown once", "the app's own record"),
     choice("notchWidth", "medium", &["small", "medium", "large"], true, "Width of the notch's panel")
         .free("Notch width", "Width of the notch's panel: small, medium or large", "a display preference"),
+    choice("attentionLevel", "normal", &["calm", "normal", "urgent"], false, "How hard Notchling tries to reach you when an agent is stopped")
+        .free("Attention", "How hard Notchling tries to reach you when an agent is stopped: calm, normal or urgent", "a display preference"),
     key("dismissed", K::Dict, D::Empty, true, "Done rows cleared in the notch: agent id to time (seconds)")
         .never("Cleared notch rows", "Done rows cleared from the notch", "the app's own record"),
     key("hiddenAgents", K::Dict, D::Empty, true, "Agents hidden in the notch: agent id to the group they were hidden in")

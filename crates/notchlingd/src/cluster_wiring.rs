@@ -512,7 +512,7 @@ impl ClusterParts {
             holder.clone(),
             predicate(last_set.clone()),
         );
-        let _ = sender_slot.set(snap.sender.clone());
+        let _ = sender_slot.set(Arc::downgrade(&snap.sender));
         let snap_run = Arc::new(SnapRunner::spawn(
             snap.sender.clone(),
             SnapContext {
@@ -767,6 +767,7 @@ impl ClusterParts {
                 .with_replication(Arc::new(move |now_ms| {
                     replication_slot
                         .get()
+                        .and_then(std::sync::Weak::upgrade)
                         .map_or_else(|| serde_json::json!([]), |s| s.replication(now_ms))
                 }))
                 .with_mover(runner.clone())

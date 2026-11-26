@@ -30,7 +30,7 @@ use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 pub const RESCAN_EVERY: Duration = Duration::from_secs(5);
@@ -89,34 +89,47 @@ impl FirstScan {
 }
 
 #[derive(Default)]
-pub struct LateRoom(OnceLock<ServerHandle>, PromptFollowers);
+pub struct LateRoom(Mutex<Option<ServerHandle>>, PromptFollowers);
 
 impl LateRoom {
     pub fn set(&self, handle: ServerHandle) {
-        let _ = self.0.set(handle);
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            *slot = Some(handle);
+        }
+    }
+
+    pub fn release(&self) {
+        let handle = self.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(handle);
+        self.1.detach();
+    }
+
+    fn handle(&self) -> Option<ServerHandle> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
 impl Room for LateRoom {
     fn publish(&self, topic: &str, event: &str, data: &Value) {
-        if let Some(handle) = self.0.get() {
+        if let Some(handle) = self.handle() {
             handle.publish(topic, event, data);
         }
         self.1.relay(now_ms(), topic, event, data);
     }
 
     fn publish_to(&self, owner: &str, topic: &str, event: &str, data: &Value) {
-        if let Some(handle) = self.0.get() {
+        if let Some(handle) = self.handle() {
             handle.publish_to(owner, topic, event, data);
         }
     }
 
     fn can_answer(&self) -> bool {
-        self.0.get().is_some_and(ServerHandle::app_attached)
+        self.handle().is_some_and(|h| h.app_attached())
     }
 
     fn can_follow(&self, topic: &str) -> bool {
-        self.0.get().is_some_and(|h| h.app_following(topic))
+        self.handle().is_some_and(|h| h.app_following(topic))
     }
 
     fn can_answer_prompts(&self) -> bool {
@@ -421,6 +434,7 @@ pub fn run(
             "the server thread panicked",
         ))),
     };
+    wired.release();
     logs.bus.push(Event::new(
         &DaemonStopped {
             cause: if signals::stop_requested() {
@@ -434,6 +448,8 @@ pub fn run(
         wall_ms(),
     ));
     logs.close(Duration::from_secs(2));
+    room.release();
+    drop(handle);
     served
 }
 

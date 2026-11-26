@@ -84,6 +84,7 @@ impl Example {
             .sub("[--timeout <seconds>]", "--timeout 10")
             .sub("[--expires-in <seconds>]", "")
             .sub("[--key <text>]", "")
+            .sub("[--retry-of <id>]", "")
             .sub("[--dry-run]", "--dry-run")
     }
 
@@ -120,7 +121,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .fill()
             .setup(Setup::SwitchOn("acting"))
             .parse_only("it needs a session with an open question"),
-        ex(SESSIONS, r#"session answer <id> --answers <json> [--question <json>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session answer <id> --answers <json> [--question <json>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session answer {self} --answers '[["a"]]' --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting"))
@@ -129,7 +130,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .sub("<id>", "{other}")
             .fill()
             .setup(Setup::SwitchOn("acting")),
-        ex(SESSIONS, r#"session chrome <id> on|off [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session chrome <id> on|off [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session chrome {other} on --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
@@ -137,7 +138,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .sub("<id>", "{other}")
             .fill()
             .setup(Setup::SwitchOn("acting")),
-        ex(SESSIONS, r#"session command <id> <command> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session command <id> <command> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session command {other} /compact --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
@@ -145,7 +146,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .fill()
             .setup(Setup::SwitchOn("acting"))
             .parse_only("it needs a session in a terminal Notchling started"),
-        ex(SESSIONS, r#"session dialog <id> --pick <1-9>|--dismiss [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session dialog <id> --pick <1-9>|--dismiss [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session dialog {self} --pick 1 --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting"))
@@ -153,7 +154,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
         ex(SESSIONS, r#"session new <folder> --message "<task in a few words>" --dry-run --json"#)
             .fill()
             .setup(Setup::SwitchOn("acting")),
-        ex(SESSIONS, r#"session new <folder> [--model <name>] [--message <text>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session new <folder> [--model <name>] [--message <text>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session new {work} --message hello --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
@@ -161,7 +162,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .fill()
             .setup(Setup::SwitchOn("acting"))
             .exit(4),
-        ex(SESSIONS, r#"session options <id> <option> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session options <id> <option> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session options {self} model opus --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting"))
@@ -175,7 +176,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .fill()
             .sub("{self}", "{other}")
             .setup(Setup::SwitchOn("acting")),
-        ex(SESSIONS, r#"session remove <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session remove <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session remove {other} --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
@@ -183,7 +184,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .fill()
             .sub("{self}", "{other}")
             .setup(Setup::SwitchOn("acting")),
-        ex(SESSIONS, r#"session reply <id> <text> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session reply <id> <text> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session reply {other} hello --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
@@ -191,11 +192,17 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .sub("<id>", "{other}")
             .fill()
             .setup(Setup::SwitchOn("acting")),
-        ex(SESSIONS, r#"session stop|interrupt <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(SESSIONS, r#"session stop|interrupt <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"session stop {other} --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
         ex(SESSIONS, r#"sessions --json"#),
+        ex(SESSIONS, r#"sessions history --limit 30 --json"#),
+        ex(
+            SESSIONS,
+            r#"sessions history [--limit <n>] [--before <cursor>] [--json] [--socket <path>]"#,
+        )
+        .run(r#"sessions history --limit 5 --json"#),
         ex(SESSIONS, r#"sessions [--json] [--socket <path>]"#),
         ex(SESSIONS, r#"shells [--stuck] [--json] [--socket <path>]"#)
             .run(r#"shells --stuck --json"#),
@@ -210,7 +217,7 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
 
 pub(crate) fn jobs_rows() -> Vec<Example> {
     vec![
-        ex(JOBS, r#"dispatch <machine> --tool <claude|codex|agy|shell> [--folder <path>] [--model <name>] [--effort <level>] [--text <prompt>] [--command <line>] [--secret <name>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(JOBS, r#"dispatch <machine> --tool <claude|codex|agy|shell> [--folder <path>] [--model <name>] [--effort <level>] [--text <prompt>] [--command <line>] [--secret <name>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .fill()
             .run(r#"dispatch m1 --tool claude --folder /tmp --text hello --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting"))
@@ -233,7 +240,7 @@ pub(crate) fn jobs_rows() -> Vec<Example> {
             .run(r#"job return j-none --dry-run --json"#)
             .setup(Setup::SwitchOn("cluster"))
             .parse_only("it needs a job of the cluster; the fixture has none"),
-        ex(JOBS, r#"job return <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(JOBS, r#"job return <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .run(r#"job return j-none --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("cluster"))
             .parse_only("it needs a job of the cluster; the fixture has none"),
@@ -241,7 +248,7 @@ pub(crate) fn jobs_rows() -> Vec<Example> {
             .run(r#"job stop j-none --dry-run --json"#)
             .setup(Setup::SwitchOn("cluster"))
             .parse_only("it needs a job of the cluster; the fixture has none"),
-        ex(JOBS, r#"job stop <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(JOBS, r#"job stop <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .run(r#"job stop j-none --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("cluster"))
             .parse_only("it needs a job of the cluster; the fixture has none"),
@@ -249,7 +256,7 @@ pub(crate) fn jobs_rows() -> Vec<Example> {
             .run(r#"job tail j-none --dry-run --json"#)
             .setup(Setup::SwitchOn("cluster"))
             .parse_only("it needs a job of the cluster; the fixture has none"),
-        ex(JOBS, r#"job tail <id> [--from <offset>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]"#)
+        ex(JOBS, r#"job tail <id> [--from <offset>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
             .run(r#"job tail j-none --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("cluster"))
             .parse_only("it needs a job of the cluster; the fixture has none"),
@@ -561,6 +568,10 @@ pub(crate) fn general_rows() -> Vec<Example> {
             .sub("[--since <ms>]", "--since 0")
             .sub("[--limit <n>]", "--limit 5"),
         ex(GENERAL, "capabilities [--json] [--socket <path>]"),
+        ex(GENERAL, "chat open-file <path> [--session <id>] [--json] [--socket <path>]")
+            .sub("<path>", "/etc/hosts")
+            .sub("[--session <id>]", "")
+            .setup(Setup::SwitchOn("acting")),
         ex(GENERAL, "consent <id> [--wait] [--timeout <seconds>] [--json]")
             .sub("<id>", "consent-none")
             .sub("[--wait]", "")
@@ -569,7 +580,7 @@ pub(crate) fn general_rows() -> Vec<Example> {
         ex(GENERAL, "consent cancel <id> [--json]").sub("<id>", "consent-none").exit(1),
         ex(GENERAL, "consents [--json]"),
         ex(GENERAL, "cost check [--json]"),
-        ex(GENERAL, "cost profile set|setup|undo [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]")
+        ex(GENERAL, "cost profile set|setup|undo [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]")
             .sub("set|setup|undo", "setup")
             .acting("--reason 'check the model table'")
             .setup(Setup::SwitchOn("install")),
@@ -586,7 +597,7 @@ pub(crate) fn general_rows() -> Vec<Example> {
         ex(GENERAL, "inbox [--json] [--socket <path>]"),
         ex(GENERAL, "install plan [--what <a,b>] [--json] [--socket <path>]")
             .sub("[--what <a,b>]", "--what notchling-ask,notchling"),
-        ex(GENERAL, "install request [--part <id>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]")
+        ex(GENERAL, "install request [--part <id>]... [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]")
             .sub("[--part <id>]...", "--part notchling-ask")
             .acting("--reason 'install the skills'")
             .setup(Setup::SwitchOn("install")),
@@ -596,20 +607,21 @@ pub(crate) fn general_rows() -> Vec<Example> {
         ex(GENERAL, "status [--json] [--socket <path>]"),
         ex(GENERAL, "switch off <acting|bridge|accounts|vault|install|cluster|machines> [--json]")
             .sub("<acting|bridge|accounts|vault|install|cluster|machines>", "vault"),
-        ex(GENERAL, "switch on <acting|bridge|accounts|vault|install|cluster|machines> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]")
+        ex(GENERAL, "switch on <acting|bridge|accounts|vault|install|cluster|machines> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]")
             .sub("<acting|bridge|accounts|vault|install|cluster|machines>", "vault")
             .sub("[--reason <text>]", "--reason 'the task needs the vault'")
             .sub("[--no-wait]", "")
             .sub("[--timeout <seconds>]", "--timeout 10")
             .sub("[--expires-in <seconds>]", "")
             .sub("[--key <text>]", "")
+            .sub("[--retry-of <id>]", "")
             .sub("[--dry-run]", "")
             .setup(Setup::Allow),
         ex(GENERAL, "switches [--json] [--socket <path>]"),
         ex(GENERAL, "versions [--latest] [--workers] [--json] [--socket <path>]")
             .sub("[--latest]", "")
             .sub("[--workers]", ""),
-        ex(GENERAL, "versions update <tool> [--to <version>] [--worker <machine>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]")
+        ex(GENERAL, "versions update <tool> [--to <version>] [--worker <machine>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]")
             .parse_only("it needs an installed tool and the newest version from the network"),
         ex(GENERAL, "watch [--topic <topic>]... [--until <state>] [--count <n>] [--timeout <seconds>] [--json]")
             .sub("[--topic <topic>]...", "--topic mine.consents")

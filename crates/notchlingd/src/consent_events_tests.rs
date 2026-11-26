@@ -28,6 +28,7 @@ fn row_of(tag: &str) -> Consent {
                 reason: None,
                 expires_in_ms: None,
                 key: None,
+                retry_of: None,
             },
         )
         .unwrap();

@@ -42,7 +42,7 @@ pub trait RemoteRows: Send + Sync {
 const SAVE_FAILED: &str = "Couldn't save the message.";
 const EMPTY: &str = "Type a message first.";
 const TOO_LONG: &str = "That message is over 100 KB.";
-const NO_SESSION: &str = "No such session.";
+pub(crate) const NO_SESSION: &str = "No such session.";
 const CHROME: &str = "Chrome is turned on with the /chrome command in Chat, not queued.";
 const MENU: &str = "That command opens a menu; open the session's terminal.";
 const NOT_UNSURE: &str = "Only a message that may already be in the session can be marked as sent.";
@@ -271,6 +271,14 @@ impl OutboxOps {
         }
         self.emit_then(row, then);
         true
+    }
+
+    pub fn release(&self) {
+        lock(&self.wake).take();
+        lock(&self.forget).take();
+        lock(&self.resume).take();
+        lock(&self.tell).take();
+        lock(&self.remote).take();
     }
 
     pub fn set_wake(&self, wake: Wake) {
@@ -506,13 +514,17 @@ impl OutboxOps {
             .map_or_else(|| id.to_string(), |a| a.outbox_key())
     }
 
+    fn fresh_job(&self, id: &str) -> Option<Agent> {
+        fresh::job_row(&self.roots, &Probes::from_proc(), id)
+    }
+
     fn target(&self, id: &str, text: &str) -> Result<Target, ApiError> {
         if is_draft(id) {
             return Err(bad("Start the session with codex.send or agy.send."));
         }
         let tool = tool_of(id);
         let key = match tool {
-            Tool::Claude => match self.agent_by_id(id) {
+            Tool::Claude => match self.agent_by_id(id).or_else(|| self.fresh_job(id)) {
                 Some(agent) if agent.can_reply() => agent.outbox_key(),
                 Some(_) => return Err(bad("Reply in its terminal.")),
                 None => return Err(bad(NO_SESSION)),

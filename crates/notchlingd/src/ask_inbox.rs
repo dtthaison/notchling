@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 pub(crate) struct Link {
     me: Weak<AskOps>,
-    inbox: Arc<InboxOps>,
+    pub(crate) inbox: Arc<InboxOps>,
 }
 
 pub(crate) struct AskResponder {
@@ -170,6 +170,7 @@ impl AskOps {
             Some(responder),
         );
         let _ = self.store.set_inbox(&row.id, Some(&inbox_id));
+        self.show_live(&row.id);
         inbox_id
     }
 

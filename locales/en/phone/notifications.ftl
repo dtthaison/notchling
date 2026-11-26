@@ -34,3 +34,12 @@ notifications-watching-sessions = { $count ->
     [one] Watching · { $count } session
    *[other] Watching · { $count } sessions
 }
+
+# The name of the Android notification channel for items an agent or a step waits on. Shown in the system's notification settings.
+notifications-channel-waiting = Waiting on you
+
+# The text of a notification when an agent has waited three minutes for an answer.
+notifications-waiting-still = Still waiting for you
+
+# The text of a notification a minute before an item that waits runs out.
+notifications-waiting-last-call = Last call: about a minute left

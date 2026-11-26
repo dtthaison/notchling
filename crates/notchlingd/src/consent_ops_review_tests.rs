@@ -307,7 +307,7 @@ impl Handler for Stale {
 }
 
 #[test]
-fn an_allowed_request_withdrawn_before_it_applies_shows_withdrawn_in_the_inbox() {
+fn an_allowed_request_withdrawn_before_it_applies_keeps_its_answer_and_shows_a_withdrawn_outcome() {
     let r = rig("allowed-withdrawn");
     r.consent.register(SETTING, Arc::new(Stale));
     let row = r.open(1, SETTING, "limitMode");
@@ -319,6 +319,14 @@ fn an_allowed_request_withdrawn_before_it_applies_shows_withdrawn_in_the_inbox()
             .answered
     );
     r.eventually_state(&row.id, "withdrawn");
-    let shown = r.eventually_item(&row.id, "withdrawn");
-    assert_eq!(shown["state"], "withdrawn", "{shown}");
+    let mut shown = r.eventually_item(&row.id, "answered");
+    for _ in 0..500 {
+        if shown["outcome"]["state"] == "withdrawn" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        shown = r.eventually_item(&row.id, "answered");
+    }
+    assert_eq!(shown["state"], "answered", "{shown}");
+    assert_eq!(shown["outcome"]["state"], "withdrawn", "{shown}");
 }

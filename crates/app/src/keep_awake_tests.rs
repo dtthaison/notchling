@@ -78,7 +78,7 @@ fn no_other_command_writes_a_setting() {
         Command::Welcome,
         Command::Quit,
     ] {
-        assert_eq!(wanted(command, &now), None, "{command:?}");
+        assert_eq!(wanted(command.clone(), &now), None, "{command:?}");
     }
 }
 

@@ -174,7 +174,12 @@ pub struct ClusterNode {
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
-pub const KEPT_CODES: [&str; 3] = ["refused", "not_sent", "stale_term"];
+pub const KEPT_CODES: [&str; 4] = [
+    "refused",
+    "not_sent",
+    "stale_term",
+    crate::control_ops::SIGNED_OUT,
+];
 
 pub fn api_error(e: WireError) -> ApiError {
     let code = match e.code.as_str() {

@@ -63,11 +63,12 @@ pub struct ToolRow {
     pub is_error: bool,
     pub finished: bool,
     pub browser: Option<BrowserRow>,
+    pub parent: Option<String>,
 }
 
 pub fn tool_icon(kind: ToolKind) -> Icon {
     match kind {
-        ToolKind::Shell => Icon::Terminal,
+        ToolKind::Shell | ToolKind::Repl => Icon::Terminal,
         ToolKind::Read => Icon::File,
         ToolKind::Search => Icon::Search,
         ToolKind::Web | ToolKind::Browser => Icon::Web,
@@ -189,6 +190,7 @@ fn tool_row(call: &ToolCall) -> ToolRow {
         is_error: call.is_error,
         finished: call.finished,
         browser,
+        parent: call.parent.clone(),
     }
 }
 

@@ -27,7 +27,7 @@ use super::hook_rows::HooksShown;
 use super::models_refresh;
 use super::models_rows::ModelsShown;
 use super::settings::{
-    change, sections, shared_agent_sections, tool_sections, Daemon, Field, Row, Section,
+    change, sections, shared_agent_sections, tool_sections, Daemon, Field, Press, Row, Section,
 };
 use super::settings_skills_view::{skills_page, SkillsHandlers, SkillsPageState};
 use super::skills_models;
@@ -671,6 +671,21 @@ impl SettingsView {
             )
     }
 
+    fn press(&mut self, press: Press, cx: &mut Context<Self>) {
+        match press {
+            Press::PlaySound => {
+                #[cfg(target_os = "macos")]
+                crate::mac::sound::play();
+            }
+            Press::OpenNotificationSettings => {
+                let _ = std::process::Command::new("/usr/bin/open")
+                    .arg("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+                    .spawn();
+            }
+        }
+        cx.notify();
+    }
+
     fn field(&self, row: &Row, i: usize, a: Appearance, cx: &mut Context<Self>) -> Div {
         let id = |part: &str| SharedString::from(format!("setting-{i}-{part}"));
         match &row.field {
@@ -746,6 +761,23 @@ impl SettingsView {
                 }
             }
             Field::Shortcut(setting) => self.shortcut_field(*setting, a, cx),
+            Field::Press(press) => {
+                let press = *press;
+                let title = match press {
+                    Press::PlaySound => t::settings::attention_play(),
+                    Press::OpenNotificationSettings => t::settings::attention_open_settings(),
+                };
+                div().child(
+                    button(
+                        id("press"),
+                        title,
+                        ButtonKind::Secondary,
+                        PartState::Rest,
+                        a,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.press(press, cx))),
+                )
+            }
             Field::List { .. } | Field::Categories(_) => div(),
             Field::ReadOnly { value, .. } => div()
                 .px(px(8.0))

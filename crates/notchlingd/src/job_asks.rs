@@ -1,12 +1,13 @@
 use crate::acting_ops::now_ms;
 use crate::cluster_dispatch::build;
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Failure, Handler, Opening};
 use crate::job_book::{JobBook, Record};
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::net::crypto::sha256_hex;
 use notchling_engine::cluster::jobs::job_id;
 use notchling_engine::cluster::wire::OriginTier;
 use notchling_engine::consent::{Consent, DISPATCH, JOB, JOB_STOP};
+use notchling_engine::delegate::record::pid_alive;
 use notchling_engine::organizations::PERSONAL_ID;
 use notchling_events::kinds::choices::Answerer;
 use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec};
@@ -215,6 +216,7 @@ impl JobAsks {
         for kind in [DISPATCH, JOB, JOB_STOP] {
             consent.register(kind, Arc::new(Apply(asks.me.clone())));
         }
+        asks.reconcile();
         asks
     }
 
@@ -289,6 +291,7 @@ impl JobAsks {
             reason,
             expires_in_ms,
             key: key.or(asked_key),
+            retry_of: retry_of(args),
         };
         if dry_run(args) {
             let would = self.consent.would(&opening)?;
@@ -360,15 +363,8 @@ impl JobAsks {
         let tool = args["tool"].as_str().unwrap_or_default();
         let message = match tool {
             "shell" => args["command"].as_str(),
-            "claude" => None,
             _ => args["text"].as_str(),
         };
-        if tool == "claude" && args["text"].as_str().is_some() {
-            return Err(
-                bad("A Claude Code job starts a session and takes no prompt yet.")
-                    .with_reason("usage"),
-            );
-        }
         let pick = |name: &str| {
             args.get(name)
                 .and_then(Value::as_str)
@@ -508,7 +504,7 @@ impl JobAsks {
                 "change": {"tool": tool, "folder": folder}, "request": null, "error": null}),
             );
         }
-        self.book.record(
+        self.book.record_with_pid(
             &id,
             Record {
                 session,
@@ -520,6 +516,7 @@ impl JobAsks {
                 ended_ms: None,
                 exit: None,
             },
+            caller.pid.filter(|pid| pid_alive(*pid)),
         );
         Ok(json!({"id": id}))
     }
@@ -541,8 +538,8 @@ impl JobAsks {
         Ok(json!({"id": id, "ended": ended}))
     }
 
-    fn apply_row(&self, row: &Consent) -> Result<Value, String> {
-        self.still_fits(row)?;
+    fn apply_row(&self, row: &Consent) -> Result<Value, Failure> {
+        self.still_fits(row).map_err(Failure::from)?;
         let change = &row.change;
         if row.kind == DISPATCH {
             return self.run_dispatch(row);
@@ -550,11 +547,11 @@ impl JobAsks {
         let act = change["action"]
             .as_str()
             .and_then(Act::parse)
-            .ok_or_else(|| "not a job action".to_string())?;
+            .ok_or_else(|| Failure::from("not a job action".to_string()))?;
         let id = change["job"].as_str().unwrap_or_default();
-        let job = self.row_of(id).map_err(|e| e.message)?;
+        let job = self.row_of(id).map_err(|e| Failure::of_api(&e))?;
         self.execute(&job, act, change["from"].as_u64().unwrap_or(0))
-            .map_err(|e| e.message)
+            .map_err(|e| Failure::of_api(&e))
     }
 
     pub(crate) fn dispatch_args(change: &Value) -> Value {
@@ -576,10 +573,13 @@ impl JobAsks {
         args
     }
 
-    fn run_dispatch(&self, row: &Consent) -> Result<Value, String> {
+    fn run_dispatch(&self, row: &Consent) -> Result<Value, Failure> {
         let change = &row.change;
         let args = Self::dispatch_args(change);
-        let started = self.hands.dispatch(&args).map_err(|e| e.message)?;
+        let started = self
+            .hands
+            .dispatch(&args)
+            .map_err(|e| Failure::of_api(&e))?;
         let key = change["key"].as_str().unwrap_or_default();
         let id = started["job"]
             .as_str()
@@ -605,7 +605,9 @@ impl JobAsks {
             )
         });
         if !claimed {
-            return Err("That key already started another session's job.".to_string());
+            return Err(Failure::from(
+                "That key already started another session's job.".to_string(),
+            ));
         }
         Ok(json!({"job": id, "state": started["state"], "warning": started["warning"]}))
     }
@@ -664,13 +666,27 @@ impl Handler for Apply {
     fn apply(
         &self,
         row: &Consent,
+        by: Option<Answerer>,
+        device: Option<&str>,
+    ) -> Result<Value, String> {
+        self.apply_failing(row, by, device)
+            .map_err(|failure| failure.message)
+    }
+
+    fn apply_failing(
+        &self,
+        row: &Consent,
         _by: Option<Answerer>,
         _device: Option<&str>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, Failure> {
         match self.0.upgrade() {
             Some(asks) => asks.apply_row(row),
-            None => Err("stopping".to_string()),
+            None => Err(Failure::from("stopping".to_string())),
         }
+    }
+
+    fn slow(&self, _row: &Consent) -> bool {
+        true
     }
 
     fn shape(&self, row: &Consent, view: &mut Value, agent: bool) {
@@ -712,6 +728,29 @@ impl OpGroup for JobAsks {
 
 #[path = "job_reads.rs"]
 mod reads;
+
+#[cfg(test)]
+#[path = "job_asks_failure_tests.rs"]
+mod failure_tests;
+
+#[cfg(test)]
+#[path = "job_asks_leak_tests.rs"]
+mod leak_tests;
+
+#[cfg(test)]
+#[path = "job_asks_lost_tests.rs"]
+mod lost_tests;
+
+#[cfg(test)]
+#[path = "job_asks_pid_tests.rs"]
+mod pid_tests;
+
+#[cfg(test)]
+#[path = "job_asks_late_tests.rs"]
+mod late_tests;
+#[cfg(test)]
+#[path = "job_asks_slow_tests.rs"]
+mod slow_tests;
 
 #[cfg(test)]
 #[path = "job_asks_review_tests.rs"]

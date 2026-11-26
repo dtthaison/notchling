@@ -452,6 +452,7 @@ kinds! {
             parts: Count,
             parts_allowed: Count,
             waited: Millis,
+            noted: Option<bool>,
         }
     }
     AgentNamed = "agent.named", kv 1 {

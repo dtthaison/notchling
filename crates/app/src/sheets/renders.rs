@@ -18,7 +18,7 @@ use crate::accounts::menu::targets;
 use crate::accounts::renders::{snapshot, Shown as AccountsShown};
 use crate::cluster::model::ClusterModel;
 
-pub const VIEWS: [ViewSpec; 26] = [
+pub const VIEWS: [ViewSpec; 27] = [
     ViewSpec {
         name: "banner",
         size: (620.0, 260.0),
@@ -53,6 +53,11 @@ pub const VIEWS: [ViewSpec; 26] = [
         name: "settings-semantic-models",
         size: (620.0, 1980.0),
         about: "the Settings sheet with Semantic Search on: Standard to download and Accent Helper on this Mac, with Pause (made-up data)",
+    },
+    ViewSpec {
+        name: "settings-semantic-standard",
+        size: (620.0, 1980.0),
+        about: "the Settings sheet with Semantic Search on: Standard on this Mac with Remove Model and Accent Helper to download, with Pause (made-up data)",
     },
     ViewSpec {
         name: "settings-semantic-downloading",
@@ -161,6 +166,7 @@ pub enum Shown {
     SettingsCluster,
     SettingsSemanticOff,
     SettingsSemanticModels,
+    SettingsSemanticStandard,
     SettingsSemanticDownloading,
     SettingsSemanticIndexing,
     SettingsAgents,
@@ -191,6 +197,7 @@ pub fn shown(name: &str) -> Option<Shown> {
         "settings-cluster" => Shown::SettingsCluster,
         "settings-semantic-off" => Shown::SettingsSemanticOff,
         "settings-semantic-models" => Shown::SettingsSemanticModels,
+        "settings-semantic-standard" => Shown::SettingsSemanticStandard,
         "settings-semantic-downloading" => Shown::SettingsSemanticDownloading,
         "settings-semantic-indexing" => Shown::SettingsSemanticIndexing,
         "settings-agents" => Shown::SettingsAgents,
@@ -222,6 +229,7 @@ pub fn acting(shown: Shown) -> Acting {
         | Shown::SettingsCluster
         | Shown::SettingsSemanticOff
         | Shown::SettingsSemanticModels
+        | Shown::SettingsSemanticStandard
         | Shown::SettingsSemanticDownloading
         | Shown::SettingsSemanticIndexing
         | Shown::SettingsAgents
@@ -338,6 +346,9 @@ pub fn semantic_status(shown: Shown) -> Option<Value> {
         Shown::SettingsSemanticOff => json!({"state": "off", "models": [], "fetch": []}),
         Shown::SettingsSemanticModels => json!({
             "state": "ready", "models": present(&[helper]), "fetch": [], "corpora": []
+        }),
+        Shown::SettingsSemanticStandard => json!({
+            "state": "ready", "models": present(&[standard]), "fetch": [], "corpora": []
         }),
         Shown::SettingsSemanticDownloading => json!({
             "state": "no_model", "models": [], "corpora": [],

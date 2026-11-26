@@ -417,6 +417,7 @@ pub struct Wired {
     pub account_follow: Arc<crate::account_asks::follow::AccountFollow>,
     account_asks: OnceLock<Arc<crate::account_asks::AccountAsks>>,
     pub embed: OnceLock<Arc<crate::embed_ops::EmbedOps>>,
+    pub(crate) released: std::sync::atomic::AtomicBool,
 }
 
 impl Wired {
@@ -813,6 +814,7 @@ impl Wired {
             account_follow,
             account_asks: OnceLock::new(),
             embed: OnceLock::new(),
+            released: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -898,6 +900,9 @@ impl Wired {
             ))
             .with_group(self.catalog.clone())
             .with_group(self.inbox.clone())
+            .with_group(Arc::new(crate::chat_ops::ChatOps::new(
+                self.acting.room.clone(),
+            )))
             .with_group(self.outbox.clone())
             .with_group(self.ask.clone())
             .with_group(self.vault.clone())

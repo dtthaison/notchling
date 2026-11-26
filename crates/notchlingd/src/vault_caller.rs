@@ -13,6 +13,9 @@ pub trait Processes: Send + Sync {
     fn start_time(&self, _pid: u32) -> Option<u64> {
         None
     }
+    fn exited(&self, _pid: u32) -> bool {
+        false
+    }
     fn argv(&self, _pid: u32) -> Option<Vec<String>> {
         None
     }
@@ -41,6 +44,12 @@ impl Processes for SystemProcesses {
     }
     fn start_time(&self, pid: u32) -> Option<u64> {
         crate::process_facts::start_time(pid)
+    }
+    fn exited(&self, pid: u32) -> bool {
+        matches!(
+            crate::process_facts::process(pid),
+            notchling_engine::sessions::fresh::Process::Gone
+        )
     }
     fn argv(&self, pid: u32) -> Option<Vec<String>> {
         crate::process_facts::argv(pid)

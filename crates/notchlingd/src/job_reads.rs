@@ -3,6 +3,8 @@ use crate::job_book::Record;
 use notchling_local_api::{ApiError, Caller};
 use serde_json::{json, Value};
 
+const DELEGATE_STALE_MS: i64 = 24 * 60 * 60 * 1000;
+
 fn full(job: &JobRow, record: Option<&Record>) -> Value {
     json!({
         "id": job.id, "own": true, "kind": "dispatch", "state": job.state,
@@ -13,17 +15,18 @@ fn full(job: &JobRow, record: Option<&Record>) -> Value {
     })
 }
 
-fn delegate_state(record: &Record) -> &'static str {
+fn delegate_state(record: &Record, lost: bool) -> &'static str {
     match (record.ended_ms, record.exit) {
         (None, _) => "running",
+        (Some(_), _) if lost => "lost",
         (Some(_), Some(0) | None) => "done",
         _ => "failed",
     }
 }
 
-fn delegate_full(id: &str, record: &Record) -> Value {
+fn delegate_full(id: &str, record: &Record, lost: bool) -> Value {
     json!({
-        "id": id, "own": true, "kind": "delegate", "state": delegate_state(record),
+        "id": id, "own": true, "kind": "delegate", "state": delegate_state(record, lost),
         "tool": record.tool, "machine": Value::Null, "organization": record.organization,
         "folder": record.folder, "createdMs": record.started_ms, "endedMs": record.ended_ms,
         "exit": record.exit,
@@ -35,12 +38,18 @@ fn state_only(id: &str, state: &str) -> Value {
 }
 
 impl JobAsks {
+    pub(super) fn reconcile(&self) {
+        self.book
+            .reap("delegate", (self.clock)(), DELEGATE_STALE_MS);
+    }
+
     fn session_of(&self, caller: &Caller) -> Option<(String, String)> {
         caller_of(&self.consent.who(caller)).ok()
     }
 
     pub(super) fn mine(&self, caller: &Caller) -> Result<Value, ApiError> {
         self.gate()?;
+        self.reconcile();
         let Some((session, organization)) = self.session_of(caller) else {
             return Ok(json!({"jobs": [], "reason": "no_session"}));
         };
@@ -51,7 +60,9 @@ impl JobAsks {
             seen.push(id.clone());
             match rows.iter().find(|r| r.id == id) {
                 Some(job) => out.push(full(job, Some(&record))),
-                None if record.kind == "delegate" => out.push(delegate_full(&id, &record)),
+                None if record.kind == "delegate" => {
+                    out.push(delegate_full(&id, &record, self.book.is_lost(&id)))
+                }
                 None => {}
             }
         }
@@ -74,6 +85,7 @@ impl JobAsks {
             .filter(|i| !i.trim().is_empty())
             .ok_or_else(|| bad("jobs.get takes {\"id\": text}"))?;
         self.gate()?;
+        self.reconcile();
         let (session, organization) = match self.session_of(caller) {
             Some((session, organization)) => (Some(session), Some(organization)),
             None => (None, None),
@@ -93,7 +105,9 @@ impl JobAsks {
             return Ok(state_only(id, &job.state));
         }
         match record {
-            Some(record) if own && record.kind == "delegate" => Ok(delegate_full(id, &record)),
+            Some(record) if own && record.kind == "delegate" => {
+                Ok(delegate_full(id, &record, self.book.is_lost(id)))
+            }
             _ => Err(bad(NO_JOB).with_reason("no_job")),
         }
     }

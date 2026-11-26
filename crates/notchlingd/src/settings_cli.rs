@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-pub const USAGE: &str = "Usage: notchling settings list [--json]\n       notchling settings get <key> [--json]\n       notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]";
+pub const USAGE: &str = "Usage: notchling settings list [--json]\n       notchling settings get <key> [--json]\n       notchling settings set <key> <value> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]";
 
 pub const DEFAULT_TIMEOUT: Duration =
     Duration::from_secs(notchling_engine::settings::skill::WAIT_SECS);
@@ -31,6 +31,7 @@ pub struct Flags {
     pub expires_in: Option<u64>,
     pub key: Option<String>,
     pub dry_run: bool,
+    pub retry_of: Option<String>,
 }
 
 impl Default for Flags {
@@ -42,6 +43,7 @@ impl Default for Flags {
             expires_in: None,
             key: None,
             dry_run: false,
+            retry_of: None,
         }
     }
 }
@@ -68,6 +70,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         match arg.as_str() {
             "--reason" => flags.reason = Some(value("--reason")?),
             "--key" => flags.key = Some(value("--key")?),
+            "--retry-of" => flags.retry_of = Some(value("--retry-of")?),
             "--wait" => flags.wait = true,
             "--no-wait" => flags.wait = false,
             "--dry-run" => flags.dry_run = true,
@@ -314,6 +317,9 @@ fn set(
     }
     if let Some(key) = &flags.key {
         consent.insert("key".into(), json!(key));
+    }
+    if let Some(id) = &flags.retry_of {
+        consent.insert("retryOf".into(), json!(id));
     }
     let mut args = json!({"key": key, "value": text, "wait": 0, "consent": consent});
     if flags.dry_run {

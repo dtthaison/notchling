@@ -179,3 +179,23 @@ fn settings_skill_wait_matches_the_timeout() {
         );
     }
 }
+
+#[test]
+fn every_skill_that_asks_the_user_teaches_the_change_note_and_retry_of() {
+    let names = [
+        "notchling",
+        "notchling-sessions",
+        "notchling-jobs",
+        "notchling-cluster",
+        "notchling-machines",
+        "notchling-accounts",
+        "notchling-settings",
+    ];
+    let specs = all_specs();
+    for name in names {
+        let spec = specs.iter().find(|s| s.name == name).expect(name);
+        let text = rendered(spec, SkillTool::Claude);
+        assert!(text.contains("denied with a note"), "{name}");
+        assert!(text.contains("--retry-of <id>"), "{name}");
+    }
+}

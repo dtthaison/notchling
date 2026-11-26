@@ -3,7 +3,7 @@ use crate::jobs_cli::{consent_of, scan, through_card, Scanned};
 use notchling_local_api::ops;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "Usage: notchling cluster create <name>\n       notchling cluster token\n       notchling cluster invite --node <id> --name <name> [--role master|worker] [--acting on|off]\n       notchling cluster member <node> [--role master|worker] [--delegation on|off]\n       notchling cluster failover on|off|30m|1h\n       notchling cluster main <session> [on|off]\n       notchling cluster allow <node> <secret>...\n       notchling cluster remove <node>\n       notchling cluster move-home <node>\n       notchling cluster move-now\n       each takes [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--dry-run] [--json]; the user says yes on a card";
+pub const USAGE: &str = "Usage: notchling cluster create <name>\n       notchling cluster token\n       notchling cluster invite --node <id> --name <name> [--role master|worker] [--acting on|off]\n       notchling cluster member <node> [--role master|worker] [--delegation on|off]\n       notchling cluster failover on|off|30m|1h\n       notchling cluster main <session> [on|off]\n       notchling cluster allow <node> <secret>...\n       notchling cluster remove <node>\n       notchling cluster move-home <node>\n       notchling cluster move-now\n       each takes [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]; the user says yes on a card";
 
 pub const WORDS: [&str; 10] = [
     "create",

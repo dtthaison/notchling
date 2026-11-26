@@ -51,6 +51,7 @@ fn asked_answers_only_for_a_setting_request() {
                 reason: None,
                 expires_in_ms: None,
                 key: None,
+                retry_of: None,
             },
         )
         .unwrap()

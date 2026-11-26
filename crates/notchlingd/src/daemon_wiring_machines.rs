@@ -27,6 +27,10 @@ pub mod machine_asks_rig;
 #[cfg(test)]
 #[path = "machine_asks_tests.rs"]
 mod machine_asks_tests;
+
+#[cfg(test)]
+#[path = "machine_asks_failure_tests.rs"]
+mod machine_asks_failure_tests;
 #[cfg(test)]
 #[path = "machines_ops_tests.rs"]
 mod machines_ops_tests;

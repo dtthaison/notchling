@@ -1,6 +1,6 @@
 use crate::acting_ops::{now_ms, ActingOps};
 use crate::bridge_ops::BridgeOps;
-use crate::consent_ops::{options, ConsentOps, Handler, Opening};
+use crate::consent_ops::{options, retry_of, ConsentOps, Handler, Opening};
 use crate::inbox_ops::{InboxOps, Responder};
 use crate::op_group::OpGroup;
 use crate::switch_worker::{Place, Where};
@@ -97,6 +97,7 @@ pub fn off_notice(name: &str, tool: &str, session: Option<&str>, created_ms: i64
         open: Some(json!({"switch": name})),
         closed_ms: None,
         switch: None,
+        ..Default::default()
     }
 }
 
@@ -208,6 +209,7 @@ impl SwitchAsks {
             reason,
             expires_in_ms,
             key,
+            retry_of: retry_of(args),
         };
         if args.get("dryRun").and_then(Value::as_bool) == Some(true) {
             let would = self.consent.would(&opening)?;

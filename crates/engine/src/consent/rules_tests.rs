@@ -198,3 +198,109 @@ fn a_deny_of_an_unverified_ask_cools_only_unverified_callers() {
     assert!(after > 0 && after <= COOLDOWN_MS);
     store.insert(&new("s1", "k1"), 3_000).unwrap();
 }
+
+fn denied_with_note(store: &ConsentStore, session: &str, target: &str, at: i64) -> String {
+    let id = store
+        .insert(&new(session, target), at)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    store
+        .answer_noted(
+            &id,
+            State::Denied,
+            "mac",
+            None,
+            Some("call it b2"),
+            at + 500,
+        )
+        .unwrap();
+    id
+}
+
+fn retrying(session: &str, target: &str, of: &str) -> New {
+    let mut asked = new(session, target);
+    asked.change["retryOf"] = serde_json::json!(of);
+    asked
+}
+
+#[test]
+fn a_deny_with_a_note_does_not_start_the_cooldown() {
+    let store = ConsentStore::in_memory_for_tests();
+    denied_with_note(&store, "s1", "k1", 0);
+    store.insert(&new("s1", "k1"), 60_000).unwrap();
+}
+
+#[test]
+fn a_deny_without_a_note_still_starts_the_cooldown() {
+    let store = ConsentStore::in_memory_for_tests();
+    let id = store.insert(&new("s1", "k1"), 0).unwrap().row().id.clone();
+    store
+        .answer_noted(&id, State::Denied, "mac", None, None, 500)
+        .unwrap();
+    busy(store.insert(&new("s1", "k1"), 60_000));
+}
+
+#[test]
+fn the_retry_of_a_noted_deny_is_not_held_by_the_hourly_cap() {
+    let store = ConsentStore::in_memory_for_tests();
+    let mut noted = String::new();
+    for n in 0..10 {
+        if n == 3 {
+            noted = denied_with_note(&store, "s1", "k3", 1_000 + n);
+            continue;
+        }
+        let id = store
+            .insert(&new("s1", &format!("k{n}")), 1_000 + n)
+            .unwrap()
+            .row()
+            .id
+            .clone();
+        store.finish(&id, State::Cancelled, None, 2_000).unwrap();
+    }
+    busy(store.insert(&new("s1", "again"), 3_000));
+    store
+        .insert(&retrying("s1", "k3-changed", &noted), 3_000)
+        .unwrap();
+}
+
+#[test]
+fn a_retry_row_does_not_count_toward_the_hourly_cap() {
+    let store = ConsentStore::in_memory_for_tests();
+    let noted = denied_with_note(&store, "s1", "k0", 1_000);
+    let retry = store
+        .insert(&retrying("s1", "k0-changed", &noted), 2_000)
+        .unwrap()
+        .row()
+        .id
+        .clone();
+    store.finish(&retry, State::Cancelled, None, 2_500).unwrap();
+    for n in 1..9 {
+        let id = store
+            .insert(&new("s1", &format!("k{n}")), 3_000 + n)
+            .unwrap()
+            .row()
+            .id
+            .clone();
+        store.finish(&id, State::Cancelled, None, 4_000).unwrap();
+    }
+    store.insert(&new("s1", "last"), 5_000).unwrap();
+}
+
+#[test]
+fn a_retry_of_a_row_that_was_not_a_noted_deny_gets_no_exemption() {
+    let store = ConsentStore::in_memory_for_tests();
+    let mut plain = String::new();
+    for n in 0..10 {
+        let id = store
+            .insert(&new("s1", &format!("k{n}")), 1_000 + n)
+            .unwrap()
+            .row()
+            .id
+            .clone();
+        store.finish(&id, State::Cancelled, None, 2_000).unwrap();
+        plain = id;
+    }
+    busy(store.insert(&retrying("s1", "other", &plain), 3_000));
+}

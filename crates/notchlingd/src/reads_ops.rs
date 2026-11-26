@@ -14,7 +14,11 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-pub const READ_OPS: [&str; 4] = [
+#[path = "reads_history.rs"]
+mod history;
+
+pub const READ_OPS: [&str; 5] = [
+    ops::SESSIONS_HISTORY,
     ops::INBOX_MINE,
     ops::ACCOUNTS_SUMMARY,
     ops::LIMITS_SUMMARY,
@@ -34,6 +38,7 @@ pub struct ReadsOps {
     quota_dir: PathBuf,
     ids: AccountIds,
     now: Clock,
+    history: notchling_engine::sessions::history::History,
 }
 
 pub fn mask_email(email: &str) -> String {
@@ -117,6 +122,7 @@ impl ReadsOps {
             quota_dir: daemon_dir.join("accounts"),
             ids: AccountIds::in_dir(daemon_dir),
             now,
+            history: notchling_engine::sessions::history::History::new(),
         }
     }
 
@@ -345,11 +351,29 @@ impl ReadsOps {
     }
 }
 
-fn own_item(item: &Item) -> Value {
-    json!({
+pub(crate) fn own_item(item: &Item) -> Value {
+    let mut shown = json!({
         "id": item.id, "kind": item.kind, "state": item.state,
         "title": item.title, "detail": item.detail, "createdMs": item.created_ms,
-    })
+    });
+    if let Some(outcome) = &item.outcome {
+        shown["outcome"] = json!({
+            "state": outcome.state, "reason": outcome.reason, "atMs": outcome.at_ms,
+        });
+    }
+    if item.is_blocking() {
+        shown["blocking"] = json!(true);
+        shown["waitingSince"] = json!(item.waiting_since);
+        shown["waiter"] = json!(item.waiter);
+    }
+    if let Some(place) = &item.place {
+        shown["place"] = json!({
+            "machine": place.machine, "machineName": place.machine_name,
+            "session": place.session, "sessionName": place.session_name,
+            "branch": place.branch,
+        });
+    }
+    shown
 }
 
 fn short_item(item: &Item) -> Value {
@@ -455,6 +479,7 @@ impl OpGroup for ReadsOps {
 
     fn call(&self, caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
         match op {
+            ops::SESSIONS_HISTORY => self.history(caller, args),
             ops::INBOX_MINE => Ok(self.inbox(caller)),
             ops::ACCOUNTS_SUMMARY => Ok(self.accounts(caller)),
             ops::LIMITS_SUMMARY => {

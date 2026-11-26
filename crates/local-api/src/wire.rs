@@ -9,6 +9,7 @@ pub mod ops {
     pub const DAEMON_STATUS: &str = "daemon.status";
     pub const DAEMON_CAPABILITIES: &str = "daemon.capabilities";
     pub const SESSIONS_LIST: &str = "sessions.list";
+    pub const SESSIONS_HISTORY: &str = "sessions.history";
     pub const EVENTS_SUBSCRIBE: &str = "events.subscribe";
 
     pub const SESSION_REPLY: &str = "session.reply";
@@ -213,6 +214,7 @@ pub mod ops {
 
     pub const SHELLS_MINE: &str = "shells.mine";
     pub const SHELLS_STOP: &str = "shells.stop";
+    pub const CHAT_OPEN_FILE: &str = "chat.open_file";
     pub const SHELLS_STUCK: &str = "shells.stuck";
 
     pub const CONSENT_GET: &str = "consent.get";
@@ -311,6 +313,9 @@ pub mod topics {
     pub const OUTBOX_CHANGED: &str = "outbox.changed";
     pub const OUTBOX_REMOVED: &str = "outbox.removed";
 
+    pub const CHAT: &str = "chat";
+    pub const CHAT_OPEN_FILE: &str = "chat.open_file";
+
     pub const RELOADS: &str = "reloads";
     pub const RELOAD_CHANGED: &str = "reload.changed";
 
@@ -320,11 +325,12 @@ pub mod topics {
 
     pub const MINE_CONSENTS: &str = "mine.consents";
     pub const MINE_ASKS: &str = "mine.asks";
+    pub const MINE_INBOX: &str = "mine.inbox";
     pub const MINE_JOBS: &str = "mine.jobs";
     pub const MINE_SESSIONS: &str = "mine.sessions";
     pub const CONSENT_CHANGED: &str = "consent.changed";
     pub const MINE_PREFIX: &str = "mine.";
-    pub const SCOPED: [&str; 2] = [MINE_CONSENTS, MINE_ASKS];
+    pub const SCOPED: [&str; 3] = [MINE_CONSENTS, MINE_ASKS, MINE_INBOX];
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

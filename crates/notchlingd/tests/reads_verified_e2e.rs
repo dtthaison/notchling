@@ -88,6 +88,7 @@ const READS: &[&[&str]] = &[
     &["inbox", "--json"],
     &["limits", "--json"],
     &["limits", "--tool", "codex", "--json"],
+    &["sessions", "history", "--limit", "5", "--json"],
 ];
 
 fn assert_answered_for_the_session(steps: &[Value], organization: &str, personal: bool) {
@@ -116,6 +117,12 @@ fn assert_answered_for_the_session(steps: &[Value], organization: &str, personal
     assert_eq!(accounts["organization"], organization, "{accounts}");
     let limits = parsed(&steps[4]);
     assert_eq!(limits["organization"], organization, "{limits}");
+    let history = parsed(&steps[6]);
+    assert!(history["sessions"].is_array(), "{history}");
+    assert_eq!(history["organization"], organization, "{history}");
+    assert_eq!(history["masked"], true, "{history}");
+    assert_eq!(history["window_days"], 14, "{history}");
+    assert!(history.get("next").is_some(), "{history}");
 }
 
 #[test]

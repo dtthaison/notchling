@@ -220,6 +220,7 @@ impl Notices for InboxNotices {
             open: None,
             closed_ms: None,
             switch: None,
+            ..Default::default()
         };
         self.inbox.raise(item, None);
     }

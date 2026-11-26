@@ -106,6 +106,7 @@ fn env() -> Env {
                         command: "cargo watch".into(),
                         title: String::new(),
                         output_path: PATH.into(),
+                        description: String::new(),
                         started: Some(started.load(Ordering::SeqCst) as f64),
                     }],
                     finished_agents: finished.lock().unwrap().clone(),

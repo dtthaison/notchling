@@ -7,7 +7,7 @@ use notchling_engine::sessions::Agent;
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode, Tier};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 pub const FOLLOW_EVERY_MS: u64 = 60_000;
 pub const FOLLOW_RETRY_MS: u64 = 5_000;
@@ -20,8 +20,8 @@ struct Parts {
 }
 
 pub struct PhoneCluster {
-    parts: OnceLock<Parts>,
-    relay: OnceLock<Arc<dyn Relay>>,
+    parts: Mutex<Option<Arc<Parts>>>,
+    relay: Mutex<Option<Arc<dyn Relay>>>,
     followed: Mutex<HashMap<String, u64>>,
 }
 
@@ -41,8 +41,8 @@ fn the_phone() -> Caller {
 impl PhoneCluster {
     pub fn none() -> Arc<PhoneCluster> {
         Arc::new(PhoneCluster {
-            parts: OnceLock::new(),
-            relay: OnceLock::new(),
+            parts: Mutex::new(None),
+            relay: Mutex::new(None),
             followed: Mutex::new(HashMap::new()),
         })
     }
@@ -53,27 +53,39 @@ impl PhoneCluster {
         sessions: Arc<RemoteSessions>,
         prompts: Arc<RemotePrompts>,
     ) {
-        let _ = self.parts.set(Parts {
-            handler,
-            sessions,
-            prompts,
-        });
+        let mut slot = lock(&self.parts);
+        if slot.is_none() {
+            *slot = Some(Arc::new(Parts {
+                handler,
+                sessions,
+                prompts,
+            }));
+        }
+    }
+
+    pub fn detach(&self) {
+        let parts = lock(&self.parts).take();
+        let relay = lock(&self.relay).take();
+        drop((parts, relay));
     }
 
     pub fn attach_relay(&self, relay: Arc<dyn Relay>) {
-        let _ = self.relay.set(relay);
+        let mut slot = lock(&self.relay);
+        if slot.is_none() {
+            *slot = Some(relay);
+        }
     }
 
     pub fn relay(&self) -> Option<Arc<dyn Relay>> {
-        self.relay.get().cloned()
+        lock(&self.relay).clone()
     }
 
     pub fn attached(&self) -> bool {
-        self.parts.get().is_some()
+        lock(&self.parts).is_some()
     }
 
     pub fn agents(&self) -> Vec<Agent> {
-        let Some(parts) = self.parts.get() else {
+        let Some(parts) = lock(&self.parts).clone() else {
             return Vec::new();
         };
         parts
@@ -86,14 +98,14 @@ impl PhoneCluster {
     }
 
     pub fn prompts(&self) -> Vec<PendingPrompt> {
-        let Some(parts) = self.parts.get() else {
+        let Some(parts) = lock(&self.parts).clone() else {
             return Vec::new();
         };
         parts.prompts.list().iter().filter_map(pending).collect()
     }
 
     pub fn call(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
-        let parts = self.parts.get().ok_or_else(|| {
+        let parts = lock(&self.parts).clone().ok_or_else(|| {
             ApiError::new(
                 ErrorCode::Failed,
                 "the cluster isn't running in this daemon",

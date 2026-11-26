@@ -57,6 +57,7 @@ pub enum ToolKind {
     Ask,
     Skill,
     Browser,
+    Repl,
     Other,
 }
 
@@ -151,6 +152,10 @@ pub struct ToolCall {
     pub finished: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<Box<BrowserCall>>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 impl ToolCall {
@@ -166,6 +171,8 @@ impl ToolCall {
             diff: Vec::new(),
             finished: false,
             browser: None,
+            description: String::new(),
+            parent: None,
         }
     }
 
@@ -268,6 +275,8 @@ pub struct BackgroundShell {
     pub command: String,
     pub title: String,
     pub output_path: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     pub started: Option<Timestamp>,
 }
 

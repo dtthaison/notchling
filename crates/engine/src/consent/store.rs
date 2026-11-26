@@ -13,7 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 const COLUMNS: &str = "id, kind, target, change, facts, parts, parts_allowed, reason, session, \
     tool, verified, root, folder, organization, pid, pid_start, idem_key, state, answer_on, \
     applied_by, created_ms, expires_ms, answered_ms, by, used_ms, used_op_id, result, closed_ms, \
-    request, extended";
+    request, extended, note";
 
 pub struct ConsentStore {
     db: Mutex<Connection>,
@@ -89,6 +89,7 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Consent> {
         closed_ms: r.get(27)?,
         request,
         extended: r.get::<_, i64>(29)? != 0,
+        note: r.get(30)?,
     })
 }
 
@@ -220,6 +221,18 @@ impl ConsentStore {
                 return Err(Refusal::KeyReused);
             }
         }
+        if let Some(old) = super::retry::retry_of(&new.change) {
+            let taken: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM consents WHERE json_extract(change, '$.retryOf') = ?1)",
+                    params![old],
+                    |r| r.get(0),
+                )
+                .map_err(db_error)?;
+            if taken {
+                return Err(Refusal::RetryRefused(super::retry::ALREADY));
+            }
+        }
         let recent = select(
             &tx,
             "WHERE state IN ('waiting', 'opened') OR created_ms > ?1 OR answered_ms > ?1 ORDER BY n",
@@ -270,6 +283,16 @@ impl ConsentStore {
         fetch(&self.lock(), id)
     }
 
+    pub fn retried_by(&self, id: &str) -> Result<bool, String> {
+        self.lock()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM consents WHERE json_extract(change, '$.retryOf') = ?1)",
+                params![id],
+                |r| r.get(0),
+            )
+            .map_err(db_err)
+    }
+
     pub fn all(&self) -> Result<Vec<Consent>, String> {
         select(&self.lock(), "ORDER BY n DESC", &[])
     }
@@ -298,15 +321,39 @@ impl ConsentStore {
         parts_allowed: Option<&Value>,
         now: i64,
     ) -> Result<Taken, String> {
+        self.answer_noted(id, to, by, parts_allowed, None, now)
+    }
+
+    pub fn answer_noted(
+        &self,
+        id: &str,
+        to: State,
+        by: &str,
+        parts_allowed: Option<&Value>,
+        note: Option<&str>,
+        now: i64,
+    ) -> Result<Taken, String> {
         let db = self.lock();
         let closed = to.closed();
+        let note = note.filter(|_| to == State::Denied);
+        let sent = if closed {
+            fetch(&db, id)?
+                .as_ref()
+                .and_then(|row| super::retry::sent_hash(&row.change))
+        } else {
+            None
+        };
         let changed = db
             .execute(
                 "UPDATE consents SET state = ?2, by = ?3, answered_ms = ?4, parts_allowed = ?5,
                      used_ms = CASE WHEN ?2 = 'applying' THEN ?4 ELSE used_ms END,
                      closed_ms = CASE WHEN ?6 THEN ?4 ELSE closed_ms END,
-                     reason = CASE WHEN ?6 THEN NULL ELSE reason END,
-                     change = CASE WHEN ?6 THEN json_remove(change, '$.message', '$.question') ELSE change END
+                     note = ?7,
+                     reason = CASE WHEN ?6 AND ?7 IS NULL THEN NULL ELSE reason END,
+                     change = CASE WHEN ?6 THEN
+                         CASE WHEN ?8 IS NULL THEN json_remove(change, '$.message', '$.question')
+                         ELSE json_set(json_remove(change, '$.message', '$.question'), '$.sentHash', ?8) END
+                     ELSE change END
                  WHERE id = ?1 AND state IN ('waiting', 'opened') AND expires_ms > ?4",
                 params![
                     id,
@@ -314,7 +361,9 @@ impl ConsentStore {
                     by,
                     now,
                     parts_allowed.map(text_of),
-                    i64::from(closed)
+                    i64::from(closed),
+                    note,
+                    sent
                 ],
             )
             .map_err(db_err)?;

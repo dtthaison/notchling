@@ -17,6 +17,7 @@ MORE_COMMANDS = (
     Path("crates/notchlingd/src/commands_machines.rs"),
     Path("crates/notchlingd/src/commands_setup.rs"),
     Path("crates/notchlingd/src/commands_search.rs"),
+    Path("crates/notchlingd/src/commands_inbox.rs"),
 )
 SPECS = Path("docs/superpowers/specs")
 FIRST_DATE = "2026-11-21"

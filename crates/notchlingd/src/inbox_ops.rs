@@ -1,12 +1,14 @@
 use crate::acting_ops::{now_ms, Room};
 use crate::inbox_events::events_of;
-use crate::inbox_mirrors::{localize, Home, InboxLink, Mirrors, Refusal, Tap};
+use crate::inbox_mirrors::{localize, name_machines, Home, InboxLink, Mirrors, Refusal, Tap};
 use crate::late_emit::Events;
 use crate::op_group::OpGroup;
 use notchling_engine::bridge::inbox::InboxOutcome;
 use notchling_engine::cluster::persist::{self as cluster_persist, CLUSTER_DB};
 use notchling_engine::cluster::{NodeId, Qualified};
-use notchling_engine::inbox::{self, ActionId, Book, Change, Item, Kind, State, Store};
+use notchling_engine::inbox::{
+    self, ActionId, Book, Change, Item, Kind, Live, Outcome, State, Store,
+};
 use notchling_engine::store;
 use notchling_local_api::{ops, topics, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier};
 use serde_json::{json, Value};
@@ -30,13 +32,17 @@ pub trait Responder: Send + Sync {
     fn answered_by(&self, item: &Item, action: ActionId, _by: &str) -> bool {
         self.answered(item, action)
     }
+
+    fn answered_with(&self, item: &Item, action: ActionId, by: &str, _note: Option<&str>) -> bool {
+        self.answered_by(item, action, by)
+    }
 }
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 enum Msg {
     Changes(Vec<Change>),
-    Publish(Vec<Change>),
+    Publish(Vec<Change>, bool),
     Flush(Sender<()>),
     Move(Store, Option<Sender<bool>>),
 }
@@ -77,11 +83,19 @@ impl Inner {
     }
 
     fn publish(&self, changes: Vec<Change>) {
+        self.publish_as(changes, false);
+    }
+
+    fn publish_own(&self, changes: Vec<Change>) {
+        self.publish_as(changes, true);
+    }
+
+    fn publish_as(&self, changes: Vec<Change>, own: bool) {
         if changes.is_empty() {
             return;
         }
         if let Some(writes) = &self.writes {
-            let _ = writes.send(Msg::Publish(changes));
+            let _ = writes.send(Msg::Publish(changes, own));
         }
     }
 
@@ -98,6 +112,15 @@ impl Inner {
             }
         }
     }
+}
+
+pub enum Closing<'a> {
+    Resolve {
+        state: State,
+        answer: Option<ActionId>,
+        by: Option<&'a str>,
+    },
+    Withdraw,
 }
 
 pub struct InboxOps {
@@ -125,12 +148,12 @@ fn write_loop(
                 for change in &changes {
                     let at = lock(&store).clone();
                     persist(&at, change);
-                    publish(room.as_ref(), change);
+                    publish(room.as_ref(), change, true);
                 }
             }
-            Msg::Publish(changes) => {
+            Msg::Publish(changes, own) => {
                 for change in &changes {
-                    publish(room.as_ref(), change);
+                    publish(room.as_ref(), change, own);
                 }
             }
             Msg::Flush(ack) => {
@@ -186,10 +209,19 @@ fn report(done: Result<(), String>) {
     }
 }
 
-fn publish(room: &dyn Room, change: &Change) {
+fn publish(room: &dyn Room, change: &Change, own: bool) {
     match change {
         Change::Raised(item) | Change::Updated(item) => {
             room.publish(topics::INBOX, topics::INBOX_CHANGED, &json!({"item": item}));
+            let owner = item
+                .source
+                .session
+                .as_deref()
+                .filter(|s| own && !s.is_empty() && item.source.node.is_none());
+            if let Some(owner) = owner {
+                let data = json!({"item": crate::reads_ops::own_item(item), "state": item.state});
+                room.publish_to(owner, topics::MINE_INBOX, topics::INBOX_CHANGED, &data);
+            }
         }
         Change::Removed(id) => {
             room.publish(topics::INBOX, topics::INBOX_REMOVED, &json!({"id": id}));
@@ -384,6 +416,63 @@ impl InboxOps {
         inner.send(changes);
     }
 
+    pub fn close_item(&self, id: &str, closing: Closing<'_>, outcome: Option<Outcome>) {
+        let now = (self.clock)();
+        let mut inner = lock(&self.inner);
+        let first = match closing {
+            Closing::Resolve { state, answer, by } => {
+                inner.book.resolve(id, state, answer, by, now)
+            }
+            Closing::Withdraw
+                if inner
+                    .book
+                    .get(id)
+                    .is_some_and(|item| item.state == State::Open) =>
+            {
+                inner.book.withdraw(id, now)
+            }
+            Closing::Withdraw => None,
+        };
+        let last = outcome.and_then(|outcome| inner.book.set_outcome(id, outcome));
+        let closed: Vec<Change> = first.into_iter().collect();
+        let changes: Vec<Change> = last.or(closed.first().cloned()).into_iter().collect();
+        inner.responders.remove(id);
+        inner.note(&closed);
+        inner.send(changes);
+    }
+
+    pub fn set_live(&self, id: &str, live: Option<Live>) -> bool {
+        let mut inner = lock(&self.inner);
+        if !inner.book.set_live(id, live) {
+            return false;
+        }
+        let shown: Vec<Change> = inner
+            .book
+            .get(id)
+            .map(Change::Updated)
+            .into_iter()
+            .collect();
+        if inner.paused.is_none() {
+            if let Some(tap) = &inner.tap {
+                tap(shown.clone());
+            }
+        }
+        inner.publish_own(shown);
+        true
+    }
+
+    pub fn set_outcome(&self, id: &str, outcome: Outcome) {
+        let mut inner = lock(&self.inner);
+        let changes: Vec<Change> = inner.book.set_outcome(id, outcome).into_iter().collect();
+        inner.send(changes);
+    }
+
+    pub fn note_item(&self, id: &str, note: &str) {
+        let mut inner = lock(&self.inner);
+        let changes: Vec<Change> = inner.book.set_note(id, note).into_iter().collect();
+        inner.send(changes);
+    }
+
     pub fn withdraw(&self, id: &str) {
         let now = (self.clock)();
         let mut inner = lock(&self.inner);
@@ -517,7 +606,7 @@ impl InboxOps {
         inner.responders.retain(|id, _| open.contains(id));
         inner.book = Book::from_items(items);
         inner.note(&shown);
-        inner.publish(shown);
+        inner.publish_own(shown);
         inner.send(writes);
     }
 
@@ -562,6 +651,9 @@ impl InboxOps {
                     .into_iter()
                     .filter(|item| !known.contains(&item.id)),
             );
+        }
+        if let Some(link) = lock(&self.link).clone() {
+            name_machines(&mut items, link.as_ref());
         }
         items.sort_by_key(|item| std::cmp::Reverse(item.created_ms));
         items
@@ -629,7 +721,7 @@ impl InboxOps {
         &self,
         owner: Qualified,
         full: &str,
-        (action, by): (ActionId, &str),
+        (action, by, note): (ActionId, &str, Option<&str>),
     ) -> Result<InboxOutcome, ApiError> {
         let link = lock(&self.link)
             .clone()
@@ -648,24 +740,43 @@ impl InboxOps {
                 "Only the Mac or a paired phone may allow a secret.",
             ));
         }
-        let answered = link.answer(&owner.node, &owner.id, action, by)?;
+        let answered = link.answer_noted(&owner.node, &owner.id, action, by, note)?;
         outcome_of(&answered)
     }
 
     pub fn decide(&self, id: &str, action: ActionId, by: &str) -> Result<InboxOutcome, ApiError> {
+        self.decide_noted(id, action, by, None)
+    }
+
+    pub fn decide_noted(
+        &self,
+        id: &str,
+        action: ActionId,
+        by: &str,
+        note: Option<&str>,
+    ) -> Result<InboxOutcome, ApiError> {
+        if note.is_some() && action != ActionId::Deny {
+            return Err(bad("A note goes with a no only."));
+        }
         let me = lock(&self.link).as_ref().and_then(|link| link.me());
         let parsed = Qualified::parse(id);
         if let Some(owner) = parsed.clone().filter(|q| Some(&q.node) != me.as_ref()) {
-            return self.forward(owner, id, (action, by));
+            return self.forward(owner, id, (action, by, note));
         }
         let id = match parsed {
             Some(own) => own.id,
             None => id.to_string(),
         };
-        self.decide_own(&id, action, by)
+        self.decide_own(&id, action, by, note)
     }
 
-    fn decide_own(&self, id: &str, action: ActionId, by: &str) -> Result<InboxOutcome, ApiError> {
+    fn decide_own(
+        &self,
+        id: &str,
+        action: ActionId,
+        by: &str,
+        note: Option<&str>,
+    ) -> Result<InboxOutcome, ApiError> {
         let now = (self.clock)();
         let mut inner = lock(&self.inner);
         let current = inner
@@ -691,11 +802,11 @@ impl InboxOps {
             ));
         }
         if let Some(responder) = inner.responders.get(id).cloned() {
-            if !responder.answered_by(&current, action, by) {
+            if !responder.answered_with(&current, action, by, note) {
                 return Ok(refused(&current));
             }
         }
-        match inner.book.answer(id, action, by, now) {
+        match inner.book.answer_noted(id, action, by, note, now) {
             Ok(change) => {
                 inner.note(std::slice::from_ref(&change));
                 inner.send(vec![change]);
@@ -723,7 +834,16 @@ impl InboxOps {
             .and_then(Value::as_str)
             .filter(|by| from_node && MAY_ALLOW.contains(by))
             .unwrap_or(ANSWERED_BY);
-        let outcome = self.decide(id, action, by)?;
+        let note = match args.get("note") {
+            None | Some(Value::Null) => None,
+            Some(_) if action != ActionId::Deny => return Err(bad("A note goes with a no only.")),
+            Some(Value::String(text)) => Some(
+                notchling_engine::consent::clean_note(text)
+                    .ok_or_else(|| bad("The note is empty."))?,
+            ),
+            Some(_) => return Err(bad("The note is text.")),
+        };
+        let outcome = self.decide_noted(id, action, by, note.as_deref())?;
         Ok(json!({
             "answered": outcome.answered,
             "state": state_name(outcome.state),

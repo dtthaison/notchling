@@ -30,10 +30,17 @@ pub fn make_call(id: &str, name: &str, input: &Map<String, Value>) -> ToolCall {
             let title = if d.is_empty() {
                 format!("Ran {}", prefix_chars(&command, 60))
             } else {
-                d
+                d.clone()
             };
-            call(ToolKind::Shell, title, command)
+            let mut made = call(ToolKind::Shell, title, command);
+            made.description = d;
+            made
         }
+        "REPL" => call(
+            ToolKind::Repl,
+            super::repl::title(&s("description")),
+            s("code"),
+        ),
         "Read" => call(
             ToolKind::Read,
             format!("Read {}", file_in(input, "file_path")),

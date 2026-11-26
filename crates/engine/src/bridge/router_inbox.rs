@@ -53,6 +53,12 @@ impl Router {
         if action == ActionId::Open {
             return Err(("open", BridgeFailure::invalid("Open the form on the Mac.")));
         }
+        if body.get("note").is_some_and(|note| !note.is_null()) {
+            return Err((
+                "note",
+                BridgeFailure::invalid("Notes from the phone aren't on yet."),
+            ));
+        }
         let outcome = self
             .backend
             .inbox_answer(item_id, action)

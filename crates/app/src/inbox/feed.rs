@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -7,15 +6,14 @@ use notchling_engine::consent::{member_set_args, worker_switch};
 use notchling_engine::inbox::ActionId;
 use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ConnectOptions, Event};
 use notchling_locale as t;
-use notchling_platform::notify::{system_notifier, Notifier, Unsupported};
 use serde_json::{json, Value};
 
 use super::consent_card::{AccountApply, ClusterApply};
 use super::model::{
-    answer_args, cluster_apply_args, consent_answer_args, consent_of, seen_args, switch_apply,
-    InboxModel,
+    answer_args, cluster_apply_args, consent_answer_args, consent_deny_with_args, consent_of,
+    seen_args, switch_apply, InboxModel,
 };
-use super::system::{notify_new, remember, Detached};
+use super::triage::{blocking_for, Strip};
 use crate::actions::{Socket, Transport};
 use crate::chat::data::DataRoot;
 use crate::switches::feed::{config_for, FeedConfig};
@@ -30,11 +28,11 @@ pub enum SignIn {
 impl std::fmt::Debug for SignIn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SignIn::OpenUrl(_) => f.write_str("OpenUrl(..)"),
+            SignIn::OpenUrl(_) => f.write_str("open_url(..)"),
             SignIn::OpenAccounts(provider) => {
-                f.debug_tuple("OpenAccounts").field(provider).finish()
+                f.debug_tuple("open_accounts").field(provider).finish()
             }
-            SignIn::Nothing => f.write_str("Nothing"),
+            SignIn::Nothing => f.write_str("nothing"),
         }
     }
 }
@@ -59,19 +57,15 @@ fn sign_in_of(apply: &AccountApply, reply: &Value) -> SignIn {
 
 struct Shared {
     model: Mutex<InboxModel>,
-    notified: Mutex<HashSet<String>>,
-    notifier: Arc<dyn Notifier>,
     generation: AtomicU64,
     stop: AtomicBool,
     refresh: AtomicBool,
 }
 
 impl Shared {
-    fn new(notifier: Arc<dyn Notifier>) -> Shared {
+    fn new() -> Shared {
         Shared {
             model: Mutex::default(),
-            notified: Mutex::default(),
-            notifier,
             generation: AtomicU64::new(0),
             stop: AtomicBool::new(false),
             refresh: AtomicBool::new(false),
@@ -86,14 +80,9 @@ impl Shared {
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn notified(&self) -> MutexGuard<'_, HashSet<String>> {
-        self.notified.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
     fn seed(&self, reply: &Value) {
         let mut model = self.model();
         model.load(reply);
-        remember(&model, &mut self.notified());
         drop(model);
         self.bump();
     }
@@ -105,17 +94,7 @@ impl Shared {
 
     fn apply(&self, event: &Event) {
         let wire = json!({"event": event.event, "data": event.data});
-        if event.event == topics::INBOX_CHANGED {
-            let (before, after) = {
-                let mut model = self.model();
-                let before = model.clone();
-                model.apply(&wire);
-                (before, model.clone())
-            };
-            notify_new(&before, &after, &mut self.notified(), &*self.notifier);
-        } else {
-            self.model().apply(&wire);
-        }
+        self.model().apply(&wire);
         self.bump();
     }
 
@@ -137,7 +116,7 @@ pub struct InboxFeed {
 impl InboxFeed {
     pub fn none() -> InboxFeed {
         InboxFeed {
-            shared: Arc::new(Shared::new(Arc::new(Unsupported))),
+            shared: Arc::new(Shared::new()),
             transport: None,
         }
     }
@@ -155,20 +134,15 @@ impl InboxFeed {
                     socket: config.socket.clone(),
                     version: config.version.clone(),
                 };
-                let banners = Detached::new(Arc::from(system_notifier()));
-                InboxFeed::start(config, Arc::new(transport), Arc::new(banners))
+                InboxFeed::start(config, Arc::new(transport))
             }
             None => InboxFeed::none(),
         }
     }
 
-    pub fn start(
-        config: FeedConfig,
-        transport: Arc<dyn Transport>,
-        notifier: Arc<dyn Notifier>,
-    ) -> InboxFeed {
+    pub fn start(config: FeedConfig, transport: Arc<dyn Transport>) -> InboxFeed {
         let mut feed = InboxFeed::none();
-        feed.shared = Arc::new(Shared::new(notifier));
+        feed.shared = Arc::new(Shared::new());
         feed.transport = Some(transport);
         let shared = feed.shared.clone();
         let spawned = std::thread::Builder::new()
@@ -194,6 +168,15 @@ impl InboxFeed {
 
     pub fn unread(&self) -> usize {
         self.shared.model().unread()
+    }
+
+    pub fn clear_row(&self, id: &str) {
+        self.shared.model().clear_row(id);
+        self.shared.bump();
+    }
+
+    pub fn blocking_for(&self, node: Option<&str>, sessions: &[&str]) -> Option<Strip> {
+        blocking_for(&self.shared.model(), node, sessions)
     }
 
     pub fn snapshot(&self, now_ms: i64) -> InboxModel {
@@ -222,6 +205,27 @@ impl InboxFeed {
 
     pub fn consent_answer(&self, id: &str, allow: bool) -> Result<bool, String> {
         let reply = self.call(ops::CONSENT_ANSWER, consent_answer_args(id, allow))?;
+        Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
+    }
+
+    pub fn consent_deny_with(&self, id: &str, note: &str) -> Result<bool, String> {
+        let reply = self.call(ops::CONSENT_ANSWER, consent_deny_with_args(id, note))?;
+        Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
+    }
+
+    pub fn approval_deny_with(&self, id: &str, note: &str) -> Result<bool, String> {
+        let reply = self.call(
+            ops::VAULT_APPROVAL_ANSWER,
+            json!({"id": id, "decision": "deny", "note": note}),
+        )?;
+        Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
+    }
+
+    pub fn approval_allow_once(&self, ticket: &str) -> Result<bool, String> {
+        let reply = self.call(
+            ops::VAULT_APPROVAL_ANSWER,
+            json!({"id": ticket, "decision": "once"}),
+        )?;
         Ok(reply.get("answered").and_then(Value::as_bool) == Some(true))
     }
 

@@ -98,6 +98,7 @@ pub(super) fn opening(kind: &'static str, target: &str, reason: Option<&str>) ->
         reason: reason.map(str::to_string),
         expires_in_ms: None,
         key: None,
+        retry_of: None,
     }
 }
 

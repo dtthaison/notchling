@@ -152,7 +152,7 @@ fn a_shell_cannot_follow_a_scoped_topic() {
     let dir = scratch("watch-scoped");
     let root = dir.0.as_path();
     let _daemon = start_daemon(root);
-    for topic in ["mine.consents", "mine.asks"] {
+    for topic in ["mine.consents", "mine.asks", "mine.inbox", "inbox"] {
         let started = Instant::now();
         let out = notchling(root)
             .args(["watch", "--topic", topic, "--timeout", "20", "--json"])

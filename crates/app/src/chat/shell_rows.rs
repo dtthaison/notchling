@@ -60,6 +60,7 @@ pub fn shell_rows_with_fan(
                         shell.title.clone()
                     },
                     command: shell.command.clone(),
+                    description: shell.description.clone(),
                     status,
                     status_word: word,
                     running: status == Status::Working,
