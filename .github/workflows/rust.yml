@@ -35,8 +35,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - if: matrix.os != 'macos-latest'
+      - if: matrix.os == 'ubuntu-latest'
         run: cargo test --workspace --locked
+      - if: matrix.os == 'windows-latest'
+        run: cargo test --workspace --locked --no-fail-fast
       # GitHub's macOS runners are slow enough that a timing test can miss once. Each failed test runs
       # once more on its own; a real failure fails twice. Retried tests are listed in the log.
       - if: matrix.os == 'macos-latest'
