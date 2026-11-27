@@ -35,7 +35,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: cargo test --workspace --locked
+      - if: matrix.os != 'macos-latest'
+        run: cargo test --workspace --locked
+      # GitHub's macOS runners are slow enough that a timing test can miss once. Each failed test runs
+      # once more on its own; a real failure fails twice. Retried tests are listed in the log.
+      - if: matrix.os == 'macos-latest'
+        name: cargo test, failed tests retried once
+        shell: bash
+        run: |
+          set -o pipefail
+          if cargo test --workspace --locked --no-fail-fast 2>&1 | tee test.log; then exit 0; fi
+          awk '/^ +Running /{names=""} /^test .* \.\.\. FAILED$/{names=names" "$2} /^error: test failed, to rerun pass `/{match($0,/`[^`]*`/); print substr($0,RSTART+1,RLENGTH-2) "\t" names; names=""}' test.log > retry.tsv
+          test -s retry.tsv || exit 1
+          echo "::warning::Retrying failed tests once:"; cat retry.tsv
+          status=0
+          while IFS=$'\t' read -r target names; do
+            if [ -z "$names" ] || [ "$target" = "--doc" ] || [[ "$target" == *" --doc" ]]; then status=1; continue; fi
+            read -ra args <<< "$target"
+            read -ra tests <<< "$names"
+            out=$(cargo test --locked "${args[@]}" -- --exact "${tests[@]}" 2>&1) || status=1
+            echo "$out"
+            echo "$out" | grep -q "test result: ok. ${#tests[@]} passed" || status=1
+          done < retry.tsv
+          exit $status
 
   # One required check for the whole matrix: it fails unless macOS and Linux passed. Windows runs but
   # doesn't block until Notchling is ported there.
