@@ -345,6 +345,18 @@ settings-chat-history-v8mb = 8 MB
 # Choice of the Conversation history row: sixteen megabytes.
 settings-chat-history-v16mb = 16 MB
 
+# Row in the Chat section: how long finished sessions stay in Chat's Done list and the notch's Completed tab. Title Case.
+settings-keep-finished-sessions = Keep Finished Sessions
+
+# Choice of the Keep Finished Sessions row: one day.
+settings-keep-finished-sessions-v1d = 1 Day
+
+# Choice of the Keep Finished Sessions row: seven days.
+settings-keep-finished-sessions-v7d = 7 Days
+
+# Choice of the Keep Finished Sessions row: thirty days.
+settings-keep-finished-sessions-v30d = 30 Days
+
 ## Agents page
 
 # Name of the tool whose hooks the Agents page shows.

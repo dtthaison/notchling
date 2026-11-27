@@ -244,7 +244,8 @@ impl ChatView {
         if self.tools.take_channel(key, value) {
             cx.notify();
         }
-        if crate::chat::history::on_change(key, value) {
+        let history_changed = crate::chat::history::on_change(key, value);
+        if history_changed || crate::chat::keep_finished::chosen(key, value).is_some() {
             self.reload_now(cx);
         }
     }

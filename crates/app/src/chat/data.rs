@@ -7,6 +7,7 @@ use notchling_engine::contract::subagents::{Roots as SubagentRoots, SessionRef};
 use notchling_engine::contract::{Registry, Tool as ContractTool};
 use notchling_engine::delegate::record::Delegation;
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
+use notchling_engine::settings::KeepFinished;
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::subagents::Subagent;
 use notchling_engine::transcript::{codex, conversation};
@@ -202,11 +203,17 @@ impl DataRoot {
         self.claude_dir.join("projects")
     }
 
+    pub fn completed_window_ms(&self) -> i64 {
+        if self.fixture.is_some() {
+            i64::MAX / 4
+        } else {
+            KeepFinished::window_ms_in(&self.data_dir)
+        }
+    }
+
     pub fn new_monitor(&self) -> Monitor {
         let mut monitor = Monitor::default();
-        if self.fixture.is_some() {
-            monitor.completed_window_ms = i64::MAX / 4;
-        }
+        monitor.completed_window_ms = self.completed_window_ms();
         monitor
     }
 
@@ -237,7 +244,14 @@ impl DataRoot {
     ) -> Vec<Session> {
         let agents = match claude {
             Some(agents) => agents,
-            None => monitor.poll(&self.roots(), &Probes::from_proc(), now_ms),
+            None => {
+                if self.fixture.is_none() {
+                    if let Some(keep) = KeepFinished::read(&self.data_dir) {
+                        monitor.completed_window_ms = keep.window_ms();
+                    }
+                }
+                monitor.poll(&self.roots(), &Probes::from_proc(), now_ms)
+            }
         };
         let projects = self.projects_dir();
         let mut out: Vec<Session> = agents
@@ -524,5 +538,58 @@ mod tests {
         assert!(default.fixture.is_some());
         assert!(!default.claude_dir.ends_with(".claude"));
         assert!(default.claude_dir.ends_with("claude"));
+    }
+
+    #[test]
+    fn real_root_maps_keep_finished_sessions_and_updates_on_poll() {
+        use crate::testutil::Scratch;
+        use notchling_engine::settings::{Settings, DAY_MS, KEEP_FINISHED_KEY};
+        use serde_json::json;
+
+        let s = Scratch::new("chat-keep-finished");
+        s.write(
+            "claude/jobs/aa11bb22/state.json",
+            r#"{"state":"done","sessionId":"three-days","cwd":"/w/p","updatedAt":"2026-10-31T10:00:00.000Z"}"#,
+        );
+        let root = DataRoot {
+            claude_dir: s.path().join("claude"),
+            data_dir: s.path().join("notchling"),
+            codex_dir: s.path().join("codex"),
+            antigravity_dir: s.path().join("antigravity-cli"),
+            home: s.path().to_path_buf(),
+            fixture: None,
+        };
+        assert_eq!(root.new_monitor().completed_window_ms, DAY_MS);
+
+        let mut settings = Settings::open(&root.data_dir.join("settings.json")).unwrap();
+        settings.set(KEEP_FINISHED_KEY, json!("7d")).unwrap();
+        assert_eq!(root.new_monitor().completed_window_ms, 7 * DAY_MS);
+        settings.set(KEEP_FINISHED_KEY, json!("30d")).unwrap();
+        assert_eq!(root.new_monitor().completed_window_ms, 30 * DAY_MS);
+        settings
+            .set_unchecked(KEEP_FINISHED_KEY, json!("90d"))
+            .unwrap();
+        assert_eq!(root.new_monitor().completed_window_ms, DAY_MS);
+
+        settings.set(KEEP_FINISHED_KEY, json!("1d")).unwrap();
+        assert_eq!(
+            DataRoot::fixture(s.path())
+                .new_monitor()
+                .completed_window_ms,
+            i64::MAX / 4
+        );
+
+        settings.set(KEEP_FINISHED_KEY, json!("7d")).unwrap();
+        let now = 1_793_700_000_000;
+        let mut monitor = root.new_monitor();
+        let mut locator = root.new_locator();
+        let kept = root.sessions_with(&mut monitor, &mut locator, now);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].agent.id, "three-days");
+
+        settings.set(KEEP_FINISHED_KEY, json!("1d")).unwrap();
+        let pruned = root.sessions_with(&mut monitor, &mut locator, now);
+        assert_eq!(monitor.completed_window_ms, DAY_MS);
+        assert!(pruned.is_empty());
     }
 }

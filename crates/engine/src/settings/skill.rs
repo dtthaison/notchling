@@ -8,7 +8,7 @@ pub const WAIT_SECS: u64 = 900;
 
 const TEMPLATE: &str = r#"---
 name: notchling-settings
-description: Use when the user asks to check or change a Notchling setting — the theme or appearance, how much Chat history to load, a shortcut, the notch (width, pet, last reply), how hard Notchling tries to reach you when an agent is stopped (attention: calm, normal or urgent), keeping the Mac awake, limit watching — or asks what Notchling's settings are. Reads and changes them through Notchling, and the app shows a change at once.
+description: Use when the user asks to check or change a Notchling setting — the theme or appearance, how much Chat history to load, how long to keep finished sessions, a shortcut, the notch (width, pet, last reply), how hard Notchling tries to reach you when an agent is stopped (attention: calm, normal or urgent), keeping the Mac awake, limit watching — or asks what Notchling's settings are. Reads and changes them through Notchling, and the app shows a change at once.
 ---
 
 # Notchling settings

@@ -9,7 +9,8 @@ use notchling_engine::consent::{Consent, SETTING};
 use notchling_engine::limits::mode::PROVIDERS;
 use notchling_engine::limits::{LimitConfig, LimitMode};
 use notchling_engine::settings::{
-    log_value, spec, switch, Access, KeySpec, Settings, SwitchSpec, KEYS, SWITCHES, SWITCH_WHY,
+    log_value, spec, switch, Access, KeySpec, Settings, SwitchSpec, KEEP_FINISHED_KEY, KEYS,
+    SWITCHES, SWITCH_WHY,
 };
 use notchling_events::kinds::choices::{Answerer, ConsentThen};
 use notchling_events::kinds::settings::{AgentSetResult, SettingClass, SettingsAgent};
@@ -47,6 +48,7 @@ pub struct Writer {
     limits: Option<Arc<LimitConfig>>,
     failover: OnceLock<Arc<dyn FailoverSink>>,
     search: OnceLock<Arc<dyn Fn() + Send + Sync>>,
+    sessions: OnceLock<Arc<dyn Fn() + Send + Sync>>,
 }
 
 fn cut(text: &str, at: usize) -> String {
@@ -142,6 +144,11 @@ impl Writer {
             .map_err(|e| e.to_string())?;
         if SEARCH_KEYS.contains(&spec.name) {
             if let Some(poke) = self.search.get() {
+                poke();
+            }
+        }
+        if spec.name == KEEP_FINISHED_KEY {
+            if let Some(poke) = self.sessions.get() {
                 poke();
             }
         }
@@ -261,6 +268,7 @@ impl SettingsOps {
                 limits: None,
                 failover: OnceLock::new(),
                 search: OnceLock::new(),
+                sessions: OnceLock::new(),
             }),
             switches,
             consent: None,
@@ -283,6 +291,10 @@ impl SettingsOps {
 
     pub fn bind_search_poke(&self, poke: Arc<dyn Fn() + Send + Sync>) {
         let _ = self.writer.search.set(poke);
+    }
+
+    pub fn bind_sessions_poke(&self, poke: Arc<dyn Fn() + Send + Sync>) {
+        let _ = self.writer.sessions.set(poke);
     }
 
     pub fn bind_failover(&self, sink: Arc<dyn FailoverSink>) {

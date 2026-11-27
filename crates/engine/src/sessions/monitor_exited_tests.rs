@@ -3,6 +3,7 @@ use super::exited_store::ExitedStore;
 use super::lanes::Roots;
 use super::monitor::{Monitor, Probes};
 use super::testutil::TempDir;
+use crate::settings::KeepFinished;
 use std::path::PathBuf;
 
 const NOW: i64 = 1_793_700_000_000;
@@ -427,4 +428,51 @@ fn a_finished_job_leaves_the_stored_row_of_the_session_it_resumed() {
 
     assert_eq!(exited_ids(&rows), vec!["s"], "{rows:?}");
     assert_eq!(w.stored(), vec!["s".to_string()]);
+}
+
+#[test]
+fn keeps_a_three_day_old_ended_session_with_seven_days_and_drops_it_with_one_day() {
+    let w = World::new();
+    let three_days_ago = NOW - 3 * 24 * HOUR;
+    let file = w.tmp.path("home/.claude/sessions/100.json");
+    w.tmp.write(
+        "home/.claude/sessions/100.json",
+        &format!(
+            r#"{{"sessionId":"s","pid":100,"status":"busy","cwd":"/w/s","statusUpdatedAt":{}}}"#,
+            three_days_ago - 1000
+        ),
+    );
+    w.tmp.write(
+        "home/.claude/jobs/ab12cd34/state.json",
+        &job_in("done", "2026-10-31T10:00:00.000Z", "done-job", None),
+    );
+
+    let mut monitor = w.monitor();
+    monitor.completed_window_ms = KeepFinished::Days7.window_ms();
+    poll_at(&mut monitor, &w.roots, &[], three_days_ago - 1000);
+    poll_at(&mut monitor, &w.roots, &[100], three_days_ago);
+    std::fs::remove_file(file).unwrap();
+
+    let kept = poll_at(&mut monitor, &w.roots, &[], NOW);
+    assert_eq!(exited_ids(&kept), vec!["s"]);
+    assert!(kept.iter().any(|a| a.id == "done-job"));
+    assert_eq!(w.stored(), vec!["s".to_string()]);
+
+    monitor.completed_window_ms = KeepFinished::Days1.window_ms();
+    let pruned = poll_at(&mut monitor, &w.roots, &[], NOW);
+    assert!(pruned.is_empty(), "{pruned:?}");
+    assert!(w.stored().is_empty());
+
+    monitor.completed_window_ms = KeepFinished::Days30.window_ms();
+    let after_lengthen = poll_at(&mut monitor, &w.roots, &[], NOW);
+    assert!(exited_ids(&after_lengthen).is_empty());
+    assert!(w.stored().is_empty());
+
+    let fresh = w.tmp.path("home/.claude/sessions/200.json");
+    w.session("home/.claude/sessions/200.json", "fresh", 200);
+    poll_at(&mut monitor, &w.roots, &[], NOW);
+    poll_at(&mut monitor, &w.roots, &[200], NOW + HOUR);
+    std::fs::remove_file(fresh).unwrap();
+    let ten_days_later = poll_at(&mut monitor, &w.roots, &[], NOW + 10 * 24 * HOUR);
+    assert_eq!(exited_ids(&ten_days_later), vec!["fresh"]);
 }
