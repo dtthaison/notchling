@@ -321,7 +321,9 @@ fn main_set_from_a_client_reaches_the_home() {
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    assert_eq!(home.node.status()["kept"], json!(["job-1"]));
+    eventually("the home keeps the job", || {
+        home.node.status()["kept"] == json!(["job-1"])
+    });
 }
 
 #[test]
