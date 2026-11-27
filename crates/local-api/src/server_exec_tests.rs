@@ -176,19 +176,30 @@ fn an_app_tier_request_from_another_process_is_refused() {
     assert_eq!(reply(&mut r)["ok"]["tier"], "app");
     let line = b"{\"id\":2,\"op\":\"settings.set\",\"args\":{}}\n";
     let fd = std::os::fd::AsRawFd::as_raw_fd(&s);
-    // SAFETY: the child only writes and exits.
+    let mut hold = [0i32; 2];
+    // SAFETY: a fresh pipe for this test.
+    assert_eq!(unsafe { libc::pipe(hold.as_mut_ptr()) }, 0);
+    // SAFETY: the child only writes, waits on the pipe and exits.
     let pid = unsafe { libc::fork() };
     assert!(pid >= 0);
     if pid == 0 {
         // SAFETY: as above.
         unsafe {
+            libc::close(hold[1]);
             libc::write(fd, line.as_ptr().cast(), line.len());
+            let mut byte = 0u8;
+            libc::read(hold[0], (&mut byte as *mut u8).cast(), 1);
             libc::_exit(0);
         }
     }
-    // SAFETY: our own child.
-    unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) };
+    // SAFETY: our end of the pipe.
+    unsafe { libc::close(hold[0]) };
     let v = reply(&mut r);
+    // SAFETY: closing the pipe lets our own child exit.
+    unsafe {
+        libc::close(hold[1]);
+        libc::waitpid(pid, std::ptr::null_mut(), 0);
+    }
     assert_eq!(v["err"]["code"], "forbidden", "{v}");
     send(&mut s, r#"{"id":3,"op":"settings.set","args":{}}"#);
     assert_eq!(reply(&mut r)["ok"], "done");
