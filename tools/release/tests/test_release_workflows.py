@@ -555,14 +555,15 @@ class ReleaseScripts(ScriptCase):
         for bash in BASHES:
             with self.subTest(bash=bash), tempfile.TemporaryDirectory() as tmp:
                 env = self.build_files(tmp)
+                (Path(tmp) / "assets" / "models").mkdir(parents=True)
                 r = self.run_script(self.verify, tmp, bash, **env)
                 self.assertEqual(r.returncode, 0, self.fail_msg(r))
-                listed = [l.split("  ")[1] for l in (Path(tmp) / "assets" / "SHA256SUMS").read_text().splitlines()]
+                listed = [l.split("  ")[1] for l in (Path(tmp) / "upload" / "SHA256SUMS").read_text().splitlines()]
                 self.assertEqual(sorted(listed), sorted(["Notchling-2.0.0.dmg", "Notchling-2.0.0.zip", "manifest.json",
                                                          *NODE_FILES]))
-                self.assertEqual(sorted(p.name for p in (Path(tmp) / "assets").iterdir()), sorted(listed + ["SHA256SUMS"]))
+                self.assertEqual(sorted(p.name for p in (Path(tmp) / "upload").iterdir()), sorted(listed + ["SHA256SUMS"]))
                 check = subprocess.run(["sha256sum" if shutil.which("sha256sum") else "shasum", *([] if shutil.which("sha256sum") else ["-a", "256"]), "-c", "SHA256SUMS"],
-                                       cwd=Path(tmp) / "assets", capture_output=True, text=True)
+                                       cwd=Path(tmp) / "upload", capture_output=True, text=True)
                 self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_changed_files_mismatched_builds_and_odd_values_stop_the_release(self):
@@ -587,10 +588,10 @@ class ReleaseScripts(ScriptCase):
                     env.update(over)
                     r = self.run_script(self.verify, tmp, bash, **env)
                     self.assertNotEqual(r.returncode, 0, self.fail_msg(r))
-                    self.assertFalse((Path(tmp) / "assets").exists(), label)
+                    self.assertFalse((Path(tmp) / "upload").exists(), label)
 
     def release_assets(self, tmp, dmg=b"dmg"):
-        assets = Path(tmp) / "assets"
+        assets = Path(tmp) / "upload"
         assets.mkdir()
         (assets / "Notchling-2.0.0.dmg").write_bytes(dmg)
         for name in ("Notchling-2.0.0.zip", "notchling-linux-x86_64", "notchling-linux-aarch64", "manifest.json", "SHA256SUMS"):
@@ -606,7 +607,7 @@ class ReleaseScripts(ScriptCase):
                 self.assertEqual(r.returncode, 0, self.fail_msg(r))
                 create = [l for l in log if l.startswith("release create")]
                 self.assertEqual(len(create), 1)
-                self.assertIn("create v2.0.0 assets/Notchling-2.0.0.dmg assets/Notchling-2.0.0.zip", create[0])
+                self.assertIn("create v2.0.0 upload/Notchling-2.0.0.dmg upload/Notchling-2.0.0.zip", create[0])
                 self.assertIn("--target %s --latest --title Notchling 2.0.0 --notes-file notes.md" % sha, create[0])
 
     def test_a_rerun_carries_on_only_when_the_release_holds_the_same_disk_image(self):
@@ -626,7 +627,7 @@ class ReleaseScripts(ScriptCase):
         tools = Path(tmp) / "tools" / "release"
         tools.mkdir(parents=True)
         shutil.copy(ROOT / "tools" / "release" / "appcast.py", tools / "appcast.py")
-        assets = Path(tmp) / "assets"
+        assets = Path(tmp) / "upload"
         assets.mkdir()
         (assets / "Notchling-2.0.0.dmg").write_bytes(b"d" * 123)
 
