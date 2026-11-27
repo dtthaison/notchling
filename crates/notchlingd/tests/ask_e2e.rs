@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use common::{connect, scratch, Daemon};
 use notchling_local_api::{ops, Client, ClientKind};
 use serde_json::{json, Value};
@@ -74,8 +76,7 @@ fn restart_keeps_the_same_question() {
         .stdin(Stdio::null())
         .stdout(std::fs::File::create(&out_file).unwrap())
         .stderr(std::fs::File::create(&err_file).unwrap())
-        .spawn()
-        .unwrap());
+        .spawn_retrying());
 
     let row = eventually("the question is open", || open_row(&mut first));
     let id = row["id"].as_str().unwrap().to_string();

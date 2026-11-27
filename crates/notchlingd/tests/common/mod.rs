@@ -16,6 +16,16 @@ impl Drop for Dir {
     }
 }
 
+pub trait SpawnRetrying {
+    fn spawn_retrying(&mut self) -> Child;
+}
+
+impl SpawnRetrying for Command {
+    fn spawn_retrying(&mut self) -> Child {
+        spawn_retrying(self)
+    }
+}
+
 pub fn spawn_retrying(command: &mut Command) -> Child {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -115,8 +125,7 @@ impl Daemon {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+            .spawn_retrying();
         let socket = socket(root);
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {

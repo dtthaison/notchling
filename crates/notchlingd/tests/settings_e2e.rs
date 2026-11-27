@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use notchling_engine::settings::Settings;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -56,7 +58,7 @@ fn start_daemon(root: &Path) -> Daemon {
     cmd.arg("daemon")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let daemon = Daemon(cmd.spawn().unwrap());
+    let daemon = Daemon(cmd.spawn_retrying());
     let socket = root.join("notchling/notchlingd.sock");
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {

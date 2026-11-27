@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+mod common;
+
+use common::SpawnRetrying;
 use notchling_engine::cluster::fence::{FenceFile, Gate, FENCE_VERSION, WAIT_MAX_MS};
 use notchling_engine::cluster::id::{fingerprint, NodeId};
 use notchling_engine::cluster::members::Term;
@@ -67,8 +70,7 @@ fn fence_hook(dir: &Path, stdin: &[u8]) -> (Output, Duration) {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     child.stdin.take().unwrap().write_all(stdin).unwrap();
     let out = child.wait_with_output().unwrap();
     (out, started.elapsed())
@@ -184,8 +186,7 @@ fn the_fence_flag_takes_nothing_else() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     let _ = child.stdin.take().unwrap().write_all(&event("s1"));
     let out = child.wait_with_output().unwrap();
     assert!(passed(&out), "{out:?}");
@@ -203,8 +204,7 @@ fn a_stdin_that_never_closes_passes_inside_the_budget() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     let held = child.stdin.take().unwrap();
     let out = child.wait_with_output().unwrap();
     drop(held);

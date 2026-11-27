@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+mod common;
+
+use common::SpawnRetrying;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,8 +33,7 @@ fn guard_hook(dir: &Path, stdin: &[u8]) -> (Output, Duration) {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     let _ = child.stdin.take().unwrap().write_all(stdin);
     let out = child.wait_with_output().unwrap();
     (out, started.elapsed())

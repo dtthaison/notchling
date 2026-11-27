@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+mod common;
+
+use common::SpawnRetrying;
 use notchling_engine::pages::{PageLibrary, RecordContext};
 use notchling_local_api::{ops, Client, ClientKind};
 use serde_json::json;
@@ -134,7 +137,7 @@ fn the_ops_and_the_commands_work_with_and_without_a_daemon() {
         )
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let daemon = Daemon(cmd.spawn().unwrap());
+    let daemon = Daemon(cmd.spawn_retrying());
     wait_for_socket(&socket);
 
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();

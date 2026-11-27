@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use notchling_local_api::{ops, topics, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -81,7 +83,7 @@ fn with_the_switch_off_every_vault_path_says_so() {
         .arg("daemon")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let _daemon = Daemon(daemon.spawn().unwrap());
+    let _daemon = Daemon(daemon.spawn_retrying());
     let socket = root.join("notchling/notchlingd.sock");
     wait_for_socket(&socket);
 

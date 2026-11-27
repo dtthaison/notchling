@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+mod common;
+
+use common::SpawnRetrying;
 use notchling_local_api::{ops, Client, ClientKind};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -58,7 +61,7 @@ fn start_daemon(root: &Path) -> Daemon {
     .arg("daemon")
     .stdout(Stdio::null())
     .stderr(Stdio::null());
-    let daemon = Daemon(cmd.spawn().unwrap());
+    let daemon = Daemon(cmd.spawn_retrying());
     let socket = root.join("notchling/notchlingd.sock");
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
@@ -76,8 +79,7 @@ fn watch(root: &Path, args: &[&str]) -> Child {
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap()
+        .spawn_retrying()
 }
 
 fn flip_until_exit(root: &Path, child: &mut Child) -> i32 {

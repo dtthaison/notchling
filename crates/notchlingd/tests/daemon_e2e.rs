@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+mod common;
+
+use common::SpawnRetrying;
 use notchling_local_api::{ensure_daemon_with, Client, ClientKind, SpawnOptions, Started};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -171,7 +174,7 @@ fn serves_the_fixture_and_its_changes_then_stops_on_sigterm() {
     drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
     assert!(socket.exists());
 
-    let mut running = Daemon::child(daemon(&root, &dir.0).spawn().unwrap());
+    let mut running = Daemon::child(daemon(&root, &dir.0).spawn_retrying());
     wait_for_socket(&socket);
 
     let mut client = Client::connect(&socket, ClientKind::Cli, "0.1.0").unwrap();

@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -57,7 +59,7 @@ fn start_daemon(root: &Path) -> Daemon {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let daemon = Daemon(cmd.spawn().unwrap());
+    let daemon = Daemon(cmd.spawn_retrying());
     let socket = root.join("notchling/notchlingd.sock");
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
@@ -75,8 +77,7 @@ fn run(root: &Path, args: &[&str], input: &str) -> (i32, String, String) {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(input.as_bytes());
     }
@@ -146,7 +147,7 @@ fn node_daemon(root: &Path, home: &Path) -> Daemon {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let daemon = Daemon(cmd.spawn().unwrap());
+    let daemon = Daemon(cmd.spawn_retrying());
     let socket = common::socket(root);
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {

@@ -1,3 +1,4 @@
+use super::SpawnRetrying;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -84,8 +85,7 @@ fn run_limited(command: &mut Command, limit: Duration) -> (Option<i32>, String, 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0)
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     let out = drain(child.stdout.take().unwrap());
     let err = drain(child.stderr.take().unwrap());
     let deadline = Instant::now() + limit;
@@ -140,8 +140,7 @@ impl Session<'_> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+            .spawn_retrying();
         let sessions = self.root.join("claude/sessions");
         std::fs::create_dir_all(&sessions).unwrap();
         let file = if self.job {

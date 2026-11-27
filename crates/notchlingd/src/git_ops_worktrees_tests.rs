@@ -8,7 +8,6 @@ use notchling_engine::git::reader::Reader;
 use notchling_local_api::{ops, ApiError, ErrorCode, OpSpec};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -515,16 +514,10 @@ fn timed_out_reads_fill_the_cache() {
 fn cache_lock_never_held_across_git() {
     let rig = Arc::new(RepoRig::new("wt-lock"));
     let key = key_of(&rig);
-    rig.launcher
-        .delay("status", Some(Duration::from_millis(2_000)));
-    let done = Arc::new(AtomicBool::new(false));
+    let gate = rig.launcher.gate("status", Duration::from_secs(60));
     let worker = {
-        let (rig, done) = (rig.clone(), done.clone());
-        std::thread::spawn(move || {
-            let got = reply(&rig);
-            done.store(true, Ordering::SeqCst);
-            got
-        })
+        let rig = rig.clone();
+        std::thread::spawn(move || reply(&rig))
     };
     let end = Instant::now() + Duration::from_secs(20);
     while rig.launcher.count("status") == 0 {
@@ -532,11 +525,10 @@ fn cache_lock_never_held_across_git() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let second = reply(&rig);
+    let waited = gate.expired();
+    gate.open();
     assert_eq!(second["repo"], true);
-    assert!(
-        !done.load(Ordering::SeqCst),
-        "the second call waited for the first"
-    );
+    assert!(!waited, "the second call waited for the first");
     worker.join().unwrap();
     idle(&rig, &key);
 }

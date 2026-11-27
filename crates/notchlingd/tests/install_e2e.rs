@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use notchling_local_api::{ops, Client, ClientKind, Tier};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -84,8 +86,7 @@ fn a_real_daemon_plans_but_with_the_switch_off_writes_nothing() {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
+            .spawn_retrying(),
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     while std::os::unix::net::UnixStream::connect(&socket).is_err() {

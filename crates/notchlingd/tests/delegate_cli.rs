@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+mod common;
+
+use common::SpawnRetrying;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -23,8 +26,15 @@ fn scratch(tag: &str) -> Dir {
 
 fn fake_codex(home: &Path, script: &str) {
     let path = home.join(".local/bin/codex");
-    std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\n[ -n \"$NL_PROBE\" ] && exit 0\n{script}\n"),
+    )
+    .unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    common::spawn_retrying(Command::new(&path).env("NL_PROBE", "1"))
+        .wait()
+        .unwrap();
 }
 
 fn command(home: &Path, args: &[&str]) -> Command {
@@ -244,9 +254,7 @@ fn a_stop_signal_stops_the_tool_and_reports_it() {
         &dir.0,
         &format!("echo '{THREAD}'\necho started > \"$HOME/started\"\nexec sleep 30"),
     );
-    let child = command(&dir.0, &["delegate", "codex", "--json", "slow"])
-        .spawn()
-        .unwrap();
+    let child = command(&dir.0, &["delegate", "codex", "--json", "slow"]).spawn_retrying();
     let begin = Instant::now();
     while !dir.0.join("started").exists() {
         assert!(

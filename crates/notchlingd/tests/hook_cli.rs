@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use notchling_local_api::{ops, Client, ClientError, ClientKind, ErrorCode};
 use serde_json::json;
 use std::io::Write;
@@ -43,8 +45,7 @@ fn hook(dir: &Path, args: &[&str], stdin: &[u8]) -> (Output, Duration) {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn_retrying();
     child.stdin.take().unwrap().write_all(stdin).unwrap();
     let out = child.wait_with_output().unwrap();
     (out, started.elapsed())
@@ -137,8 +138,7 @@ fn a_real_daemon_with_acting_off_lets_the_hook_pass_and_refuses_every_acting_op(
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
+            .spawn_retrying(),
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     while std::os::unix::net::UnixStream::connect(&socket).is_err() {
@@ -223,8 +223,7 @@ fn start_daemon(dir: &Path, root: &Path) -> Daemon {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
+            .spawn_retrying(),
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     while std::os::unix::net::UnixStream::connect(&socket).is_err() {

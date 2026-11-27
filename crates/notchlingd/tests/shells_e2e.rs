@@ -2,6 +2,8 @@
 
 mod common;
 
+use common::SpawnRetrying;
+
 use common::{audit, home, notchling, scratch, Daemon};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -33,8 +35,7 @@ fn fake_shell(script: &str, output: &Path) -> Child {
         .stdout(file)
         .stderr(Stdio::null())
         .process_group(0)
-        .spawn()
-        .unwrap()
+        .spawn_retrying()
 }
 
 #[test]

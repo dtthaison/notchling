@@ -20,10 +20,38 @@ pub struct Seen {
     pub argv: Vec<String>,
 }
 
+pub struct Gate {
+    release: AtomicBool,
+    expired: AtomicBool,
+    cap: Duration,
+}
+
+impl Gate {
+    pub fn open(&self) {
+        self.release.store(true, Ordering::SeqCst);
+    }
+
+    pub fn expired(&self) -> bool {
+        self.expired.load(Ordering::SeqCst)
+    }
+
+    fn wait(&self) {
+        let end = Instant::now() + self.cap;
+        while !self.release.load(Ordering::SeqCst) {
+            if Instant::now() >= end {
+                self.expired.store(true, Ordering::SeqCst);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
 pub struct Recorded {
     inner: Arc<dyn Launcher>,
     seen: Mutex<Vec<Seen>>,
     delay: Mutex<Option<(String, Duration)>>,
+    gate: Mutex<Option<(String, Arc<Gate>)>>,
     old_git: AtomicBool,
     hook: Mutex<Option<(String, Hook)>>,
     failing: Mutex<Option<(String, String)>>,
@@ -52,6 +80,7 @@ impl Recorded {
             inner: real_launcher(),
             seen: Mutex::new(Vec::new()),
             delay: Mutex::new(None),
+            gate: Mutex::new(None),
             old_git: AtomicBool::new(false),
             hook: Mutex::new(None),
             failing: Mutex::new(None),
@@ -60,6 +89,16 @@ impl Recorded {
 
     pub fn delay(&self, sub: &str, by: Option<Duration>) {
         *lock(&self.delay) = by.map(|by| (sub.to_owned(), by));
+    }
+
+    pub fn gate(&self, sub: &str, cap: Duration) -> Arc<Gate> {
+        let gate = Arc::new(Gate {
+            release: AtomicBool::new(false),
+            expired: AtomicBool::new(false),
+            cap,
+        });
+        *lock(&self.gate) = Some((sub.to_owned(), Arc::clone(&gate)));
+        gate
     }
 
     pub fn before_once(&self, arg: &str, hook: impl FnOnce() + Send + 'static) {
@@ -126,6 +165,13 @@ impl Launcher for Recorded {
             .map(|(_, by)| *by);
         if let Some(by) = wait {
             std::thread::sleep(by);
+        }
+        let gate = lock(&self.gate)
+            .as_ref()
+            .filter(|(name, _)| *name == sub)
+            .map(|(_, gate)| Arc::clone(gate));
+        if let Some(gate) = gate {
+            gate.wait();
         }
         let fire = {
             let mut held = lock(&self.hook);
