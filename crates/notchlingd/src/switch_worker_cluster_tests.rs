@@ -429,6 +429,7 @@ impl Handler for Served {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn switch_request_and_switch_off_each_record_agent_called() {
     bounded(switch_request_and_switch_off_each_record_agent_called_body);

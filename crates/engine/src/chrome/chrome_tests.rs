@@ -198,6 +198,7 @@ fn nothing_is_typed_over_a_dialog_or_an_open_menu() {
     assert!(open.writes.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn reconnecting_moves_to_the_menu_entry_and_presses_enter_there() {
     let not_connected = MENU_ON.replace("✔ enabled", "⚠ not connected");
@@ -223,6 +224,7 @@ fn reconnecting_moves_to_the_menu_entry_and_presses_enter_there() {
     assert_eq!(pty.writes, ["/chrome", "\r", "\x1b[B", "\x1b[B", "\r"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_failed_reconnect_hands_back_claude_codes_note_and_closes_the_menu() {
     let not_connected = MENU_ON.replace("✔ enabled", "⚠ not connected");
@@ -688,6 +690,7 @@ fn the_phase_goes_over_the_wire_in_plain_words() {
     assert!(!Phase::Waiting { why: Wait::Box }.is_over());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_menu_is_closed_when_the_reconnect_entry_is_missing() {
     let not_connected = MENU_ON
@@ -717,6 +720,7 @@ fn a_menu_is_closed_when_moving_to_the_entry_never_gets_there() {
     assert_eq!(pty.writes.last().map(String::as_str), Some("\x1b"));
 }
 
+#[cfg(unix)]
 #[test]
 fn enter_is_never_pressed_when_the_box_holds_more_than_the_command() {
     let mixed = TYPED.replacen("/chrome\n", "hello /chrome\n", 1);

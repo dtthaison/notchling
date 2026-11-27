@@ -82,7 +82,12 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, u64, Option<SystemTime>)> {
             if meta.is_dir() {
                 stack.push(e.path());
             }
-            out.push((e.path(), meta.len(), meta.modified().ok()));
+            let modified = if cfg!(windows) && meta.is_dir() {
+                None
+            } else {
+                meta.modified().ok()
+            };
+            out.push((e.path(), meta.len(), modified));
         }
     }
     out.sort();
@@ -258,6 +263,7 @@ fn a_pairing_waits_for_the_apps_answer_and_none_is_no() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pairing_is_asked_only_of_an_app_that_follows_the_bridge() {
     use notchling_local_api::{

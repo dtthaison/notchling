@@ -60,6 +60,7 @@ pub(super) fn mode_of(path: &Path) -> u32 {
     fs::metadata(path).expect("meta").permissions().mode() & 0o777
 }
 
+#[cfg(unix)]
 #[test]
 fn put_then_get() {
     let tmp = TempDir::new("grant-put-get");
@@ -80,6 +81,7 @@ fn put_then_get() {
     assert!(store.get(JOB2, "gh_token", n).expect("get").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn stored_format_is_versioned_json() {
     let tmp = TempDir::new("grant-format");
@@ -97,6 +99,7 @@ fn stored_format_is_versioned_json() {
     assert!(json["value"] == "NL-MARKER-2");
 }
 
+#[cfg(unix)]
 #[test]
 fn names_are_case_insensitive() {
     let tmp = TempDir::new("grant-case");
@@ -147,6 +150,7 @@ fn files_are_0600_in_0700_folders() {
     assert_eq!(mode_of(&root(&tmp).join(JOB).join("a.json")), 0o600);
 }
 
+#[cfg(unix)]
 #[test]
 fn sweep_lists_every_entry_of_a_big_folder() {
     let tmp = TempDir::new("grant-sweep-big");
@@ -163,6 +167,7 @@ fn sweep_lists_every_entry_of_a_big_folder() {
     assert_eq!(listing(&folder), vec!["keep.json".to_string()]);
 }
 
+#[cfg(unix)]
 #[test]
 fn expired_grant_is_deleted_on_get() {
     let tmp = TempDir::new("grant-expired");
@@ -180,6 +185,7 @@ fn expired_grant_is_deleted_on_get() {
     assert!(store.get(JOB, "b", n + MINUTE).expect("get").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn sweep_removes_expired_and_dead_jobs() {
     let tmp = TempDir::new("grant-sweep");
@@ -210,6 +216,7 @@ fn sweep_without_a_root_is_nothing() {
     assert!(!root(&tmp).exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn sweep_deletes_malformed_and_stray_files_in_live_jobs() {
     let tmp = TempDir::new("grant-sweep-bad");
@@ -304,6 +311,7 @@ fn put_replaces_by_remove_then_create() {
     assert_eq!(got.expires_ms, n + 2 * MINUTE);
 }
 
+#[cfg(unix)]
 #[test]
 fn remove_and_remove_job_delete_and_are_idempotent() {
     let tmp = TempDir::new("grant-remove");
@@ -326,6 +334,7 @@ fn remove_and_remove_job_delete_and_are_idempotent() {
     store.remove_job(JOB).expect("again");
 }
 
+#[cfg(unix)]
 #[test]
 fn malformed_file_is_an_error_without_content() {
     let tmp = TempDir::new("grant-malformed");

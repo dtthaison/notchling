@@ -59,6 +59,7 @@ fn rigged(tag: &str) -> Rig {
     rig
 }
 
+#[cfg(unix)]
 #[test]
 fn history_without_a_verified_session_is_empty_with_the_reason() {
     let rig = rigged("hist-none");
@@ -71,6 +72,7 @@ fn history_without_a_verified_session_is_empty_with_the_reason() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn history_lists_the_ended_rows_then_this_organizations_last_14_days_masked() {
     let rig = rigged("hist-mine");
@@ -95,6 +97,7 @@ fn history_lists_the_ended_rows_then_this_organizations_last_14_days_masked() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn history_pages_by_cursor_and_refuses_a_bad_one() {
     let rig = rigged("hist-page");

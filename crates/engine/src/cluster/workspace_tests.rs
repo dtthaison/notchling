@@ -44,6 +44,7 @@ fn all_calls() -> Vec<GitCall> {
     calls
 }
 
+#[cfg(unix)]
 #[test]
 fn every_call_is_hardened() {
     for call in all_calls() {
@@ -92,6 +93,7 @@ fn scrubbed_names_are_every_git_variable() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn send_plan_bundles_only_unpushed_commits() {
     let f = facts();
@@ -130,6 +132,7 @@ fn send_plan_bundles_only_unpushed_commits() {
         .is_some());
 }
 
+#[cfg(unix)]
 #[test]
 fn prepare_clones_once_and_adds_a_worktree() {
     let f = facts();
@@ -199,6 +202,7 @@ fn prepare_clones_once_and_adds_a_worktree() {
         .any(|c| joined(c).contains("refs/notchling/in/")));
 }
 
+#[cfg(unix)]
 #[test]
 fn repo_without_origin_is_refused() {
     let f = RepoFacts {
@@ -212,6 +216,7 @@ fn repo_without_origin_is_refused() {
     assert!(NO_REMOTE.starts_with("This repository has no remote; send its folder to"));
 }
 
+#[cfg(unix)]
 #[test]
 fn prepare_refuses_hostile_values() {
     let ok = |f: &RepoFacts| plan_prepare(f, "j-1", "/data/work", None);
@@ -319,6 +324,7 @@ fn branch_names_follow_git_rules() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn return_and_fetch_back_never_force_or_merge() {
     let back = plan_return("j-1", "/data/work", "/data/out.bundle").unwrap();
@@ -354,6 +360,7 @@ fn node_names_become_branch_parts() {
     assert!(node_slug(&"x".repeat(100)).len() <= 40);
 }
 
+#[cfg(unix)]
 #[test]
 fn facts_are_read_and_checked() {
     let out = |branch: Option<&str>, origin: Option<&str>, upstream: Option<&str>| FactsOut {

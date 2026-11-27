@@ -67,6 +67,7 @@ fn screenshots_copy_only_images_with_quoted_sources() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn screenshot_names_cannot_leave_the_cache_folder() {
     let cache = temp_cache("shots");

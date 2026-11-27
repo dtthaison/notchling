@@ -220,6 +220,7 @@ fn raise_publishes_changed() {
     assert_eq!(events[0].1["item"]["id"], "a");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cap_victim_is_published_in_order() {
     let r = rig();
@@ -444,6 +445,7 @@ fn a_slow_publish_blocks_no_op_and_events_keep_book_order() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn racing_calls_publish_in_book_order() {
     let r = rig();

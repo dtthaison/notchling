@@ -185,6 +185,7 @@ fn old_phone_without_cluster_field_still_connects() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn standby_relays_to_reachable_primary() {
     let relay = ScriptedRelay::new(Some(scripted_cluster()));

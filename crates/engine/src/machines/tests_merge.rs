@@ -90,6 +90,7 @@ fn merge_target_prefers_clean_main_worktree() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn merge_target_makes_own_when_main_unchecked() {
     let list = "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/feature\n\nworktree /x\nHEAD bbb\ndetached\n";
@@ -115,6 +116,7 @@ fn a_bare_or_prunable_main_is_not_a_target() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn own_worktree_is_made_under_the_data_folder() {
     let list = "worktree /Users/me/code/app\nHEAD aaa\nbranch refs/heads/feature\n";

@@ -258,6 +258,7 @@ fn a_first_get_never_runs_agy() {
     assert!(rig.launcher.calls().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn fixture_root_runs_only_its_own_agy() {
     let rig = rig("versions-agy-fixture");

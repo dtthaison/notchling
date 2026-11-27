@@ -170,6 +170,7 @@ fn refused(result: Result<Value, ApiError>) -> (ErrorCode, String) {
     (e.code, e.message)
 }
 
+#[cfg(unix)]
 #[test]
 fn acting_off_refuses_every_acting_op_before_anything_starts() {
     let rig = rig(false);
@@ -285,6 +286,7 @@ fn the_phone_reads_a_session_open_here_from_the_runner_with_the_same_bound() {
     assert_eq!(read.omitted > 0, op["truncated"] == true);
 }
 
+#[cfg(unix)]
 #[test]
 fn open_runs_agy_in_the_sessions_own_folder_and_refuses_one_it_does_not_know() {
     let rig = rig(true);

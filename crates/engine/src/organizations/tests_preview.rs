@@ -30,6 +30,7 @@ fn run(doc: &Document, id: &str, wanted: &[&str], sessions: &[&str]) -> super::F
     preview(doc, id, &wanted, &sessions, &look)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_new_folder_lists_the_sessions_that_would_change_organization() {
     let out = run(
@@ -56,6 +57,7 @@ fn a_new_folder_lists_the_sessions_that_would_change_organization() {
     assert!(out.overlaps.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn removing_a_folder_sends_its_sessions_back_to_personal() {
     let out = run(&doc(), "aptusfit", &[], &["/Users/me/work/aptusfit/fe"]);
@@ -70,6 +72,7 @@ fn removing_a_folder_sends_its_sessions_back_to_personal() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_folder_inside_another_organizations_folder_is_allowed_and_flagged() {
     let out = run(
@@ -101,6 +104,7 @@ fn a_folder_inside_another_organizations_folder_is_allowed_and_flagged() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_folder_that_holds_another_organizations_folder_leaves_that_one_alone() {
     let out = run(
@@ -128,6 +132,7 @@ fn a_folder_that_holds_another_organizations_folder_leaves_that_one_alone() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_same_folder_in_two_organizations_is_refused_with_who_has_it() {
     let out = run(&doc(), "acme", &["/Users/me/work/aptusfit"], &[]);

@@ -278,6 +278,7 @@ fn continue_from_this_copy_keeps_the_other() {
     assert_eq!(on_meet(&mine, &mine, 5), Meet::Keep);
 }
 
+#[cfg(unix)]
 #[test]
 fn take_back_moves_side_copies_aside_first() {
     let data = Path::new("/data");

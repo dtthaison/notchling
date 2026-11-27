@@ -108,6 +108,7 @@ fn exit_codes_are_0_1_and_124() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_command_line_that_cannot_run_exits_2_and_starts_nothing() {
     let rig = rig(AcpFake::new());
@@ -387,6 +388,7 @@ fn a_refused_command_line_leaves_no_record() {
     assert!(!dir.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_trusted_folder_is_added_to_agy_and_the_command_says_so_on_stderr() {
     let mut rig = rig(AcpFake::new());

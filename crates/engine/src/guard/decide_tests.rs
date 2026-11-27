@@ -47,6 +47,7 @@ fn run(dir: &TempDir, event: &Event) -> Vec<(Rule, Action)> {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn the_sixth_concurrent_builder_would_be_blocked() {
     let dir = TempDir::new("guard-decide");
@@ -59,6 +60,7 @@ fn the_sixth_concurrent_builder_would_be_blocked() {
     assert_eq!(run(&dir, &spawn("t5")), vec![(Rule::Cap, Action::Block)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_stopped_builder_makes_room() {
     let dir = TempDir::new("guard-decide");
@@ -102,6 +104,7 @@ fn a_spawn_without_an_id_is_not_counted() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_helper_past_eighty_calls_is_noted_once() {
     let dir = TempDir::new("guard-decide");
@@ -147,6 +150,7 @@ fn two_helpers_count_apart() {
     assert!(run(&dir, &call("a")).is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn rules_and_state_add_up_on_one_call() {
     let dir = TempDir::new("guard-decide");

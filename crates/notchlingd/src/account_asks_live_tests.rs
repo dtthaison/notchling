@@ -174,6 +174,7 @@ fn live(tag: &str, registry: impl FnOnce(&Path) -> ProviderRegistry) -> Rig {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn the_owner_of_an_account_comes_from_the_organizations_listing_only() {
     let rig = rig("live-owner");
@@ -194,6 +195,7 @@ fn the_owner_of_an_account_comes_from_the_organizations_listing_only() {
     assert_eq!(rig.orgs.view().organizations().len(), 3);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_folder_org_places_a_folder_by_the_organizations_folders() {
     let rig = rig("live-folder");
@@ -219,6 +221,7 @@ fn the_folder_org_places_a_folder_by_the_organizations_folders() {
         .starts_with("lane-"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_closed_view_has_no_owner() {
     let rig = rig("live-closed");
@@ -226,6 +229,7 @@ fn a_closed_view_has_no_owner() {
     assert!(rig.book.closed());
 }
 
+#[cfg(unix)]
 #[test]
 fn lanes_summary_lists_only_the_callers_lanes_without_names() {
     let rig = rig("live-lanes");
@@ -275,6 +279,7 @@ fn lanes_summary_lists_only_the_callers_lanes_without_names() {
     assert!(!theirs.to_string().contains("o***@e***.com"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_tool_that_cannot_add_accounts_is_refused_before_a_card() {
     let rig = rig("live-can-add");
@@ -429,6 +434,7 @@ fn asked_add_ends_on(rig: &Rig, tool: &Signing, id: &'static str) -> Value {
     ended(rig, &request)
 }
 
+#[cfg(unix)]
 #[test]
 fn an_asked_provider_add_places_only_the_account_its_own_attempt_stored() {
     let made: Arc<Mutex<Option<Arc<Signing>>>> = Arc::new(Mutex::new(None));
@@ -520,6 +526,7 @@ fn asked_codex_add_ends_on(
     ended(rig, &request)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_terminal_codex_login_during_an_asked_add_is_never_placed_or_named() {
     let (rig, procs, auth) = codex_live("live-codex-term");

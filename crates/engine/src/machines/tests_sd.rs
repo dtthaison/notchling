@@ -74,6 +74,7 @@ pub(super) fn text(r: &CheckResult) -> &str {
     r.state.text()
 }
 
+#[cfg(unix)]
 #[test]
 fn mac_facts_reads_versions_and_paths() {
     let tmp = TempDir::new("facts");

@@ -99,6 +99,7 @@ fn calls_are_counted_per_helper_and_forgotten_on_stop() {
     assert_eq!(held.count("a", NOW), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_survives_between_calls() {
     let dir = TempDir::new("guard-state");
@@ -112,6 +113,7 @@ fn a_session_survives_between_calls() {
     assert!(text.contains("t0"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_damaged_or_huge_file_starts_over() {
     let dir = TempDir::new("guard-state");
@@ -121,6 +123,7 @@ fn a_damaged_or_huge_file_starts_over() {
     assert_eq!(with_session(dir.root(), "s2", |s| s.working()), Some(0));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_held_lock_gives_up_instead_of_waiting() {
     let dir = TempDir::new("guard-state");
@@ -132,6 +135,7 @@ fn a_held_lock_gives_up_instead_of_waiting() {
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
 }
 
+#[cfg(unix)]
 #[test]
 fn old_session_files_are_swept_when_a_new_session_starts() {
     let dir = TempDir::new("guard-state");
@@ -240,6 +244,7 @@ fn a_sweep_takes_old_files_with_their_lock_and_leaves_used_ones() {
     drop(held);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_whose_lock_was_swept_while_waiting_still_gets_exclusive_use() {
     let dir = TempDir::new("guard-state");
@@ -250,6 +255,7 @@ fn a_session_whose_lock_was_swept_while_waiting_still_gets_exclusive_use() {
     assert!(lock.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_file_in_the_old_shape_starts_that_session_fresh() {
     let dir = TempDir::new("guard-state");
@@ -283,6 +289,7 @@ fn a_session_that_woke_up_is_not_swept_from_under_itself() {
     assert!(data.exists() && lock.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_old_file_without_a_lock_is_swept_under_a_lock_and_leaves_none_behind() {
     let dir = TempDir::new("guard-state");

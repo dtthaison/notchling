@@ -24,6 +24,7 @@ fn id(orgs: &[Organization], folder: &str, resolve: &dyn Fn(&Path) -> Option<Pat
     find(orgs, Path::new(folder), Path::new("/Users/me"), resolve).organization
 }
 
+#[cfg(unix)]
 #[test]
 fn a_folder_belongs_to_the_organization_whose_folder_holds_it() {
     let orgs = [
@@ -58,6 +59,7 @@ fn a_folder_belongs_to_the_organization_whose_folder_holds_it() {
     assert_eq!(id(&orgs, "", &none), PERSONAL_ID);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_longest_folder_wins_wherever_it_is_listed() {
     let none = links(&[]);
@@ -87,6 +89,7 @@ fn the_longest_folder_wins_wherever_it_is_listed() {
     assert_eq!(found.folder.as_deref(), Some("~/work/aptusfit"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_link_to_a_folder_matches_through_the_file_system() {
     let orgs = [org(PERSONAL_ID, &[]), org("aptusfit", &["~/work/aptusfit"])];
@@ -129,6 +132,7 @@ fn the_real_file_system_resolves_a_link_the_same_way() {
     assert_eq!(by(&tmp.path("gone/aptus/app")), PERSONAL_ID);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_home_marker_and_the_normal_form() {
     let home = Path::new("/Users/me");
@@ -152,6 +156,7 @@ fn the_home_marker_and_the_normal_form() {
     assert_eq!(normalize_folder("/a\nb"), None);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_document_places_a_folder_through_its_view() {
     let mut doc = Document::personal_only();
@@ -173,6 +178,7 @@ fn a_document_places_a_folder_through_its_view() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_deeper_real_folder_wins_over_a_link_that_looks_deeper_and_a_tie_is_settled_by_id() {
     let orgs = [
@@ -202,6 +208,7 @@ fn the_deeper_real_folder_wins_over_a_link_that_looks_deeper_and_a_tie_is_settle
     assert_eq!(id(&flipped, "/srv/x/app", &none), "alpha");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_matches_a_folder_in_any_case_only_where_the_disk_ignores_case() {
     let orgs = [org(PERSONAL_ID, &[]), org("acme", &["/Srv/X"])];

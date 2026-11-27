@@ -39,6 +39,7 @@ fn passes(map: &HashMap<PathBuf, Owner>, path: &str) -> bool {
     root_owned_chain(Path::new(path), &|p| map.get(p).copied())
 }
 
+#[cfg(unix)]
 #[test]
 fn a_path_passes_only_when_it_and_every_parent_is_root_owned_and_not_writable_by_others() {
     let good = tree(&[

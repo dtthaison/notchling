@@ -12,7 +12,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Instant;
 
 const ID: &str = "457369a9-35a1-40f8-92b9-26b6398b78a1";
+#[cfg(not(windows))]
 const BINARY: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
+#[cfg(windows)]
+const BINARY: &str = "C:\\Applications\\Notchling\\notchling.exe";
 const SIDECAR_PID: u32 = 500;
 const OTHER_PID: u32 = 600;
 const GONE_PID: u32 = 501;

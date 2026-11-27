@@ -69,6 +69,7 @@ pub(super) fn rig_with_templates(m: Machine, tmp: TempDir) -> Rig {
     rig
 }
 
+#[cfg(unix)]
 #[test]
 fn service_files_for_linux() {
     let files = render_linux("agent", "/home/agent").unwrap();
@@ -108,6 +109,7 @@ fn service_files_for_linux() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn service_files_set_the_user() {
     let files = render_linux("worker", "/home/worker").unwrap();
@@ -188,6 +190,7 @@ fn service_files_refuse_unsafe_values() {
     .is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn service_files_for_mac() {
     let sd = shell::sd_py("/Users/tester");
@@ -222,6 +225,7 @@ fn service_files_for_mac() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_plist_that_is_cut_or_has_no_path_is_refused() {
     let r = |t: &BTreeMap<String, String>| {
@@ -251,6 +255,7 @@ fn templates_are_read_from_a_directory_and_none_when_one_is_missing() {
     assert!(service_files::templates(tmp.path()).is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn linux_service_fix_only_writes_the_four_units_and_reloads() {
     let files = render_linux("agent", "/home/agent").unwrap();
@@ -299,6 +304,7 @@ fn linux_service_fix_only_writes_the_four_units_and_reloads() {
     assert_eq!(script.matches("systemctl").count(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn linux_service_fix_runs_one_admin_call_as_root_with_no_stdin() {
     let tmp = TempDir::new("linuxfix");
@@ -323,6 +329,7 @@ fn linux_service_fix_through_sudo_refuses_a_worker_that_is_the_admin() {
     assert!(rig.calls().is_empty(), "nothing ran");
 }
 
+#[cfg(unix)]
 #[test]
 fn service_fix_on_a_mac_writes_only_the_launch_agent_without_admin() {
     let tmp = TempDir::new("macfix");

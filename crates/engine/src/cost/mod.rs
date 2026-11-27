@@ -16,7 +16,7 @@ mod account_log_tests;
 mod check_tests;
 #[cfg(test)]
 mod compare_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod fork_tests;
 #[cfg(test)]
 mod ledger_guard_tests;

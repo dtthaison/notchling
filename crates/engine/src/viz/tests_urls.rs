@@ -16,6 +16,7 @@ fn nothing_listens(_: u16) -> bool {
     false
 }
 
+#[cfg(unix)]
 #[test]
 fn url_precedence_is_transcript_then_project_launch_then_home_launch() {
     let project = TempDir::new("viz-proj");

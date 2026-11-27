@@ -174,6 +174,7 @@ fn clean(branch: &str, head: &str) -> impl Fn(&Path) -> PathState {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_missing_folder_is_cloned_at_its_commit() {
     let mut rig = Rig::new("restore-clone");
@@ -190,6 +191,7 @@ fn a_missing_folder_is_cloned_at_its_commit() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_clean_clone_behind_the_set_is_fast_forwarded_and_one_at_the_commit_needs_nothing() {
     let mut rig = Rig::new("restore-ff");
@@ -211,6 +213,7 @@ fn a_clean_clone_behind_the_set_is_fast_forwarded_and_one_at_the_commit_needs_no
         .is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn restore_refuses_a_folder_with_its_own_changes() {
     let mut rig = Rig::new("restore-changed");
@@ -227,6 +230,7 @@ fn restore_refuses_a_folder_with_its_own_changes() {
         .is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn restore_refuses_a_clone_on_another_branch() {
     let mut rig = Rig::new("restore-branch");
@@ -240,6 +244,7 @@ fn restore_refuses_a_clone_on_another_branch() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn unmovable_session_is_not_restored() {
     let mut rig = Rig::new("restore-unmovable");
@@ -257,6 +262,7 @@ fn unmovable_session_is_not_restored() {
     assert!(rig.plan(&[], false, false, &missing).unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_linked_worktree_needs_its_main_repository_there() {
     let mut rig = Rig::new("restore-worktree");
@@ -287,6 +293,7 @@ fn a_linked_worktree_needs_its_main_repository_there() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shared_repository_is_planned_once_and_at_one_commit() {
     let mut rig = Rig::new("restore-shared-repo");
@@ -312,6 +319,7 @@ fn with_transcript(rig: &mut Rig, local: Option<&[u8]>, stored: &[u8]) -> PathBu
     path
 }
 
+#[cfg(unix)]
 #[test]
 fn a_transcript_is_put_appended_or_left_alone() {
     let mut rig = Rig::new("restore-transcript");
@@ -336,6 +344,7 @@ fn a_transcript_is_put_appended_or_left_alone() {
         .is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn longer_local_transcript_refuses() {
     let mut rig = Rig::new("restore-longer");
@@ -350,6 +359,7 @@ fn longer_local_transcript_refuses() {
     assert_eq!(why, format!("{S1} ran on m1 after this set"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_different_local_transcript_refuses_whatever_its_length() {
     let mut rig = Rig::new("restore-different");
@@ -365,6 +375,7 @@ fn a_different_local_transcript_refuses_whatever_its_length() {
         .is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn aside_moves_the_local_transcript_first() {
     let mut rig = Rig::new("restore-aside");
@@ -381,6 +392,7 @@ fn aside_moves_the_local_transcript_first() {
     assert_eq!(steps.len(), 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_transcript_missing_from_the_set_refuses() {
     let mut rig = Rig::new("restore-no-transcript");
@@ -395,6 +407,7 @@ fn a_transcript_missing_from_the_set_refuses() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn restore_steps_never_touch_excluded_dirs() {
     let mut rig = Rig::new("restore-excluded");
@@ -414,6 +427,7 @@ fn restore_steps_never_touch_excluded_dirs() {
     assert!(shared.plan(&[], false, false, &missing).unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn paths_outside_the_home_folder_or_inside_a_repository_refuse() {
     let mut rig = Rig::new("restore-outside");
@@ -434,6 +448,7 @@ fn paths_outside_the_home_folder_or_inside_a_repository_refuse() {
         .contains("code never travels"));
 }
 
+#[cfg(unix)]
 #[test]
 fn shared_parts_are_restored_with_the_database_last() {
     let mut rig = Rig::new("restore-shared");
@@ -458,6 +473,7 @@ fn shared_parts_are_restored_with_the_database_last() {
     assert_eq!(steps.len(), 3);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_codex_index_is_merged_for_its_session_only() {
     let mut rig = Rig::new("restore-index");
@@ -529,6 +545,7 @@ fn a_hostile_set_cannot_restore_a_shared_part_this_machine_doesnt_own() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_can_only_restore_the_files_a_session_keeps() {
     let main = format!(".claude/projects/p/{S1}.jsonl");
@@ -604,6 +621,7 @@ fn a_session_can_only_restore_the_files_a_session_keeps() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_codex_session_keeps_only_its_own_rollout_and_the_index() {
     let mut rig = Rig::new("restore-codex-shapes");
@@ -630,6 +648,7 @@ fn a_codex_session_keeps_only_its_own_rollout_and_the_index() {
     assert!(!why.contains(&format!("rollout-t-{CODEX}.jsonl")), "{why}");
 }
 
+#[cfg(unix)]
 #[test]
 fn an_id_that_is_not_a_uuid_keeps_nothing() {
     let mut rig = Rig::new("restore-short-id");
@@ -661,6 +680,7 @@ fn hostile_root(rel: &str, tag: &str) -> Result<Vec<RestoreStep>, String> {
     rig.plan(&[S1], false, false, &missing)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_repository_root_in_a_hidden_or_system_folder_is_refused() {
     let refused = [
@@ -688,6 +708,7 @@ fn a_repository_root_in_a_hidden_or_system_folder_is_refused() {
     assert!(hostile_root("LIBRARY/cloudstorage/Dropbox/a", "restore-root-cloud-case").is_ok());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_home_folder_itself_is_not_a_repository_root() {
     let mut rig = Rig::new("restore-home-root");
@@ -699,6 +720,7 @@ fn the_home_folder_itself_is_not_a_repository_root() {
     assert!(why.contains("home folder itself"), "{why}");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_folder_outside_its_repository_is_refused() {
     let mut rig = Rig::new("restore-cwd");
@@ -708,6 +730,7 @@ fn a_session_folder_outside_its_repository_is_refused() {
     assert!(why.contains("isn't inside its repository"), "{why}");
 }
 
+#[cfg(unix)]
 #[test]
 fn nested_repositories_are_refused_except_a_worktree_in_its_main() {
     let mut rig = Rig::new("restore-nested");
@@ -725,6 +748,7 @@ fn nested_repositories_are_refused_except_a_worktree_in_its_main() {
     assert!(hostile_root("code/a/.git/hooks", "restore-root-hooks").is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_clone_from_a_folder_on_the_primary_outside_home_is_refused() {
     let cases = [
@@ -784,6 +808,7 @@ fn blanking_filters_names_every_driver_the_folder_defines() {
     assert!(!plain.contains("filter."), "{plain}");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_main_repository_that_is_not_a_repository_is_refused() {
     let mut rig = Rig::new("restore-foreign-main");
@@ -838,6 +863,7 @@ fn git_calls_are_hardened_and_never_reach_for_a_login() {
     .is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_root_that_is_or_holds_a_path_folder_under_home_is_refused() {
     let tools = |rig: &Rig| vec![rig.at("code/tools"), PathBuf::from("/usr/bin")];
@@ -866,6 +892,7 @@ fn a_root_that_is_or_holds_a_path_folder_under_home_is_refused() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn nested_roots_are_found_whatever_their_case() {
     let mut rig = Rig::new("restore-nested-case");
@@ -883,6 +910,7 @@ fn nested_roots_are_found_whatever_their_case() {
     assert!(linked.plan(&[S1, S2], false, false, &missing).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn session_files_inside_a_root_are_refused_whatever_their_case() {
     let mut rig = Rig::new("restore-inside-case");

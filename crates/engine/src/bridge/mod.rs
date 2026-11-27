@@ -33,7 +33,7 @@ pub use wire::BridgeFailure;
 mod extras_tests;
 #[cfg(test)]
 mod fixtures_data;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod fixtures_tests;
 #[cfg(test)]
 mod foreign_tests;

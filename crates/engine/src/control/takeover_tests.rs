@@ -54,6 +54,7 @@ fn eval(f: &Fixture, s: &TakeoverSession) -> Result<TakeoverPlan, TakeoverError>
     evaluate(s, &f.roots, false, &probes(&dead))
 }
 
+#[cfg(unix)]
 #[test]
 fn an_exited_session_with_a_transcript_and_folder_can_be_taken_over() {
     let f = fixture(true, true);
@@ -89,6 +90,7 @@ fn a_running_original_is_busy_no_matter_what() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_verified_original_is_stoppable_and_busy_says_so() {
     let f = fixture(true, true);
@@ -117,6 +119,7 @@ fn a_verified_original_is_stoppable_and_busy_says_so() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn another_live_process_writing_the_same_session_id_is_busy() {
     let f = fixture(true, true);
@@ -138,6 +141,7 @@ fn another_live_process_writing_the_same_session_id_is_busy() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn no_resumable_transcript_means_no_takeover() {
     let f = fixture(false, true);
@@ -153,6 +157,7 @@ fn no_resumable_transcript_means_no_takeover() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn bad_ids_never_reach_the_path() {
     let f = fixture(true, true);
@@ -195,6 +200,7 @@ fn sdk_missing_folder_and_already_controllable_are_refused() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn spawn_request_has_resume_and_a_scrubbed_environment() {
     let f = fixture(true, true);

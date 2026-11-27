@@ -184,6 +184,7 @@ fn turning_acting_off_passes_every_held_hook_at_once() {
     assert!(resolved.iter().all(|r| r["by"] == "acting_off"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_hook_claude_code_gave_up_on_is_let_go() {
     let s = Arc::new(setup(true, PROMPT, sessions()));

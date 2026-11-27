@@ -25,6 +25,7 @@ impl Processes for FakeProcesses {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn the_approval_says_what_the_daemon_checked_about_the_caller() {
     let s = setup("verified", true);

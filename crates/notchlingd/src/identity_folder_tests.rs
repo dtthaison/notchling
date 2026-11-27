@@ -9,6 +9,7 @@ fn job(id: &str, short: &str, resume: &str, cwd: &str, group: &str, label: &str)
     })
 }
 
+#[cfg(unix)]
 #[test]
 fn a_finished_job_that_once_resumed_the_session_never_lends_its_folder() {
     let r = rig("stale", json!({"sessionId": SESSION}));
@@ -25,6 +26,7 @@ fn a_finished_job_that_once_resumed_the_session_never_lends_its_folder() {
     assert_eq!(who.organization.as_deref(), Some(r.beta.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn two_jobs_that_resumed_the_same_session_each_get_their_own_folder_by_job_id() {
     let r = rig("twins", json!({"sessionId": SESSION}));
@@ -44,6 +46,7 @@ fn two_jobs_that_resumed_the_same_session_each_get_their_own_folder_by_job_id() 
     assert_eq!(who.organization.as_deref(), Some(r.beta.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn several_running_jobs_on_one_resumed_session_are_no_match_without_a_job_id() {
     let r = rig("many", json!({"sessionId": SESSION}));
@@ -58,6 +61,7 @@ fn several_running_jobs_on_one_resumed_session_are_no_match_without_a_job_id() {
     assert!(who.organization.is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_row_with_an_empty_folder_does_not_hide_the_running_job_that_has_one() {
     let r = rig("stub", json!({"sessionId": SESSION, "cwd": "/launch"}));
@@ -71,6 +75,7 @@ fn a_row_with_an_empty_folder_does_not_hide_the_running_job_that_has_one() {
     assert_eq!(who.organization.as_deref(), Some(r.acme.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn with_no_row_and_no_file_folder_the_process_working_folder_decides() {
     let r = rig("live", json!({"sessionId": SESSION}));
@@ -114,6 +119,7 @@ fn unlisted_job(tag: &str) -> (super::job_tests::Rig, String, Value) {
     (r, in_acme, rows)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_the_list_lacks_borrows_no_other_row_and_not_its_launch_folder() {
     let (r, _, rows) = unlisted_job("unlisted");
@@ -126,6 +132,7 @@ fn a_job_the_list_lacks_borrows_no_other_row_and_not_its_launch_folder() {
     assert!(alone.organization.is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_the_list_lacks_takes_its_live_process_folder() {
     let (r, _, rows) = unlisted_job("unlisted-live");
@@ -138,6 +145,7 @@ fn a_job_the_list_lacks_takes_its_live_process_folder() {
     assert_eq!(who.organization.as_deref(), Some(r.beta.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_running_resume_row_with_no_folder_yet_leaves_the_one_with_a_folder_unique() {
     let r = rig("blank", json!({"sessionId": SESSION, "cwd": "/launch"}));
@@ -151,6 +159,7 @@ fn a_running_resume_row_with_no_folder_yet_leaves_the_one_with_a_folder_unique()
     assert_eq!(who.organization.as_deref(), Some(r.acme.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_row_of_another_session_never_lends_its_folder_to_the_jobs_caller() {
     let r = rig("foreign", json!({"sessionId": SESSION, "jobId": "j1"}));

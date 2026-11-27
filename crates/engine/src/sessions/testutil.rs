@@ -18,8 +18,16 @@ impl TempDir {
         &self.0
     }
 
+    #[cfg(not(windows))]
     pub fn path(&self, rel: &str) -> PathBuf {
         self.0.join(rel)
+    }
+
+    #[cfg(windows)]
+    pub fn path(&self, rel: &str) -> PathBuf {
+        rel.split('/')
+            .filter(|part| !part.is_empty())
+            .fold(self.0.clone(), |path, part| path.join(part))
     }
 
     pub fn write(&self, rel: &str, text: &str) -> PathBuf {

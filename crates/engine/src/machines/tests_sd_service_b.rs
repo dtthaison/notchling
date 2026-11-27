@@ -62,6 +62,7 @@ fn mac_service_check_fails_when_installed_but_not_disabled() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn service_probe_compares_the_digests_of_the_rendered_units() {
     let tmp = TempDir::new("linuxcheck");

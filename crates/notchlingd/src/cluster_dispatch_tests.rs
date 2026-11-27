@@ -443,6 +443,7 @@ fn secret_names_are_checked_lowercased_and_deduplicated() {
     assert_eq!(err.code, ErrorCode::BadRequest);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_delegate_spec_carries_its_arguments_and_folder() {
     let args = json!({

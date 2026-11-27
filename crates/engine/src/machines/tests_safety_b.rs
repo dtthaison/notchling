@@ -207,6 +207,7 @@ fn admin_scripts_never_touch_production_services() {
     assert!(systemctl >= 2, "the systemctl commands were looked at");
 }
 
+#[cfg(unix)]
 #[test]
 fn every_admin_command_uses_the_absolute_sudo_and_a_fixed_environment() {
     let mut seen = 0;

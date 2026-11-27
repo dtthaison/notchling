@@ -352,6 +352,7 @@ fn can_be_master_is_inert_until_ready() {
     assert!(sender.wait_idle(Duration::from_secs(5)));
 }
 
+#[cfg(unix)]
 #[test]
 fn the_primarys_last_set_is_the_newest_offer_then_the_acked_lengths_then_zero() {
     let dir = TempDir::new("lastset");
@@ -381,6 +382,7 @@ fn the_primarys_last_set_is_the_newest_offer_then_the_acked_lengths_then_zero() 
     assert_eq!(sender.last_set_mb(), 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_acked_fallback_counts_only_current_members() {
     let dir = TempDir::new("lastset-members");

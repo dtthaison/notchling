@@ -300,6 +300,7 @@ fn search_kind_and_since_narrow_the_answer() {
     assert_eq!(reply["sessions"].as_array().unwrap().len(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shell_or_unverified_caller_gets_nothing_and_no_personal_data() {
     let rig = rig("shell");
@@ -321,6 +322,7 @@ fn a_shell_or_unverified_caller_gets_nothing_and_no_personal_data() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_verified_session_sees_its_own_items_in_full_and_its_organization_by_title() {
     let rig = rig("inbox");
@@ -345,6 +347,7 @@ fn a_verified_session_sees_its_own_items_in_full_and_its_organization_by_title()
     assert!(!text.contains("FAR-"));
 }
 
+#[cfg(unix)]
 #[test]
 fn another_organizations_session_sees_none_of_the_first_ones_text() {
     let rig = rig("inbox-other");
@@ -358,6 +361,7 @@ fn another_organizations_session_sees_none_of_the_first_ones_text() {
     assert_eq!(reply["otherOrganizations"], json!(2));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_a_running_job_resumed_in_another_organization_is_not_shown_to_the_first() {
     let rig = rig("inbox-resumed");
@@ -375,6 +379,7 @@ fn a_session_a_running_job_resumed_in_another_organization_is_not_shown_to_the_f
     assert!(!reply.to_string().contains("MATE-"));
 }
 
+#[cfg(unix)]
 #[test]
 fn organizations_mine_names_only_the_callers_and_counts_the_rest() {
     let rig = rig("orgs");
@@ -385,6 +390,7 @@ fn organizations_mine_names_only_the_callers_and_counts_the_rest() {
     assert!(!reply.to_string().contains("Personal"));
 }
 
+#[cfg(unix)]
 #[test]
 fn accounts_and_limits_answer_for_a_verified_session() {
     let rig = rig("acc");
@@ -457,6 +463,7 @@ fn every_read(rig: &Rig) -> Vec<(&'static str, String)> {
     all
 }
 
+#[cfg(unix)]
 #[test]
 fn a_planted_email_token_folder_and_inbox_text_of_another_organization_appear_in_no_reply() {
     let rig = rig_with("planted-far", planted_registry());
@@ -476,6 +483,7 @@ fn a_planted_email_token_folder_and_inbox_text_of_another_organization_appear_in
     assert!(seen_account, "the caller's own masked account is shown");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_planted_email_token_folder_and_inbox_text_of_the_first_organization_appear_in_no_other_reply()
 {
@@ -497,6 +505,7 @@ fn a_planted_email_token_folder_and_inbox_text_of_the_first_organization_appear_
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn another_sessions_inbox_text_in_the_same_organization_is_a_title_only() {
     let rig = rig("inbox-mate");
@@ -507,6 +516,7 @@ fn another_sessions_inbox_text_in_the_same_organization_is_a_title_only() {
     assert!(text.contains("OWN-TITLE"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_planted_search_row_of_another_organization_or_for_a_shell_is_dropped() {
     let rig = rig("search-planted");
@@ -548,6 +558,7 @@ fn a_planted_search_row_of_another_organization_or_for_a_shell_is_dropped() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shell_with_planted_accounts_still_gets_nothing_from_any_read() {
     let rig = rig_with("planted-shell", planted_registry());
@@ -584,6 +595,7 @@ fn claude_limits(rig: &Rig) -> Value {
     read(rig, ops::LIMITS_SUMMARY, json!({"tool": "claude"}))["tool"].clone()
 }
 
+#[cfg(unix)]
 #[test]
 fn claude_with_no_reading_yet_is_usable_for_its_own_organization() {
     let rig = rig_seen("claude-none", claude_registry("me", false), None);
@@ -592,6 +604,7 @@ fn claude_with_no_reading_yet_is_usable_for_its_own_organization() {
     assert_eq!(tool["reason"], Value::Null, "{tool}");
 }
 
+#[cfg(unix)]
 #[test]
 fn claude_uses_the_reading_of_the_active_account_only() {
     let seen = rig_seen("claude-same", claude_registry("me", false), Some(99.0));
@@ -613,6 +626,7 @@ fn claude_uses_the_reading_of_the_active_account_only() {
     assert_eq!(tool["pools"], json!([]), "{tool}");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_signed_out_claude_account_is_not_usable_with_or_without_a_reading() {
     for (tag, seen) in [("claude-out-seen", Some(10.0)), ("claude-out-none", None)] {
@@ -659,6 +673,7 @@ fn a_pool_of_a_tool_with_no_pools_gives_the_tools_own_verdict() {
     assert_eq!(verdict["reason"], json!("other_organization"));
 }
 
+#[cfg(unix)]
 #[test]
 fn limits_with_a_pool_passes_the_reason_through_for_a_shell_or_another_organization() {
     let rig = rig_with("pool-through", planted_registry());
@@ -692,6 +707,7 @@ fn a_row_with_an_empty_folder_is_dropped_and_never_placed_in_personal() {
     assert_eq!(reply["sessions"], json!([]));
 }
 
+#[cfg(unix)]
 #[test]
 fn account_ids_in_the_summary_are_opaque_stable_and_resolve_back() {
     let rig = rig_with("opaque-ids", planted_registry());
@@ -781,6 +797,7 @@ fn plant_claude(rig: &Rig) -> Vec<String> {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn accounts_summary_lists_claude_code_accounts_by_opaque_id() {
     let rig = rig("claude-rows");
@@ -829,6 +846,7 @@ fn accounts_summary_lists_claude_code_accounts_by_opaque_id() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_claude_account_with_no_organization_field_is_personal_and_an_unknown_one_is_left_out() {
     let rig = rig("claude-strict");

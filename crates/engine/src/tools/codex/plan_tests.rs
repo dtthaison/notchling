@@ -114,6 +114,7 @@ fn what_a_caller_may_name_is_checked() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn the_codex_command_is_found_in_the_usual_places() {
     let home = Path::new("/home/me");
@@ -255,6 +256,7 @@ fn the_folder_of_the_found_codex_leads_the_path_once() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_path_gains_the_usual_tool_folders_once() {
     let home = Path::new("/home/me");

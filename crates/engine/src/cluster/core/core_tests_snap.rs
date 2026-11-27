@@ -215,6 +215,7 @@ fn acked_len(hub: &Hub, who: &NodeId) -> Option<u64> {
     })
 }
 
+#[cfg(unix)]
 #[test]
 fn an_ack_from_a_standby_is_kept_per_target_and_never_goes_back() {
     let mut hub = with_standby();

@@ -154,6 +154,7 @@ fn is_held(out: &Value) -> bool {
     out["next"].as_u64().unwrap() < out["size"].as_u64().unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn a_held_prefix_in_a_worker_claude_row_is_not_flushed_while_the_job_is_live_here() {
     let w = claude();
@@ -170,6 +171,7 @@ fn a_held_prefix_in_a_worker_claude_row_is_not_flushed_while_the_job_is_live_her
     assert!(!both.contains("-VALUE"), "no part of the value is served");
 }
 
+#[cfg(unix)]
 #[test]
 fn the_held_prefix_is_masked_and_flushed_once_the_job_ends_here() {
     let w = claude();
@@ -183,6 +185,7 @@ fn the_held_prefix_is_masked_and_flushed_once_the_job_ends_here() {
     assert_eq!(end["next"], end["size"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_antigravity_row_of_a_worker_is_held_the_same_way() {
     let w = agy();
@@ -196,6 +199,7 @@ fn an_antigravity_row_of_a_worker_is_held_the_same_way() {
     assert_eq!(end["next"], end["size"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_that_has_not_started_yet_keeps_an_untied_rows_prefix_held_until_its_window_ends() {
     let w = untied();
@@ -209,6 +213,7 @@ fn a_job_that_has_not_started_yet_keeps_an_untied_rows_prefix_held_until_its_win
     assert_eq!(end["next"], end["size"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pending_job_is_not_over_for_its_own_row_either() {
     let shell = format!("shell:{JOB}");
@@ -221,6 +226,7 @@ fn a_pending_job_is_not_over_for_its_own_row_either() {
     assert_eq!(end["next"], end["size"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_live_here_keeps_an_untied_rows_prefix_held_and_its_end_releases_it() {
     let w = untied();
@@ -233,6 +239,7 @@ fn a_job_live_here_keeps_an_untied_rows_prefix_held_and_its_end_releases_it() {
     assert_eq!(end["next"], end["size"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shell_jobs_root_alive_here_keeps_its_log_prefix_held_though_the_log_is_closed() {
     let shell = format!("shell:{JOB}");
@@ -246,6 +253,7 @@ fn a_shell_jobs_root_alive_here_keeps_its_log_prefix_held_though_the_log_is_clos
     assert_eq!(end["next"], end["size"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_state_decides_for_a_job_it_lists_whatever_the_local_record_says() {
     let w = claude();
@@ -264,6 +272,7 @@ fn the_state_decides_for_a_job_it_lists_whatever_the_local_record_says() {
     assert!(is_held(&w.tail(0).unwrap()), "the state says it runs");
 }
 
+#[cfg(unix)]
 #[test]
 fn rows_tied_to_no_job_follow_the_state_for_a_job_it_lists() {
     let w = untied();
@@ -279,6 +288,7 @@ fn rows_tied_to_no_job_follow_the_state_for_a_job_it_lists() {
     assert!(is_held(&w.tail(0).unwrap()), "the state says it runs");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_lost_login_refuses_a_worker_claude_row_but_not_an_antigravity_or_shell_row() {
     let w = claude();
@@ -311,6 +321,7 @@ fn a_lost_login_refuses_a_worker_claude_row_but_not_an_antigravity_or_shell_row(
     assert!(s.tail(0).is_ok(), "nor to a shell job");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_lost_login_refuses_the_claude_row_of_a_job_that_began_a_claude_start_only() {
     let w = claude();
@@ -330,6 +341,7 @@ fn a_lost_login_refuses_the_claude_row_of_a_job_that_began_a_claude_start_only()
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shell_row_of_a_job_with_no_grants_is_masked_with_another_jobs_value() {
     let shell = format!("shell:{JOB}");
@@ -345,6 +357,7 @@ fn a_shell_row_of_a_job_with_no_grants_is_masked_with_another_jobs_value() {
     assert_eq!(served(&out), "it read the file: [secret other-key] done\n");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_tied_claude_row_is_masked_with_another_jobs_value() {
     let w = claude();
@@ -360,6 +373,7 @@ fn a_tied_claude_row_is_masked_with_another_jobs_value() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_held_prefix_of_another_jobs_value_is_not_flushed_while_the_row_is_live() {
     let w = claude();
@@ -377,6 +391,7 @@ fn a_held_prefix_of_another_jobs_value_is_not_flushed_while_the_row_is_live() {
     assert_eq!(both, "said [secret other-key] more\n");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_held_prefix_of_another_jobs_value_is_masked_once_the_row_is_over() {
     let w = claude();

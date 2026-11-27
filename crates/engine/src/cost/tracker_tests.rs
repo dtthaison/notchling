@@ -463,6 +463,7 @@ fn other_files(tmp: &TempDir) {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_and_antigravity_channels() {
     let tmp = TempDir::new("cost-others");
@@ -502,6 +503,7 @@ fn codex_and_antigravity_channels() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn appended_codex_lines_keep_the_model_and_skip_a_repeat() {
     let tmp = TempDir::new("cost-codex-append");
@@ -521,6 +523,7 @@ fn appended_codex_lines_keep_the_model_and_skip_a_repeat() {
     near(codex, 0.026 + 0.01075 + 0.0125);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_codex_model_survives_a_restart_through_the_cache() {
     let tmp = TempDir::new("cost-codex-cache");

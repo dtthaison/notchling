@@ -25,7 +25,11 @@ pub(crate) struct Dir(PathBuf);
 impl Dir {
     pub(crate) fn new(tag: &str) -> Dir {
         let n = NEXT.fetch_add(1, Ordering::SeqCst);
-        let path = PathBuf::from(format!("/tmp/nlc-{tag}-{}-{n}", std::process::id()));
+        let name = format!("nlc-{tag}-{}-{n}", std::process::id());
+        #[cfg(unix)]
+        let path = PathBuf::from("/tmp").join(name);
+        #[cfg(not(unix))]
+        let path = std::env::temp_dir().join(name);
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         Dir(path)

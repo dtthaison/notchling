@@ -114,6 +114,7 @@ pub(crate) fn identify_in(
     .identify(900)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_the_list_holds_under_its_job_id_keeps_its_folder_and_organization() {
     let r = rig(
@@ -134,6 +135,7 @@ fn a_session_the_list_holds_under_its_job_id_keeps_its_folder_and_organization()
     assert_eq!(who.organization.as_deref(), Some(r.acme.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_the_list_lacks_takes_its_folder_from_its_own_session_file() {
     let r = rig("file", json!({"sessionId": SESSION, "cwd": "/placeholder"}));
@@ -148,6 +150,7 @@ fn a_session_the_list_lacks_takes_its_folder_from_its_own_session_file() {
     assert_eq!(who.organization.as_deref(), Some(r.acme.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_verified_session_with_no_known_folder_has_no_organization() {
     let r = rig("none", json!({"sessionId": SESSION}));

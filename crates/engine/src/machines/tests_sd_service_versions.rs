@@ -9,6 +9,7 @@ use crate::versions::knob::{AGY_VAR, CLAUDE_VAR};
 const LINE: &str = "Environment=DISABLE_AUTOUPDATER=1";
 const PLIST_PAIR: &str = "\n\t\t<key>DISABLE_AUTOUPDATER</key>\n\t\t<string>1</string>";
 
+#[cfg(unix)]
 #[test]
 fn unit_has_the_variable_beside_path() {
     let files = render_linux("agent", "/home/agent").unwrap();
@@ -28,6 +29,7 @@ fn unit_has_the_variable_beside_path() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn plist_has_the_variable() {
     let files = render_mac();
@@ -37,6 +39,7 @@ fn plist_has_the_variable() {
     assert_eq!(c.matches(CLAUDE_VAR).count(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn old_file_without_it_is_changed() {
     let tmp = TempDir::new("oldunit");
@@ -65,6 +68,7 @@ fn old_file_without_it_is_changed() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn restart_waits_for_no_job() {
     let idle = WorkerStatus::default();
@@ -87,6 +91,7 @@ fn restart_waits_for_no_job() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn agy_variable_only_when_verified() {
     assert_eq!(service_vars(false), vec![(CLAUDE_VAR, "1")]);

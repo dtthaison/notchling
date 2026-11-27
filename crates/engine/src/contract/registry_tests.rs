@@ -35,6 +35,7 @@ fn unwired_lists_exactly_the_native_and_fallback_cells_not_wired() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn the_files_are_sorted_unique_and_well_formed() {
     for text in [GAPS, UNWIRED] {

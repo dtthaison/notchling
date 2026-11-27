@@ -231,6 +231,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn codex_lives_in_codex_home_else_dot_codex_and_beside_a_fixture_root() {
         let real = Layout::resolve(None, None, real).unwrap();

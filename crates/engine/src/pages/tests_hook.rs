@@ -17,6 +17,11 @@ fn event(text: &str) -> Value {
     serde_json::from_str(text).unwrap()
 }
 
+fn json_escaped(text: &str) -> String {
+    let quoted = serde_json::to_string(text).unwrap();
+    quoted[1..quoted.len() - 1].to_owned()
+}
+
 fn library_with_page(dir: &TempDir) -> PageLibrary {
     dir.write(
         "work/report.html",
@@ -24,7 +29,7 @@ fn library_with_page(dir: &TempDir) -> PageLibrary {
     );
     let lib = PageLibrary::writable(dir.path("pages"));
     let work = dir.path("work");
-    let text = POST_PUBLISH.replace("WORK", &work.to_string_lossy());
+    let text = POST_PUBLISH.replace("WORK", &json_escaped(&work.to_string_lossy()));
     let saved = lib
         .record(&event(&text), &ctx("owner@example.com", dir.root()))
         .unwrap();
@@ -56,7 +61,8 @@ fn a_publish_event_is_recorded_and_says_nothing() {
     let page = lib.entries().remove(0);
     assert_eq!(page.version, "1793506664-65e3");
     assert_eq!(page.account, "owner@example.com");
-    let again = event(&POST_PUBLISH.replace("WORK", &dir.path("work").to_string_lossy()));
+    let again =
+        event(&POST_PUBLISH.replace("WORK", &json_escaped(&dir.path("work").to_string_lossy())));
     assert_eq!(post_tool_use(&lib, &again, &ctx("x", dir.root())), None);
 }
 
@@ -145,7 +151,8 @@ fn a_read_only_library_stays_silent_and_unchanged() {
     library_with_page(&dir);
     let ro = PageLibrary::read_only(dir.path("pages"));
     let before = std::fs::read(ro.list_path()).unwrap();
-    let publish = event(&POST_PUBLISH.replace("WORK", &dir.path("work").to_string_lossy()));
+    let publish =
+        event(&POST_PUBLISH.replace("WORK", &json_escaped(&dir.path("work").to_string_lossy())));
     assert_eq!(post_tool_use(&ro, &publish, &ctx("x", dir.root())), None);
     assert_eq!(std::fs::read(ro.list_path()).unwrap(), before);
     assert!(pre_tool_use(&ro, &event(PRE_READ_SAVED), None).is_some());
@@ -182,7 +189,8 @@ fn answer_runs_the_event_by_its_name_and_leaves_the_rest_alone() {
             .unwrap()
             .starts_with("Notchling keeps a local copy"));
     }
-    let publish = event(&POST_PUBLISH.replace("WORK", &dir.path("work").to_string_lossy()));
+    let publish =
+        event(&POST_PUBLISH.replace("WORK", &json_escaped(&dir.path("work").to_string_lossy())));
     assert_eq!(answer(&lib, &publish, &c), None);
     assert_eq!(answer(&lib, &event(POST_READ_OK), &c), None);
     for other in [

@@ -60,6 +60,7 @@ fn the_tilde_stays_in_what_is_stored() {
     assert_eq!(file_name("~/.ssh/id_work"), "id_work");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_key_file_is_checked_without_reading_it() {
     let dir = TempDir::new("key");

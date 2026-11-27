@@ -443,6 +443,7 @@ impl Placing for Folders {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn hybrid_hits_keep_the_organization_and_window() {
     let rig = build(

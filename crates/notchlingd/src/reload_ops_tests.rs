@@ -496,8 +496,8 @@ fn a_mode_changed_during_the_session_is_carried_and_restored_on_failure() {
     let text = IDLE.replace(
         "\"state\":\"done\"",
         &format!(
-            "\"state\":\"done\",\"linkScanPath\":\"{}\"",
-            transcript.display()
+            "\"state\":\"done\",\"linkScanPath\":{}",
+            serde_json::to_string(&transcript.display().to_string()).unwrap()
         ),
     );
     std::fs::write(&state, text).unwrap();
@@ -659,8 +659,8 @@ fn with_mode_in_transcript(dir: &Dir, state: &PathBuf, flags: &str, mode: &str) 
     std::fs::write(
         state,
         format!(
-            "{{\"state\":\"done\",\"linkScanPath\":\"{}\",\"respawnFlags\":{flags},\"inFlight\":{{\"tasks\":0}}}}",
-            transcript.display()
+            "{{\"state\":\"done\",\"linkScanPath\":{},\"respawnFlags\":{flags},\"inFlight\":{{\"tasks\":0}}}}",
+            serde_json::to_string(&transcript.display().to_string()).unwrap()
         ),
     )
     .unwrap();

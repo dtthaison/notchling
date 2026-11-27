@@ -69,6 +69,7 @@ fn token_text(rig: &Rig) -> Option<String> {
     rig.hold.token().map(|t| t.expose().to_string())
 }
 
+#[cfg(unix)]
 #[test]
 fn the_vault_node_while_home_stores_the_login() {
     let rig = rig("login-store");
@@ -151,6 +152,7 @@ fn a_bad_delivery_is_refused_without_echoing_the_value() {
     assert!(!rig.hold.standing());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_login_ends_on_the_day_it_was_sent_with_no_twelve_hour_cap() {
     let rig = rig("login-long");
@@ -165,6 +167,7 @@ fn the_login_ends_on_the_day_it_was_sent_with_no_twelve_hour_cap() {
     assert!(!rig.hold.standing());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_new_delivery_replaces_the_login() {
     let rig = rig("login-replace");
@@ -183,6 +186,7 @@ fn masked(masks: &TailMasks, job: &str, text: &str) -> String {
     String::from_utf8(out).unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn the_token_is_masked_in_every_served_tail_even_for_jobs_with_no_grants() {
     let rig = rig("login-masks");
@@ -197,6 +201,7 @@ fn the_token_is_masked_in_every_served_tail_even_for_jobs_with_no_grants() {
     assert!(!String::from_utf8(out).unwrap().contains("NL-MARKER"));
 }
 
+#[cfg(unix)]
 #[test]
 fn the_token_stays_masked_after_it_is_replaced() {
     let rig = rig("login-masks-old");
@@ -215,6 +220,7 @@ fn the_token_stays_masked_after_it_is_replaced() {
     assert!(!out.contains("NL-MARKER"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_restart_masks_the_stored_login_again() {
     let rig = rig("login-restart");
@@ -225,6 +231,7 @@ fn a_restart_masks_the_stored_login_again() {
     assert!(again.hold.standing());
 }
 
+#[cfg(unix)]
 #[test]
 fn too_many_different_tokens_since_the_start_stop_serving_a_new_one() {
     let rig = rig("login-many");
@@ -244,6 +251,7 @@ fn too_many_different_tokens_since_the_start_stop_serving_a_new_one() {
     assert!(!err.message.contains("NL-MARKER"));
 }
 
+#[cfg(unix)]
 #[test]
 fn leaving_the_cluster_removes_the_login() {
     let rig = rig("login-wipe");
@@ -254,6 +262,7 @@ fn leaving_the_cluster_removes_the_login() {
     rig.hold.wipe();
 }
 
+#[cfg(unix)]
 #[test]
 fn the_calls_answer_only_login_deliver() {
     let rig = rig("login-calls");
@@ -271,6 +280,7 @@ fn the_calls_answer_only_login_deliver() {
     assert_eq!(LOGIN_DELIVER, "login.deliver");
 }
 
+#[cfg(unix)]
 #[test]
 fn the_login_is_hidden_when_printed() {
     let rig = rig("login-print");
@@ -279,6 +289,7 @@ fn the_login_is_hidden_when_printed() {
     assert!(!format!("{token:?}{token}").contains("NL-MARKER"));
 }
 
+#[cfg(unix)]
 #[test]
 fn the_versions_a_node_reports_follow_the_login_while_it_stands() {
     use crate::cluster_versions::{own, with_logins};
@@ -306,6 +317,7 @@ fn session_row(rig: &Rig, session: &str, text: &str) -> Result<String, String> {
         .map(|(out, _)| String::from_utf8(out).unwrap())
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_that_ran_with_the_current_token_stays_readable_after_a_restart() {
     let rig = rig("login-job-same");
@@ -318,6 +330,7 @@ fn a_job_that_ran_with_the_current_token_stays_readable_after_a_restart() {
     assert!(again.masks.job_for_key("6ce4c19c").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_that_ran_with_an_earlier_token_is_refused_after_a_restart() {
     let rig = rig("login-job-old");
@@ -340,6 +353,7 @@ fn a_job_that_ran_with_an_earlier_token_is_refused_after_a_restart() {
     assert!(!kept.contains("NL-MARKER"));
 }
 
+#[cfg(unix)]
 #[test]
 fn after_the_login_is_gone_every_recorded_job_is_refused_after_a_restart() {
     let rig = rig("login-job-gone");
@@ -351,6 +365,7 @@ fn after_the_login_is_gone_every_recorded_job_is_refused_after_a_restart() {
     assert!(session_row(&again, "6ce4c19c", "x").is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_record_holds_a_hash_and_never_the_value() {
     let rig = rig("login-job-file");
@@ -362,6 +377,7 @@ fn the_record_holds_a_hash_and_never_the_value() {
     assert!(text.contains(&crate::cluster_logins_jobs::hash_of(&token)));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_record_that_cannot_be_read_stops_new_launches() {
     let rig = rig("login-job-bad");
@@ -372,6 +388,7 @@ fn a_record_that_cannot_be_read_stops_new_launches() {
     assert!(!again.hold.standing());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_unreadable_record_refuses_every_unmapped_row() {
     let rig = rig("login-job-blanket");
@@ -382,6 +399,7 @@ fn an_unreadable_record_refuses_every_unmapped_row() {
     assert!(again.masks.unidentified_lost());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_stored_token_is_masked_at_start_even_when_the_record_is_unreadable() {
     let rig = rig("login-job-stored");
@@ -394,6 +412,7 @@ fn the_stored_token_is_masked_at_start_even_when_the_record_is_unreadable() {
     assert!(again.masks.login_lost());
 }
 
+#[cfg(unix)]
 #[test]
 fn recorded_jobs_are_lost_after_a_restart_even_while_the_login_is_off() {
     let rig = rig("login-job-off");
@@ -433,6 +452,7 @@ fn a_full_record_keeps_taking_launches_and_folds_the_older_hashes_into_an_overfl
     assert_eq!(again.all(), jobs.all());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_overflow_of_an_earlier_token_refuses_unmapped_rows_after_a_restart_but_the_current_one_does_not(
 ) {
@@ -452,6 +472,7 @@ fn an_overflow_of_an_earlier_token_refuses_unmapped_rows_after_a_restart_but_the
     assert!(other.masks.unidentified_lost());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_disabled_hold_takes_nothing_serves_nothing_and_removes_an_old_file() {
     let rig = rig("login-off");
@@ -469,6 +490,7 @@ fn the_cluster_login_is_off_in_this_build() {
     const { assert!(!CLUSTER_LOGIN_ON) };
 }
 
+#[cfg(unix)]
 #[test]
 fn standing_and_token_agree_once_the_masks_are_full() {
     let rig = rig("login-agree");
@@ -491,6 +513,7 @@ fn standing_and_token_agree_once_the_masks_are_full() {
     assert!(!rig.hold.standing());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_home_or_the_vault_node_revokes_and_nobody_else() {
     let rig = rig("login-revoke");

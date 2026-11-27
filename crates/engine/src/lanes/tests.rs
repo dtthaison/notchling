@@ -50,6 +50,7 @@ fn names_come_from_the_email_and_stay_unique() {
     assert_eq!(new_name(&format!("{}@x", "a".repeat(40)), &[]).len(), 24);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_start_command_quotes_the_path() {
     let mut l = lane(&LaneStore::new(Path::new("/h"), Path::new("/d")), "w");

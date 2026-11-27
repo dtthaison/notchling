@@ -18,6 +18,7 @@ fn bin() -> PathBuf {
     PathBuf::from("/Applications/Notchling.app/Contents/MacOS/notchling")
 }
 
+#[cfg(unix)]
 #[test]
 fn the_sidecar_runs_the_installed_binary_with_one_subcommand_and_no_shell() {
     let value = sidecar_json(&bin()).unwrap();
@@ -30,6 +31,7 @@ fn the_sidecar_runs_the_installed_binary_with_one_subcommand_and_no_shell() {
     assert!(sidecar_json(&PathBuf::from("notchling")).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn install_writes_the_plugin_with_its_mark_and_is_idempotent() {
     let r = roots("install");
@@ -42,6 +44,7 @@ fn install_writes_the_plugin_with_its_mark_and_is_idempotent() {
     assert!(!install(&r, &bin(), 1).unwrap());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_moved_binary_rewrites_only_the_sidecar_file() {
     let r = roots("moved");
@@ -68,6 +71,7 @@ fn a_plugin_folder_that_is_not_ours_is_never_touched() {
     assert!(!sidecar_dir(&r).exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn remove_takes_only_what_it_wrote_and_the_folder_when_it_is_then_empty() {
     let r = roots("remove");
@@ -114,6 +118,7 @@ fn backups(r: &Roots) -> Vec<PathBuf> {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn the_mark_says_notchling_rewrites_these_files_and_that_is_what_install_does() {
     assert!(MARK_TEXT.contains("manages these files"));
@@ -145,6 +150,7 @@ fn the_mark_says_notchling_rewrites_these_files_and_that_is_what_install_does() 
         .all(|e| !e.file_name().to_string_lossy().contains("backup")));
 }
 
+#[cfg(unix)]
 #[test]
 fn an_unchanged_install_makes_no_backup() {
     let r = roots("same");

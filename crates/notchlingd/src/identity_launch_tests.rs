@@ -57,6 +57,7 @@ fn identify(r: &Rig, launches: Launches, rows: Value, cwd: Option<PathBuf>) -> A
     .identify(900)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_launched_session_takes_the_folder_it_was_launched_in() {
     let r = rig("launch-folder", json!({}));
@@ -72,6 +73,7 @@ fn a_launched_session_takes_the_folder_it_was_launched_in() {
     assert_eq!(who.organization.as_deref(), Some(r.acme.as_str()));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_launched_session_with_no_launch_folder_reads_its_live_folder_or_has_none() {
     let r = rig("launch-live", json!({}));

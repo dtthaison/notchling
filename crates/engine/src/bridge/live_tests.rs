@@ -354,6 +354,7 @@ fn acting_goes_through_the_acting_trait() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn with_acting_off_the_router_refuses_and_nothing_is_audited() {
     let backend: Arc<dyn BridgeBackend> = Arc::new(LiveBackend::new(agy_world(), ActingOff));

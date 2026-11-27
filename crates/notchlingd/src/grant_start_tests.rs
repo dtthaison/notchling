@@ -23,6 +23,7 @@ fn from_home() -> Origin {
     from("vault", OriginTier::App)
 }
 
+#[cfg(unix)]
 #[test]
 fn a_claude_start_op_from_the_home_turns_the_pending_grant_into_the_jobs_grant() {
     let rig = rig();
@@ -46,6 +47,7 @@ fn a_claude_start_op_from_the_home_turns_the_pending_grant_into_the_jobs_grant()
     assert_eq!(rig.marks.marked()[0].ended_ms, None);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_antigravity_start_op_is_noted_the_same_way() {
     let rig = rig();
@@ -84,6 +86,7 @@ fn only_the_two_start_ops_name_a_tool() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_start_op_that_fails_ends_the_job_and_removes_its_grants() {
     let rig = rig();
@@ -143,6 +146,7 @@ fn other_ops_pass_through_untouched() {
     assert!(!rig.roots.is_live(JOB));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_known_only_by_a_start_is_ended_by_the_state_when_the_state_says_so() {
     let rig = rig();

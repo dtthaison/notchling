@@ -43,6 +43,7 @@ fn iso(day: u32) -> String {
     format!("2026-11-{day:02}T08:00:00.000Z")
 }
 
+#[cfg(unix)]
 #[test]
 fn lists_a_main_job_and_a_lane_job_sorted_by_group_then_recency() {
     let w = world(Some(LANE));
@@ -67,6 +68,7 @@ fn lists_a_main_job_and_a_lane_job_sorted_by_group_then_recency() {
     assert_eq!(rows[1].config_dir, None);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_moved_job_shows_once_as_its_current_copy() {
     let w = world(Some(LANE));
@@ -92,6 +94,7 @@ fn a_moved_job_shows_once_as_its_current_copy() {
     assert_eq!(monitor.config_dir_for_session("conv"), rows[0].config_dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn moved_back_to_main_forgets_the_lane() {
     let w = world(Some(LANE));

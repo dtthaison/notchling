@@ -290,6 +290,7 @@ fn answer(rig: &Rig, pid: u32, names: &[&str]) -> Result<Value, ApiError> {
         .expect("the worker path answers")
 }
 
+#[cfg(unix)]
 #[test]
 fn use_answers_from_the_jobs_grants() {
     let rig = rig();
@@ -310,6 +311,7 @@ fn use_answers_from_the_jobs_grants() {
     assert_eq!(*rig.fake.used.lock().unwrap(), [(JOB.to_string(), true)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn caller_outside_any_job_is_refused() {
     let rig = rig();
@@ -329,6 +331,7 @@ fn caller_outside_any_job_is_refused() {
     assert!(rig.fake.asked.lock().unwrap().is_empty(), "nothing asked");
 }
 
+#[cfg(unix)]
 #[test]
 fn caller_in_another_job_gets_only_its_own() {
     let rig = rig();
@@ -349,6 +352,7 @@ fn caller_in_another_job_gets_only_its_own() {
     assert_eq!(asked[0].1["job"], OTHER_JOB);
 }
 
+#[cfg(unix)]
 #[test]
 fn missing_name_requests_from_home_once() {
     let rig = rig();
@@ -376,6 +380,7 @@ fn missing_name_requests_from_home_once() {
     assert_eq!(asked[0].1["folder"], "/work");
 }
 
+#[cfg(unix)]
 #[test]
 fn waiting_and_failed_requests_say_why_and_give_nothing() {
     let rig = rig();
@@ -399,6 +404,7 @@ fn waiting_and_failed_requests_say_why_and_give_nothing() {
     assert!(rig.fake.used.lock().unwrap().iter().all(|(_, ok)| !ok));
 }
 
+#[cfg(unix)]
 #[test]
 fn expired_grant_is_not_used() {
     let later = real_now() + 2 * 3_600_000;
@@ -410,6 +416,7 @@ fn expired_grant_is_not_used() {
     assert_eq!(rig.fake.asked.lock().unwrap().len(), 1, "asked afresh");
 }
 
+#[cfg(unix)]
 #[test]
 fn an_ended_or_unknown_job_gets_nothing() {
     let rig = rig();

@@ -18,6 +18,7 @@ fn janitor(rig: &Rig) -> Arc<GrantJanitor> {
     )
 }
 
+#[cfg(unix)]
 #[test]
 fn a_restored_job_stays_unservable_after_a_later_grant() {
     let rig = rig();
@@ -37,6 +38,7 @@ fn a_restored_job_stays_unservable_after_a_later_grant() {
     assert!(!restarted.masks.lost(OTHER_JOB));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_revoke_that_found_nothing_beats_a_deliver_that_arrived_before_it() {
     let rig = rig();
@@ -57,6 +59,7 @@ fn a_revoke_that_found_nothing_beats_a_deliver_that_arrived_before_it() {
     deliver(&rig, JOB, "one", "NL-MARKER-1").expect("a later deliver is fine");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_revoke_of_other_names_does_not_stop_a_deliver() {
     let rig = rig();
@@ -71,6 +74,7 @@ fn a_revoke_of_other_names_does_not_stop_a_deliver() {
     assert!(rig.store.get(JOB, "one", real_now()).unwrap().is_some());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_deliver_and_a_sweep_both_wait_for_the_gate() {
     let rig = rig();
@@ -104,6 +108,7 @@ fn a_deliver_and_a_sweep_both_wait_for_the_gate() {
     sweep.join().unwrap().expect("swept");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_grant_of_a_running_job_survives_a_sweep() {
     let rig = rig();
@@ -159,6 +164,7 @@ fn a_persisted_cluster_that_cannot_be_read_is_not_taken_for_none() {
     assert_eq!(got.expect_err("refused").message, NOT_LOADED);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_revoke_handled_after_a_deliver_arrived_beats_it() {
     let rig = rig();
@@ -177,6 +183,7 @@ fn a_revoke_handled_after_a_deliver_arrived_beats_it() {
     deliver(&rig, JOB, "one", "NL-MARKER-1").expect("a deliver arriving later is fine");
 }
 
+#[cfg(unix)]
 #[test]
 fn the_dispatcher_stamps_a_deliver_when_it_arrives() {
     let rig = rig();

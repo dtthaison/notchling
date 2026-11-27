@@ -12,6 +12,7 @@ fn parse_in(list: &[&str]) -> Result<Parsed, ParseError> {
     )
 }
 
+#[cfg(unix)]
 #[test]
 fn flags_and_prompt() {
     let p = parse_in(&[
@@ -47,6 +48,7 @@ fn flags_and_prompt() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn defaults_are_read_only_in_the_current_folder_for_half_an_hour() {
     let p = parse_in(&["codex", "hello", "world"]).unwrap();
@@ -112,6 +114,7 @@ fn the_prompt_can_come_from_a_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn paths_are_tidied_without_touching_the_disk() {
     let cwd = Path::new("/a/b");

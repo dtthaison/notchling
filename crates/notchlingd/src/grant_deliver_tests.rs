@@ -6,6 +6,7 @@ fn deliver(rig: &Rig, args: &Value) -> Result<Value, ApiError> {
     rig.uses.deliver(&from_vault(), args)
 }
 
+#[cfg(unix)]
 #[test]
 fn deliver_for_a_job_the_state_lists_elsewhere_or_finished_is_refused() {
     let rig = rig();
@@ -35,6 +36,7 @@ fn deliver_for_a_job_the_state_lists_elsewhere_or_finished_is_refused() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn deliver_stores_masks_and_marks_the_job() {
     let rig = rig();
@@ -58,6 +60,7 @@ fn deliver_stores_masks_and_marks_the_job() {
     assert!(text.contains("[secret api-key]"));
 }
 
+#[cfg(unix)]
 #[test]
 fn deliver_clamps_the_expiry_to_twelve_hours() {
     let rig = rig();
@@ -73,6 +76,7 @@ fn deliver_clamps_the_expiry_to_twelve_hours() {
     assert!(deliver(&rig, &gone).is_err(), "already expired");
 }
 
+#[cfg(unix)]
 #[test]
 fn deliver_is_taken_only_from_the_vault_node_while_it_is_home() {
     let rig = rig();
@@ -97,6 +101,7 @@ fn deliver_is_taken_only_from_the_vault_node_while_it_is_home() {
     assert!(rig.marks.list().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_malformed_or_oversize_value_is_refused_whole() {
     let rig = rig();
@@ -132,6 +137,7 @@ fn a_malformed_or_oversize_value_is_refused_whole() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn revoke_deletes_at_once() {
     let rig = rig();
@@ -157,6 +163,7 @@ fn revoke_deletes_at_once() {
     assert_eq!(rig.masks.state(JOB), JobMasks::Masked, "masks only grow");
 }
 
+#[cfg(unix)]
 #[test]
 fn revoke_is_taken_from_the_home_or_the_vault_node_only() {
     let rig = rig();
@@ -179,6 +186,7 @@ fn revoke_is_taken_from_the_home_or_the_vault_node_only() {
     assert!(rig.uses.revoke(&from_vault(), &bad).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn job_end_deletes_grants() {
     let rig = rig();
@@ -208,6 +216,7 @@ fn job_end_deletes_grants() {
     assert_eq!(rig.marks.list(), [JOB.to_string()], "the mark stays");
 }
 
+#[cfg(unix)]
 #[test]
 fn after_a_restart_a_job_that_had_grants_is_not_served() {
     let rig = rig();
@@ -222,6 +231,7 @@ fn after_a_restart_a_job_that_had_grants_is_not_served() {
     assert_eq!(out, b"plain");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_mark_that_cannot_be_written_refuses_the_grant() {
     let rig = rig();
@@ -236,6 +246,7 @@ fn a_mark_that_cannot_be_written_refuses_the_grant() {
     assert_eq!(rig.masks.state(JOB), JobMasks::Never);
 }
 
+#[cfg(unix)]
 #[test]
 fn no_marker_value_reaches_any_debug_or_error_text() {
     let rig = rig();
@@ -248,6 +259,7 @@ fn no_marker_value_reaches_any_debug_or_error_text() {
     assert!(!format!("{:?}", rig.masks).contains("NL-MARKER"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_mark_records_the_keys_that_find_the_jobs_rows() {
     let rig = rig_running_both();
@@ -269,6 +281,7 @@ fn a_mark_records_the_keys_that_find_the_jobs_rows() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_mark_for_a_claude_job_not_yet_linked_has_no_keys() {
     let rig = rig_for_claude("");

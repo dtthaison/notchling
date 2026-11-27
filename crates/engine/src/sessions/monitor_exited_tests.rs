@@ -81,6 +81,7 @@ fn ends_one_session(w: &World, monitor: &mut Monitor) {
     std::fs::remove_file(file).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn an_exited_session_is_still_listed_after_the_monitor_restarts() {
     let w = World::new();
@@ -113,6 +114,7 @@ fn an_exited_session_is_still_listed_after_the_monitor_restarts() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_running_again_under_the_same_id_wins_over_the_stored_row() {
     let w = World::new();
@@ -158,6 +160,7 @@ fn a_missing_store_starts_empty_and_writes_nothing() {
     assert!(!w.file.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_corrupt_store_starts_empty_and_the_next_exit_replaces_it() {
     for damaged in [
@@ -221,6 +224,7 @@ fn rows_older_than_the_window_are_dropped_and_forgotten() {
     assert_eq!(w.stored(), vec!["recent"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_list_that_did_not_change_is_not_written_again() {
     let w = World::new();
@@ -355,6 +359,7 @@ fn exited_ids(rows: &[Agent]) -> Vec<&str> {
     exited(rows).iter().map(|a| a.id.as_str()).collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn a_finished_job_that_resumed_a_session_does_not_hide_its_later_exit() {
     for state in ["done", "stopped"] {
@@ -372,6 +377,7 @@ fn a_finished_job_that_resumed_a_session_does_not_hide_its_later_exit() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn an_expired_job_that_resumed_a_session_does_not_hide_its_later_exit() {
     for state in ["running", "done"] {
@@ -389,6 +395,7 @@ fn an_expired_job_that_resumed_a_session_does_not_hide_its_later_exit() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn an_expired_job_with_the_same_id_does_not_hide_the_exit_of_that_session() {
     let w = World::new();
@@ -403,6 +410,7 @@ fn an_expired_job_with_the_same_id_does_not_hide_the_exit_of_that_session() {
     assert_eq!(w.stored(), vec!["s".to_string()]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_finished_job_leaves_the_stored_row_of_the_session_it_resumed() {
     let w = World::new();

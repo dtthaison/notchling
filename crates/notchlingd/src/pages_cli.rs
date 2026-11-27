@@ -186,6 +186,7 @@ mod tests {
         (root, layout)
     }
 
+    #[cfg(unix)]
     #[test]
     fn page_prints_the_describe_blocks_and_pages_prints_a_table() {
         let (root, layout) = root_with_pages("print");

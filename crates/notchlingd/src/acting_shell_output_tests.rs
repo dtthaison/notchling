@@ -155,6 +155,7 @@ fn a_job_the_cache_still_calls_working_is_not_attached_once_its_files_say_idle()
     assert!(s.attached.lock().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_dead_process_whose_job_file_still_says_working_is_never_attached() {
     let (dir, s) = running("dead", "busy");

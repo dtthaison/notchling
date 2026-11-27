@@ -34,12 +34,14 @@ fn a_phone_paired_with_the_swift_app_authenticates() {
     assert!(store.authenticate("").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn what_rust_writes_is_byte_for_byte_what_swift_wrote() {
     let devices = decode(SWIFT.as_bytes()).unwrap();
     assert_eq!(String::from_utf8(encode(&devices)).unwrap(), SWIFT);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_change_keeps_the_swift_format_and_the_other_records() {
     let dir = TempDir::new("devices-change");

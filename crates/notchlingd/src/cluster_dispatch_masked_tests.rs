@@ -47,6 +47,7 @@ fn reply(out: String, err: String) -> Value {
     calls.call("delegate.run", &args, &from_home()).unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn delegate_run_masks_every_value_live_on_the_node_in_out_and_err() {
     let out = reply(format!("out {VALUE}\n"), format!("err {VALUE}\n"));
@@ -56,6 +57,7 @@ fn delegate_run_masks_every_value_live_on_the_node_in_out_and_err() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_value_straddling_the_output_cap_is_masked_before_the_cut() {
     let pad = "x".repeat(OUTPUT_CAP - 6);
@@ -74,6 +76,7 @@ fn a_value_straddling_the_output_cap_is_masked_before_the_cut() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_reply_under_the_cap_is_not_cut() {
     let out = reply("short\n".to_string(), String::new());

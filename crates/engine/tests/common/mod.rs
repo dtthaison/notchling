@@ -35,8 +35,16 @@ impl Scratch {
         Scratch { dir }
     }
 
+    #[cfg(not(windows))]
     pub fn path(&self, name: &str) -> PathBuf {
         self.dir.join(name)
+    }
+
+    #[cfg(windows)]
+    pub fn path(&self, name: &str) -> PathBuf {
+        name.split('/')
+            .filter(|part| !part.is_empty())
+            .fold(self.dir.clone(), |path, part| path.join(part))
     }
 
     pub fn write(&self, name: &str, text: &str) -> PathBuf {

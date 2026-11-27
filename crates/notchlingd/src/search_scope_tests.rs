@@ -169,6 +169,7 @@ fn three_pages(dir: &Dir) {
     save_page(dir, "misc", "Gamma Report", C, now());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_page_is_placed_by_its_cwd_then_by_its_source() {
     let dir = Dir::new("place");

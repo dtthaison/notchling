@@ -470,6 +470,7 @@ fn entries_are_newest_first_and_bad_ones_are_skipped() {
         .is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn describe_names_the_copy_and_who_can_republish() {
     let dir = TempDir::new("pages-describe");

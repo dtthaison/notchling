@@ -114,6 +114,7 @@ fn the_ops_are_agent_tier_reads() {
     assert_eq!(ops_.spec("pages.remove"), None);
 }
 
+#[cfg(unix)]
 #[test]
 fn pages_list_and_find_return_the_library() {
     let dir = Dir::new("list");

@@ -83,6 +83,7 @@ fn reaches_a_local_listener_under_loopback() {
     assert!(err.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn closed_port_says_refused() {
     let port = {

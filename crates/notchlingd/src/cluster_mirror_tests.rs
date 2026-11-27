@@ -207,6 +207,7 @@ fn following_pulls_the_owners_transcript_into_a_private_file() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn mirror_appends_and_resets_on_truncation() {
     let r = rig();

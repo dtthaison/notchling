@@ -34,8 +34,8 @@ pub(crate) fn setup(tag: &str, on: bool) -> Setup {
     }
     let work = std::fs::canonicalize(dir.join("home/work")).expect("work");
     let rollout = format!(
-        "{{\"timestamp\":\"2026-11-08T09:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{SESSION}\",\"cwd\":\"{}\"}}}}\n",
-        work.display()
+        "{{\"timestamp\":\"2026-11-08T09:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{SESSION}\",\"cwd\":{}}}}}\n",
+        serde_json::to_string(&work.display().to_string()).expect("cwd")
     );
     std::fs::write(
         dir.join(format!(
@@ -235,6 +235,7 @@ fn a_message_behind_a_running_turn_is_queued() {
     assert_eq!(specs[1].cwd, s.work(), "it runs where the session does");
 }
 
+#[cfg(unix)]
 #[test]
 fn what_a_caller_names_is_checked_before_anything_starts() {
     let s = setup("bad", true);
@@ -517,6 +518,7 @@ fn over_a_fixture_root_a_codex_elsewhere_on_the_machine_is_not_run() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_codex_under_nvm_runs_with_its_own_node_first_on_the_path() {
     let root = std::env::temp_dir().join(format!("nl-codexops-nvm-{}", std::process::id()));

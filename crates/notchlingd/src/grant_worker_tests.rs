@@ -56,6 +56,7 @@ fn from(node: &str, tier: OriginTier) -> Origin {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_secret_delivered_before_the_job_starts_reaches_a_worker_built_from_a_sync() {
     let rig = rig();
@@ -68,6 +69,7 @@ fn a_secret_delivered_before_the_job_starts_reaches_a_worker_built_from_a_sync()
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn vault_use_from_a_running_job_answers_on_a_worker_whose_state_has_no_jobs() {
     let rig = rig();
@@ -81,6 +83,7 @@ fn vault_use_from_a_running_job_answers_on_a_worker_whose_state_has_no_jobs() {
     assert_eq!(*rig.fake.used.lock().unwrap(), [(JOB.to_string(), true)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_janitor_keeps_the_grants_of_a_job_running_here_though_the_worker_state_has_no_jobs() {
     let rig = rig();
@@ -98,6 +101,7 @@ fn the_pending_window_is_the_attach_call_plus_one_call() {
     assert_eq!(PENDING_MS, (ATTACH_CALL_MS + CALL_MS) as i64);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pending_grant_becomes_the_jobs_grant_when_its_shell_job_starts() {
     let rig = rig();
@@ -130,6 +134,7 @@ fn a_pending_grant_becomes_the_jobs_grant_when_its_shell_job_starts() {
     assert!(rig.fake.asked.lock().unwrap().is_empty(), "nothing asked");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pending_grant_whose_job_never_starts_is_swept_when_the_window_passes() {
     let start = real_now();
@@ -154,6 +159,7 @@ fn a_pending_grant_whose_job_never_starts_is_swept_when_the_window_passes() {
     assert!(use_names(&rig, 700, &["api-key"]).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_deliver_after_the_window_starts_a_new_window() {
     let start = real_now();
@@ -169,6 +175,7 @@ fn a_deliver_after_the_window_starts_a_new_window() {
     assert!(has(&rig, JOB, "one") && has(&rig, JOB, "two"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_revoke_of_a_pending_grant_deletes_it_and_bars_a_deliver_that_arrived_before() {
     let rig = rig();
@@ -197,6 +204,7 @@ fn a_revoke_of_a_pending_grant_deletes_it_and_bars_a_deliver_that_arrived_before
     assert!(rig.roots.is_pending(JOB, real_now()));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pending_deliver_from_anyone_but_the_vault_node_that_is_home_is_still_refused() {
     let rig = rig();
@@ -222,6 +230,7 @@ fn a_pending_deliver_from_anyone_but_the_vault_node_that_is_home_is_still_refuse
     assert_eq!(rig.masks.state(JOB), JobMasks::Never);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_node_whose_state_lists_the_job_takes_it_as_live_and_not_pending() {
     let rig = rig_running_both();
@@ -239,6 +248,7 @@ fn a_node_whose_state_lists_the_job_takes_it_as_live_and_not_pending() {
     assert!(!has(&rig, JOB, "api-key"), "the state ends it");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_that_ends_here_loses_its_grants_at_the_next_sweep_and_takes_no_more() {
     let rig = rig();
@@ -259,6 +269,7 @@ fn a_job_that_ends_here_loses_its_grants_at_the_next_sweep_and_takes_no_more() {
     assert_eq!(err.message, NOT_A_JOB);
 }
 
+#[cfg(unix)]
 #[test]
 fn grants_of_a_job_nobody_here_knows_are_swept() {
     let rig = rig();
@@ -267,6 +278,7 @@ fn grants_of_a_job_nobody_here_knows_are_swept() {
     assert!(!has(&rig, JOB, "api-key"));
 }
 
+#[cfg(unix)]
 #[test]
 fn without_a_cluster_state_even_a_job_running_here_loses_its_grants() {
     let rig = rig();
@@ -277,6 +289,7 @@ fn without_a_cluster_state_even_a_job_running_here_loses_its_grants() {
     assert!(!has(&rig, JOB, "api-key"));
 }
 
+#[cfg(unix)]
 #[test]
 fn the_thread_notices_a_local_end_without_waiting_for_the_slow_sweep() {
     let rig = rig();
@@ -402,6 +415,7 @@ impl Notices for Marker {
     fn clear(&self, _job: &str) {}
 }
 
+#[cfg(unix)]
 #[test]
 fn a_secret_attached_at_dispatch_reaches_a_shell_job_through_the_worker_wiring() {
     let cluster_dir = Dir::new("worker-wiring-cluster");

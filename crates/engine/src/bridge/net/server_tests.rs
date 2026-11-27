@@ -454,6 +454,7 @@ fn a_phone_paired_with_the_swift_app_connects_over_tls_with_the_same_fingerprint
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn stopping_closes_the_port_and_every_phone() {
     let rig = Rig::new();

@@ -220,6 +220,7 @@ impl Env {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_picture_message_with_zero_width_spaces_is_sent_when_the_transcript_shows_its_turn() {
     let e = env();
@@ -232,6 +233,7 @@ fn a_picture_message_with_zero_width_spaces_is_sent_when_the_transcript_shows_it
     assert_eq!(e.r.returns(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_unsure_picture_message_with_zero_width_spaces_is_sent_when_its_turn_appears_later() {
     let e = env();
@@ -251,6 +253,7 @@ fn an_unsure_picture_message_with_zero_width_spaces_is_sent_when_its_turn_appear
     assert_eq!(e.r.returns(), 1, "never typed again");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_late_proof_settles_a_row_that_stepped_aside_and_it_is_never_typed_again() {
     let e = env();
@@ -275,6 +278,7 @@ fn a_late_proof_settles_a_row_that_stepped_aside_and_it_is_never_typed_again() {
     assert_eq!(e.r.returns(), 1, "never typed again");
 }
 
+#[cfg(unix)]
 #[test]
 fn the_next_message_goes_once_the_one_before_it_is_found() {
     let e = env();
@@ -338,6 +342,7 @@ fn absorbed(ms: i64, text: &str) -> Vec<String> {
     ]
 }
 
+#[cfg(unix)]
 #[test]
 fn a_sending_row_with_zero_width_spaces_is_found_at_daemon_start_and_not_left_unsure() {
     let r = rig();
@@ -390,6 +395,7 @@ fn a_sending_row_with_zero_width_spaces_is_found_at_daemon_start_and_not_left_un
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_same_picture_message_without_invisible_characters_is_sent_the_same_way() {
     let e = env();

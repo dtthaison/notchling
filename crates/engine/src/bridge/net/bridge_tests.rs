@@ -85,6 +85,7 @@ fn off_binds_no_port_and_on_binds_both() {
     assert!(refused(lan) && refused(tunnel), "off closes both");
 }
 
+#[cfg(unix)]
 #[test]
 fn nothing_under_the_data_folder_is_written_while_off() {
     let dir = TempDir::new("bridge-nowrite");
@@ -175,6 +176,7 @@ fn replies_have_the_panels_shapes() {
     assert_eq!(payload["tunnel"]["url"], "wss://h.example");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_phone_pairs_with_the_code_and_revoke_drops_it() {
     let dir = TempDir::new("bridge-pair");

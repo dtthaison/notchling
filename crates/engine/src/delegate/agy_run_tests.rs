@@ -504,6 +504,7 @@ fn subagent_files(media_root: &Path, answered: bool) {
     std::fs::write(system.join("logs/transcript.jsonl"), log).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn the_parents_answer_after_its_subagents_is_the_reply_and_their_media_is_picked_up() {
     let root_for_agent = Arc::new(Mutex::new(PathBuf::new()));

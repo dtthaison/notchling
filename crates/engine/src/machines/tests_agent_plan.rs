@@ -83,6 +83,7 @@ fn the_digest_follows_what_is_shown_and_not_the_plan_id() {
     assert_eq!(*lock(&ran), 0);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_run_is_refused_while_another_process_holds_the_machines_claim() {
     let dir = std::env::temp_dir().join(format!("nl-claim-engine-{}", std::process::id()));

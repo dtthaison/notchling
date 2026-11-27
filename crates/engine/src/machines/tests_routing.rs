@@ -209,6 +209,7 @@ fn an_ipv6_scp_host_is_bracketed() {
     assert_eq!(Route::direct("a.example", "me").scp_host(), "me@a.example");
 }
 
+#[cfg(unix)]
 #[test]
 fn the_cli_is_found_on_the_path_when_the_app_is_missing() {
     use super::tailscale::{resolve_cli, APP_CLI};

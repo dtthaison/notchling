@@ -52,6 +52,7 @@ fn run(rest: &[&str], machine: &str, reply: Result<Value, ClientError>) -> Run {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn check_takes_a_whole_agy_review() {
     let list = strings(&[
@@ -122,6 +123,7 @@ fn a_bad_command_is_exit_two_before_any_call() {
     assert!(none.calls.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_warning_comes_first_then_the_jobs_output_and_its_exit_code() {
     let reply = json!({

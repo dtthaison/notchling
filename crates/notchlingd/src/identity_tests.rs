@@ -294,6 +294,7 @@ fn a_process_under_a_session_the_daemon_started_is_that_tool_and_verified() {
     assert!(!reused.verified);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_organization_comes_from_the_session_folder_and_only_for_a_verified_session() {
     let h = home("org", &[(800, "sess-o")]);

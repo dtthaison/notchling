@@ -73,6 +73,7 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     #[test]
     fn writes_the_login_privately_and_makes_the_folder() {
         let home = temp("write");

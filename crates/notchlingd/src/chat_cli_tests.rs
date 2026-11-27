@@ -5,6 +5,7 @@ fn words(list: &[&str]) -> Vec<String> {
     list.iter().map(|w| (*w).to_string()).collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn open_file_takes_a_path_and_an_optional_session() {
     let args = parse(&words(&[

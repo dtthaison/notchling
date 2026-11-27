@@ -242,6 +242,7 @@ fn a_transcript_without_the_split_says_so() {
     assert_eq!(found[0].write_5m, 90_000);
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_and_antigravity_rows_come_from_the_same_sources() {
     let world = World::new("ledger-others");

@@ -47,6 +47,7 @@ fn native_layout_reads_the_link() {
     assert!(found.problems.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn npm_layout_reads_package_json() {
     let dir = TempDir::new("mac-npm");
@@ -295,6 +296,7 @@ fn detect_starts_nothing() {
     assert!(!ran.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cask_with_its_binary_under_bin_is_an_install() {
     let dir = TempDir::new("mac-cask-bin");

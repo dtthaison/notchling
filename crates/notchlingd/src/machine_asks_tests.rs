@@ -309,6 +309,7 @@ fn a_fix_whose_display_changed_is_withdrawn_stale_and_nothing_runs() {
     assert_eq!(row.state.as_str(), "withdrawn");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_daemon_fix_is_refused_while_the_app_holds_the_claim() {
     let r = base("claim");

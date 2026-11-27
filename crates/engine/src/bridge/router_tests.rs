@@ -507,6 +507,7 @@ fn prompt_answer_for_permission_and_questions() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn session_new_checks_the_folder_and_model() {
     let rig = Rig::new();
@@ -599,6 +600,7 @@ fn sessions_list_carries_the_models_only_when_the_backend_has_some() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_model_id_from_the_list_starts_that_model() {
     let rig = Rig::new();
@@ -658,6 +660,7 @@ fn an_unknown_model_id_is_invalid() {
     assert!(rig.backend.with(|s| s.new_sessions.is_empty()));
 }
 
+#[cfg(unix)]
 #[test]
 fn an_old_phone_sending_model_opus_still_works() {
     let rig = Rig::new();

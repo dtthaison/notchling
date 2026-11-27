@@ -142,6 +142,7 @@ fn listed(w: &World) -> Vec<String> {
         .collect()
 }
 
+#[cfg(unix)]
 #[test]
 fn a_worktree_under_a_folder_claude_trusts_is_added_to_agys_list() {
     let w = world(
@@ -182,6 +183,7 @@ fn a_folder_claude_does_not_trust_is_left_to_agy() {
     let _ = std::fs::remove_dir_all(&none.root);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_unreadable_or_invalid_settings_file_is_not_touched() {
     let missing = world(Some(TRUSTED), None);

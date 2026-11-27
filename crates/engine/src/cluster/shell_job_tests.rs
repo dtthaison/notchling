@@ -6,6 +6,7 @@ fn plan(job: &str, cwd: &str, command: &str) -> Result<ShellPlan, String> {
     shell_plan(job, cwd, command, Path::new("/data"))
 }
 
+#[cfg(unix)]
 #[test]
 fn shell_plan_scrubs_env_and_needs_absolute_cwd() {
     let got = plan("j-0123456789ab", "/srv/repo", "printf hi").expect("plan");
@@ -22,6 +23,7 @@ fn shell_plan_scrubs_env_and_needs_absolute_cwd() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn shell_plan_refuses_a_bad_job_name_or_command() {
     for job in ["", "../x", "a/b", "j 1", "j\n1", &"j".repeat(65)] {

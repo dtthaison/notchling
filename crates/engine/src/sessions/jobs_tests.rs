@@ -311,6 +311,7 @@ fn reads_jobs_and_live_sessions_from_a_folder() {
     assert!(read_jobs(&tmp.path("missing")).is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn finds_the_current_lane_of_a_moved_job() {
     let tmp = TempDir::new("jobdirs");

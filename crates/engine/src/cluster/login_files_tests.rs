@@ -23,6 +23,7 @@ fn store(tmp: &TempDir) -> LoginStore {
     LoginStore::new(&tmp.path("cluster"))
 }
 
+#[cfg(unix)]
 #[test]
 fn put_then_get_then_remove() {
     let tmp = TempDir::new("login-put-get");
@@ -38,6 +39,7 @@ fn put_then_get_then_remove() {
     assert!(!store.standing(CLAUDE, n));
 }
 
+#[cfg(unix)]
 #[test]
 fn the_file_is_cluster_logins_claude_json_and_excluded_from_snapshots() {
     let tmp = TempDir::new("login-path");
@@ -63,6 +65,7 @@ fn the_file_is_0600_in_a_0700_folder() {
     assert_eq!(mode(tmp.path("cluster/logins/claude.json")), 0o600);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_expired_login_is_deleted_on_get_and_is_not_standing() {
     let tmp = TempDir::new("login-expired");
@@ -82,6 +85,7 @@ fn an_already_expired_login_is_refused() {
     assert!(!store.path_of(CLAUDE).exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_second_put_replaces_the_first() {
     let tmp = TempDir::new("login-replace");

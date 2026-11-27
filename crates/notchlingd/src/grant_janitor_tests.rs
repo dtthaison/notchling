@@ -24,6 +24,7 @@ fn has(rig: &Rig, job: &str, name: &str) -> bool {
     rig.store.get(job, name, real_now()).unwrap().is_some()
 }
 
+#[cfg(unix)]
 #[test]
 fn sweep_removes_expired_and_dead_jobs() {
     let rig = rig();
@@ -48,6 +49,7 @@ fn sweep_removes_expired_and_dead_jobs() {
     assert!(rig.store.get(JOB, "live", real_now()).unwrap().is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_finished_job_is_ended_and_its_grants_go() {
     let rig = rig();
@@ -72,6 +74,7 @@ fn a_finished_job_is_ended_and_its_grants_go() {
     assert_eq!(rig.marks.list(), [JOB.to_string()], "the mark outlives it");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pruned_job_record_keeps_its_masks_and_mark() {
     let rig = rig_running_both();
@@ -100,6 +103,7 @@ fn a_lost_job_missing_from_the_state_stays_lost_and_keyed() {
     assert_eq!(rig.marks.list(), [JOB.to_string()]);
 }
 
+#[cfg(unix)]
 #[test]
 fn no_cluster_state_sweeps_grants_but_keeps_masks_and_marks() {
     let rig = rig();
@@ -137,6 +141,7 @@ fn finished(rig: &Rig) {
     *rig.fake.state.lock().unwrap() = Some(cluster("vault", &[job(JOB, "worker", JobState::Done)]));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_finished_jobs_mark_gets_one_end_time() {
     let rig = rig();
@@ -203,6 +208,7 @@ fn a_session_the_state_gains_is_picked_up_without_waiting_for_the_sweep() {
     assert!(janitor.changed(), "a session link is a change");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_job_with_live_masks_keeps_its_mark_past_the_twelve_hours() {
     let rig = rig();
@@ -245,6 +251,7 @@ fn the_janitor_fills_in_the_session_a_mark_lacked() {
     assert!(!rig.masks.unidentified_lost());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_thread_sweeps_on_a_state_change_and_stops() {
     let rig = rig_running_both();

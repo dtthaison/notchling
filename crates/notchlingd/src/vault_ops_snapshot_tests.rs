@@ -150,6 +150,7 @@ fn the_card_and_the_row_say_the_same_about_who_asks() {
     assert_eq!(event["session"], "sess-9");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_retry_of_a_closed_request_shows_no_card_again() {
     let s = setup("snap-retry", true);

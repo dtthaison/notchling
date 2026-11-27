@@ -160,6 +160,7 @@ fn new_session_responder() -> notchling_engine::tools::acp::fake::Responder {
     })
 }
 
+#[cfg(unix)]
 #[test]
 fn a_new_session_never_starts_in_the_root_or_the_home_folder() {
     let rig = rig_with(

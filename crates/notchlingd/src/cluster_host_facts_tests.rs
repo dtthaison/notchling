@@ -83,6 +83,7 @@ fn filevault_off_is_false_and_a_failed_probe_is_unknown() {
     assert_eq!(probe("macos", &fake).facts().encrypted, None);
 }
 
+#[cfg(unix)]
 #[test]
 fn luks_home_passes() {
     let fake = Arc::new(FakeLauncher::new());
@@ -96,6 +97,7 @@ fn luks_home_passes() {
     assert_eq!(probe("linux", &fake).facts().encrypted, Some(true));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_plain_home_is_not_encrypted_whatever_else_is() {
     let fake = Arc::new(FakeLauncher::new());

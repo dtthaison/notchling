@@ -71,6 +71,7 @@ fn a_job_that_is_gone_or_a_name_that_is_no_job_gives_nothing() {
     assert!(job_row(&roots(&dir), &probes, "be50d36a").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_file_of_a_dead_process_is_not_the_live_status() {
     let dir = TempDir::new("fresh-dead");
@@ -130,6 +131,7 @@ fn job_process_is_the_pid_and_start_the_files_record() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn job_process_ignores_a_session_file_of_a_dead_pid() {
     let dir = TempDir::new("fresh-process-dead");

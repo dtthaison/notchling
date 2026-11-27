@@ -254,6 +254,7 @@ mod tests {
         assert!(parent_names(&own, 10).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn folders_compare_once_standardized() {
         let p = FakeProcesses::default();
@@ -270,6 +271,7 @@ mod tests {
         assert_eq!(standardize("rel"), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_link_to_the_same_folder_matches_through_the_file_system() {
         let p = FakeProcesses {
@@ -281,6 +283,7 @@ mod tests {
         assert_eq!(folder_matches(&p, "/tmp/v", cwd), Some(false));
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_verified_object() {
         let mut p = chain();

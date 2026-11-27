@@ -69,6 +69,7 @@ fn pages(env: &PagesEnv) -> Vec<notchling_engine::search::PageEntry> {
     PageLibrary::read_only(&env.pages_dir).entries()
 }
 
+#[cfg(unix)]
 #[test]
 fn a_publish_event_is_recorded_into_the_library_and_says_nothing() {
     let dir = scratch("record");

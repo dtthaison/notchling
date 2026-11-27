@@ -70,6 +70,7 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_second_claim_on_one_machine_is_refused_until_the_first_ends() {
         let dir = temp("two");

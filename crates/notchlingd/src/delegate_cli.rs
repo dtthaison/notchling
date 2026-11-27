@@ -294,6 +294,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_real_folders_are_the_users_own() {
         let f = folders(&layout(None), Path::new("/home/me"), "/bin".into(), None);

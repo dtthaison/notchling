@@ -122,6 +122,7 @@ fn excluded_names_a_regular_file_over_the_limit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn staged_path_lays_a_source_under_parts() {
     assert_eq!(

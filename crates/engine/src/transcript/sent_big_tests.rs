@@ -449,6 +449,7 @@ fn a_user_prompt_is_judged_by_its_own_keys_not_by_the_text_inside() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_replaced_file_with_the_same_size_and_mtime_is_read_again() {
     let text = "keep the sidebar narrow";

@@ -392,6 +392,7 @@ mod tests {
         assert!(alive, "the daemon was killed when the wait ended");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_refused_binary_is_never_started() {
         let dir = TempDir::new("spawn-refuse");

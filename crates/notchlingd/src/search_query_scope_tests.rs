@@ -106,6 +106,7 @@ fn a_page_found_by_text_and_meaning_is_one_row_marked_both() {
     assert_eq!(rows[0]["match"], "both", "{reply}");
 }
 
+#[cfg(unix)]
 #[test]
 fn pages_of_another_organization_do_not_take_the_limit() {
     let mut pages: Vec<PageRow> = (0..130)
@@ -132,6 +133,7 @@ fn pages_of_another_organization_do_not_take_the_limit() {
     assert_eq!(titles(&reply), ["Ours"], "{reply}");
 }
 
+#[cfg(unix)]
 #[test]
 fn sessions_of_another_organization_do_not_take_the_limit() {
     let rig = build(
@@ -290,6 +292,7 @@ fn crowded(
     build(tag, &all, vectors, true)
 }
 
+#[cfg(unix)]
 #[test]
 fn many_sessions_of_another_organization_do_not_fill_the_semantic_cut() {
     let rig = crowded(

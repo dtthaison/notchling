@@ -103,6 +103,7 @@ fn tail_set(set: &str, seq: u64, from: u64, bytes: &[u8]) -> (Manifest, Part) {
     (manifest(set, seq, vec![tail.clone()]), tail)
 }
 
+#[cfg(unix)]
 #[test]
 fn complete_set_becomes_current() {
     let tmp = TempDir::new("standby-complete");
@@ -174,6 +175,7 @@ fn complete_set_becomes_current() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn partial_set_never_becomes_current() {
     let tmp = TempDir::new("standby-partial");
@@ -198,6 +200,7 @@ fn partial_set_never_becomes_current() {
     assert_eq!(reopened.missing(&m2), vec![file2]);
 }
 
+#[cfg(unix)]
 #[test]
 fn bad_hash_part_is_refused() {
     let tmp = TempDir::new("standby-hash");
@@ -236,6 +239,7 @@ fn stored_partial(tmp: &TempDir, set: &str, original: &str) -> PathBuf {
     ))
 }
 
+#[cfg(unix)]
 #[test]
 fn tail_part_appends_only_at_its_offset() {
     let tmp = TempDir::new("standby-tail");
@@ -289,6 +293,7 @@ fn tail_part_appends_only_at_its_offset() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cut_append_is_finished_by_the_next_commit() {
     let tmp = TempDir::new("standby-cut");
@@ -306,6 +311,7 @@ fn a_cut_append_is_finished_by_the_next_commit() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn resume_sends_only_missing_parts() {
     let tmp = TempDir::new("standby-resume");
@@ -350,6 +356,7 @@ fn resume_sends_only_missing_parts() {
         .exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn unchanged_parts_come_from_the_current_set() {
     let tmp = TempDir::new("standby-reuse");
@@ -386,6 +393,7 @@ fn unchanged_parts_come_from_the_current_set() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn prune_keeps_two() {
     let tmp = TempDir::new("standby-prune");
@@ -490,6 +498,7 @@ fn links_in_the_store_are_never_followed() {
     assert!(store.part("s-2", &dir, &dir_root).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_older_set_is_refused_and_a_held_one_is_a_no_op() {
     let tmp = TempDir::new("standby-older");
@@ -505,6 +514,7 @@ fn an_older_set_is_refused_and_a_held_one_is_a_no_op() {
     assert_eq!(store.current(), Some(m5));
 }
 
+#[cfg(unix)]
 #[test]
 fn ack_book_keeps_each_node_and_survives_a_restart() {
     use super::ack_book::AckBook;
@@ -572,6 +582,7 @@ fn a_tail_never_overlaps_a_file_or_folder_part() {
         .is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_retried_commit_of_the_current_set_is_ok() {
     let tmp = TempDir::new("standby-recommit");

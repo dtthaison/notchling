@@ -320,6 +320,7 @@ fn tail_is_capped_at_512k() {
     assert!(line < notchling_engine::cluster::wire::MAX_LINE, "{line}");
 }
 
+#[cfg(unix)]
 #[test]
 fn tail_resets_when_the_file_is_shorter_or_replaced() {
     let dir = Dir::new("tail-reset");
