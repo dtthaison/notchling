@@ -171,5 +171,8 @@ fn a_second_binary_on_the_same_socket_leaves_with_an_error() {
 
 #[test]
 fn version_flag() {
-    assert_eq!(run(&["--version"]).trim(), "ptyhost 0.1.0");
+    assert_eq!(
+        run(&["--version"]).trim(),
+        concat!("ptyhost ", env!("CARGO_PKG_VERSION"))
+    );
 }

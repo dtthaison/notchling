@@ -38,6 +38,9 @@ mod tests {
 
     #[test]
     fn version_line_is_name_then_version() {
-        assert_eq!(version_line(), "ptyhost 0.1.0");
+        assert_eq!(
+            version_line(),
+            concat!("ptyhost ", env!("CARGO_PKG_VERSION"))
+        );
     }
 }
