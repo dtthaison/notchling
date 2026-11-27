@@ -292,6 +292,54 @@ fn losing_the_host_closes_the_client() {
     ));
 }
 
+#[test]
+fn stopping_closes_in_flight_and_queued_clients() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::channel;
+
+    let scratch = Scratch::new();
+    let (host, _) = make_host(&scratch, FakeSpawner::new(), never_alive, nothing_found);
+    let path = scratch.path("h.sock");
+    let (entered_tx, entered_rx) = channel();
+    let (gate_tx, gate_rx) = channel();
+    let entered_tx = Mutex::new(entered_tx);
+    let gate_rx = Mutex::new(gate_rx);
+    let pause_first = AtomicBool::new(true);
+    let authorize = move |uid: u32| {
+        if pause_first.swap(false, Ordering::SeqCst) {
+            let _ = entered_tx.lock().expect("lock").send(());
+            let _ = gate_rx.lock().expect("lock").recv_timeout(TIMEOUT);
+        }
+        owner(uid)
+    };
+    let server = HostServer::new(host.clone(), &path, Arc::new(authorize));
+    server.start().expect("the server starts");
+    let running = Running { server, host, path };
+
+    let in_flight = connect(&running.path);
+    let (in_flight_tx, in_flight_rx) = channel();
+    in_flight.on_closed(move || {
+        let _ = in_flight_tx.send(());
+    });
+    entered_rx.recv_timeout(TIMEOUT).expect("in flight");
+
+    let queued = connect(&running.path);
+    let (queued_tx, queued_rx) = channel();
+    queued.on_closed(move || {
+        let _ = queued_tx.send(());
+    });
+
+    let for_stop = running.server.clone();
+    let stopper = std::thread::spawn(move || for_stop.stop());
+    queued_rx.recv_timeout(TIMEOUT).expect("queued closed");
+    gate_tx.send(()).expect("release accept");
+    in_flight_rx.recv_timeout(TIMEOUT).expect("closed");
+    stopper.join().expect("stop finishes");
+
+    assert!(!in_flight.is_connected());
+    assert!(!queued.is_connected());
+}
+
 fn real_server(scratch: &Scratch) -> Running {
     let state = Arc::new(StateStore::new(scratch.path("state.json")));
     let host = SessionHost::new(

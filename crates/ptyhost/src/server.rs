@@ -4,13 +4,14 @@ use crate::wire::{self, int, Frame, FrameReader, SessionId};
 use crate::HostError;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub const PROTOCOL_VERSION: i64 = 1;
@@ -23,12 +24,28 @@ pub fn same_user() -> Authorize {
     Arc::new(move |uid| uid == me)
 }
 
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+#[derive(Default)]
+struct Connections {
+    running: bool,
+    open: HashMap<u64, Arc<Connection>>,
+}
+
+struct RunningListener {
+    listener: Arc<UnixListener>,
+    wake: UnixStream,
+    thread: JoinHandle<()>,
+}
+
 pub struct HostServer {
     host: Arc<SessionHost>,
     socket_path: PathBuf,
     authorize: Authorize,
-    running: Arc<AtomicBool>,
-    connections: Arc<Mutex<HashMap<u64, Arc<Connection>>>>,
+    connections: Arc<Mutex<Connections>>,
+    listener: Mutex<Option<RunningListener>>,
     next: AtomicU64,
     this: Weak<HostServer>,
 }
@@ -43,8 +60,8 @@ impl HostServer {
             host: host.clone(),
             socket_path: socket_path.to_path_buf(),
             authorize,
-            running: Arc::new(AtomicBool::new(false)),
             connections: Arc::default(),
+            listener: Mutex::new(None),
             next: AtomicU64::new(1),
             this: this.clone(),
         });
@@ -62,6 +79,10 @@ impl HostServer {
     }
 
     pub fn start(&self) -> Result<(), HostError> {
+        let mut slot = lock(&self.listener);
+        if slot.is_some() {
+            return Err(HostError::AlreadyRunning);
+        }
         let path = &self.socket_path;
         let limit = if cfg!(target_os = "macos") { 104 } else { 108 };
         if path.as_os_str().len() + 1 > limit {
@@ -85,36 +106,80 @@ impl HostServer {
         listener
             .set_nonblocking(true)
             .map_err(|e| HostError::socket(&e))?;
-        self.running.store(true, Ordering::SeqCst);
+        let (wake_read, wake_write) = UnixStream::pair().map_err(|e| HostError::socket(&e))?;
+        wake_read
+            .set_nonblocking(true)
+            .map_err(|e| HostError::socket(&e))?;
+        wake_write
+            .set_nonblocking(true)
+            .map_err(|e| HostError::socket(&e))?;
+        set_no_sigpipe(&wake_write);
+        let listener = Arc::new(listener);
+        lock(&self.connections).running = true;
         let this = self.this.clone();
-        std::thread::spawn(move || accept_loop(&this, &listener));
+        let for_accept = listener.clone();
+        let thread = std::thread::spawn(move || accept_loop(&this, &for_accept, &wake_read));
+        *slot = Some(RunningListener {
+            listener,
+            wake: wake_write,
+            thread,
+        });
         Ok(())
     }
 
     pub fn stop(&self) {
-        if !self.running.swap(false, Ordering::SeqCst) {
-            return;
-        }
-        let open: Vec<Arc<Connection>> = {
-            let mut all = self.connections.lock().unwrap_or_else(|p| p.into_inner());
-            all.drain().map(|(_, c)| c).collect()
+        let (running_listener, open) = {
+            let mut slot = lock(&self.listener);
+            let taken = slot.take();
+            let (was_running, open) = {
+                let mut all = lock(&self.connections);
+                let was = all.running;
+                all.running = false;
+                let open: Vec<Arc<Connection>> = all.open.drain().map(|(_, c)| c).collect();
+                (was, open)
+            };
+            if !was_running && taken.is_none() {
+                return;
+            }
+            let _ = std::fs::remove_file(&self.socket_path);
+            (taken, open)
         };
         for connection in open {
             connection.close();
         }
-        let _ = std::fs::remove_file(&self.socket_path);
+        if let Some(mut running) = running_listener {
+            drain_listener(&running.listener);
+            let _ = running.wake.write_all(&[1]);
+            let _ = running.wake.shutdown(std::net::Shutdown::Both);
+            drop(running.wake);
+            drop(running.listener);
+            if running.thread.thread().id() != std::thread::current().id() {
+                let _ = running.thread.join();
+            }
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        lock(&self.connections).running
     }
 
     fn accepted(&self, stream: UnixStream) {
+        if !self.is_running() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            return;
+        }
         let Some(uid) = peer_uid(&stream) else {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
             return;
         };
         if !(self.authorize)(uid) {
             eprintln!("hostd: refused a connection from uid {uid}");
+            let _ = stream.shutdown(std::net::Shutdown::Both);
             return;
         }
         let _ = stream.set_nonblocking(false);
         let Ok(writer) = stream.try_clone() else {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
             return;
         };
         let key = self.next.fetch_add(1, Ordering::SeqCst);
@@ -126,48 +191,94 @@ impl HostServer {
             on_close: Mutex::new(None),
         });
         let connections = Arc::downgrade(&self.connections);
-        *connection
-            .on_close
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Some(Box::new(move || {
+        *lock(&connection.on_close) = Some(Box::new(move || {
             if let Some(all) = connections.upgrade() {
-                all.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+                lock(&all).open.remove(&key);
             }
         }));
-        self.connections
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(key, connection.clone());
+        let stopped = {
+            let mut all = lock(&self.connections);
+            if all.running {
+                all.open.insert(key, connection.clone());
+            }
+            !all.running
+        };
+        if stopped {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            connection.close();
+            return;
+        }
         std::thread::spawn(move || connection.read_loop(stream));
     }
 }
 
-fn accept_loop(server: &Weak<HostServer>, listener: &UnixListener) {
+fn accept_loop(server: &Weak<HostServer>, listener: &UnixListener, wake: &UnixStream) {
     loop {
         let Some(server) = server.upgrade() else {
+            drain_listener(listener);
             return;
         };
-        if !server.running.load(Ordering::SeqCst) {
+        if !server.is_running() {
+            drain_listener(listener);
             return;
         }
-        let mut pfd = libc::pollfd {
-            fd: listener.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: one valid pollfd.
-        let ready = unsafe { libc::poll(&mut pfd, 1, 200) };
+        let mut pfds = [
+            libc::pollfd {
+                fd: listener.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: wake.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        // SAFETY: pfds is a valid array of two pollfds.
+        let ready = unsafe { libc::poll(pfds.as_mut_ptr(), 2, 200) };
         if ready <= 0 {
             continue;
         }
-        match listener.accept() {
-            Ok((stream, _)) => {
-                if server.running.load(Ordering::SeqCst) {
+        if pfds[1].revents != 0 {
+            drain_listener(listener);
+            return;
+        }
+        if pfds[0].revents == 0 {
+            continue;
+        }
+        loop {
+            if !server.is_running() {
+                drain_listener(listener);
+                return;
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
                     set_no_sigpipe(&stream);
                     server.accepted(stream);
                 }
+                Err(error) if retry_accept(&error) => continue,
+                Err(_) => break,
             }
-            Err(_) => continue,
+        }
+    }
+}
+
+fn retry_accept(error: &io::Error) -> bool {
+    use std::io::ErrorKind::{ConnectionAborted, ConnectionReset, Interrupted};
+    matches!(
+        error.kind(),
+        Interrupted | ConnectionAborted | ConnectionReset
+    )
+}
+
+fn drain_listener(listener: &UnixListener) {
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+            Err(error) if retry_accept(&error) => continue,
+            Err(_) => break,
         }
     }
 }
@@ -218,13 +329,8 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
     ok.then_some(cred.uid)
 }
 
-fn broadcast(connections: &Mutex<HashMap<u64, Arc<Connection>>>, event: HostEvent) {
-    let all: Vec<Arc<Connection>> = connections
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .values()
-        .cloned()
-        .collect();
+fn broadcast(connections: &Mutex<Connections>, event: HostEvent) {
+    let all: Vec<Arc<Connection>> = lock(connections).open.values().cloned().collect();
     let message = match event {
         HostEvent::Exited { id, status } => {
             json!({"event": "exit", "sessionId": id.to_string(), "status": status})
@@ -364,10 +470,12 @@ impl Attachments for Arc<Connection> {
                 }));
             }
         }));
-        self.listeners
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(session, token);
+        lock(&self.listeners).insert(session, token);
+        if self.closed.load(Ordering::SeqCst) {
+            if let Some(orphan) = lock(&self.listeners).remove(&session) {
+                handle.remove_listener(orphan);
+            }
+        }
         Ok(())
     }
 

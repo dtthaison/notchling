@@ -59,11 +59,13 @@ impl HostClient {
     }
 
     pub fn on_closed(&self, handler: impl FnOnce() + Send + 'static) {
+        let mut slot = lock(&self.shared.on_closed);
         if self.shared.closed.load(Ordering::SeqCst) {
+            drop(slot);
             handler();
             return;
         }
-        *lock(&self.shared.on_closed) = Some(Box::new(handler));
+        *slot = Some(Box::new(handler));
     }
 
     pub fn close(&self) {
@@ -89,7 +91,13 @@ impl HostClient {
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = channel();
-        lock(&self.shared.waiters).insert(id, tx);
+        {
+            let mut waiters = lock(&self.shared.waiters);
+            if self.shared.closed.load(Ordering::SeqCst) {
+                return Err(HostError::Closed);
+            }
+            waiters.insert(id, tx);
+        }
         let mut message = params;
         message.insert("id".into(), Value::from(id));
         message.insert("op".into(), Value::from(op));
@@ -206,11 +214,14 @@ fn dispatch(shared: &Shared, frame: Frame) {
 }
 
 fn finish(shared: &Shared) {
-    if shared.closed.swap(true, Ordering::SeqCst) {
-        return;
-    }
+    let handler = {
+        let mut slot = lock(&shared.on_closed);
+        if shared.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        slot.take()
+    };
     lock(&shared.waiters).clear();
-    let handler = lock(&shared.on_closed).take();
     if let Some(handler) = handler {
         handler();
     }
