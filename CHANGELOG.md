@@ -4,6 +4,12 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-27
+
+### Fixed
+
+- The 2.0.0 release was built but never published, because its upload step failed. 2.0.1 is the same app, published.
+
 ## [2.0.0] - 2026-11-27
 
 Notchling 2.0 is a new app, written in Rust, and it replaces the Swift app, which is retired. It is for Macs with Apple silicon, and it is ad hoc signed, not notarized (macOS asks you to allow it once). The big new thing is the Cluster: your own Macs and Linux machines join one cluster, and you see and answer their sessions from one place.
@@ -157,7 +163,8 @@ First public release.
 
 - The menu bar menu no longer lags or skips items when moving between them.
 
-[Unreleased]: https://github.com/dtthaison/notchling/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/dtthaison/notchling/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/dtthaison/notchling/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dtthaison/notchling/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/dtthaison/notchling/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dtthaison/notchling/releases/tag/v1.1.0
