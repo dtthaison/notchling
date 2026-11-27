@@ -4394,7 +4394,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "notchling-app"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "block2",
  "gpui",
@@ -4418,7 +4418,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-cluster-net"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "notchling-platform",
  "rcgen",
@@ -4430,7 +4430,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-embed"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "base64 0.22.1",
  "candle-core",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-engine"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -4478,7 +4478,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-events"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.3.4",
@@ -4489,7 +4489,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-kit"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "gpui",
  "unicode-segmentation",
@@ -4497,7 +4497,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-local-api"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "libc",
  "notchling-events",
@@ -4508,7 +4508,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-locale"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -4521,7 +4521,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-notchlingd"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "hmac",
  "libc",
@@ -4541,7 +4541,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-platform"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "block2",
  "libc",
@@ -4553,7 +4553,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-protocol"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4561,7 +4561,7 @@ dependencies = [
 
 [[package]]
 name = "notchling-ptyhost"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "libc",
  "notchling-engine",
