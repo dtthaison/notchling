@@ -69,6 +69,11 @@ fn rows(r: &Rig) -> Vec<notchling_engine::outbox::Row> {
     r.ops.store().list(Some(IDLE)).unwrap()
 }
 
+fn retrying(r: &Rig) -> bool {
+    let list = r.room.named("outbox.changed");
+    list.last().is_some_and(|e| e["row"]["why"] == "retry")
+}
+
 #[test]
 fn reply_returns_sent_when_delivered() {
     let r = rig();
@@ -260,7 +265,7 @@ fn reply_to_a_vanished_session_fails_and_removes_the_row() {
     r.files.vanish(IDLE);
     r.at(T0 + 1_000);
     r.postmen.waker()(IDLE);
-    std::thread::sleep(Duration::from_millis(1_200));
+    assert!(until(|| retrying(&r)));
     r.at(T0 + 61_000);
     r.postmen.waker()(IDLE);
     let err = out

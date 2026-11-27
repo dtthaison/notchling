@@ -172,8 +172,8 @@ impl HelperIo for FakeIo {
                 .iter()
                 .map(|t| pack(&FakeSpawn::vector_of(t)))
                 .collect();
-            let _ = out.send(json!({"id": id, "vecs": vecs}).to_string());
             counters.in_flight.fetch_sub(1, Ordering::SeqCst);
+            let _ = out.send(json!({"id": id, "vecs": vecs}).to_string());
         });
         Ok(())
     }
