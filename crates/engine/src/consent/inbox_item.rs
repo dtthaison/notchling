@@ -72,6 +72,7 @@ fn session_title(row: &Consent, who: &str) -> String {
         Some("stop") => format!("{who} asks to stop {name}"),
         Some("interrupt") => format!("{who} asks to interrupt {name}"),
         Some("remove") => format!("{who} asks to remove {name}"),
+        Some("resume") => format!("{who} asks to resume {name}"),
         Some("choose") => format!("{who} asks to answer a question of {name}"),
         Some("run") => format!("{who} asks to run a command in {name}"),
         Some("pick") if row.change.get("dismiss") == Some(&Value::Bool(true)) => {

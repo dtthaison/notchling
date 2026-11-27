@@ -4,9 +4,9 @@ Generated from crates/engine/src/contract by the provider_matrix test; NOTCHLING
 
 | Tool | Native | Fallback | Not applicable | Gap | Unwired |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | 32 | 2 | 1 | 4 | 30 |
-| Codex | 22 | 1 | 6 | 10 | 19 |
-| Antigravity | 23 | 0 | 4 | 12 | 19 |
+| Claude Code | 33 | 2 | 1 | 4 | 31 |
+| Codex | 22 | 1 | 7 | 10 | 19 |
+| Antigravity | 23 | 0 | 5 | 12 | 19 |
 
 ## Sessions
 
@@ -17,6 +17,7 @@ Generated from crates/engine/src/contract by the provider_matrix test; NOTCHLING
 | `session.new` | N: A claude job · unwired | N: First codex exec turn, shown as a draft row · unwired | N: ACP session/new, shown as a draft row · unwired |
 | `session.stop` | N: claude stop · unwired | NA: Nothing runs between Codex turns; Stop interrupts the turn | N: Closes its agy acp · unwired |
 | `session.remove` | N: claude rm · unwired | N: codex delete · unwired | GAP: phase 5: hide-row; agy has no delete |
+| `session.resume` | N: claude --bg --resume · unwired | NA: Nothing runs between Codex turns; TurnSend resumes | NA: Conversations have no exited process; ACP loads them on demand |
 | `session.move` | N: Lanes: Move and Move All · unwired | GAP: phase 5: a lane needs its own CODEX_HOME | NA: One Antigravity login per Mac; a switch moves every session |
 | `folder.trust` | N: Trust Folder · unwired | NA: codex exec asks no trust question; the sandbox is set per turn | N: trustedWorkspaces through agy_trust · unwired |
 

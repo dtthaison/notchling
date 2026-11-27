@@ -397,6 +397,28 @@ impl History {
             next: next.flatten(),
         }
     }
+
+    pub fn find(&self, sources: &[Source], id: &str) -> Option<Item> {
+        if id.is_empty()
+            || id.starts_with("agent-")
+            || id.contains('/')
+            || id.contains('\\')
+            || id.contains("..")
+        {
+            return None;
+        }
+        let entry = scan(sources, None).into_iter().find(|e| e.id == id)?;
+        let head = self.head(&entry)?;
+        (!head.folder.is_empty()).then(|| Item {
+            kind: Kind::Past,
+            id: entry.id,
+            title: head.title,
+            folder: head.folder,
+            config_dir: entry.config_dir,
+            path: Some(entry.path.to_string_lossy().into_owned()),
+            modified_ms: entry.modified_ms,
+        })
+    }
 }
 
 #[cfg(test)]

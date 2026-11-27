@@ -9,6 +9,9 @@ pub fn support(c: Capability) -> Support {
         Capability::SessionNew => Support::native("ACP session/new, shown as a draft row"),
         Capability::SessionStop => Support::native("Closes its agy acp"),
         Capability::SessionRemove => Support::gap("phase 5: hide-row; agy has no delete"),
+        Capability::SessionResume => Support::not_applicable(
+            "Conversations have no exited process; ACP loads them on demand",
+        ),
         Capability::SessionMove => {
             Support::not_applicable("One Antigravity login per Mac; a switch moves every session")
         }

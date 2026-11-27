@@ -53,6 +53,7 @@ mod reload;
 mod render_map;
 mod repo;
 mod repo_section;
+mod resume;
 mod root;
 mod row_blocks;
 mod row_menu;

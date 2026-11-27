@@ -70,7 +70,7 @@ const OWN_QUIET: [&str; 18] = [
     ops::CONSENT_LIST,
 ];
 
-const NEVER_QUIET: [&str; 185] = [
+const NEVER_QUIET: [&str; 186] = [
     ops::EMBED_REFRESH,
     ops::EMBED_STATUS,
     ops::EMBED_SETTINGS,
@@ -247,6 +247,7 @@ const NEVER_QUIET: [&str; 185] = [
     ops::SESSION_SAY,
     ops::SESSION_HALT,
     ops::SESSION_DISCARD,
+    ops::SESSION_RESUME,
     ops::SESSION_CHOOSE,
     ops::SESSION_RUN,
     ops::SESSION_PICK,

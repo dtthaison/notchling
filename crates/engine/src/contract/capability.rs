@@ -49,6 +49,7 @@ pub enum Capability {
     SessionNew,
     SessionStop,
     SessionRemove,
+    SessionResume,
     SessionMove,
     FolderTrust,
     ConversationRead,
@@ -86,12 +87,13 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 39] = [
+    pub const ALL: [Capability; 40] = [
         Capability::SessionList,
         Capability::SessionStatus,
         Capability::SessionNew,
         Capability::SessionStop,
         Capability::SessionRemove,
+        Capability::SessionResume,
         Capability::SessionMove,
         Capability::FolderTrust,
         Capability::ConversationRead,
@@ -135,6 +137,7 @@ impl Capability {
             Capability::SessionNew => "session.new",
             Capability::SessionStop => "session.stop",
             Capability::SessionRemove => "session.remove",
+            Capability::SessionResume => "session.resume",
             Capability::SessionMove => "session.move",
             Capability::FolderTrust => "folder.trust",
             Capability::ConversationRead => "conversation.read",
@@ -179,6 +182,7 @@ impl Capability {
             Capability::SessionNew => "New session",
             Capability::SessionStop => "Stop a session",
             Capability::SessionRemove => "Remove a session",
+            Capability::SessionResume => "Resume a session",
             Capability::SessionMove => "Move a session",
             Capability::FolderTrust => "Folder trust",
             Capability::ConversationRead => "Conversation",
@@ -223,6 +227,7 @@ impl Capability {
             | Capability::SessionNew
             | Capability::SessionStop
             | Capability::SessionRemove
+            | Capability::SessionResume
             | Capability::SessionMove
             | Capability::FolderTrust => Group::Sessions,
             Capability::ConversationRead

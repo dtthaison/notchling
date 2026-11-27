@@ -1,7 +1,7 @@
 use notchling_kit::Icon;
 use notchling_locale as t;
 
-use crate::chat::data::Tool;
+use crate::chat::data::{Session, Tool};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -91,6 +91,12 @@ pub fn is_add_files(key: &str, platform: bool, shift: bool, alt: bool, control: 
     key == "u" && platform && !shift && !alt && !control
 }
 
+pub fn can_resume_session(session: &Session) -> bool {
+    session.tool == Tool::Claude
+        && session.agent.can_resume()
+        && !crate::chat::remote::is_remote(&session.agent)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +171,68 @@ mod tests {
         assert!(!is_add_files("u", false, false, false, false));
         assert!(!is_add_files("u", true, true, false, false));
         assert!(!is_add_files("i", true, false, false, false));
+    }
+
+    #[test]
+    fn only_an_ended_local_claude_session_offers_resume() {
+        use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget, NodeRef};
+
+        let base = Session {
+            agent: Agent {
+                id: "s1".into(),
+                name: "fix".into(),
+                project: "app".into(),
+                cwd: "/work/app".into(),
+                group: AgentGroup::Completed,
+                label: "Exited".into(),
+                detail: None,
+                since_ms: 0,
+                target: AgentTarget::Resume {
+                    session_id: "s1".into(),
+                    cwd: "/work/app".into(),
+                },
+                suggested_reply: None,
+                transcript_path: None,
+                host: String::new(),
+                headless: false,
+                config_dir: None,
+                command: None,
+                resume_session_id: None,
+                at_prompt: false,
+                node: None,
+                worktree_path: None,
+            },
+            tool: Tool::Claude,
+            transcript: None,
+        };
+        assert!(can_resume_session(&base));
+
+        let mut codex = base.clone();
+        codex.tool = Tool::Codex;
+        assert!(!can_resume_session(&codex));
+
+        let mut agy = base.clone();
+        agy.tool = Tool::Antigravity;
+        assert!(!can_resume_session(&agy));
+
+        let mut running = base.clone();
+        running.agent.target = AgentTarget::Job("j1".into());
+        assert!(!can_resume_session(&running));
+
+        let mut headless = base.clone();
+        headless.agent.headless = true;
+        assert!(!can_resume_session(&headless));
+
+        let mut remote = base.clone();
+        remote.agent.node = Some(NodeRef {
+            id: "0123456789abcdef".into(),
+            name: "w1".into(),
+            online: true,
+        });
+        assert!(!can_resume_session(&remote));
+
+        let mut qualified = base;
+        qualified.agent.id = "0123456789abcdef/s1".into();
+        assert!(!can_resume_session(&qualified));
     }
 }

@@ -31,6 +31,7 @@ fn every_act_has_a_dry_run_first() {
         "session reply",
         "session stop",
         "session remove",
+        "session resume",
         "session answer",
         "session command",
         "session dialog",

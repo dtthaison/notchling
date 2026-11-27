@@ -35,6 +35,7 @@
   "claude session.move",
   "claude session.new",
   "claude session.remove",
+  "claude session.resume",
   "claude session.status",
   "claude session.stop",
   "claude setup.hooks",

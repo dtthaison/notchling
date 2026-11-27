@@ -19,7 +19,7 @@ pub use plan::{
 pub use run::{execute, job_id_in_launch_output, ControlError, Report};
 pub use session::{
     claude_json_for, job_state_path, plan_move, plan_new_session, plan_remove, plan_respawn,
-    plan_stop, NewSession,
+    plan_resume, plan_stop, NewSession, ResumeError,
 };
 pub use slash::{Route, SlashCommand};
 pub use takeover::{offers_takeover, prompt_for, TakeoverState};

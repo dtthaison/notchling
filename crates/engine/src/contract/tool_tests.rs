@@ -29,8 +29,8 @@ fn row_ids_name_their_tool() {
 }
 
 #[test]
-fn thirty_nine_capabilities_with_unique_ids() {
-    assert_eq!(Capability::ALL.len(), 39);
+fn forty_capabilities_with_unique_ids() {
+    assert_eq!(Capability::ALL.len(), 40);
     let mut seen = std::collections::HashSet::new();
     for c in Capability::ALL {
         assert!(seen.insert(c.id()), "{} twice", c.id());
@@ -50,7 +50,7 @@ fn thirty_nine_capabilities_with_unique_ids() {
         .iter()
         .map(|g| Capability::ALL.iter().filter(|c| c.group() == *g).count())
         .collect();
-    assert_eq!(counts, [7, 3, 5, 3, 8, 5, 2, 3, 2, 1]);
+    assert_eq!(counts, [8, 3, 5, 3, 8, 5, 2, 3, 2, 1]);
     let order: Vec<Group> = Capability::ALL.iter().map(|c| c.group()).collect();
     let mut sorted = order.clone();
     sorted.sort();

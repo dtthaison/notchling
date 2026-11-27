@@ -35,6 +35,7 @@ chat-session-not-started = This session hasn't started yet, so it has no id.
 chat-close-session = Close Session
 chat-close-all-codex = Close All { -brand-codex } Sessions
 chat-close-all-antigravity = Close All { -brand-antigravity } Sessions
+chat-resume = Resume
 chat-remove-session = Remove Session…
 # The title of the confirmation; $title is the session's name.
 chat-remove-title = Remove “{ $title }”?

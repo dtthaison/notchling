@@ -1,6 +1,7 @@
 use super::plan::{Command, Expect, Outcome, Plan, PlanError, RunStep, Step};
 use super::trust::plan_trust_folder;
 use crate::sessions::jobs::read_json;
+use crate::sessions::lanes::lane_at_path;
 use crate::sessions::{
     config_dir_for_job, job_dirs, launch_flags, resume_arguments, Agent, AgentTarget, Roots,
 };
@@ -228,4 +229,65 @@ pub(crate) fn stop_for(id: &str, config_dir: Option<&str>) -> Plan {
         steps: vec![Step::Run(stop_step(id, config_dir))],
         outcome: Outcome::Done,
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResumeError {
+    Running,
+    NotResumable,
+}
+
+impl ResumeError {
+    pub fn message(self) -> &'static str {
+        match self {
+            ResumeError::Running => "That session is still running.",
+            ResumeError::NotResumable => "Only an ended Claude Code session can be resumed.",
+        }
+    }
+}
+
+impl std::fmt::Display for ResumeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for ResumeError {}
+
+fn resume_config_dir(roots: &Roots, config_dir: Option<&str>) -> Option<String> {
+    let dir = config_dir.filter(|d| !d.is_empty())?;
+    if Path::new(dir) == roots.main_dir {
+        return None;
+    }
+    if let Some(lane) = lane_at_path(roots, dir) {
+        return Some(lane.path);
+    }
+    Some(dir.to_string())
+}
+
+pub fn plan_resume(agent: &Agent, roots: &Roots) -> Result<Plan, ResumeError> {
+    if !agent.headless
+        && agent.node.is_none()
+        && matches!(agent.target, AgentTarget::Job(_) | AgentTarget::Process(_))
+    {
+        return Err(ResumeError::Running);
+    }
+    if !agent.can_resume() {
+        return Err(ResumeError::NotResumable);
+    }
+    let AgentTarget::Resume { session_id, cwd } = &agent.target else {
+        return Err(ResumeError::NotResumable);
+    };
+    let to = resume_config_dir(roots, agent.config_dir.as_deref());
+    Ok(Plan {
+        steps: vec![Step::Run(resume_plan_step(
+            roots,
+            session_id,
+            session_id,
+            cwd,
+            to.as_deref(),
+            &[],
+        ))],
+        outcome: Outcome::NewJob,
+    })
 }

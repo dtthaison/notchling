@@ -335,3 +335,118 @@ fn respawn_runs_claude_respawn_in_the_jobs_lane_and_watches_its_state_file() {
         r.tmp.path("home/.claude/jobs/m1/state.json")
     );
 }
+
+#[test]
+fn resume_starts_a_background_job_in_the_sessions_folder_and_lane() {
+    let r = rig("resume");
+    let mut ended = sample(
+        AgentTarget::Resume {
+            session_id: "1f2e-uuid".into(),
+            cwd: "/work/app".into(),
+        },
+        None,
+    );
+    ended.cwd = "/work/app".into();
+    let main = plan_resume(&ended, &r.roots).expect("plan");
+    let steps = runs(&main);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(
+        steps[0].command.argv,
+        ["claude", "--bg", "--resume", "1f2e-uuid"]
+    );
+    assert_eq!(steps[0].command.cwd.as_deref(), Some("/work/app"));
+    assert_eq!(config(&steps[0].command), Some(None));
+    assert_eq!(steps[0].expect, Expect::JobId);
+    assert_eq!(steps[0].timeout_secs, 60);
+    assert_eq!(main.outcome, Outcome::NewJob);
+
+    ended.config_dir = Some(r.roots.main_dir.to_string_lossy().into_owned());
+    let explicit_main = plan_resume(&ended, &r.roots).expect("plan");
+    assert_eq!(config(&runs(&explicit_main)[0].command), Some(None));
+
+    ended.config_dir = Some(r.lane.clone());
+    let in_lane = plan_resume(&ended, &r.roots).expect("plan");
+    assert_eq!(
+        runs(&in_lane)[0].command.argv,
+        ["claude", "--bg", "--resume", "1f2e-uuid"]
+    );
+    assert_eq!(
+        config(&runs(&in_lane)[0].command),
+        Some(Some(r.lane.clone()))
+    );
+}
+
+#[test]
+fn resume_refuses_running_headless_remote_and_incomplete_sessions() {
+    let r = rig("resume-refused");
+    assert_eq!(
+        plan_resume(&job("ab12"), &r.roots),
+        Err(ResumeError::Running)
+    );
+    assert_eq!(
+        ResumeError::Running.message(),
+        "That session is still running."
+    );
+    assert_eq!(
+        plan_resume(&sample(AgentTarget::Process(42), None), &r.roots),
+        Err(ResumeError::Running)
+    );
+
+    let mut headless = sample(
+        AgentTarget::Resume {
+            session_id: "s1".into(),
+            cwd: "/work".into(),
+        },
+        None,
+    );
+    headless.headless = true;
+    assert_eq!(
+        plan_resume(&headless, &r.roots),
+        Err(ResumeError::NotResumable)
+    );
+    assert_eq!(
+        ResumeError::NotResumable.message(),
+        "Only an ended Claude Code session can be resumed."
+    );
+
+    let mut remote = sample(
+        AgentTarget::Resume {
+            session_id: "s1".into(),
+            cwd: "/work".into(),
+        },
+        None,
+    );
+    remote.node = Some(crate::sessions::agent::NodeRef {
+        id: "0123456789abcdef".into(),
+        name: "w1".into(),
+        online: true,
+    });
+    assert_eq!(
+        plan_resume(&remote, &r.roots),
+        Err(ResumeError::NotResumable)
+    );
+
+    let no_id = sample(
+        AgentTarget::Resume {
+            session_id: String::new(),
+            cwd: "/work".into(),
+        },
+        None,
+    );
+    assert_eq!(
+        plan_resume(&no_id, &r.roots),
+        Err(ResumeError::NotResumable)
+    );
+
+    let no_cwd = sample(
+        AgentTarget::Resume {
+            session_id: "s1".into(),
+            cwd: String::new(),
+        },
+        None,
+    );
+    assert_eq!(
+        plan_resume(&no_cwd, &r.roots),
+        Err(ResumeError::NotResumable)
+    );
+}

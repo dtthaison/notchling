@@ -97,5 +97,5 @@ fn the_registry_answers_for_each_tool_in_order() {
     let cells = registry.cells();
     assert_eq!(cells.len(), Tool::ALL.len() * Capability::ALL.len());
     assert_eq!(cells[0].entry(), "claude session.list");
-    assert_eq!(cells[39].entry(), "codex session.list");
+    assert_eq!(cells[40].entry(), "codex session.list");
 }

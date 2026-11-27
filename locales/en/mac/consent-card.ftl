@@ -114,6 +114,8 @@ consent-card-fact-session-stop = Stop { $name } ({ $folder })
 consent-card-fact-session-interrupt = Interrupt { $name } ({ $folder })
 # What the request does: remove a stopped session from the list. $name is the session's name, $folder the folder it works in.
 consent-card-fact-session-remove = Remove { $name } ({ $folder })
+# What the request does: resume an ended session. $name is the session's name, $folder the folder it works in.
+consent-card-fact-session-resume = Resume { $name } ({ $folder })
 # What the request does: answer the question a session is asking. $name is the session's name, $folder the folder it works in.
 consent-card-fact-session-choose = Answer the question of { $name } ({ $folder })
 # What the request does: run a slash command in a session. $name is the session's name, $folder the folder it works in.

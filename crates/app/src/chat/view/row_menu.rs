@@ -57,6 +57,7 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
     let session = view.sessions.iter().find(|s| s.agent.id == menu.row_id);
     let tool = session.map(|s| s.tool);
     let remote = session.filter(|s| remote::is_remote(&s.agent));
+    let resumable = session.is_some_and(crate::chat::composer::can_resume_session);
     let removable = session.is_some_and(|s| {
         s.tool == Tool::Claude
             && matches!(s.agent.target, AgentTarget::Job(_))
@@ -130,6 +131,16 @@ pub(super) fn render(view: &ChatView, a: Appearance, cx: &mut Context<ChatView>)
                 .on_click(cx.listener(move |this, _, _, cx| this.chrome_toggle(&row, cx)))
         } else {
             held_item("row-chrome", t::chat::chrome_use(), control, a)
+        });
+    }
+    if resumable {
+        let row = menu.row_id.clone();
+        let control = view.acting_control(cx);
+        items = items.child(if control.enabled && !view.tools.sending {
+            menu_item("row-resume", t::chat::resume(), a)
+                .on_click(cx.listener(move |this, _, _, cx| this.resume_row(row.clone(), cx)))
+        } else {
+            held_item("row-resume", t::chat::resume(), control, a)
         });
     }
     if removable {

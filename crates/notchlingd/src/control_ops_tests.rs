@@ -564,3 +564,56 @@ fn a_command_is_typed_like_a_reply_unless_it_opens_a_menu() {
     );
     assert!(fake.calls().is_empty(), "a command starts no process");
 }
+
+#[test]
+fn resume_session_starts_claude_bg_resume_in_the_sessions_lane() {
+    let (d, s, fake) = control("resume", true);
+    let lane = d.0.join("lane-b");
+    std::fs::create_dir_all(&lane).unwrap();
+    let lane_str = lane.to_string_lossy().into_owned();
+    std::fs::write(
+        d.0.join("lanes.json"),
+        json!([{"name": "b", "path": lane_str, "accountID": "acc-b", "email": "b@example.com"}])
+            .to_string(),
+    )
+    .unwrap();
+    {
+        let mut list = s.ops.sessions.lock().unwrap();
+        list.as_array_mut().unwrap().push(json!({
+            "id": "ended-1",
+            "name": "billing",
+            "project": "api",
+            "cwd": "/w/api",
+            "group": "completed",
+            "label": "Exited",
+            "detail": null,
+            "sinceMs": 100,
+            "target": {"resume": {"session_id": "sess-99", "cwd": "/w/api"}},
+            "suggestedReply": null,
+            "transcriptPath": null,
+            "host": "",
+            "headless": false,
+            "configDir": lane_str,
+            "command": null,
+            "resumeSessionId": null,
+        }));
+    }
+    fake.push_output(Ok(LaunchOutput::ok(
+        "backgrounded · 77aa11bb · api (idle)\n",
+    )));
+    assert_eq!(
+        s.ops.resume_session(&json!({"id": "ended-1"})).unwrap(),
+        json!({"jobId": "77aa11bb"})
+    );
+    assert_eq!(
+        fake.commands(),
+        [Command::new(&["claude", "--bg", "--resume", "sess-99"])
+            .in_dir("/w/api")
+            .for_config_dir(Some(&lane_str))]
+    );
+
+    let running = s.ops.resume_session(&json!({"id": "job-a"})).unwrap_err();
+    assert_eq!(running.code, ErrorCode::BadRequest);
+    assert_eq!(running.message, "That session is still running.");
+    assert_eq!(fake.calls().len(), 1);
+}

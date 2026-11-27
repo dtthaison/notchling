@@ -14,12 +14,12 @@ fn the_text_is_the_matrix() {
 }
 
 #[test]
-fn the_json_has_117_cells_and_says_which_are_wired() {
+fn the_json_has_120_cells_and_says_which_are_wired() {
     let mut out = Vec::new();
     assert_eq!(run(true, &mut out), 0);
     let value: Value = serde_json::from_slice(&out).unwrap();
     let cells = value["cells"].as_array().unwrap();
-    assert_eq!(cells.len(), 117);
+    assert_eq!(cells.len(), 120);
     for cell in cells {
         for key in ["tool", "capability", "support", "line", "flow", "wired"] {
             assert!(cell.get(key).is_some(), "{key} in {cell}");

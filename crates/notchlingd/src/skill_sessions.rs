@@ -2,7 +2,7 @@ use crate::skills_family::{minimal, KEY_RULE, REASON_RULE};
 
 pub const NAME: &str = "notchling-sessions";
 
-const DESCRIPTION: &str = "Use to follow, answer or control the agent sessions Notchling shows: list them, start one, reply to one, stop or remove one, answer its question, run a slash command in it, or read this session's shells, prompts, queued messages and delivery receipts.";
+const DESCRIPTION: &str = "Use to follow, answer or control the agent sessions Notchling shows: list them, start one, reply to one, stop, remove or resume one, answer its question, run a slash command in it, or read this session's shells, prompts, queued messages and delivery receipts.";
 
 const TITLE: &str = "Notchling sessions";
 
@@ -17,12 +17,12 @@ const STEPS: &str = r#"
 '{binary}' sessions history --limit 30 --json
 ```
 
-`sessions` lists the sessions of your organization. `search` finds one by what was said in it; `--since` takes a duration (`30m`, `24h`, `7d`), a date (`2026-11-01`) or epoch seconds. Use the `id` it prints. `sessions history` lists what the Chat Sidebar hides: sessions that ended in the last day, then older Claude Code sessions of your organization from the last 14 days, newest first, with masked titles; pass its `next` as `--before <cursor>` for the next page (`--limit` is 1 to 100). It reads only; you cannot resume one from here.
+`sessions` lists the sessions of your organization. `search` finds one by what was said in it; `--since` takes a duration (`30m`, `24h`, `7d`), a date (`2026-11-01`) or epoch seconds. Use the `id` it prints. `sessions history` lists what the Chat Sidebar hides: sessions that ended in the last day, then older Claude Code sessions of your organization from the last 14 days, newest first, with masked titles; pass its `next` as `--before <cursor>` for the next page (`--limit` is 1 to 100). Use `session resume <id>` to resume an ended Claude Code session.
 
 ## Whose session it is
 
 - `self` is the session you run in. Only `session reload` takes it: `'{binary}' session reload self --after-turn` restarts you once your turn ends.
-- A session you started with `session new` is yours to drive. Replying to it is free, up to 30 an hour, then exit 7; stopping or interrupting it is free; removing it is free once it is stopped. Your own session (`self`) is never yours to reply to or remove: that is exit 2.
+- A session you started with `session new` is yours to drive. Replying to it is free, up to 30 an hour, then exit 7; stopping or interrupting it is free; removing it is free once it is stopped; resuming it is free once it has ended. Your own session (`self`) is never yours to reply to, remove or resume: that is exit 2.
 - Any other session, and every `session answer`, `command`, `dialog`, `chrome` and `options`, even on your own child, asks the user on a card. `help --json` shows which: `own_free` is free for a session you started, `request` is always a card.
 
 ## Do one thing safely
@@ -36,6 +36,7 @@ const STEPS: &str = r#"
 '{binary}' session reply <id> "<text>" --dry-run --json
 '{binary}' session stop <id> --dry-run --json
 '{binary}' session remove <id> --dry-run --json
+'{binary}' session resume <id> --dry-run --json
 '{binary}' session answer <id> --answers <json> --dry-run --json
 '{binary}' session command <id> <command> --dry-run --json
 '{binary}' session dialog <id> --pick <1-9> --dry-run --json

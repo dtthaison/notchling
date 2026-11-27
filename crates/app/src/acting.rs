@@ -17,6 +17,7 @@ pub mod ops {
     pub const SESSION_INTERRUPT: &str = "session.interrupt";
     pub const SESSION_STOP: &str = "session.stop";
     pub const SESSION_REMOVE: &str = "session.remove";
+    pub const SESSION_RESUME: &str = "session.resume";
     pub const SESSION_TAKE_BACK: &str = "session.take_back";
     pub const SESSION_NEW: &str = "session.new";
     pub const FOLDER_TRUST: &str = "folder.trust";
@@ -352,6 +353,10 @@ impl Request {
 
     pub fn remove(id: &str) -> Request {
         Request::new(ops::SESSION_REMOVE, json!({ "id": id }))
+    }
+
+    pub fn resume(id: &str) -> Request {
+        Request::new(ops::SESSION_RESUME, json!({ "id": id }))
     }
 
     pub fn take_back(id: &str) -> Request {

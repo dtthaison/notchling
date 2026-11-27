@@ -847,7 +847,9 @@ pub fn render(view: &ChatView, a: Appearance, window: &Window, cx: &mut Context<
             div()
                 .flex_1()
                 .min_w(px(0.0))
-                .children(status(view, control, a, cx)),
+                .children(super::resume::footer_status(view, a, cx, |cx| {
+                    status(view, control, a, cx)
+                })),
         )
         .children(context_meter(view, a, cx))
         .children(

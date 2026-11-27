@@ -4,7 +4,9 @@ use crate::op_group::OpGroup;
 use crate::session_children::{Child, Children};
 use notchling_engine::consent::{Consent, SESSION, SESSION_STOP};
 use notchling_events::kinds::choices::Answerer;
-use notchling_local_api::{ops, AgentIdentity, ApiError, Caller, ErrorCode, OpSpec};
+use notchling_local_api::{
+    ops, AgentIdentity, ApiError, Caller, ClientKind, ErrorCode, OpSpec, Tier,
+};
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 
@@ -13,6 +15,7 @@ const START_USAGE: &str = "session.start takes {\"folder\": \"/absolute/path\", 
 const SAY_USAGE: &str = "session.say takes {\"id\": text, \"text\": text}";
 const HALT_USAGE: &str = "session.halt takes {\"id\": text, \"how\": \"stop\"|\"interrupt\"}";
 const DISCARD_USAGE: &str = "session.discard takes {\"id\": text}";
+const RESUME_USAGE: &str = "session.resume takes {\"id\": text}";
 const ACTING_OFF: &str = "Act on Sessions is off, so no agent may start or drive a session.";
 const OTHER_ORG: &str = "That session is in another organization.";
 const NEVER_PROMPTS: &str = "Only you can skip permission prompts, in Notchling.";
@@ -32,6 +35,7 @@ pub enum Action {
     Stop,
     Interrupt,
     Remove,
+    Resume,
     Choose,
     Run,
     Pick,
@@ -39,12 +43,13 @@ pub enum Action {
     Tune,
 }
 
-const ALL_ACTIONS: [Action; 10] = [
+const ALL_ACTIONS: [Action; 11] = [
     Action::Start,
     Action::Say,
     Action::Stop,
     Action::Interrupt,
     Action::Remove,
+    Action::Resume,
     Action::Choose,
     Action::Run,
     Action::Pick,
@@ -60,6 +65,7 @@ impl Action {
             Action::Stop => "stop",
             Action::Interrupt => "interrupt",
             Action::Remove => "remove",
+            Action::Resume => "resume",
             Action::Choose => "choose",
             Action::Run => "run",
             Action::Pick => "pick",
@@ -92,6 +98,7 @@ impl Action {
             Action::Say => ops::SESSION_SAY,
             Action::Stop | Action::Interrupt => ops::SESSION_HALT,
             Action::Remove => ops::SESSION_DISCARD,
+            Action::Resume => ops::SESSION_RESUME,
             Action::Choose => ops::SESSION_CHOOSE,
             Action::Run => ops::SESSION_RUN,
             Action::Pick => ops::SESSION_PICK,
@@ -107,6 +114,7 @@ impl Action {
             Action::Stop => "consent-session-stop",
             Action::Interrupt => "consent-session-interrupt",
             Action::Remove => "consent-session-remove",
+            Action::Resume => "consent-session-resume",
             Action::Choose => "consent-session-choose",
             Action::Run => "consent-session-run",
             Action::Pick if change["dismiss"] == json!(true) => "consent-session-dismiss",
@@ -118,6 +126,14 @@ impl Action {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TargetState {
+    #[default]
+    Running,
+    Resumable,
+    Ended,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     pub id: String,
@@ -125,6 +141,7 @@ pub struct Target {
     pub folder: String,
     pub name: String,
     pub remote: bool,
+    pub state: TargetState,
     pub also: Vec<String>,
 }
 
@@ -266,7 +283,12 @@ impl SessionAsks {
         if target.id == session || target.also.iter().any(|a| a == session) {
             return Relation::Own;
         }
-        if self.children.owned_by(session, &target.id).is_some() {
+        if self.children.owned_by(session, &target.id).is_some()
+            || target
+                .also
+                .iter()
+                .any(|a| self.children.owned_by(session, a).is_some())
+        {
             return Relation::Child;
         }
         Relation::Other
@@ -519,6 +541,56 @@ impl SessionAsks {
         }
     }
 
+    fn check_resumable(target: &Target, own: bool) -> Result<(), ApiError> {
+        if target.tool != "claude" {
+            return Err(bad("That can't be done to this kind of session.").with_reason("not_yet"));
+        }
+        if own || target.state == TargetState::Running {
+            return Err(bad("That session is still running.").with_reason("usage"));
+        }
+        if target.state != TargetState::Resumable {
+            return Err(
+                bad("Only an ended Claude Code session can be resumed.").with_reason("usage")
+            );
+        }
+        Ok(())
+    }
+
+    fn resume(&self, caller: &Caller, args: &Value) -> Result<Value, ApiError> {
+        if caller.tier == Tier::App && caller.client == ClientKind::App {
+            if !(self.acting)() {
+                return Err(crate::acting_ops::switch_off(
+                    "acting",
+                    crate::acting::ACTING_OFF,
+                ));
+            }
+            let id = text_of(args, "id", RESUME_USAGE)?;
+            let target = self.target_of(id)?;
+            Self::check_resumable(&target, false)?;
+            if dry_run(args) {
+                let organization = self.dir.organization(&target.folder);
+                return Ok(
+                    json!({"dryRun": true, "op": ops::SESSION_RESUME, "would": "apply",
+                    "change": Self::change_of(&target, Action::Resume, None, organization),
+                    "request": null, "error": null}),
+                );
+            }
+            let result = self.execute(&target, Action::Resume, None)?;
+            return Ok(json!({"action": "resume", "session": target.id, "result": result}));
+        }
+        self.gate(args)?;
+        let id = text_of(args, "id", RESUME_USAGE)?;
+        let target = self.target_of(id)?;
+        let who = self.consent.who(caller);
+        let organization = self.check_org(&who, &target.folder)?;
+        let relation = self.relation(&who, &target);
+        Self::check_resumable(&target, relation == Relation::Own)?;
+        match relation {
+            Relation::Child => self.free(args, &target, Action::Resume, None, organization),
+            _ => self.card(caller, args, &target, Action::Resume, None, organization),
+        }
+    }
+
     fn map(
         &self,
         tool: &str,
@@ -541,6 +613,7 @@ impl SessionAsks {
             ("claude", Action::Interrupt) => (ops::SESSION_INTERRUPT.into(), json!({"id": id})),
             ("claude", Action::Remove) => (ops::SESSION_REMOVE.into(), json!({"id": id})),
             ("codex", Action::Remove) => (ops::CODEX_DELETE.into(), json!({"id": id})),
+            ("claude", Action::Resume) => (ops::SESSION_RESUME.into(), json!({"id": id})),
             _ => {
                 return Err(
                     bad("That can't be done to this kind of session.").with_reason("not_yet")
@@ -562,6 +635,30 @@ impl SessionAsks {
         }
         if action == Action::Remove {
             self.children.forget(&target.id);
+        }
+        if action == Action::Resume {
+            let prev = self
+                .children
+                .get(&target.id)
+                .or_else(|| target.also.iter().find_map(|a| self.children.get(a)));
+            if let (Some(prev), Some(job)) = (
+                prev,
+                result
+                    .get("jobId")
+                    .and_then(Value::as_str)
+                    .filter(|j| !j.is_empty()),
+            ) {
+                self.children.record(
+                    job,
+                    Child {
+                        started_by: prev.started_by,
+                        tool: prev.tool,
+                        folder: target.folder.clone(),
+                        started_ms: (self.clock)(),
+                        stopped_ms: None,
+                    },
+                );
+            }
         }
         Ok(result)
     }
@@ -618,6 +715,9 @@ impl SessionAsks {
             .dir
             .find(id)
             .ok_or_else(|| "the session is gone".to_string())?;
+        if action == Action::Resume {
+            Self::check_resumable(&target, false).map_err(|e| e.message)?;
+        }
         if action.drives() {
             return self.act(action, row, id).map_err(|e| e.message);
         }
@@ -636,6 +736,18 @@ impl SessionAsks {
                     Ok(())
                 } else {
                     Err("the folder is gone".to_string())
+                }
+            }
+            Some("resume") => {
+                let id = row.change["session"].as_str().unwrap_or_default();
+                let target = self
+                    .dir
+                    .find(id)
+                    .ok_or_else(|| "the session is gone".to_string())?;
+                match target.state {
+                    TargetState::Resumable => Ok(()),
+                    TargetState::Running => Err("the session is already running".to_string()),
+                    TargetState::Ended => Err("the session can no longer be resumed".to_string()),
                 }
             }
             _ => {
@@ -690,6 +802,7 @@ impl OpGroup for SessionAsks {
                 | ops::SESSION_SAY
                 | ops::SESSION_HALT
                 | ops::SESSION_DISCARD
+                | ops::SESSION_RESUME
                 | ops::SESSION_CHOOSE
                 | ops::SESSION_RUN
                 | ops::SESSION_PICK
@@ -705,6 +818,7 @@ impl OpGroup for SessionAsks {
             ops::SESSION_SAY => self.drive(caller, args, Action::Say),
             ops::SESSION_HALT => self.halt(caller, args),
             ops::SESSION_DISCARD => self.drive(caller, args, Action::Remove),
+            ops::SESSION_RESUME => self.resume(caller, args),
             ops::SESSION_CHOOSE => self.choose(caller, args),
             ops::SESSION_RUN => self.run_command(caller, args),
             ops::SESSION_PICK => self.pick(caller, args),

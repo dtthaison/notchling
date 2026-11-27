@@ -554,3 +554,22 @@ fn a_card_the_agent_asked_again_carries_the_note_that_changed_it() {
     let first = ConsentCard::build(&setting(), &env()).expect("card");
     assert_eq!(first.asked_again, None);
 }
+
+#[test]
+fn a_session_resume_card_shows_the_session_name_and_folder() {
+    let mut view = session_say();
+    view["change"] = json!({
+        "action": "resume",
+        "tool": "claude",
+        "name": "shop",
+        "folder": "/work/shop",
+        "session": "s-1",
+    });
+    view["facts"] = json!([{
+        "line": "consent-session-resume",
+        "args": {"tool": "claude", "folder": "/work/shop", "name": "shop"},
+    }]);
+    let card = ConsentCard::build(&view, &env()).expect("card");
+    assert_eq!(card.facts, vec!["Resume shop (/work/shop)"]);
+    assert!(card.value.is_none());
+}
