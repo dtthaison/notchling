@@ -1,9 +1,14 @@
 use super::{Turns, Workspace};
 use crate::cluster_blobs::Blobs;
-use crate::cluster_workspace_testkit::{node_id, noise, Fixture, Gated};
+#[cfg(unix)]
+use crate::cluster_workspace_testkit::{node_id, noise};
+use crate::cluster_workspace_testkit::{Fixture, Gated};
+#[cfg(unix)]
 use notchling_engine::bridge::net::crypto::{base64_decode, sha256_hex};
+#[cfg(unix)]
 use notchling_engine::cluster::jobs::job_id;
 use serde_json::json;
+#[cfg(unix)]
 use std::path::Path;
 
 #[test]
@@ -57,6 +62,7 @@ fn prepares_for_different_repositories_overlap() {
     );
 }
 
+#[cfg(unix)]
 fn noisy_worktree(fx: &Fixture, key: &str) -> String {
     let cwd = fx
         .sender
@@ -69,6 +75,7 @@ fn noisy_worktree(fx: &Fixture, key: &str) -> String {
     job_id(key)
 }
 
+#[cfg(unix)]
 #[test]
 fn two_returns_of_one_job_cannot_corrupt_each_other() {
     let fx = Fixture::new("ws-race");
@@ -112,6 +119,7 @@ fn two_returns_of_one_job_cannot_corrupt_each_other() {
     assert_eq!(leftover.count(), 0);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_return_chunk_needs_its_own_nonce() {
     let fx = Fixture::new("ws-nonce");

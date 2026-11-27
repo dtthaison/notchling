@@ -409,6 +409,7 @@ fn a_damaged_database_is_set_aside_and_rebuilt() {
     assert_eq!(again.len(), 1, "the new database was kept");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_session_in_two_lanes_keeps_the_newer_copy_and_a_linked_projects_folder_counts_once() {
     let dir = TempDir::new("idx-lanes");

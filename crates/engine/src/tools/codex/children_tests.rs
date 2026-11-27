@@ -65,6 +65,7 @@ fn a_changed_rollout_is_read_once_and_an_unchanged_one_never() {
     assert_eq!(refresh(&index, &two), Refreshed { read: 1, kept: 1 });
 }
 
+#[cfg(unix)]
 #[test]
 fn a_gone_rollout_is_swept_when_its_day_is_read_again() {
     let dir = tree("children-sweep");

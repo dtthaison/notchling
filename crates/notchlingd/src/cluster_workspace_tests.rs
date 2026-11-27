@@ -1,14 +1,21 @@
 use super::command_for;
-use crate::cluster_workspace_testkit::{node_id, noise, Fixture};
+#[cfg(unix)]
+use crate::cluster_workspace_testkit::noise;
+use crate::cluster_workspace_testkit::{node_id, Fixture};
+#[cfg(unix)]
 use notchling_engine::cluster::jobs::job_id;
-use notchling_engine::cluster::workspace::{GitCall, NO_NEW_COMMITS};
+use notchling_engine::cluster::workspace::GitCall;
+#[cfg(unix)]
+use notchling_engine::cluster::workspace::NO_NEW_COMMITS;
 use serde_json::json;
 use std::path::Path;
 
+#[cfg(unix)]
 fn tree_of(cwd: &str) -> &Path {
     Path::new(cwd)
 }
 
+#[cfg(unix)]
 #[test]
 fn worker_gets_unpushed_commit() {
     let fx = Fixture::new("ws-unpushed");
@@ -42,6 +49,7 @@ fn worker_gets_unpushed_commit() {
     assert_eq!(std::fs::read_dir(incoming).unwrap().count(), 0);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_pushed_branch_sends_no_bundle_and_a_subfolder_is_kept() {
     let fx = Fixture::new("ws-pushed");
@@ -64,6 +72,7 @@ fn a_pushed_branch_sends_no_bundle_and_a_subfolder_is_kept() {
     assert_eq!(fx.ops(), vec!["workspace.prepare"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_big_bundle_goes_in_several_chunks() {
     let fx = Fixture::new("ws-big");
@@ -83,6 +92,7 @@ fn a_big_bundle_goes_in_several_chunks() {
     assert!(puts >= 3, "{:?}", fx.ops());
 }
 
+#[cfg(unix)]
 #[test]
 fn the_same_key_again_reuses_the_worktree() {
     let fx = Fixture::new("ws-again");
@@ -168,6 +178,7 @@ fn prepare_refuses_what_the_planner_refuses() {
         .is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn hooks_never_run() {
     let fx = Fixture::new("ws-hooks");
@@ -217,6 +228,7 @@ fn hooks_never_run() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn return_creates_branch_and_never_merges() {
     let fx = Fixture::new("ws-return");
@@ -262,6 +274,7 @@ fn return_creates_branch_and_never_merges() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_second_return_fast_forwards() {
     let fx = Fixture::new("ws-return2");
@@ -289,6 +302,7 @@ fn a_second_return_fast_forwards() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn fetch_back_refuses_a_diverged_branch() {
     let fx = Fixture::new("ws-diverged");
@@ -320,6 +334,7 @@ fn fetch_back_refuses_a_diverged_branch() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn return_with_nothing_new_says_so() {
     let fx = Fixture::new("ws-nothing");
@@ -404,10 +419,12 @@ fn git_env_is_scrubbed() {
         .contains(&"core.hooksPath=/dev/null".to_string()));
 }
 
+#[cfg(unix)]
 fn tip_in(fx: &Fixture, tree: &Path) -> String {
     fx.git(tree, &["rev-parse", "HEAD"])
 }
 
+#[cfg(unix)]
 fn clone_of(fx: &Fixture) -> std::path::PathBuf {
     std::fs::read_dir(fx.worker_cluster.join("work"))
         .unwrap()
@@ -421,6 +438,7 @@ fn clone_of(fx: &Fixture) -> std::path::PathBuf {
         .expect("the cached clone")
 }
 
+#[cfg(unix)]
 #[test]
 fn a_new_branch_with_no_commits_sends_no_bundle() {
     let fx = Fixture::new("ws-newbranch");
@@ -437,6 +455,7 @@ fn a_new_branch_with_no_commits_sends_no_bundle() {
     assert_eq!(tip_in(&fx, Path::new(&cwd)), head);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_branch_behind_its_upstream_sends_no_bundle() {
     let fx = Fixture::new("ws-behind");
@@ -464,6 +483,7 @@ fn unpushed_commits_are_counted() {
     assert_eq!(fx.sender.read_facts(fx.repo_str()).unwrap().unpushed, 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cached_clone_finds_a_newer_base() {
     let fx = Fixture::new("ws-newbase");
@@ -491,6 +511,7 @@ fn a_cached_clone_finds_a_newer_base() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_retried_prepare_keeps_the_start_ref() {
     let fx = Fixture::new("ws-startref");

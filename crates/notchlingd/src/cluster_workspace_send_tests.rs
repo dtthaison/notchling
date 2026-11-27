@@ -3,9 +3,13 @@ use crate::acting_ops_tests::app;
 use crate::cluster_blobs::Blobs;
 use crate::cluster_dispatch::{DispatchOps, NodeReporter};
 use crate::cluster_node::LocalCalls;
-use crate::cluster_testkit::{eventually, node, online, pair, Dir, FakeCalls, Opts, TestNode};
+#[cfg(unix)]
+use crate::cluster_testkit::{eventually, node, online};
+use crate::cluster_testkit::{pair, Dir, FakeCalls, Opts, TestNode};
 use crate::cluster_workspace::{Workspace, WorkspaceCalls};
-use crate::cluster_workspace_testkit::{git_in, Fixture, Isolated};
+#[cfg(unix)]
+use crate::cluster_workspace_testkit::git_in;
+use crate::cluster_workspace_testkit::{Fixture, Isolated};
 use crate::op_group::OpGroup;
 use crate::shell_jobs::ShellJobs;
 use notchling_cluster_net::MemNet;
@@ -16,6 +20,7 @@ use notchling_engine::control::Launcher;
 use notchling_engine::versions::Tool as VTool;
 use notchling_local_api::{Caller, ClientKind, Tier};
 use serde_json::{json, Value};
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -86,6 +91,7 @@ fn send_args(worker: &TestNode, rig: &Rig, key: &str) -> Value {
     })
 }
 
+#[cfg(unix)]
 fn folder_of(rig: &Rig) -> String {
     let calls = rig.fake.calls.lock().unwrap();
     assert_eq!(calls.len(), 1, "{calls:?}");
@@ -103,6 +109,7 @@ fn code_modes() {
     assert!(code_mode(&json!({"code": 1})).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn dispatch_with_send_starts_the_session_in_a_worktree() {
     let rig = rig("send-home");
@@ -127,6 +134,7 @@ fn dispatch_with_send_starts_the_session_in_a_worktree() {
     assert_eq!(again["job"], reply["job"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn dispatch_from_a_client_sends_code_straight_to_the_worker() {
     let rig = rig("send-client");
@@ -208,6 +216,7 @@ fn a_worker_cannot_send_code_to_another_node() {
     assert!(a.calls.calls.lock().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn folder_and_no_code_leave_the_folder_alone() {
     let rig = rig("send-folder");

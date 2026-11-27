@@ -39,6 +39,7 @@ fn world(tag: &str) -> World {
     }
 }
 
+#[cfg(unix)]
 fn snapshot(rig: &Rig) -> Vec<(String, String)> {
     fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
         let Ok(read) = std::fs::read_dir(dir) else {
@@ -64,6 +65,7 @@ fn snapshot(rig: &Rig) -> Vec<(String, String)> {
     out
 }
 
+#[cfg(unix)]
 #[test]
 fn undo_puts_every_tool_back_byte_for_byte() {
     let rig = Rig::new("undo-all").claude().codex().agy();

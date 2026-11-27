@@ -117,6 +117,7 @@ impl Launcher for Gated {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn noise(len: usize) -> Vec<u8> {
     let mut seed = 12345u64;
     (0..len)
@@ -177,6 +178,7 @@ pub(crate) fn node_id(letter: char) -> NodeId {
 pub(crate) struct Fixture {
     pub dir: Dir,
     pub home: PathBuf,
+    #[cfg(unix)]
     pub origin: PathBuf,
     pub repo: PathBuf,
     pub worker: Arc<Workspace>,
@@ -234,6 +236,7 @@ impl Fixture {
         Fixture {
             dir,
             home,
+            #[cfg(unix)]
             origin,
             repo,
             worker,

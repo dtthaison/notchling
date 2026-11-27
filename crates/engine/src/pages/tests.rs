@@ -140,6 +140,7 @@ fn a_hand_edited_list_cannot_point_outside_the_library() {
     assert!(lib.describe(&entry("..", "x")).contains("damaged"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_publish_is_saved_wrapped_and_listed() {
     let dir = TempDir::new("pages-rec");
@@ -394,6 +395,7 @@ fn a_read_only_library_never_writes() {
     assert!(!dir.path("pages").exists(), "not even the folder");
 }
 
+#[cfg(unix)]
 #[test]
 fn two_publishes_at_once_keep_both_entries() {
     let dir = TempDir::new("pages-race");

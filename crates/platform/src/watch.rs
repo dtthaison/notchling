@@ -362,6 +362,7 @@ mod tests {
     fn nothing_is_sent_while_nothing_changes() {
         let dir = TempDir::new();
         fs::write(dir.path().join("f"), b"x").unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
         let (_watcher, rx) = Watcher::start(vec![dir.path().to_path_buf()], FAST).unwrap();
         assert!(rx.recv_timeout(Duration::from_millis(400)).is_err());
     }
