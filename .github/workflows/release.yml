@@ -250,10 +250,10 @@ jobs:
           for name, entry in manifest["files"].items():
               assert hashlib.sha256(open(os.path.join(folder, name), "rb").read()).hexdigest() == entry["sha256"], name
           PY
-          mkdir assets
-          cp "mac/Notchling-$VERSION.dmg" "mac/Notchling-$VERSION.zip" nodes/notchling-linux-x86_64 nodes/notchling-linux-aarch64 nodes/manifest.json assets/
-          (cd assets && sha256sum "Notchling-$VERSION.dmg" "Notchling-$VERSION.zip" notchling-linux-x86_64 notchling-linux-aarch64 manifest.json > SHA256SUMS)
-          cat assets/SHA256SUMS
+          mkdir upload
+          cp "mac/Notchling-$VERSION.dmg" "mac/Notchling-$VERSION.zip" nodes/notchling-linux-x86_64 nodes/notchling-linux-aarch64 nodes/manifest.json upload/
+          (cd upload && sha256sum "Notchling-$VERSION.dmg" "Notchling-$VERSION.zip" notchling-linux-x86_64 notchling-linux-aarch64 manifest.json > SHA256SUMS)
+          cat upload/SHA256SUMS
       - name: Write the release notes
         env:
           VERSION: ${{ needs.gate.outputs.version }}
@@ -295,12 +295,12 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             mkdir existing
             gh release download "$TAG" --pattern "Notchling-$VERSION.dmg" --dir existing
-            [ "$(sha256sum "existing/Notchling-$VERSION.dmg" | cut -d' ' -f1)" = "$(sha256sum "assets/Notchling-$VERSION.dmg" | cut -d' ' -f1)" ] \
+            [ "$(sha256sum "existing/Notchling-$VERSION.dmg" | cut -d' ' -f1)" = "$(sha256sum "upload/Notchling-$VERSION.dmg" | cut -d' ' -f1)" ] \
               || { echo "$TAG exists with a different disk image."; exit 1; }
             echo "$TAG already published."
           else
-            gh release create "$TAG" "assets/Notchling-$VERSION.dmg" "assets/Notchling-$VERSION.zip" \
-              assets/notchling-linux-x86_64 assets/notchling-linux-aarch64 assets/manifest.json assets/SHA256SUMS \
+            gh release create "$TAG" "upload/Notchling-$VERSION.dmg" "upload/Notchling-$VERSION.zip" \
+              upload/notchling-linux-x86_64 upload/notchling-linux-aarch64 upload/manifest.json upload/SHA256SUMS \
               --target "$SHA" --latest --title "Notchling $VERSION" --notes-file notes.md
           fi
       - name: Update the feed
@@ -323,7 +323,7 @@ jobs:
           if [ "$have_feed" = "1" ] && grep -Fq "<sparkle:version>$number</sparkle:version>" feed/appcast.xml; then
             echo "Version $number is already in the feed."
           else
-            length="$(wc -c < "assets/Notchling-$VERSION.dmg" | tr -d ' ')"
+            length="$(wc -c < "upload/Notchling-$VERSION.dmg" | tr -d ' ')"
             python3 tools/release/appcast.py add --feed feed/appcast.xml \
               --version "$number" --short "$VERSION" \
               --url "https://github.com/$GH_REPO/releases/download/v$VERSION/Notchling-$VERSION.dmg" \
