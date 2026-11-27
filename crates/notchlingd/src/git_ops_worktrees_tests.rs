@@ -131,7 +131,7 @@ fn not_a_repository_is_repo_false() {
 #[test]
 fn lists_main_and_linked_with_branch_head_and_base() {
     let rig = RepoRig::new("wt-list");
-    let got = reply(&rig);
+    let got = placed(&rig);
     assert_eq!(got["repo"], true);
     assert_eq!(got["name"], "repo");
     assert_eq!(got["default"], "main");
@@ -170,7 +170,7 @@ fn lists_main_and_linked_with_branch_head_and_base() {
 #[test]
 fn lane_base_is_the_integration_branch() {
     let rig = RepoRig::new("wt-base");
-    let got = reply(&rig);
+    let got = placed(&rig);
     let lane = entry(&got, "lane-a");
     assert_eq!(lane["base"], "int");
     assert_eq!(
@@ -276,7 +276,7 @@ fn unknown_fresh_ignored() {
 #[test]
 fn detached_worktree_row() {
     let rig = RepoRig::new("wt-detached");
-    let got = reply(&rig);
+    let got = placed(&rig);
     let row = entry(&got, "lane-b");
     assert_eq!(row["detached"], true);
     assert_eq!(row["branch"], Value::Null);
@@ -404,7 +404,7 @@ fn upstream_candidate_counted_by_rev_list() {
     rig.t.write("lane-u/u1.txt", "u\n");
     git(&lane, &["add", "."]);
     git(&lane, &["commit", "-q", "-m", "lane u"]);
-    let got = reply(&rig);
+    let got = placed(&rig);
     let row = entry(&got, "lane-u");
     assert_eq!(row["upstream"], "origin/int");
     assert_eq!(row["upstream_ahead"], 1);
