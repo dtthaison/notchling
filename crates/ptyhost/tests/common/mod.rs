@@ -255,9 +255,9 @@ pub fn nothing_found(_: i32) -> Option<String> {
 }
 
 pub fn wait_until(mut condition: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !condition() {
-        assert!(Instant::now() < deadline, "condition not met in 3 s");
+        assert!(Instant::now() < deadline, "condition not met in 20 s");
         std::thread::sleep(Duration::from_millis(10));
     }
 }

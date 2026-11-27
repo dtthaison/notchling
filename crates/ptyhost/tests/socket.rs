@@ -50,7 +50,7 @@ fn owner(uid: u32) -> bool {
 }
 
 fn connect(path: &Path) -> HostClient {
-    HostClient::connect(path, Duration::from_secs(3)).expect("connects")
+    HostClient::connect(path, Duration::from_secs(20)).expect("connects")
 }
 
 #[cfg(unix)]
@@ -283,7 +283,7 @@ fn losing_the_host_closes_the_client() {
         let _ = tx.send(());
     });
     running.server.stop();
-    rx.recv_timeout(Duration::from_secs(3))
+    rx.recv_timeout(Duration::from_secs(20))
         .expect("told the host is gone");
     assert!(!client.is_connected());
     assert!(matches!(

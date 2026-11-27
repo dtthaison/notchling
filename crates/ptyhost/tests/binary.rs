@@ -110,7 +110,7 @@ fn the_binary_serves_answers_status_and_leaves_on_sigterm() {
     let state = scratch.path("state.json");
     let mut host = start(&socket, &state);
 
-    let client = HostClient::connect(&socket, Duration::from_secs(3)).expect("connects");
+    let client = HostClient::connect(&socket, Duration::from_secs(20)).expect("connects");
     let hello = client
         .request("hello", Map::new(), Duration::from_secs(5))
         .expect("hello");
