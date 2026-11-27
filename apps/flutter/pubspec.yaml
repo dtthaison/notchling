@@ -44,7 +44,7 @@ dependencies:
   intl: ^0.20.2
   connectivity_plus: ^7.3.2
   whisper_ggml: ^2.8.1
-  record: ^7.1.2
+  record: ^7.2.0
   path_provider: ^2.1.6
   app_settings: ^9.0.1
   image_picker: ^1.2.4
