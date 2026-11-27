@@ -14,3 +14,8 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # intl and fake_async are pinned exactly by the Flutter SDK (flutter_localizations, flutter_test);
+    # they move only when FLUTTER_VERSION in phone.yml moves.
+    ignore:
+      - dependency-name: intl
+      - dependency-name: fake_async

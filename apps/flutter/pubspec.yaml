@@ -35,7 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   flutter_localizations:
     sdk: flutter
-  flutter_riverpod: ^3.4.3
+  flutter_riverpod: ^3.5.0
   flutter_secure_storage: ^11.2.0
   mobile_scanner: ^7.5.0
   webview_flutter: ^4.14.1
@@ -44,7 +44,7 @@ dependencies:
   intl: ^0.20.2
   connectivity_plus: ^7.3.2
   whisper_ggml: ^2.8.1
-  record: ^7.1.2
+  record: ^7.2.0
   path_provider: ^2.1.6
   app_settings: ^9.0.1
   image_picker: ^1.2.4
