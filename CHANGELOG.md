@@ -4,6 +4,8 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-27
+
 Notchling 2.0 is a new app, written in Rust, and it replaces the Swift app, which is retired. It is for Macs with Apple silicon, and it is ad hoc signed, not notarized (macOS asks you to allow it once). The big new thing is the Cluster: your own Macs and Linux machines join one cluster, and you see and answer their sessions from one place.
 
 - Cluster: your machines join one cluster over Tailscale, and sessions on other machines show in Chat with their replies, answers and prompts.
@@ -53,6 +55,9 @@ Notchling 2.0 is a new app, written in Rust, and it replaces the Swift app, whic
 - Cluster inbox: items from every machine (a secret approval on a Worker, a sign-in notice) show in one list on the primary and on every Standby, and answering one anywhere answers it once. The vault list of another machine shows as a Vault on Another Machine tab in the Secret Vault.
 - Cluster logins: Workers report whether Codex and Antigravity are signed in, shown in each node row (Signed In, Signed Out, Not Installed), and a signed-out tool is refused at dispatch with a notice that says what to run on that machine. Nothing in the cluster renews a login. Sending Claude Code's long-lived login to Workers is built but switched off in this version.
 - A notifications inbox: a bell in Chat (and a badge in the open notch) collects what needs you, such as a vault approval, a secret an agent asked for, or a limit notice. Answer from Chat or from the phone, and get a system notification when something new arrives.
+- Agents can ask you a question with `notchling ask`. It shows as a card under its session in Chat, in the notch and in the Inbox, also on the phone, naming the agent and its branch, and your answer goes straight back to the agent that asked.
+- The Details Panel's Git section now shows every worktree of the session's repository, one line each: its branch, how big its work is, and a dot where a session or subagent is working. A last row, "main and 39 branches", opens a new read-only Branches panel with Working, Not Merged and Merged tabs, a filter, and Changes, Open Session and Show in Finder on each row. Every number is against the branch's nearest base, so a lane is shown against the branch it was cut from, not against the whole history of `main`, and Changes opens against that base too. Nothing fetches: remote branches are as fresh as the last fetch, and the panel says when that was.
+- Messages you send to a session are saved first and go in as soon as the session can take them, even mid-turn, in order. One waiting in the session's own queue shows as Queued in the session until the model reads it. A message that may already be in the session asks before sending again. Anything shown as Queued just before this update may need sending again.
 
 ### Fixed
 
@@ -69,6 +74,13 @@ Notchling 2.0 is a new app, written in Rust, and it replaces the Swift app, whic
 - Stop on a background shell (a pipeline such as `( tail -f log & wait ) | grep -m1 done` included) ended nothing and said "Couldn't stop everything" for Claude Code sessions that run as `claude bg-spare` or on a Mac outside UTC: Notchling didn't recognise the session's process, so it treated the shell as an orphan whose parent was alive and left it alone. It now finds the session's process by its title and by the UTC start time Claude Code records, and Stop ends every process of the shell.
 - Chat showed almost nothing of a long session that had read pictures (a Read of a .jpg writes megabytes of base64 into the transcript, which filled the part Chat reads). Pictures no longer count toward what is read, so the conversation before them is back, the Read steps finish instead of showing as running, and the notch and Search read around them too.
 - A reply you sent from Chat that Claude Code had already taken no longer stays shown as Sending, Queued or Needs You. Notchling now finds the take when the transcript is full of pictures or big tool results, when the text starts with a tag or is a long paste, and when the session was continued in another folder or by `/clear`.
+- The Codex tab in Accounts now shows what is left, as ChatGPT's usage page does: a 5-hour limit that is used up reads "0% left" and a week that is a third used reads "67% left", where the card used to say "100%" and "33%". The bar drains as you use it and turns red when little is left. Claude Code, Claude Desktop and Antigravity still show the share used. When ChatGPT has refused Codex because the workspace is out of credits, the card now says so under the bars, and shows a credit balance when the account has one.
+- Codex sessions you started yourself no longer drop out of Chat, the notch and the phone's list when many sessions made by `notchling delegate` are newer than them. Jobs handed to Codex are no longer counted against the 30 rows shown.
+- Chat's Details Panel showed a background agent as Completed after Claude sent it a follow-up message to bring it back, so a job with an agent at work listed none running. It now shows Running until the agent reports again. A command that Claude Code moved to the background after its timeout is now listed under Shells too.
+- Keep Mac Awake works in the new app again: the Mac stays awake while agents work, or always, as you chose, and the menu bar choices are saved.
+- Keep Mac Awake now matches the old app: the Mac is held awake only while Notchling is open, the menu bar cup is filled only while it is really held, and "Continue agents after sleep" works again, telling background agents whose reply the sleep cut off to carry on.
+- Refresh in Accounts now fixes "Couldn't read limits. Its login has expired" on a Claude Code account in a lane or the main login. When no Claude Code session is running there, Refresh asks Claude Code itself to renew the login (`claude auth status`, no prompt and no model use), shows "Renewing login…" on the card, then reads the limits again. If Claude Code can't renew it, the card says to sign in again from the ⋯ menu. A cost of zero no longer reads "$-0.00".
+- A background session whose terminal box held leftover text could no longer be replied to from Chat. A message Notchling typed earlier and didn't send is now cleared before the next one goes in. Any other text in the box is shown above the reply box with a Clear Box and Send button, so you can always send.
 
 ## [1.2.0] - 2026-11-07
 
@@ -145,6 +157,7 @@ First public release.
 
 - The menu bar menu no longer lags or skips items when moving between them.
 
-[Unreleased]: https://github.com/dtthaison/notchling/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/dtthaison/notchling/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/dtthaison/notchling/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/dtthaison/notchling/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dtthaison/notchling/releases/tag/v1.1.0
