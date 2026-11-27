@@ -1,0 +1,7 @@
+{
+  "after": "00000000-0000-4000-8000-00000000dead",
+  "id": 6,
+  "limit": 50,
+  "op": "chat.get",
+  "sessionId": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11"
+}

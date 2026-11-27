@@ -1,0 +1,6 @@
+{
+  "action": "allow_once",
+  "id": 32,
+  "itemId": "vault-approval-1",
+  "op": "inbox.answer"
+}

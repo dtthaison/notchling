@@ -1,0 +1,1 @@
+{"agentType": "general-purpose", "isBuiltIn": true, "description": "Port the parser", "toolUseId": "toolu_spawn_a1", "spawnDepth": 1, "requestShape": "background", "requestNonInteractive": true, "model": "sonnet", "effort": "high", "finished": false}

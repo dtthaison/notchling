@@ -1,0 +1,719 @@
+use crate::acting_ops::Room;
+use crate::late_emit::Events;
+use crate::op_group::OpGroup;
+use crate::switches::SwitchFlag;
+use crate::versions_check::{Checks, Parts};
+use crate::versions_drift::Drifts;
+use crate::versions_update::Updates;
+use notchling_engine::control::launcher::{LaunchOutput, Launcher};
+use notchling_engine::control::plan::Command;
+use notchling_engine::machines::versions_facts;
+use notchling_engine::store;
+use notchling_engine::versions::mac::{detect, watch_paths, Installed, Problem, Roots};
+use notchling_engine::versions::record::{Cause, Fact, Recorder};
+use notchling_engine::versions::update::go_back_target;
+use notchling_engine::versions::{
+    can_pin, cli_output, IdentityCache, Method, Tool, Version, WorkerTools,
+};
+use notchling_events::kinds::agents::{ToolVersionSeen, VersionedTool};
+use notchling_events::spec::Outcome;
+use notchling_events::{field, Event};
+use notchling_local_api::{ops, topics, ApiError, Caller, OpSpec};
+use notchling_platform::watch::{WatchConfig, Watcher};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+pub const WORKERS_DOC: &str = versions_facts::DOC;
+pub const SEEN_DOC: &str = "versions/seen";
+pub const RESCAN_EVERY: Duration = Duration::from_secs(600);
+pub const SOAK_EVERY: Duration = Duration::from_secs(600);
+pub const DRIFT_EVERY: Duration = Duration::from_secs(60);
+pub const AGY_ASK_EVERY_MS: i64 = 600_000;
+pub const AGY_TIMEOUT: Duration = Duration::from_secs(5);
+const SEEN_KEEP: usize = 400;
+
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+pub struct AuditRecorder {
+    events: Events,
+}
+
+impl AuditRecorder {
+    pub fn new(events: Events) -> AuditRecorder {
+        AuditRecorder { events }
+    }
+}
+
+impl Recorder for AuditRecorder {
+    fn record(&self, fact: Fact) {
+        let Fact::Seen { tool, version } = fact else {
+            return;
+        };
+        let tool = match tool {
+            Tool::Claude => VersionedTool::Claude,
+            Tool::Codex => VersionedTool::Codex,
+            Tool::Agy => VersionedTool::Agy,
+            Tool::Notchling => return,
+        };
+        self.events.push(Event::new(
+            &ToolVersionSeen {
+                tool,
+                version: field::Version::new(version.as_str()),
+            },
+            Outcome::Ok,
+            crate::acting_ops::now_ms(),
+        ));
+    }
+}
+
+#[derive(Default)]
+struct AgyMemo {
+    version: Option<Version>,
+    sha: Option<String>,
+    asked_at: Option<i64>,
+}
+
+#[derive(Default)]
+struct State {
+    tools: Option<BTreeMap<Tool, Installed>>,
+    agy: AgyMemo,
+}
+
+pub struct VersionsOps {
+    roots: Roots,
+    data_dir: PathBuf,
+    room: Arc<dyn Room>,
+    launcher: Arc<dyn Launcher>,
+    recorder: Arc<dyn Recorder>,
+    clock: Clock,
+    own: Version,
+    checks: Arc<Checks>,
+    drifts: Arc<Drifts>,
+    updates: Arc<Updates>,
+    rescan_wanted: Arc<AtomicBool>,
+    exe: Mutex<Option<PathBuf>>,
+    state: Mutex<State>,
+    cache: Mutex<IdentityCache>,
+    gate: Mutex<()>,
+    stop: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn installed_json(found: &Installed) -> Value {
+    json!({
+        "version": found.version.as_ref().map(|v| v.as_str()),
+        "sha256": found.identity.as_ref().map(|i| i.sha256.as_str()),
+    })
+}
+
+fn row(tool: Tool, found: Option<&Installed>, checks: &Checks) -> Value {
+    let Parts {
+        reference,
+        usable,
+        failed,
+        check,
+        soak,
+    } = checks.parts(tool, found);
+    let Some(found) = found else {
+        return json!({
+            "tool": tool.name(),
+            "installed": null,
+            "method": null,
+            "path": null,
+            "problems": [],
+            "running": [],
+            "reference": reference,
+            "usable": false,
+            "failed": failed,
+            "check": check,
+            "soak": soak,
+        });
+    };
+    json!({
+        "tool": tool.name(),
+        "installed": installed_json(found),
+        "method": found.method,
+        "path": found.path,
+        "problems": found.problems,
+        "running": [],
+        "reference": reference,
+        "usable": usable,
+        "failed": failed,
+        "check": check,
+        "soak": soak,
+    })
+}
+
+impl VersionsOps {
+    pub fn new(
+        roots: Roots,
+        data_dir: PathBuf,
+        room: Arc<dyn Room>,
+        launcher: Arc<dyn Launcher>,
+        recorder: Arc<dyn Recorder>,
+        clock: Clock,
+        own: Version,
+    ) -> Arc<VersionsOps> {
+        let checks = Checks::new(
+            launcher.clone(),
+            roots.home.clone(),
+            data_dir.clone(),
+            room.clone(),
+            recorder.clone(),
+            clock.clone(),
+        );
+        let drifts = Arc::new(Drifts::new(
+            data_dir.clone(),
+            recorder.clone(),
+            clock.clone(),
+        ));
+        let rescan_wanted = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let updates = Arc::new(Updates::new(
+            launcher.clone(),
+            room.clone(),
+            clock.clone(),
+            rescan_wanted.clone(),
+        ));
+        Arc::new(VersionsOps {
+            roots,
+            data_dir,
+            room,
+            launcher,
+            recorder,
+            clock,
+            own,
+            checks,
+            drifts,
+            updates,
+            rescan_wanted,
+            exe: Mutex::new(std::env::current_exe().ok()),
+            state: Mutex::new(State::default()),
+            cache: Mutex::new(IdentityCache::new().cancelled_by(stop.clone())),
+            gate: Mutex::new(()),
+            stop,
+            thread: Mutex::new(None),
+        })
+    }
+
+    pub fn updates(&self) -> &Arc<Updates> {
+        &self.updates
+    }
+
+    pub fn set_install_switch(&self, switch: Arc<SwitchFlag>) {
+        self.updates.set_switch(switch);
+    }
+
+    pub fn wait_updates(&self) {
+        self.updates.wait();
+    }
+
+    pub fn checks(&self) -> &Arc<Checks> {
+        &self.checks
+    }
+
+    pub fn drifts(&self) -> &Arc<Drifts> {
+        &self.drifts
+    }
+
+    pub fn drift_pass(&self) {
+        let found = self.snapshot();
+        let book = self.checks.book();
+        let reference: BTreeMap<Tool, Version> = found
+            .iter()
+            .filter_map(|(tool, installed)| {
+                let version = installed.version.as_ref()?;
+                let sha = &installed.identity.as_ref()?.sha256;
+                if !book.usable(*tool, version, sha) {
+                    return None;
+                }
+                Some((*tool, book.reference(*tool)?.version.clone()))
+            })
+            .collect();
+        self.drifts.pass(&reference);
+    }
+
+    pub fn soak_pass(&self) {
+        self.checks.soak_pass();
+    }
+
+    pub fn wait_checks(&self) {
+        self.updates.wait();
+        self.checks.wait();
+    }
+
+    pub fn tool_versions(&self) -> BTreeMap<Tool, Version> {
+        let state = lock(&self.state);
+        state
+            .tools
+            .iter()
+            .flatten()
+            .filter_map(|(tool, installed)| Some((*tool, installed.version.clone()?)))
+            .collect()
+    }
+
+    pub fn tool_paths(&self) -> BTreeMap<Tool, String> {
+        let state = lock(&self.state);
+        state
+            .tools
+            .iter()
+            .flatten()
+            .map(|(tool, installed)| (*tool, installed.path.clone()))
+            .collect()
+    }
+
+    pub fn scanned(&self) -> bool {
+        lock(&self.state).tools.is_some()
+    }
+
+    pub fn home(&self) -> PathBuf {
+        self.roots.home.clone()
+    }
+
+    pub fn set_exe(&self, exe: Option<PathBuf>) {
+        *lock(&self.exe) = exe;
+    }
+
+    pub fn hashed(&self) -> u64 {
+        lock(&self.cache).hashed()
+    }
+
+    pub fn rescan(&self) {
+        self.scan(true);
+    }
+
+    fn scan(&self, ask_agy: bool) {
+        let _gate = lock(&self.gate);
+        let mut cache = std::mem::take(&mut *lock(&self.cache));
+        let found = self.collect(&mut cache, ask_agy);
+        *lock(&self.cache) = cache;
+        let Some(found) = found else {
+            return;
+        };
+        let before = lock(&self.state).tools.replace(found.clone());
+        self.announce(before, &found);
+        self.note_seen(&found);
+        self.auto_check(&found);
+        self.drift_pass();
+    }
+
+    fn closing(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+    }
+
+    fn collect(
+        &self,
+        cache: &mut IdentityCache,
+        ask_agy: bool,
+    ) -> Option<BTreeMap<Tool, Installed>> {
+        let now = (self.clock)();
+        let mut found: BTreeMap<Tool, Installed> = BTreeMap::new();
+        for tool in Tool::ALL {
+            if self.closing() {
+                return None;
+            }
+            let seen = match tool {
+                Tool::Notchling => self.own_install(cache),
+                other => detect(&self.roots, other, cache),
+            };
+            if self.closing() {
+                return None;
+            }
+            let seen = match (tool, seen) {
+                (Tool::Agy, Some(installed)) => {
+                    Some(self.with_agy_version(installed, ask_agy, now))
+                }
+                (_, seen) => seen,
+            };
+            if let Some(seen) = seen {
+                found.insert(tool, seen);
+            }
+        }
+        (!self.closing()).then_some(found)
+    }
+
+    fn auto_check(&self, found: &BTreeMap<Tool, Installed>) {
+        self.checks.moved_on(found);
+        for (tool, installed) in found {
+            if self.checks.wanted(*tool, installed) {
+                self.checks.request(*tool, installed, false);
+            }
+        }
+    }
+
+    pub fn retry_due_checks(&self) {
+        let due = self.checks.due_retries();
+        if due.is_empty() {
+            return;
+        }
+        let found = self.snapshot();
+        for tool in due {
+            if let Some(installed) = found.get(&tool) {
+                self.checks.request(tool, installed, false);
+            }
+        }
+    }
+
+    fn check(&self, args: &Value) -> Result<Value, ApiError> {
+        let tool = Self::tool_arg(args)?;
+        if !self.checks.enabled() {
+            return Ok(json!({ "started": false, "running": false }));
+        }
+        let found = self.snapshot();
+        let Some(installed) = found.get(&tool).filter(|i| i.version.is_some()) else {
+            return Ok(json!({ "started": false, "running": false }));
+        };
+        if self.checks.is_running(tool) {
+            return Ok(json!({ "started": false, "running": true }));
+        }
+        let started = self.checks.request(tool, installed, true);
+        Ok(json!({ "started": started, "running": !started && self.checks.is_running(tool) }))
+    }
+
+    fn own_install(&self, cache: &mut IdentityCache) -> Option<Installed> {
+        let exe = lock(&self.exe).clone();
+        Some(Installed {
+            tool: Tool::Notchling,
+            version: Some(self.own.clone()),
+            method: Method::Release,
+            path: exe
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            identity: exe.as_deref().and_then(|p| cache.identity(p)),
+            problems: Vec::new(),
+        })
+    }
+
+    fn with_agy_version(&self, mut installed: Installed, ask: bool, now: i64) -> Installed {
+        let sha = installed.identity.as_ref().map(|i| i.sha256.clone());
+        let (known, asked_at) = {
+            let state = lock(&self.state);
+            let memo = &state.agy;
+            let known = memo
+                .version
+                .clone()
+                .filter(|_| memo.sha.is_some() && memo.sha == sha);
+            (known, memo.asked_at)
+        };
+        installed.version = known;
+        let due = asked_at.is_none_or(|at| now - at >= AGY_ASK_EVERY_MS);
+        if ask && due {
+            let version = self.ask_agy(&installed.path);
+            lock(&self.state).agy = AgyMemo {
+                version: version.clone(),
+                sha,
+                asked_at: Some(now),
+            };
+            installed.version = version;
+        } else if asked_at.is_none() {
+            return installed;
+        }
+        if installed.version.is_none() {
+            installed.problems.push(Problem::CantTell);
+        }
+        installed
+    }
+
+    fn ask_agy(&self, path: &str) -> Option<Version> {
+        let command = Command::new(&[path, "--version"]);
+        match self.launcher.run(&command, AGY_TIMEOUT) {
+            Ok(LaunchOutput {
+                code: 0, output, ..
+            }) => cli_output(Tool::Agy, &output),
+            _ => None,
+        }
+    }
+
+    fn announce(&self, before: Option<BTreeMap<Tool, Installed>>, now: &BTreeMap<Tool, Installed>) {
+        let Some(before) = before else {
+            return;
+        };
+        for tool in Tool::ALL {
+            let (old, new) = (before.get(&tool), now.get(&tool));
+            if old.map(|i| (&i.version, &i.identity)) == new.map(|i| (&i.version, &i.identity)) {
+                continue;
+            }
+            self.room.publish(
+                topics::VERSIONS,
+                topics::VERSIONS_CHANGED,
+                &json!({
+                    "tool": tool.name(),
+                    "installed": new.map(installed_json),
+                }),
+            );
+            let from = old.and_then(|i| i.version.clone());
+            let to = new.and_then(|i| i.version.clone());
+            let both_known = from.is_some() && to.is_some();
+            if from != to && (old.is_none() || new.is_none() || both_known) {
+                self.recorder.record(Fact::Changed {
+                    tool,
+                    machine: "mac".to_string(),
+                    from,
+                    to,
+                    method: new.or(old).map_or(Method::Unknown, |i| i.method),
+                    cause: self.updates.take_cause(tool, (self.clock)()),
+                });
+            }
+        }
+    }
+
+    fn note_seen(&self, found: &BTreeMap<Tool, Installed>) {
+        let keys: Vec<(Tool, Version, String)> = found
+            .iter()
+            .filter_map(|(tool, i)| {
+                i.version
+                    .clone()
+                    .map(|v| (*tool, v.clone(), format!("{}:{}", tool.name(), v)))
+            })
+            .collect();
+        if keys.is_empty() {
+            return;
+        }
+        let mut fresh: Vec<(Tool, Version)> = Vec::new();
+        let result = store::update_doc(&self.data_dir, SEEN_DOC, |old| {
+            let mut list: Vec<String> = old
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default();
+            for (tool, version, key) in &keys {
+                if !list.contains(key) {
+                    list.push(key.clone());
+                    fresh.push((*tool, version.clone()));
+                }
+            }
+            if list.len() > SEEN_KEEP {
+                let extra = list.len() - SEEN_KEEP;
+                list.drain(..extra);
+            }
+            serde_json::to_string(&list)
+                .map(Some)
+                .map_err(|e| e.to_string())
+        });
+        if result.is_err() {
+            return;
+        }
+        for (tool, version) in fresh {
+            self.recorder.record(Fact::Seen { tool, version });
+        }
+    }
+
+    fn snapshot(&self) -> BTreeMap<Tool, Installed> {
+        if lock(&self.state).tools.is_none() {
+            self.scan(false);
+        }
+        lock(&self.state).tools.clone().unwrap_or_default()
+    }
+
+    pub fn update_state(&self, tool: Tool) -> Option<(Installed, Option<Version>)> {
+        let installed = self.snapshot().remove(&tool)?;
+        let back = self.go_back(tool, &installed);
+        Some((installed, back))
+    }
+
+    fn get(&self, args: &Value) -> Result<Value, ApiError> {
+        let only = match args.get("tool") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(name)) => {
+                Some(Tool::from_name(name).ok_or_else(|| ApiError::bad_request("unknown tool"))?)
+            }
+            Some(_) => return Err(ApiError::bad_request("tool is a name")),
+        };
+        let found = self.snapshot();
+        let rows: Vec<Value> = Tool::ALL
+            .into_iter()
+            .filter(|t| only.is_none_or(|o| o == *t))
+            .map(|t| {
+                let mut value = row(t, found.get(&t), &self.checks);
+                value["latest"] =
+                    json!(self.updates.known_latest(t).map(|v| v.as_str().to_string()));
+                value["updating"] = json!(self.updates.is_running(t));
+                value["goBack"] = json!(found
+                    .get(&t)
+                    .and_then(|i| self.go_back(t, i))
+                    .map(|v| v.as_str().to_string()));
+                value
+            })
+            .collect();
+        Ok(json!({ "tools": rows }))
+    }
+
+    fn seen_versions(&self, tool: Tool) -> Vec<Version> {
+        let list: Vec<String> = store::doc(&self.data_dir, SEEN_DOC)
+            .ok()
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let prefix = format!("{}:", tool.name());
+        list.iter()
+            .filter_map(|entry| entry.strip_prefix(&prefix))
+            .filter_map(Version::parse)
+            .collect()
+    }
+
+    fn go_back(&self, tool: Tool, installed: &Installed) -> Option<Version> {
+        if !can_pin(tool, installed.method) || tool == Tool::Notchling {
+            return None;
+        }
+        let current = installed.version.as_ref()?;
+        let failed: Vec<Version> = self
+            .checks
+            .book()
+            .failed_versions(tool)
+            .iter()
+            .filter_map(|(v, _)| Version::parse(v))
+            .collect();
+        go_back_target(&self.seen_versions(tool), current, &failed)
+    }
+
+    fn tool_arg(args: &Value) -> Result<Tool, ApiError> {
+        let name = args
+            .get("tool")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::bad_request("tool is a name"))?;
+        Tool::from_name(name).ok_or_else(|| ApiError::bad_request("unknown tool"))
+    }
+
+    fn latest(&self, args: &Value) -> Result<Value, ApiError> {
+        let tool = Self::tool_arg(args)?;
+        Ok(self.updates.latest(tool))
+    }
+
+    fn update_local(&self, args: &Value) -> Result<Value, ApiError> {
+        self.updates.allowed()?;
+        let tool = Self::tool_arg(args)?;
+        let to = match args.get("to") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => {
+                Some(Version::parse(text).ok_or_else(|| ApiError::bad_request("to is a version"))?)
+            }
+            Some(_) => return Err(ApiError::bad_request("to is a version")),
+        };
+        let found = self.snapshot();
+        let installed = found
+            .get(&tool)
+            .filter(|i| i.version.is_some())
+            .ok_or_else(|| ApiError::bad_request("that tool isn't installed here"))?;
+        let cause = if to.is_some() {
+            if to != self.go_back(tool, installed) {
+                return Err(ApiError::bad_request("that isn't a version to go back to"));
+            }
+            Cause::Rollback
+        } else {
+            Cause::UserUpdate
+        };
+        self.updates.start(tool, installed, to, cause)
+    }
+
+    fn workers(&self) -> Value {
+        let saved = store::doc(&self.data_dir, WORKERS_DOC)
+            .ok()
+            .flatten()
+            .and_then(|text| serde_json::from_str::<Map<String, Value>>(&text).ok())
+            .unwrap_or_default();
+        let clean: Map<String, Value> = saved
+            .into_iter()
+            .filter_map(|(machine, value)| {
+                let tools: WorkerTools = serde_json::from_value(value).ok()?;
+                Some((machine, serde_json::to_value(tools).ok()?))
+            })
+            .collect();
+        json!({ "workers": clean })
+    }
+
+    pub fn start(self: &Arc<Self>) {
+        let mut slot = lock(&self.thread);
+        if slot.is_some() {
+            return;
+        }
+        let ops = self.clone();
+        *slot = Some(std::thread::spawn(move || ops.run()));
+    }
+
+    pub fn close(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let handle = lock(&self.thread).take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+        self.checks.wait();
+    }
+
+    fn run(&self) {
+        self.rescan();
+        let mut last = Instant::now();
+        let mut soaked = Instant::now() - SOAK_EVERY;
+        let mut drifted = Instant::now();
+        let mut watched = watch_paths(&self.roots);
+        let mut watcher = Watcher::start(watched.clone(), WatchConfig::default()).ok();
+        while !self.stop.load(Ordering::SeqCst) {
+            let mut changed = match &watcher {
+                Some((_, rx)) => rx.recv_timeout(Duration::from_millis(200)).is_ok(),
+                None => {
+                    std::thread::sleep(Duration::from_millis(200));
+                    false
+                }
+            };
+            changed |= self.rescan_wanted.swap(false, Ordering::SeqCst);
+            if self.stop.load(Ordering::SeqCst) {
+                break;
+            }
+            self.retry_due_checks();
+            if drifted.elapsed() >= DRIFT_EVERY {
+                drifted = Instant::now();
+                self.drift_pass();
+            }
+            if soaked.elapsed() >= SOAK_EVERY {
+                soaked = Instant::now();
+                self.checks.soak_pass();
+            }
+            if !changed && last.elapsed() < RESCAN_EVERY {
+                continue;
+            }
+            last = Instant::now();
+            self.rescan();
+            let now = watch_paths(&self.roots);
+            if now != watched {
+                drop(watcher.take());
+                watcher = Watcher::start(now.clone(), WatchConfig::default()).ok();
+                watched = now;
+            }
+        }
+    }
+}
+
+impl OpGroup for VersionsOps {
+    fn spec(&self, op: &str) -> Option<OpSpec> {
+        match op {
+            ops::VERSIONS_GET => Some(OpSpec::AGENT_READ),
+            ops::VERSIONS_WORKERS => Some(OpSpec::AGENT_READ),
+            ops::VERSIONS_CHECK => Some(OpSpec::APP),
+            ops::VERSIONS_LATEST => Some(OpSpec::AGENT_READ),
+            ops::VERSIONS_UPDATE_LOCAL => Some(OpSpec::APP),
+            _ => None,
+        }
+    }
+
+    fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        match op {
+            ops::VERSIONS_GET => self.get(args),
+            ops::VERSIONS_WORKERS => Ok(self.workers()),
+            ops::VERSIONS_CHECK => self.check(args),
+            ops::VERSIONS_LATEST => self.latest(args),
+            ops::VERSIONS_UPDATE_LOCAL => self.update_local(args),
+            other => Err(ApiError::internal(format!("{other} has no handler"))),
+        }
+    }
+
+    fn topics(&self) -> &[&'static str] {
+        &[topics::VERSIONS]
+    }
+}

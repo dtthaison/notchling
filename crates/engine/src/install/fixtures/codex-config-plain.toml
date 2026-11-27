@@ -1,0 +1,6 @@
+# Codex config
+model = "gpt-5"
+approval_policy = "on-request"
+
+[projects."/home/w/work"]
+trust_level = "trusted"

@@ -1,0 +1,7 @@
+{
+  "cwd": "/Users/example/src/app",
+  "id": 18,
+  "model": "opus",
+  "modelId": "claude-fable-5-2",
+  "op": "session.new"
+}

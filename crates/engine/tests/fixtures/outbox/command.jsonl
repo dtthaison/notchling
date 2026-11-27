@@ -1,0 +1,3 @@
+{"type":"system","subtype":"local_command","timestamp":"2026-11-15T10:00:10.000Z","sessionId":"s-1","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"}
+{"type":"system","subtype":"local_command","timestamp":"2026-11-15T10:00:11.000Z","sessionId":"s-1","content":"<local-command-stdout>Set model to `Opus 5.5`</local-command-stdout>"}
+{"type":"user","message":{"role":"user","content":"<command-name>/effort</command-name><command-message>effort</command-message><command-args>high</command-args>"},"uuid":"u","timestamp":"2026-11-15T10:00:20.000Z","sessionId":"s-1","cwd":"/work/demo"}

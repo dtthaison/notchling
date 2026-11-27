@@ -1,0 +1,51 @@
+cursor 46 2 true
+
+ ▐▛███▛█   Claude Code v2.1.326
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/work
+
+
+❯ Reply with just the word ok.
+
+⏺ ok
+
+✻ Worked for 2s · done 10:02 AM
+
+! git log --oneline --decorate --graph --grep=feature-00 --grep=feature-01 --grep=feature-02 --grep=feature-03 --grep=feature-04 --grep=feature-05 --grep=feature-06 --grep=feature-07 --grep=feature-08
+ --grep=feature-09 --grep=feature-10 --grep=feature-11 --grep=feature-12 --grep=feature-13 --grep=feature-14 --grep=feature-15 --grep=feature-16 --grep=feature-17 --grep=feature-18 --grep=feature-19 -
+-grep=feature-20 --grep=feature-21 --grep=feature-22 --grep=feature-23 --grep=feature-24 --grep=feature-25 --grep=feature-26 --grep=feature-27 --grep=feature-28 --grep=feature-29 --max-count=5
+  ⎿  Running… (1s)
+     a1b2c3d fix the build
+     e4f5a6b add the thing
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  work > Haiku 5.5 | 59.3k tokens | someone@example.invalid

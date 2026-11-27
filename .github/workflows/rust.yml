@@ -1,0 +1,119 @@
+name: rust
+
+# The Rust workspace (crates/): tests on three systems, rustfmt and clippy, and cargo-deny (licenses,
+# advisories, sources). No `paths:` filter: rust-test, rust-clippy and rust-deny are required checks
+# on main, and a filtered workflow never reports on a pull request that touches no Rust. The
+# toolchain comes from rust-toolchain.toml (rustup is on the runners); no third-party actions.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_DENY_VERSION: "0.20.2"
+  CARGO_ZIGBUILD_VERSION: "0.24.1"
+  ZIG_VERSION: "0.16.0"
+  ZIG_SHA256: "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"
+
+jobs:
+  rust-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo test --workspace --locked
+      - if: matrix.os == 'windows-latest'
+        run: cargo test --workspace --locked --no-fail-fast
+      # GitHub's macOS runners are slow enough that a timing test can miss once. Each failed test runs
+      # once more on its own; a real failure fails twice. Retried tests are listed in the log.
+      - if: matrix.os == 'macos-latest'
+        name: cargo test, failed tests retried once
+        shell: bash
+        run: |
+          set -o pipefail
+          if cargo test --workspace --locked --no-fail-fast 2>&1 | tee test.log; then exit 0; fi
+          awk '/^ +Running /{names=""} /^test .* \.\.\. FAILED$/{names=names" "$2} /^error: test failed, to rerun pass `/{match($0,/`[^`]*`/); print substr($0,RSTART+1,RLENGTH-2) "\t" names; names=""}' test.log > retry.tsv
+          test -s retry.tsv || exit 1
+          echo "::warning::Retrying failed tests once:"; cat retry.tsv
+          status=0
+          while IFS=$'\t' read -r target names; do
+            if [ -z "$names" ] || [ "$target" = "--doc" ] || [[ "$target" == *" --doc" ]]; then status=1; continue; fi
+            read -ra args <<< "$target"
+            read -ra tests <<< "$names"
+            out=$(cargo test --locked "${args[@]}" -- --exact "${tests[@]}" 2>&1) || status=1
+            echo "$out"
+            echo "$out" | grep -q "test result: ok. ${#tests[@]} passed" || status=1
+          done < retry.tsv
+          exit $status
+
+  # One required check for the whole matrix: it fails unless macOS and Linux passed. Windows runs but
+  # doesn't block until Notchling is ported there.
+  rust-test:
+    needs: rust-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every system passed
+        env:
+          RESULT: ${{ needs.rust-matrix.result }}
+        run: |
+          echo "rust-matrix: $RESULT"
+          test "$RESULT" = "success"
+
+  rust-clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  rust-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
+      - run: cargo deny check
+
+  # Keeps the static Linux builds for the cluster's other machines compiling (tools/build-node.sh);
+  # nothing is uploaded and no secret is used.
+  node-builds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - name: Install zig
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/zig.tar.xz" "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          echo "${ZIG_SHA256}  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+      - run: cargo install cargo-zigbuild --locked --version "$CARGO_ZIGBUILD_VERSION"
+      - run: test "$(zig version)" = "$ZIG_VERSION"
+      - run: cargo zigbuild --release --locked -p notchling-notchlingd --bin notchling --target x86_64-unknown-linux-musl
+      - run: cargo zigbuild --release --locked -p notchling-notchlingd --bin notchling --target aarch64-unknown-linux-musl

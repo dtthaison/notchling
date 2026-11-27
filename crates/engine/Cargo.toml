@@ -1,0 +1,53 @@
+[package]
+name = "notchling-engine"
+description = "Notchling engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# The terminal screen's combining characters (general category), as Swift's `properties.generalCategory`.
+unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
+notchling-platform = { path = "../platform" }
+# The bridge (E5a) answers in the generated `agentconsole.v1` types.
+notchling-protocol = { path = "../protocol" }
+# The typed events, the Audit's seal and its check (decision XXXX).
+notchling-events = { path = "../events" }
+# Stable message ids (SHA-256, as the Swift app's `stableUUID`) and photo chunks (base64).
+sha2 = "0.10"
+base64 = "0.22"
+# The phone bridge's transport (bridge::net): TLS with ring's provider (not aws-lc-rs), the Swift
+# app's PKCS#12 identity, and RS256 for Cloudflare Access tokens.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = { version = "1.15.1", features = ["std"] }
+ring = "0.17.14"
+p12 = "0.6.3"
+# The OS's root certificates, for the one HTTPS GET the bridge makes (Cloudflare Access's keys).
+rustls-native-certs = "0.8.5"
+# Visualize (E15) finds mermaid blocks, local URLs and device names in transcripts; the Swift app used NSRegularExpression.
+regex = "1"
+# Chat pictures go to the phone as JPEG (E15). Swift used ImageIO; HEIC has no decoder here.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+kitoken = { version = "0.11.1", default-features = false, features = ["std", "serialization", "normalization", "convert-tokenizers", "regex-perf", "regex-unicode"], optional = true }
+memmap2 = { version = "0.9", optional = true }
+
+[features]
+default = []
+static-embed = ["dep:kitoken", "dep:memmap2"]
+
+[dev-dependencies]
+# Test certificates only, and an independent WebSocket client to talk to the bridge.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+tungstenite = { version = "0.27", default-features = false, features = ["handshake"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# The Secret Vault's one Keychain item (E9), through the Security framework so it trusts only this
+# build. Already in the tree through rustls-native-certs.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7.0"

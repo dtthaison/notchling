@@ -1,0 +1,86 @@
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewSpec {
+    pub name: &'static str,
+    pub size: (f32, f32),
+    pub about: &'static str,
+}
+
+pub const ALL: [ViewSpec; 5] = [
+    ViewSpec {
+        name: "kit-gallery",
+        size: (760.0, 1080.0),
+        about: "every kit part in every state, in the system's appearance",
+    },
+    ViewSpec {
+        name: "kit-gallery-light",
+        size: (760.0, 1080.0),
+        about: "the kit gallery, light",
+    },
+    ViewSpec {
+        name: "kit-gallery-dark",
+        size: (760.0, 1080.0),
+        about: "the kit gallery, dark",
+    },
+    ViewSpec {
+        name: "shell",
+        size: (1040.0, 720.0),
+        about: "the main window's empty shell",
+    },
+    ViewSpec {
+        name: "chat",
+        size: (1240.0, 780.0),
+        about: "the read-only Chat window (fixture data, never ~/.claude)",
+    },
+];
+
+pub const NAMES: [&str; 5] = [
+    "kit-gallery",
+    "kit-gallery-light",
+    "kit-gallery-dark",
+    "shell",
+    "chat",
+];
+
+pub fn spec(name: &str) -> Option<&'static ViewSpec> {
+    every().find(|v| v.name == name)
+}
+
+pub fn every() -> impl Iterator<Item = &'static ViewSpec> {
+    ALL.iter()
+        .chain(crate::chat::renders::VIEWS.iter())
+        .chain(crate::notch::renders::VIEWS.iter())
+        .chain(crate::sheets::renders::VIEWS.iter())
+        .chain(crate::phone::renders::VIEWS.iter())
+        .chain(crate::search::renders::VIEWS.iter())
+        .chain(crate::pages::renders::VIEWS.iter())
+        .chain(crate::tools::renders::VIEWS.iter())
+        .chain(crate::accounts::renders::VIEWS.iter())
+        .chain(crate::vault::renders::VIEWS.iter())
+        .chain(crate::inbox::renders::VIEWS.iter())
+        .chain(crate::inbox::renders_p8::VIEWS.iter())
+        .chain(crate::inbox::renders_b2::VIEWS.iter())
+        .chain(crate::cluster::renders::VIEWS.iter())
+        .chain(crate::activity::renders::VIEWS.iter())
+        .chain(crate::organizations::renders::VIEWS.iter())
+        .chain(crate::costs::renders::VIEWS.iter())
+        .chain(crate::welcome::renders::VIEWS.iter())
+        .chain(crate::switches::restart::VIEWS.iter())
+        .chain(crate::machines::renders::VIEWS.iter())
+        .chain(crate::tray_render::VIEWS.iter())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_match_the_specs() {
+        assert_eq!(ALL.map(|v| v.name), NAMES);
+        for name in NAMES {
+            let spec = spec(name).unwrap();
+            assert!(spec.size.0 > 0.0 && spec.size.1 > 0.0);
+            assert!(!spec.about.is_empty());
+        }
+        assert_eq!(spec("notch"), None);
+    }
+}

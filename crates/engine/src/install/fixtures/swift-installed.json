@@ -1,0 +1,77 @@
+{
+  "permissions" : {
+    "allow" : [
+      "Bash(git log:*)"
+    ]
+  },
+  "hooks" : {
+    "PermissionRequest" : [
+      {
+        "matcher" : "*",
+        "hooks" : [
+          {
+            "type" : "command",
+            "command" : "'\/Applications\/Notchling.app\/Contents\/MacOS\/Notchling' --hook",
+            "timeout" : 300
+          }
+        ]
+      }
+    ],
+    "PreToolUse" : [
+      {
+        "matcher" : "Bash",
+        "hooks" : [
+          {
+            "type" : "command",
+            "command" : "~\/bin\/guard-bash.sh"
+          }
+        ]
+      },
+      {
+        "matcher" : "AskUserQuestion",
+        "hooks" : [
+          {
+            "type" : "command",
+            "command" : "'\/Applications\/Notchling.app\/Contents\/MacOS\/Notchling' --hook",
+            "timeout" : 300
+          }
+        ]
+      },
+      {
+        "matcher" : "Artifact",
+        "hooks" : [
+          {
+            "type" : "command",
+            "command" : "'\/Applications\/Notchling.app\/Contents\/MacOS\/Notchling' --hook",
+            "timeout" : 60
+          }
+        ]
+      }
+    ],
+    "PostToolUse" : [
+      {
+        "matcher" : "Artifact",
+        "hooks" : [
+          {
+            "type" : "command",
+            "command" : "'\/Applications\/Notchling.app\/Contents\/MacOS\/Notchling' --hook",
+            "timeout" : 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure" : [
+      {
+        "matcher" : "Artifact",
+        "hooks" : [
+          {
+            "type" : "command",
+            "command" : "'\/Applications\/Notchling.app\/Contents\/MacOS\/Notchling' --hook",
+            "timeout" : 10
+          }
+        ]
+      }
+    ]
+  },
+  "model" : "opus"
+}

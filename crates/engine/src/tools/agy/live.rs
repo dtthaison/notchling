@@ -1,0 +1,496 @@
+use super::config::{rpc_text, AgyCommand, ConfigOption, Permission};
+use super::runner::{Change, Clock, RunError, Sink, Timing, NAME};
+use crate::tools::acp::{Connection, Handler, Spawner, METHOD_NOT_FOUND};
+use crate::transcript::acp::Transcript;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+
+pub const MAX_OPEN: usize = 8;
+
+pub(super) type Job = Box<dyn FnOnce() + Send>;
+
+pub(super) const CLAIM_QUEUED: u8 = 0;
+pub(super) const CLAIM_DISPATCHED: u8 = 1;
+pub(super) const CLAIM_CANCELLED: u8 = 2;
+
+#[derive(Clone)]
+pub(super) struct Told {
+    pub(super) tx: Sender<Result<(), RunError>>,
+    pub(super) claim: Arc<AtomicU8>,
+}
+
+pub(super) struct Live {
+    pub(super) conn: Connection,
+    pub(super) folder: String,
+    pub(super) st: Mutex<St>,
+}
+
+#[derive(Default)]
+pub(super) struct St {
+    pub(super) session_id: Option<String>,
+    pub(super) transcript: Transcript,
+    pub(super) loaded: bool,
+    pub(super) working: bool,
+    pub(super) permission: Option<Permission>,
+    pub(super) config: Vec<ConfigOption>,
+    pub(super) commands: Vec<AgyCommand>,
+    pub(super) opened_at: f64,
+    pub(super) last_used: f64,
+    pub(super) failed_at: Option<f64>,
+    pub(super) load_error: Option<String>,
+    pub(super) when_loaded: Vec<Job>,
+}
+
+impl Live {
+    pub(super) fn lock(&self) -> MutexGuard<'_, St> {
+        self.st.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+pub(super) struct Inner {
+    pub(super) spawner: Arc<dyn Spawner>,
+    pub(super) binary: Option<String>,
+    pub(super) sink: Arc<dyn Sink>,
+    pub(super) now: Clock,
+    pub(super) timing: Timing,
+    pub(super) live: Mutex<HashMap<String, Arc<Live>>>,
+    pub(super) max_open: AtomicUsize,
+    pub(super) may_start: OnceLock<Arc<dyn Fn() -> bool + Send + Sync>>,
+}
+
+pub(super) fn cancelled() -> Value {
+    json!({"outcome": {"outcome": "cancelled"}})
+}
+
+impl Inner {
+    pub(super) fn lock_live(&self) -> MutexGuard<'_, HashMap<String, Arc<Live>>> {
+        self.live.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(super) fn get(&self, id: &str) -> Option<Arc<Live>> {
+        self.lock_live().get(id).cloned()
+    }
+
+    pub(super) fn emit(&self, live: &Live, change: Change) {
+        let id = live.lock().session_id.clone();
+        if let Some(id) = id {
+            self.sink.changed(&id, change);
+        }
+    }
+
+    pub(super) fn close(&self, id: &str) {
+        let removed = self.lock_live().remove(id);
+        if let Some(live) = removed {
+            self.cancel_waiting(&live, id);
+            live.conn.close();
+            self.sink.changed(id, Change::Closed);
+        }
+    }
+
+    pub(super) fn cancel_waiting(&self, live: &Live, id: &str) {
+        let waiting = live.lock().permission.take();
+        if let Some(p) = waiting {
+            self.sink.changed(
+                id,
+                Change::PermissionResolved {
+                    rpc_id: p.rpc_text(),
+                    outcome: "cancelled".into(),
+                },
+            );
+        }
+    }
+
+    fn make_room(&self, map: &HashMap<String, Arc<Live>>) -> Result<(), RunError> {
+        let max = self.max_open.load(Ordering::SeqCst);
+        if map.values().filter(|l| !l.conn.is_closed()).count() >= max {
+            return Err(RunError::Refused(format!(
+                "{max} {NAME} sessions are open already; close one first"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn open(
+        self: &Arc<Self>,
+        id: &str,
+        folder: &str,
+        retry_now: bool,
+    ) -> Result<Arc<Live>, RunError> {
+        let now = (self.now)();
+        let stale = {
+            let mut map = self.lock_live();
+            if let Some(l) = map.get(id).cloned() {
+                let failed_at = {
+                    let mut st = l.lock();
+                    if st.failed_at.is_none() {
+                        st.last_used = now;
+                    }
+                    st.failed_at
+                };
+                match failed_at {
+                    Some(at) if retry_now || now - at > self.timing.retry => {
+                        map.remove(id);
+                        Some(l)
+                    }
+                    _ => {
+                        l.lock().last_used = now;
+                        return Ok(l);
+                    }
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(old) = stale {
+            old.conn.close();
+        }
+        let live = self.launch(folder)?;
+        live.lock().session_id = Some(id.to_string());
+        {
+            let mut map = self.lock_live();
+            if let Some(existing) = map.get(id).cloned() {
+                drop(map);
+                live.conn.close();
+                return Ok(existing);
+            }
+            if let Err(full) = self.make_room(&map) {
+                drop(map);
+                live.conn.close();
+                return Err(full);
+            }
+            map.insert(id.to_string(), live.clone());
+        }
+        let (runner, l, session, cwd) = (
+            self.clone(),
+            live.clone(),
+            id.to_string(),
+            folder.to_string(),
+        );
+        self.initialize(
+            &live,
+            Box::new(move |ok| {
+                if !ok {
+                    return;
+                }
+                let params = json!({"sessionId": session, "cwd": cwd, "mcpServers": []});
+                let (runner2, l2) = (runner.clone(), l.clone());
+                l.conn.request(
+                    "session/load",
+                    params,
+                    Box::new(move |result| match result {
+                        Ok(r) => runner2.loaded(&l2, &r),
+                        Err(e) => runner2.fail_load(&l2, &e),
+                    }),
+                );
+            }),
+        );
+        Ok(live)
+    }
+
+    pub(super) fn launch(self: &Arc<Self>, folder: &str) -> Result<Arc<Live>, RunError> {
+        let binary = self.binary.clone().ok_or(RunError::NoBinary)?;
+        if self.may_start.get().is_some_and(|may| !may()) {
+            return Err(RunError::NotAllowed);
+        }
+        self.make_room(&self.lock_live())?;
+        let spawned = self
+            .spawner
+            .spawn(&binary, &["acp".to_string()], folder)
+            .map_err(|e| RunError::Start(format!("Couldn't start {NAME}: {e}")))?;
+        let conn = Connection::new(spawned, NAME);
+        let now = (self.now)();
+        let live = Arc::new(Live {
+            conn: conn.clone(),
+            folder: folder.to_string(),
+            st: Mutex::new(St {
+                opened_at: now,
+                last_used: now,
+                ..St::default()
+            }),
+        });
+        conn.start(Arc::new(Wire {
+            live: Arc::downgrade(&live),
+            runner: Arc::downgrade(self),
+        }));
+        Ok(live)
+    }
+
+    pub(super) fn initialize(
+        self: &Arc<Self>,
+        live: &Arc<Live>,
+        then: Box<dyn FnOnce(bool) + Send>,
+    ) {
+        let params = json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+            "clientInfo": {"name": "Notchling", "version": "1"},
+        });
+        let (runner, l) = (self.clone(), live.clone());
+        live.conn.request(
+            "initialize",
+            params,
+            Box::new(move |result| match result {
+                Ok(_) => then(true),
+                Err(e) => {
+                    let known = l.lock().session_id.is_some();
+                    if known {
+                        runner.fail_load(&l, &e);
+                    } else {
+                        l.lock().load_error = Some(e);
+                    }
+                    then(false);
+                }
+            }),
+        );
+    }
+
+    pub(super) fn loaded(&self, live: &Arc<Live>, result: &Value) {
+        let waiting = {
+            let mut st = live.lock();
+            st.loaded = true;
+            st.config = ConfigOption::parse(result.get("configOptions"));
+            let model = st
+                .config
+                .iter()
+                .find(|o| o.id == "model")
+                .map(|o| o.current_name().to_string())
+                .or_else(|| {
+                    result
+                        .pointer("/models/currentModelId")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                });
+            if model.is_some() {
+                st.transcript.model = model;
+            }
+            std::mem::take(&mut st.when_loaded)
+        };
+        for job in waiting {
+            job();
+        }
+        self.emit(live, Change::Loaded);
+    }
+
+    pub(super) fn fail_load(&self, live: &Arc<Live>, message: &str) {
+        let waiting = {
+            let mut st = live.lock();
+            if st.loaded || st.failed_at.is_some() {
+                return;
+            }
+            st.load_error = Some(message.to_string());
+            st.failed_at = Some((self.now)());
+            std::mem::take(&mut st.when_loaded)
+        };
+        for job in waiting {
+            job();
+        }
+        live.conn.close();
+        self.emit(live, Change::LoadFailed(message.to_string()));
+    }
+
+    pub(super) fn begin_prompt(
+        self: &Arc<Self>,
+        live: &Arc<Live>,
+        id: &str,
+        text: &str,
+        told: Option<Told>,
+    ) {
+        if let Some(told) = &told {
+            let won = told.claim.compare_exchange(
+                CLAIM_QUEUED,
+                CLAIM_DISPATCHED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            if won.is_err() {
+                return;
+            }
+        }
+        let now = (self.now)();
+        let allowed = self.may_start.get().is_none_or(|may| may());
+        let failed = {
+            let mut st = live.lock();
+            let failed = match st.load_error.clone() {
+                Some(e) => Some(RunError::Start(e)),
+                None if !allowed => Some(RunError::NotAllowed),
+                None => None,
+            };
+            match failed {
+                Some(_) => st.working = false,
+                None => {
+                    st.last_used = now;
+                    st.transcript.begin_turn(now);
+                }
+            }
+            failed
+        };
+        if let Some(e) = failed {
+            self.emit(live, Change::TurnEnded(Some(e.to_string())));
+            if let Some(told) = told {
+                let _ = told.tx.send(Err(e));
+            }
+            return;
+        }
+        self.emit(live, Change::TurnStarted);
+        let (runner, l) = (self.clone(), live.clone());
+        let written = live.conn.request(
+            "session/prompt",
+            json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]}),
+            Box::new(move |result| runner.turn_done(&l, result)),
+        );
+        if let Some(told) = told {
+            let _ = told.tx.send(match written {
+                true => Ok(()),
+                false => Err(RunError::Start(format!("{NAME} isn't running."))),
+            });
+        }
+    }
+
+    pub(super) fn turn_done(&self, live: &Arc<Live>, result: Result<Value, String>) {
+        let now = (self.now)();
+        let (error, permission) = {
+            let mut st = live.lock();
+            st.working = false;
+            st.last_used = now;
+            let permission = st.permission.take();
+            let error = match &result {
+                Ok(r) => {
+                    let reason = r.get("stopReason").and_then(Value::as_str);
+                    st.transcript.end_turn(reason, r.get("usage"), now);
+                    None
+                }
+                Err(e) => {
+                    st.transcript.fail_turn(e, now);
+                    Some(e.clone())
+                }
+            };
+            (error, permission)
+        };
+        if let Some(p) = permission {
+            self.emit(
+                live,
+                Change::PermissionResolved {
+                    rpc_id: p.rpc_text(),
+                    outcome: "cancelled".into(),
+                },
+            );
+        }
+        self.emit(live, Change::TurnEnded(error));
+    }
+}
+
+pub(super) struct Wire {
+    live: Weak<Live>,
+    runner: Weak<Inner>,
+}
+
+impl Wire {
+    pub(super) fn both(&self) -> Option<(Arc<Live>, Arc<Inner>)> {
+        Some((self.live.upgrade()?, self.runner.upgrade()?))
+    }
+}
+
+impl Handler for Wire {
+    fn notification(&self, method: &str, params: &Value) {
+        let Some((live, runner)) = self.both() else {
+            return;
+        };
+        let Some(update) = params.get("update").filter(|u| u.is_object()) else {
+            return;
+        };
+        if method != "session/update" {
+            return;
+        }
+        {
+            let mut st = live.lock();
+            match update.get("sessionUpdate").and_then(Value::as_str) {
+                Some("available_commands_update") => {
+                    st.commands = AgyCommand::parse(update.get("availableCommands"));
+                }
+                Some("config_option_update") => {
+                    let fresh = ConfigOption::parse(update.get("configOptions"));
+                    if !fresh.is_empty() {
+                        st.config = fresh;
+                    }
+                }
+                Some("current_mode_update") => {
+                    let mode = update.get("currentModeId").and_then(Value::as_str);
+                    if let (Some(mode), Some(o)) =
+                        (mode, st.config.iter_mut().find(|o| o.id == "mode"))
+                    {
+                        o.current = mode.to_string();
+                    }
+                }
+                _ => {
+                    let at = st.loaded.then(|| (runner.now)());
+                    st.transcript.apply(update, at);
+                }
+            }
+        }
+        runner.emit(&live, Change::Chunk);
+    }
+
+    fn request(&self, id: &Value, method: &str, params: &Value) {
+        let Some((live, runner)) = self.both() else {
+            return;
+        };
+        let permission = if method == "session/request_permission" {
+            Permission::parse(id, params)
+        } else {
+            None
+        };
+        let Some(permission) = permission else {
+            live.conn
+                .respond_error(id, METHOD_NOT_FOUND, "Not supported");
+            return;
+        };
+        let replaced = {
+            let mut st = live.lock();
+            if let Some(call) = params.get("toolCall") {
+                let mut update = call.clone();
+                update["sessionUpdate"] = json!("tool_call_update");
+                let at = (runner.now)();
+                st.transcript.apply(&update, Some(at));
+            }
+            st.permission.replace(permission.clone())
+        };
+        if let Some(old) = replaced {
+            live.conn.respond(&old.rpc_id, cancelled());
+            runner.emit(
+                &live,
+                Change::PermissionResolved {
+                    rpc_id: rpc_text(&old.rpc_id),
+                    outcome: "cancelled".into(),
+                },
+            );
+        }
+        runner.emit(&live, Change::PermissionPending(Box::new(permission)));
+    }
+
+    fn exit(&self, message: Option<String>) {
+        let Some((live, runner)) = self.both() else {
+            return;
+        };
+        let loaded = live.lock().loaded;
+        if !loaded {
+            runner.fail_load(
+                &live,
+                &message.unwrap_or_else(|| format!("{NAME} stopped.")),
+            );
+            return;
+        }
+        let id = live.lock().session_id.clone();
+        if let Some(id) = id {
+            let mut map = runner.lock_live();
+            if map.get(&id).is_some_and(|l| Arc::ptr_eq(l, &live)) {
+                map.remove(&id);
+                drop(map);
+                runner.cancel_waiting(&live, &id);
+                runner.sink.changed(&id, Change::Closed);
+            }
+        }
+    }
+}

@@ -1,0 +1,314 @@
+#![cfg(unix)]
+
+use crate::daemon::{run, DaemonError, DaemonOptions};
+use crate::layout::Layout;
+use notchling_engine::logs::{KeyStore, MemoryKeyStore};
+use notchling_local_api::{ops, Client, ClientKind, ConnectOptions};
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+fn hold() -> (Arc<dyn Fn() + Send + Sync>, Sender<()>) {
+    let (release, wait) = mpsc::channel::<()>();
+    let wait = Mutex::new(Some(wait));
+    let hold: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+        let first = wait.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(wait) = first {
+            let _ = wait.recv_timeout(Duration::from_secs(30));
+        }
+    });
+    (hold, release)
+}
+
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+struct Running {
+    _turn: MutexGuard<'static, ()>,
+    layout: Layout,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<Result<(), DaemonError>>>,
+    release: Option<Sender<()>>,
+    root: PathBuf,
+}
+
+impl Running {
+    fn start(tag: &str, options: DaemonOptions, held: bool) -> Running {
+        Running::start_prepared(tag, options, held, &|_| {})
+    }
+
+    fn start_prepared(
+        tag: &str,
+        mut options: DaemonOptions,
+        held: bool,
+        prepare: &dyn Fn(&Layout),
+    ) -> Running {
+        let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let root = PathBuf::from(format!("/tmp/nl-dt-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        copy_tree(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/fixtures/notch"),
+            &root,
+        );
+        let socket = root.join("s/notchlingd.sock");
+        let layout = Layout::resolve(Some(&socket), Some(root.as_os_str()), || None).unwrap();
+        prepare(&layout);
+        let release = held.then(|| {
+            let (before_scan, release) = hold();
+            options.before_scan = Some(before_scan);
+            release
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (layout, stop) = (layout.clone(), stop.clone());
+            std::thread::spawn(move || run(layout, options, &|| stop.load(Ordering::SeqCst)))
+        };
+        Running {
+            _turn: turn,
+            layout,
+            stop,
+            thread: Some(thread),
+            release,
+            root,
+        }
+    }
+
+    fn release(&mut self) {
+        self.release.take();
+    }
+
+    fn stop(&mut self) {
+        self.release.take();
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+
+    fn socket(&self) -> &Path {
+        &self.layout.socket
+    }
+
+    fn answers_within(&self, wait: Duration) -> bool {
+        let deadline = Instant::now() + wait;
+        while Instant::now() < deadline {
+            if std::os::unix::net::UnixStream::connect(self.socket()).is_ok() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
+
+    fn client(&self) -> Client {
+        let options = ConnectOptions {
+            timeout: Duration::from_secs(20),
+            check_server: false,
+        };
+        Client::connect_with(self.socket(), ClientKind::Cli, "0.1.0", &options).unwrap()
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.release.take();
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn ids(list: &Value) -> Vec<String> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn the_socket_answers_while_the_first_read_is_still_held() {
+    let daemon = Running::start("bind", DaemonOptions::default(), true);
+    assert!(
+        daemon.answers_within(Duration::from_secs(10)),
+        "no socket while the first read was held: the daemon reads the list before it binds"
+    );
+    assert!(daemon.client().status().is_ok());
+}
+
+#[test]
+fn sessions_list_waits_for_the_first_read_and_returns_it() {
+    let mut daemon = Running::start("wait", DaemonOptions::default(), true);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    let mut client = daemon.client();
+    client.subscribe(&["sessions"]).unwrap();
+    let (answer, answered) = mpsc::channel();
+    let asking = std::thread::spawn(move || {
+        let _ = answer.send(client.call(ops::SESSIONS_LIST, json!({})));
+    });
+    assert!(
+        answered.recv_timeout(Duration::from_millis(400)).is_err(),
+        "answered before the first read was done"
+    );
+    daemon.release();
+    let list = answered
+        .recv_timeout(Duration::from_secs(20))
+        .expect("an answer once the first read is done")
+        .unwrap();
+    assert!(ids(&list).contains(&"sess-notch".to_string()), "{list}");
+    assert!(list.as_array().unwrap().len() >= 5, "{list}");
+    asking.join().unwrap();
+}
+
+#[test]
+fn a_list_that_runs_out_of_patience_gets_what_there_is_and_the_read_follows_as_an_event() {
+    let options = DaemonOptions {
+        first_list_wait: Duration::from_millis(150),
+        ..DaemonOptions::default()
+    };
+    let mut daemon = Running::start("late", options, true);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    let mut client = daemon.client();
+    client.subscribe(&["sessions"]).unwrap();
+    let started = Instant::now();
+    let early = client.call(ops::SESSIONS_LIST, json!({})).unwrap();
+    assert!(started.elapsed() >= Duration::from_millis(150));
+    assert_eq!(early, json!([]), "what there is while the read is held");
+
+    daemon.release();
+    let event = client
+        .next_event(Duration::from_secs(20))
+        .unwrap()
+        .expect("the first read, as sessions.changed");
+    assert_eq!(event.event, "sessions.changed");
+    assert!(ids(&event.data).contains(&"sess-notch".to_string()));
+    assert_eq!(
+        client.call(ops::SESSIONS_LIST, json!({})).unwrap(),
+        event.data
+    );
+}
+
+#[test]
+fn a_second_daemon_is_refused_before_it_reads_the_list() {
+    let first = Running::start("lock", DaemonOptions::default(), false);
+    assert!(first.answers_within(Duration::from_secs(10)));
+
+    let read = Arc::new(AtomicBool::new(false));
+    let options = DaemonOptions {
+        before_scan: Some({
+            let read = read.clone();
+            Arc::new(move || read.store(true, Ordering::SeqCst))
+        }),
+        ..DaemonOptions::default()
+    };
+    let result = run(first.layout.clone(), options, &|| true);
+    assert!(
+        matches!(result, Err(DaemonError::AlreadyRunning(_))),
+        "{result:?}"
+    );
+    assert!(
+        !read.load(Ordering::SeqCst),
+        "the second daemon read the list before the lock refused it"
+    );
+    assert!(first.client().status().is_ok());
+}
+
+struct Release(Arc<MemoryKeyStore>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+#[test]
+fn the_socket_answers_while_the_keychain_is_blocked() {
+    let keys = Arc::new(MemoryKeyStore::new());
+    keys.set_key(Some([9; 32]));
+    keys.hold();
+    let blocked: Arc<dyn KeyStore> = keys.clone();
+    let options = DaemonOptions {
+        keys: Some(blocked),
+        ..DaemonOptions::default()
+    };
+    let daemon = Running::start("keychain", options, false);
+    let _release = Release(keys.clone());
+    assert!(
+        daemon.answers_within(Duration::from_secs(5)),
+        "no socket while the Keychain was blocked: the daemon reads the audit key before it binds"
+    );
+    let began = Instant::now();
+    let mut client = daemon.client();
+    assert!(client.status().is_ok());
+    let verified = client.call(ops::LOG_VERIFY, json!({})).unwrap();
+    assert!(verified["sealing"].is_string(), "{verified}");
+    assert!(began.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn the_first_start_makes_the_personal_organization_and_a_second_start_changes_nothing() {
+    use notchling_engine::organizations::{Organizations, State, PERSONAL_ID};
+    let daemon = Running::start("orgs", DaemonOptions::default(), false);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    let orgs = Organizations::new(&daemon.layout.data_dir);
+    let State::Loaded(doc) = orgs.state() else {
+        panic!("no organizations document after the first start");
+    };
+    assert_eq!(doc.organizations.len(), 1);
+    assert_eq!(doc.organizations[0].id, PERSONAL_ID);
+    let text = notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap();
+    assert!(super::daemon::migrate_organizations(&daemon.layout).is_ok());
+    assert_eq!(
+        notchling_engine::store::doc(&daemon.layout.data_dir, "organizations").unwrap(),
+        text
+    );
+}
+
+#[test]
+fn a_start_goes_on_when_the_organizations_document_cannot_be_read() {
+    let daemon =
+        Running::start_prepared("orgs-broken", DaemonOptions::default(), false, &|layout| {
+            notchling_engine::store::put_doc(&layout.data_dir, "organizations", "{").unwrap();
+        });
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    assert!(daemon.client().status().is_ok());
+    assert_eq!(
+        notchling_engine::store::doc(&daemon.layout.data_dir, "organizations")
+            .unwrap()
+            .as_deref(),
+        Some("{")
+    );
+}
+
+#[test]
+fn a_stopped_daemon_holds_no_file_under_its_data_folder() {
+    let mut daemon = Running::start("fds", DaemonOptions::default(), false);
+    assert!(daemon.answers_within(Duration::from_secs(10)));
+    assert!(daemon.client().status().is_ok());
+    daemon.stop();
+    let mut left = crate::fd_testkit::open_under(&daemon.root);
+    let begun = Instant::now();
+    while !left.is_empty() && begun.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(50));
+        left = crate::fd_testkit::open_under(&daemon.root);
+    }
+    assert!(left.is_empty(), "{left:?}");
+}

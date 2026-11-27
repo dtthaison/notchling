@@ -1,0 +1,30 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PermissionRequest",
+    "decision": {
+      "behavior": "allow",
+      "updatedInput": {
+        "questions": [
+          {
+            "question": "Where?",
+            "header": "Place",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Home",
+                "description": ""
+              },
+              {
+                "label": "Away",
+                "description": ""
+              }
+            ]
+          }
+        ],
+        "answers": {
+          "Where?": "Home"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,742 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show SchedulerPhase;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/net/bridge_client.dart';
+import '../core/net/ws_transport.dart';
+import '../features/chat/chat_screen.dart';
+import '../features/connection/connection.dart';
+import '../features/connection/subscription_sync.dart';
+import '../features/sessions/held_notifier.dart';
+import '../features/inbox/inbox_notifier.dart';
+import '../features/inbox/inbox_screen.dart';
+import '../features/machines/machines_sheet.dart';
+import '../features/macs/macs_notifier.dart';
+import '../features/macs/macs_screen.dart';
+import '../features/pairing/pairing_screen.dart';
+import '../features/sessions/sessions_notifier.dart';
+import '../features/sessions/sessions_screen.dart';
+import '../features/settings/settings_screen.dart';
+import '../features/visualize/visualize_screen.dart';
+import '../l10n/app_localizations.dart';
+import 'alerts.dart';
+import 'nav_state.dart';
+import 'notifications.dart';
+import 'theme/tokens.dart';
+import 'widgets/common.dart';
+import 'widgets/alert_banner.dart';
+import 'widgets/glass_nav.dart';
+import 'widgets/kit.dart';
+import 'widgets/motion.dart';
+
+class AppRoot extends ConsumerStatefulWidget {
+  const AppRoot({super.key});
+
+  @override
+  ConsumerState<AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends ConsumerState<AppRoot> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(ref.read(notificationServiceProvider).init());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _askKeepAliveOnce() async {
+    if (!Platform.isAndroid || !mounted) return;
+    for (int i = 0; i < 20 && !ref.read(alertPrefsProvider).loaded; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (!mounted || ref.read(alertPrefsProvider).keepAlive != null) return;
+    final AppL10n l10n = AppL10n.of(context);
+    final bool? on = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(l10n.appKeepAliveTitle),
+        content: Text(l10n.appKeepAliveBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.appNotNow),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.appKeepAliveEnable),
+          ),
+        ],
+      ),
+    );
+    if (on != null) {
+      await ref.read(alertPrefsProvider.notifier).setKeepAlive(on: on);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      ref.read(lifecycleProvider.notifier).set(state);
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(attentionWatcherProvider);
+    ref.watch(inboxAlertWatcherProvider);
+    ref.watch(notificationTapsProvider);
+    ref.watch(keepAliveControllerProvider);
+    ref.listen<int>(connectedCountProvider, (int? previous, int next) {
+      if (next > 0 && (previous ?? 0) == 0) {
+        unawaited(ref.read(notificationServiceProvider).requestPermission());
+        unawaited(_askKeepAliveOnce());
+      }
+    });
+    final MacsState macs = ref.watch(macsProvider);
+    if (!macs.loaded) {
+      return const Scaffold(body: SafeArea(child: SkeletonRows()));
+    }
+    if (macs.active == null) return const PairingScreen();
+    ref.watch(subscriptionSyncProvider);
+    ref.watch(heldTrackingProvider);
+    return const HomeShell();
+  }
+}
+
+class HomeShell extends ConsumerStatefulWidget {
+  const HomeShell({super.key});
+
+  @override
+  ConsumerState<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends ConsumerState<HomeShell> {
+  StreamSubscription<BridgeEvent>? _events;
+
+  late final Widget _sessionsTab = SessionsScreen(
+    onOpenChat: () => ref.read(activeTabProvider.notifier).show(1),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _bind(ref.read(bridgeClientProvider));
+  }
+
+  void _bind(BridgeClient? client) {
+    unawaited(_events?.cancel());
+    _events = client?.events.listen((BridgeEvent event) {
+      if (event is OpenEvent &&
+          ref.read(lifecycleProvider) == AppLifecycleState.resumed) {
+        showSessionsTab(ref);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_events?.cancel());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    ref.listen<BridgeClient?>(
+      bridgeClientProvider,
+      (BridgeClient? previous, BridgeClient? next) => _bind(next),
+    );
+    listenMachinesOffers(context, ref);
+    final int tab = ref.watch(activeTabProvider);
+    final bool hideBar =
+        tab == 1 &&
+        ref.watch(selectedSessionIdProvider) != null &&
+        MediaQuery.sizeOf(context).width < Metric.threePanelBreakpoint;
+
+    final bool wide =
+        MediaQuery.sizeOf(context).width >= Metric.threePanelBreakpoint;
+    final Kit kit = Kit.of(context);
+
+    Widget inset(Widget child, {bool bottom = false}) {
+      return Builder(
+        builder: (BuildContext inner) {
+          final EdgeInsets p = MediaQuery.paddingOf(inner);
+          return MediaQuery.removePadding(
+            context: inner,
+            removeTop: true,
+            removeBottom: bottom,
+            child: Padding(
+              padding: EdgeInsets.only(top: p.top, bottom: bottom ? p.bottom : 0),
+              child: child,
+            ),
+          );
+        },
+      );
+    }
+
+    return Scaffold(
+      resizeToAvoidBottomInset: false,
+      extendBody: !wide,
+      extendBodyBehindAppBar: true,
+      appBar: hideBar
+          ? null
+          : AppBar(
+              toolbarHeight: 48,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: Colors.transparent,
+              flexibleSpace: const GlassBar(
+                top: true,
+                child: SizedBox.expand(),
+              ),
+              title: Text(l10n.appName, style: kit.titleMd),
+              actions: <Widget>[
+                IconButton(
+                  tooltip: l10n.appOpenMacs,
+                  icon: const Icon(Icons.laptop_mac),
+                  constraints: const BoxConstraints(
+                    minWidth: Metric.minTarget,
+                    minHeight: Metric.minTarget,
+                  ),
+                  onPressed: () => unawaited(
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) => const MacsScreen(),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: l10n.appSettingsTitle,
+                  icon: const Icon(Icons.settings_outlined),
+                  constraints: const BoxConstraints(
+                    minWidth: Metric.minTarget,
+                    minHeight: Metric.minTarget,
+                  ),
+                  onPressed: () => unawaited(
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) =>
+                            const SettingsScreen(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+      body: wide
+          ? SafeArea(
+              bottom: false,
+              child: Column(
+                children: <Widget>[
+                  const ConnectionBanner(),
+                  Expanded(
+                    child: IndexedStack(
+                      sizing: StackFit.expand,
+                      index: tab == 2
+                          ? 1
+                          : tab == 3
+                          ? 2
+                          : 0,
+                      children: <Widget>[
+                        _TabSlot(
+                          active: tab != 2 && tab != 3,
+                          child: Row(
+                            children: <Widget>[
+                              SizedBox(
+                                width: 360,
+                                child: SessionsScreen(onOpenChat: () {}),
+                              ),
+                              const VerticalDivider(),
+                              const Expanded(child: ChatScreen()),
+                            ],
+                          ),
+                        ),
+                        if (tab == 2)
+                          const VisualizeScreen()
+                        else
+                          const SizedBox.shrink(),
+                        if (tab == 3)
+                          const InboxScreen()
+                        else
+                          const SizedBox.shrink(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: _TabFade(
+                    index: tab,
+                    child: IndexedStack(
+                      index: tab,
+                      children: <Widget>[
+                        _TabSlot(
+                          active: tab == 0,
+                          child: _sessionsTab,
+                        ),
+                        _TabSlot(
+                          active: tab == 1,
+                          child: hideBar
+                              ? inset(
+                                  const Column(
+                                    children: <Widget>[
+                                      ConnectionBanner(),
+                                      Expanded(child: ChatScreen()),
+                                    ],
+                                  ),
+                                )
+                              : inset(const ChatScreen()),
+                        ),
+                        if (tab == 2)
+                          inset(const VisualizeScreen(), bottom: true)
+                        else
+                          const SizedBox.shrink(),
+                        _TabSlot(
+                          active: tab == 3,
+                          child: inset(const InboxScreen(), bottom: true),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (!hideBar)
+                  Positioned(
+                    top: MediaQuery.paddingOf(context).top,
+                    left: 0,
+                    right: 0,
+                    child: const ConnectionBanner(),
+                  ),
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top,
+                  left: 0,
+                  right: 0,
+                  child: const InAppAlertBanner(),
+                ),
+              ],
+            ),
+      bottomNavigationBar: const _BottomNav(),
+    );
+  }
+}
+
+class ConnectionBanner extends ConsumerStatefulWidget {
+  const ConnectionBanner({super.key});
+
+  @override
+  ConsumerState<ConnectionBanner> createState() => _ConnectionBannerState();
+}
+
+class _ConnectionBannerState extends ConsumerState<ConnectionBanner> {
+  Timer? _tick;
+  Timer? _hideConnected;
+  bool _showConnected = false;
+  LinkPhase? _last;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (Timer _) {
+      if (mounted &&
+          ref.read(connectionStatusProvider).phase == LinkPhase.disconnected) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    _hideConnected?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppL10n l10n = AppL10n.of(context);
+    final ConnectionStatus status = ref.watch(connectionStatusProvider);
+    if (_last != status.phase) {
+      if (status.phase == LinkPhase.connected && _last != null) {
+        _showConnected = true;
+        _hideConnected?.cancel();
+        _hideConnected = Timer(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _showConnected = false);
+        });
+      }
+      _last = status.phase;
+    }
+
+    String? text;
+    Color color = Kit.of(context).textMuted;
+    IconData icon = Icons.sync;
+    VoidCallback? retry;
+    switch (status.phase) {
+      case LinkPhase.connecting:
+        text = l10n.appConnecting;
+      case LinkPhase.disconnected:
+        if (status.revoked) {
+          text = l10n.appConnectionRevoked;
+          color = Kit.of(context).danger;
+          icon = Icons.link_off;
+        } else {
+          final int seconds = status.retryAt == null
+              ? 0
+              : status.retryAt!
+                    .difference(DateTime.now())
+                    .inSeconds
+                    .clamp(0, 999);
+          text = status.error != null
+              ? l10n.appNoRouteToMac
+              : l10n.appConnectionLostRetry(seconds);
+          if (status.refused.isNotEmpty) {
+            text = '$text\n${l10n.appCannotVerifyNodes(status.refused.join(', '))}';
+          }
+          color = Kit.of(context).danger;
+          icon = Icons.wifi_off;
+          retry = () => ref.read(bridgeClientProvider)?.retryNow();
+        }
+      case LinkPhase.connected:
+        final bool viaInternet = status.route == RouteKind.tunnel;
+        if (_showConnected || viaInternet) {
+          final String route = viaInternet
+              ? l10n.appRouteInternet
+              : l10n.appRouteHome;
+          text = status.route == null
+              ? l10n.appConnected
+              : l10n.appConnectedVia(route);
+          color = viaInternet ? Kit.of(context).needs : Kit.of(context).working;
+          icon = viaInternet ? Icons.public : Icons.check;
+        }
+        final String? through = status.via;
+        if (through != null) {
+          final String? down = status.primaryName;
+          text = down == null ? l10n.appThroughNodeOnly(through) : l10n.appThroughNode(through, down);
+          color = Kit.of(context).needs;
+          icon = Icons.swap_horiz;
+        }
+    }
+    if (text == null) return const SizedBox.shrink();
+    return Semantics(
+      liveRegion: true,
+      label: text,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.lg,
+          vertical: Space.sm,
+        ),
+        decoration: BoxDecoration(
+          color: Kit.of(context).sidebar,
+          border: Border(bottom: BorderSide(color: Kit.of(context).hairline)),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: Space.sm),
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: Kit.of(
+                  context,
+                ).labelSm.copyWith(color: color, fontSize: 12),
+              ),
+            ),
+            if (retry != null)
+              TextButton(onPressed: retry, child: Text(l10n.appRetryNow)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomNav extends ConsumerWidget {
+  const _BottomNav();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GlassNav(
+      selected: ref.watch(activeTabProvider),
+      solid: ref.watch(activeTabProvider) == 1,
+      inboxCount: ref.watch(inboxOpenCountProvider),
+      onSelect: (int i) => ref.read(activeTabProvider.notifier).show(i),
+    );
+  }
+}
+
+class KeyboardLiftController {
+  final ValueNotifier<double> settled = ValueNotifier<double>(0);
+
+  void dispose() => settled.dispose();
+}
+
+class KeyboardLift extends StatefulWidget {
+  KeyboardLift({
+    super.key,
+    required this.controller,
+    required this.list,
+    required this.composer,
+    bool? decoupled,
+  }) : decoupled = decoupled ?? Platform.isAndroid;
+  final KeyboardLiftController controller;
+  final Widget list;
+  final Widget composer;
+  final bool decoupled;
+
+  @override
+  State<KeyboardLift> createState() => _KeyboardLiftState();
+}
+
+class _KeyboardLiftState extends State<KeyboardLift> with SingleTickerProviderStateMixin {
+  static const Duration settleAfter = Duration(milliseconds: 90);
+  static const Duration keyboardStill = Duration(milliseconds: 40);
+  static const Duration slide = Duration(milliseconds: 220);
+
+  double _below = 0;
+  double _lastLift = 0;
+  Timer? _settle;
+
+  final ValueNotifier<double> _shown = ValueNotifier<double>(0);
+  late final AnimationController _slide;
+  double _slideFrom = 0;
+  double _slideTo = 0;
+  Timer? _still;
+  double _keyboardHeight = 0;
+  double _lastInset = 0;
+
+  bool _reconcileQueued = false;
+  bool _dropRoom = false;
+
+  void _queueReconcile() {
+    if (_reconcileQueued) return;
+    _reconcileQueued = true;
+    final WidgetsBinding binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((Duration _) => _reconcile());
+    if (binding.schedulerPhase == SchedulerPhase.idle) binding.scheduleFrame();
+  }
+
+  void _reconcile() {
+    _reconcileQueued = false;
+    final bool drop = _dropRoom;
+    _dropRoom = false;
+    if (!mounted) return;
+    final ValueNotifier<double> settled = widget.controller.settled;
+    if (_lastLift == 0) {
+      settled.value = 0;
+    } else if (!_slide.isAnimating && _slideTo == _lastLift && _shown.value == _lastLift) {
+      settled.value = _lastLift;
+    } else if (drop) {
+      settled.value = 0;
+    }
+  }
+
+  void _slideTowards(double target) {
+    if (_slideTo == target && (_slide.isAnimating || _shown.value == target)) {
+      if (!_slide.isAnimating) _queueReconcile();
+      return;
+    }
+    _slideFrom = _shown.value;
+    _slideTo = target;
+    unawaited(_slide.forward(from: 0));
+  }
+
+  void _follow(double lift, double inset) {
+    _still?.cancel();
+    final bool done = inset == 0 || (_keyboardHeight > 0 && (inset - _keyboardHeight).abs() < 0.5);
+    if (done) {
+      _slideTowards(lift);
+      return;
+    }
+    _still = Timer(keyboardStill, () {
+      _keyboardHeight = _lastInset;
+      _slideTowards(_lastLift);
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _slide = AnimationController(vsync: this, duration: slide)
+      ..addListener(() => _shown.value = _slideFrom + (_slideTo - _slideFrom) * Curves.easeOutCubic.transform(_slide.value))
+      ..addStatusListener((AnimationStatus status) {
+        if (status == AnimationStatus.completed && _slideTo > 0 && _slideTo == _lastLift) {
+          widget.controller.settled.value = _slideTo;
+        }
+      });
+    widget.controller.settled.addListener(_onSettled);
+  }
+
+  @override
+  void didUpdateWidget(KeyboardLift oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.settled.removeListener(_onSettled);
+      widget.controller.settled.addListener(_onSettled);
+    }
+  }
+
+  @override
+  void dispose() {
+    _settle?.cancel();
+    _still?.cancel();
+    _slide.dispose();
+    _shown.dispose();
+    widget.controller.settled.removeListener(_onSettled);
+    super.dispose();
+  }
+
+  void _onSettled() => setState(() {});
+
+  void _measure() {
+    final RenderObject? box = context.findRenderObject();
+    if (!mounted || box is! RenderBox || !box.hasSize) return;
+    final double below =
+        MediaQuery.sizeOf(context).height -
+        box.localToGlobal(Offset(0, box.size.height)).dy;
+    if (MediaQuery.viewInsetsOf(context).bottom == 0 &&
+        (below - _below).abs() > 0.5) {
+      setState(() => _below = below);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double inset = MediaQuery.viewInsetsOf(context).bottom;
+    final double reserved = _below + MediaQuery.paddingOf(context).bottom;
+    final double lift = math.max(0, inset - reserved);
+    if (!widget.decoupled) {
+      _shown.value = lift;
+    } else if (inset != _lastInset || lift != _lastLift) {
+      _lastInset = inset;
+      _follow(lift, inset);
+    }
+    if (inset == 0) {
+      WidgetsBinding.instance.addPostFrameCallback((Duration _) => _measure());
+    }
+    if (lift != _lastLift) {
+      final bool closing = lift < _lastLift;
+      _lastLift = lift;
+      _settle?.cancel();
+      if (widget.decoupled) {
+        if (closing && lift > 0) _dropRoom = true;
+        _queueReconcile();
+      } else if (closing && lift > 0) {
+        WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+          if (_lastLift > 0 && widget.controller.settled.value != 0) widget.controller.settled.value = 0;
+        });
+      } else if (lift == 0) {
+        WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+          if (_lastLift == 0) widget.controller.settled.value = 0;
+        });
+      } else {
+        _settle = Timer(
+          settleAfter,
+          () => widget.controller.settled.value = _lastLift,
+        );
+      }
+    }
+    final double settled = widget.controller.settled.value;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Expanded(
+          child: ClipRect(
+            child: ValueListenableBuilder<double>(
+              valueListenable: _shown,
+              child: widget.list,
+              builder: (BuildContext context, double shown, Widget? list) =>
+                  Transform.translate(offset: Offset(0, settled - shown), child: list),
+            ),
+          ),
+        ),
+        ValueListenableBuilder<double>(
+          valueListenable: _shown,
+          child: widget.composer,
+          builder: (BuildContext context, double shown, Widget? composer) =>
+              Transform.translate(offset: Offset(0, -shown), child: composer),
+        ),
+      ],
+    );
+  }
+}
+
+class _TabSlot extends StatefulWidget {
+  const _TabSlot({required this.active, required this.child});
+  final bool active;
+  final Widget child;
+
+  @override
+  State<_TabSlot> createState() => _TabSlotState();
+}
+
+class _TabSlotState extends State<_TabSlot> {
+  MediaQueryData? _frozen;
+
+  @override
+  Widget build(BuildContext context) {
+    final MediaQueryData live = MediaQuery.of(context);
+    if (widget.active) _frozen = live;
+    return TickerMode(
+      enabled: widget.active,
+      child: MediaQuery(
+        data: widget.active ? live : (_frozen ?? live),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _TabFade extends StatefulWidget {
+  const _TabFade({required this.index, required this.child});
+  final int index;
+  final Widget child;
+
+  @override
+  State<_TabFade> createState() => _TabFadeState();
+}
+
+class _TabFadeState extends State<_TabFade>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: Motion.ui,
+    value: 1,
+  );
+  late final CurvedAnimation _fade = CurvedAnimation(
+    parent: _controller,
+    curve: Motion.out,
+  );
+
+  @override
+  void didUpdateWidget(_TabFade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.index != widget.index &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _controller.forward(from: 0.25);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fade.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      FadeTransition(opacity: _fade, child: widget.child);
+}

@@ -1,0 +1,36 @@
+name: Review run
+
+# The untrusted half of the review agent. It runs on a pull request (a fork's too) with no token and
+# no secrets, checks nothing out and runs nothing from the PR: it only records the PR number and head
+# commit and finishes. review-post.yml listens for it (workflow_run) and does the work with the default
+# branch's code, reading the diff and the check results through the API. Event fields reach the shell
+# only through `env:`.
+#
+# `labeled` is in the types so that labeling an outside PR `notchling:review` starts a review; any other
+# label is skipped here. `reopened` is not: it brings no new commit, and the model is asked at most once
+# for each head commit. Drafts are skipped; `ready_for_review` starts the run when one is marked ready.
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, labeled]
+
+permissions: {}
+
+jobs:
+  record:
+    if: github.event.pull_request.draft == false && (github.event.action != 'labeled' || github.event.label.name == 'notchling:review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record the pull request
+        id: pr
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          case "$PR" in *[!0-9]*|"") echo "bad PR number"; exit 1;; esac
+          case "$HEAD" in *[!0-9a-f]*|"") echo "bad head sha"; exit 1;; esac
+          { echo "number=$PR"; echo "head=$HEAD"; } >> "$GITHUB_OUTPUT"
+    outputs:
+      number: ${{ steps.pr.outputs.number }}
+      head: ${{ steps.pr.outputs.head }}

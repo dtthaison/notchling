@@ -1,0 +1,36 @@
+[package]
+name = "notchling-embed"
+description = "Notchling embedding models for hybrid search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "notchling-embed"
+path = "src/main.rs"
+
+[features]
+default = []
+
+[dependencies]
+candle-core = "0.11.1"
+candle-nn = "0.11.1"
+kitoken = { version = "0.11.1", default-features = false, features = ["std", "serialization", "normalization", "convert-tokenizers", "regex-perf", "regex-unicode"] }
+safetensors = "0.8"
+memmap2 = "0.9"
+half = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+sha2 = "0.10"
+base64 = "0.22"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.11.1", features = ["accelerate"] }
+candle-nn = { version = "0.11.1", features = ["accelerate"] }
+
+[dev-dependencies]
+tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
+notchling-engine = { path = "../engine", features = ["static-embed"] }
+candle-transformers = { version = "0.11.1", default-features = false }

@@ -1,0 +1,660 @@
+use super::*;
+use crate::delegate::test_support::{rig, Rig};
+use crate::tools::acp::fake::FakeSpawner as AcpFake;
+use crate::tools::codex::fake::FakeRun;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use std::time::Duration;
+
+const STARTED: &str = r#"{"type":"thread.started","thread_id":"019e-s1"}"#;
+const MESSAGE: &str =
+    r#"{"type":"item.completed","item":{"type":"agent_message","text":"Looks fine."}}"#;
+const DONE: &str = r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#;
+
+fn words(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| s.to_string()).collect()
+}
+
+struct Ran {
+    code: i32,
+    out: String,
+    err: String,
+}
+
+fn delegate(rig: &Rig, args: &[&str], depth: Option<&str>) -> Ran {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ctx = Context {
+        cwd: &rig.folder,
+        home: Some(&rig.root),
+        depth,
+        record: None,
+    };
+    let code = run(&words(args), &ctx, rig.deps.clone(), &mut out, &mut err);
+    Ran {
+        code,
+        out: String::from_utf8(out).unwrap(),
+        err: String::from_utf8(err).unwrap(),
+    }
+}
+
+#[test]
+fn a_codex_job_prints_the_header_the_session_and_the_reply() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+    let ran = delegate(
+        &rig,
+        &[
+            "codex", "--model", "m1", "--effort", "HIGH", "--", "review", "it",
+        ],
+        None,
+    );
+    assert_eq!(ran.code, 0);
+    let mut lines = ran.out.lines();
+    let head = lines.next().unwrap();
+    assert!(
+        head.starts_with("Codex (m1, high): done in ") && head.ends_with("s, 15 tokens"),
+        "{head}"
+    );
+    assert_eq!(
+        lines.collect::<Vec<_>>(),
+        ["Session: 019e-s1", "", "Looks fine."]
+    );
+    assert_eq!(ran.err, "");
+    let spec = rig.codex.specs().remove(0);
+    assert_eq!(spec.cwd, rig.folder.to_string_lossy());
+    assert!(spec
+        .args
+        .contains(&"sandbox_mode=\"read-only\"".to_string()));
+    assert_eq!(spec.args.last().map(String::as_str), Some("review it"));
+}
+
+#[test]
+fn json_has_the_same_shape_as_the_swift_command() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+    let ran = delegate(&rig, &["codex", "--json", "x"], None);
+    assert_eq!(ran.out.lines().count(), 1);
+    let v: Value = serde_json::from_str(&ran.out).unwrap();
+    assert_eq!(v["tool"], "codex");
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["reply"], "Looks fine.");
+    assert_eq!(v["session"], "019e-s1");
+    assert_eq!(v["tokens"], 15);
+    assert_eq!(v["media"], json!([]));
+    assert_eq!(v["declined"], json!([]));
+    assert!(v.get("timedOut").is_none() && v.get("error").is_none());
+}
+
+#[test]
+fn exit_codes_are_0_1_and_124() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE]));
+    assert_eq!(delegate(&rig, &["codex", "x"], None).code, 0);
+
+    rig.codex
+        .push(FakeRun::ok(&[r#"{"type":"error","message":"nope"}"#]).exiting(1));
+    let failed = delegate(&rig, &["codex", "x"], None);
+    assert_eq!(failed.code, 1);
+    assert!(failed.out.starts_with("Codex: failed in "));
+    assert!(failed.out.contains("\nError: nope"));
+
+    rig.codex.push(FakeRun::held(&[STARTED]));
+    let slow = delegate(&rig, &["codex", "--timeout", "0.2", "--json", "x"], None);
+    assert_eq!(slow.code, 124);
+    let v: Value = serde_json::from_str(&slow.out).unwrap();
+    assert_eq!(
+        (v["timedOut"].as_bool(), v["ok"].as_bool()),
+        (Some(true), Some(false))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_line_that_cannot_run_exits_2_and_starts_nothing() {
+    let rig = rig(AcpFake::new());
+    for (args, message) in [
+        (vec!["claude", "x"], "Name the tool first: codex or agy."),
+        (vec!["codex"], "No prompt given."),
+        (
+            vec!["codex", "--timeout", "0", "x"],
+            "--timeout takes seconds.",
+        ),
+        (
+            vec!["codex", "--folder", "/no/such/folder", "x"],
+            "No folder at /no/such/folder.",
+        ),
+    ] {
+        let ran = delegate(&rig, &args, None);
+        assert_eq!(ran.code, 2, "{args:?}");
+        assert!(ran.err.starts_with(message), "{args:?}: {}", ran.err);
+        assert_eq!(ran.out, "");
+    }
+    assert!(rig.codex.specs().is_empty() && rig.agy.spawned().is_empty());
+}
+
+#[test]
+fn a_job_that_was_itself_delegated_twice_is_refused() {
+    let rig = rig(AcpFake::new());
+    let ran = delegate(&rig, &["codex", "x"], Some("2"));
+    assert_eq!(ran.code, 2);
+    assert_eq!(
+        ran.err,
+        "This job was itself delegated 2 times; do it yourself instead of delegating again.\n"
+    );
+    assert!(rig.codex.specs().is_empty());
+
+    rig.codex.push(FakeRun::ok(&[MESSAGE]));
+    assert_eq!(delegate(&rig, &["codex", "x"], Some("1")).code, 0);
+    let env = rig.codex.specs().remove(0).env;
+    assert!(
+        env.contains(&("NOTCHLING_DELEGATE_DEPTH".into(), Some("2".into()))),
+        "the tool's own processes are one level deeper: {env:?}"
+    );
+}
+
+#[test]
+fn generated_media_is_listed_and_copied_to_out_without_overwriting() {
+    let rig = rig(AcpFake::new());
+    let session = rig.codex_media().join("019e-s1");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::write(session.join("cup.png"), "img").unwrap();
+    let out = rig.root.join("assets");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::write(out.join("cup.png"), "already here").unwrap();
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE]));
+    let ran = delegate(
+        &rig,
+        &["codex", "--out", out.to_str().unwrap(), "draw a cup"],
+        None,
+    );
+    assert_eq!(ran.code, 0);
+    let generated = session.join("cup.png");
+    let copied = out.join("cup-2.png");
+    assert!(
+        ran.out.contains(&format!(
+            "Generated:\n  {}\nCopied to:\n  {}\n",
+            generated.display(),
+            copied.display()
+        )),
+        "{}",
+        ran.out
+    );
+    assert_eq!(std::fs::read_to_string(&copied).unwrap(), "img");
+    assert_eq!(
+        std::fs::read_to_string(out.join("cup.png")).unwrap(),
+        "already here"
+    );
+}
+
+#[test]
+fn a_copy_that_fails_fails_the_run() {
+    let rig = rig(AcpFake::new());
+    let session = rig.codex_media().join("019e-s1");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::write(session.join("cup.png"), "img").unwrap();
+    let not_a_folder = rig.root.join("file");
+    std::fs::write(&not_a_folder, "x").unwrap();
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE]));
+    let ran = delegate(
+        &rig,
+        &["codex", "--out", not_a_folder.to_str().unwrap(), "draw"],
+        None,
+    );
+    assert_eq!(ran.code, 1);
+    assert!(ran.out.contains("Error: Couldn't copy to "), "{}", ran.out);
+}
+
+#[test]
+fn an_agy_job_waits_for_the_turn_and_prints_what_it_declined() {
+    let responder: crate::tools::acp::fake::Responder = Arc::new(
+        |m: &Value, h: &crate::tools::acp::fake::FakeHandle| {
+            let id = m["id"].clone();
+            let reply =
+                |result: Value| h.push(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+            match m.get("method").and_then(Value::as_str) {
+                Some("initialize") => reply(json!({})),
+                Some("session/new") => reply(json!({"sessionId": "s9", "configOptions": []})),
+                Some("session/prompt") => {
+                    h.push(&json!({"jsonrpc": "2.0", "id": "perm", "method": "session/request_permission",
+                        "params": {"toolCall": {"kind": "execute", "title": "Run make"},
+                            "options": [{"optionId": "no", "kind": "reject_once"}]}}));
+                    h.push(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"update":
+                        {"sessionUpdate": "agent_message_chunk", "content": {"text": "Reviewed."}}}}));
+                    reply(json!({"stopReason": "end_turn", "usage": {"totalTokens": 99}}));
+                }
+                _ => {}
+            }
+        },
+    );
+    let rig = rig(AcpFake::with_responder(responder));
+    let ran = delegate(&rig, &["agy", "--", "review", "the", "diff"], None);
+    assert_eq!(ran.code, 0, "{} {}", ran.out, ran.err);
+    assert!(
+        ran.out.starts_with("Antigravity CLI: done in "),
+        "{}",
+        ran.out
+    );
+    assert!(ran.out.contains(", 99 tokens\nSession: s9\nDeclined (not allowed in a delegated run):\n  Run make\n\nReviewed."));
+    let prompt = &rig.agy.spawned()[0].requests("session/prompt")[0];
+    assert_eq!(prompt["params"]["prompt"][0]["text"], "review the diff");
+}
+
+const CACHE: &str = r#"{"models":[
+  {"slug":"gpt-a","display_name":"A","priority":1,"visibility":"list","default_reasoning_level":"medium",
+   "supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}]},
+  {"slug":"gpt-b","priority":2,"visibility":"list"}]}"#;
+
+fn listing(rig: &Rig, args: &[&str]) -> String {
+    let mut out = Vec::new();
+    assert_eq!(models_listing(&words(args), &rig.deps, &mut out), 0);
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.ends_with('\n'));
+    text.trim_end().to_string()
+}
+
+#[test]
+fn delegate_models_lists_both_tools() {
+    let mut rig = rig(AcpFake::new());
+    std::fs::create_dir_all(&rig.deps.codex_home).unwrap();
+    std::fs::write(rig.deps.codex_home.join("models_cache.json"), CACHE).unwrap();
+    rig.deps.capture = Arc::new(|program, args| {
+        assert_eq!((program, args), (Path::new("/fake/agy"), &["models"][..]));
+        Some("Fetching available models...\ngemini-4-argon-medium\tM\ngemini-4-argon-high\tH\nflash\tF\n".into())
+    });
+    assert_eq!(
+        listing(&rig, &[]),
+        "codex (--model <slug> --effort <level>):\n  gpt-a  efforts: low, medium (default medium)\n  gpt-b  efforts: \nagy (--model <model> --effort <level>):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
+    );
+    assert_eq!(
+        listing(&rig, &["agy"]),
+        "agy (--model <model> --effort <level>):\n  gemini-4-argon  efforts: medium, high  [review-secrets, spec-check at high]\n    use: Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.\n  flash  [not for review]\n  not for review: effort ultra"
+    );
+    assert!(listing(&rig, &["codex"]).starts_with("codex ("));
+    assert!(!listing(&rig, &["Codex"]).contains("agy ("));
+}
+
+#[test]
+fn delegate_models_says_so_when_a_tool_has_nothing_to_list() {
+    let rig = rig(AcpFake::new());
+    assert_eq!(
+        listing(&rig, &[]),
+        "codex (--model <slug> --effort <level>):\n  (Codex hasn't cached its model list yet; run codex once)\nagy (--model <model> --effort <level>):\n  (couldn't run agy models)"
+    );
+}
+
+#[test]
+fn a_timeout_longer_than_the_run_does_not_cut_it_short() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[MESSAGE]));
+    let began = std::time::Instant::now();
+    let ran = delegate(&rig, &["codex", "--timeout", "600", "x"], None);
+    assert_eq!(ran.code, 0);
+    assert!(began.elapsed() < Duration::from_secs(5));
+}
+
+use crate::delegate::record::{self, End};
+
+fn delegate_recorded(rig: &Rig, args: &[&str]) -> (Ran, std::path::PathBuf) {
+    let dir = rig.root.join("data/delegations");
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ctx = Context {
+        cwd: &rig.folder,
+        home: Some(&rig.root),
+        depth: None,
+        record: Some(RecordTo {
+            dir: &dir,
+            parent_session: "parent-1",
+            parent_cwd: "/work/app",
+            pid: std::process::id(),
+        }),
+    };
+    let code = run(&words(args), &ctx, rig.deps.clone(), &mut out, &mut err);
+    let ran = Ran {
+        code,
+        out: String::from_utf8(out).unwrap(),
+        err: String::from_utf8(err).unwrap(),
+    };
+    (ran, dir)
+}
+
+#[test]
+fn a_codex_job_from_a_session_leaves_a_finished_record_under_its_session_id() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+    let (ran, dir) = delegate_recorded(
+        &rig,
+        &[
+            "codex",
+            "--model",
+            "m1",
+            "--effort",
+            "high",
+            "--",
+            "Review the diff\nand be brief",
+        ],
+    );
+    assert_eq!(ran.code, 0);
+    let records = record::read_all(&dir);
+    assert_eq!(records.len(), 1, "the pending file is gone: {records:?}");
+    let r = &records[0];
+    assert_eq!(r.file_name(), "codex-019e-s1.json");
+    assert_eq!(r.parent_session, "parent-1");
+    assert_eq!(r.parent_cwd, "/work/app");
+    assert_eq!(r.tool, "codex");
+    assert_eq!(r.model.as_deref(), Some("m1"));
+    assert_eq!(r.effort.as_deref(), Some("high"));
+    assert_eq!(r.description, "Review the diff");
+    assert_eq!(r.outcome, Some(End::Ok));
+    assert!(r.ended.is_some_and(|e| e >= r.started));
+    assert_eq!(r.pid, std::process::id());
+}
+
+#[test]
+fn a_failed_job_is_recorded_as_failed_and_a_call_without_a_session_leaves_nothing() {
+    let failing = rig(AcpFake::new());
+    failing
+        .codex
+        .push(FakeRun::ok(&[STARTED, r#"{"type":"error","message":"nope"}"#]).exiting(1));
+    let (ran, dir) = delegate_recorded(&failing, &["codex", "x"]);
+    assert_eq!(ran.code, 1);
+    assert_eq!(record::read_all(&dir)[0].outcome, Some(End::Failed));
+
+    let plain = rig(AcpFake::new());
+    plain.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+    assert_eq!(delegate(&plain, &["codex", "x"], None).code, 0);
+    assert!(
+        !plain.root.join("data").exists(),
+        "no CLAUDE_CODE_SESSION_ID, no record"
+    );
+}
+
+#[test]
+fn a_job_that_is_stopped_by_a_signal_is_recorded_as_stopped() {
+    let rig = rig(AcpFake::new());
+    rig.codex.push(FakeRun::held(&[STARTED]));
+    rig.deps
+        .stop
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (ran, dir) = delegate_recorded(&rig, &["codex", "x"]);
+    assert_eq!(ran.code, 1);
+    assert_eq!(record::read_all(&dir)[0].outcome, Some(End::Stopped));
+}
+
+#[test]
+fn a_refused_command_line_leaves_no_record() {
+    let rig = rig(AcpFake::new());
+    let (ran, dir) = delegate_recorded(&rig, &["codex"]);
+    assert_eq!(ran.code, 2);
+    assert!(!dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_trusted_folder_is_added_to_agy_and_the_command_says_so_on_stderr() {
+    let mut rig = rig(AcpFake::new());
+    let claude_json = rig.root.join("claude.json");
+    let settings = rig.root.join("agy-settings.json");
+    let canonical = std::fs::canonicalize(&rig.folder).unwrap();
+    std::fs::write(
+        &claude_json,
+        format!(
+            r#"{{"projects": {{"{}": {{"hasTrustDialogAccepted": true}}}}}}"#,
+            canonical.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    std::fs::write(&settings, r#"{"trustedWorkspaces": []}"#).unwrap();
+    rig.deps.agy_trust = Some(super::agy_trust::Files {
+        claude_json,
+        settings: settings.clone(),
+    });
+    let mut err = Vec::new();
+    trust_folder(&rig.folder.to_string_lossy(), &rig.deps, &mut err);
+    let said = String::from_utf8(err).unwrap();
+    assert!(
+        said.starts_with("Added ") && said.contains("trusted workspaces"),
+        "{said}"
+    );
+    assert!(std::fs::read_to_string(&settings)
+        .unwrap()
+        .contains(&*canonical.to_string_lossy()));
+    let mut again = Vec::new();
+    trust_folder(&rig.folder.to_string_lossy(), &rig.deps, &mut again);
+    assert!(again.is_empty());
+}
+
+mod quota_gate {
+    use super::*;
+    use crate::delegate::quota::{self, Pool, Quota, Source, Window};
+    use crate::providers::usage::Reached;
+
+    const NOW: f64 = 1_794_400_000.0;
+
+    fn clock() -> f64 {
+        NOW
+    }
+
+    fn gated() -> Rig {
+        let mut rig = rig(AcpFake::new());
+        rig.deps.quota = Some(Source {
+            dir: rig.root.join("quota"),
+            clock,
+        });
+        rig
+    }
+
+    fn argon_full() -> Quota {
+        Quota {
+            fetched: NOW,
+            signed_in: true,
+            reached: None,
+            pools: vec![
+                Pool {
+                    name: "Gemini Models".into(),
+                    windows: vec![Window {
+                        label: "Week".into(),
+                        percent: 0.0,
+                        resets_at: None,
+                    }],
+                },
+                Pool {
+                    name: "Gemini 4 Argon".into(),
+                    windows: vec![Window {
+                        label: "Week".into(),
+                        percent: 100.0,
+                        resets_at: Some(NOW + 3.0 * 86_400.0 + 4.0 * 3_600.0),
+                    }],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_model_in_a_used_up_pool_fails_at_once_naming_the_pool_and_the_reset() {
+        let rig = gated();
+        quota::save(&rig.root.join("quota"), "antigravity", &argon_full());
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-argon-high", "--", "hello"],
+            None,
+        );
+        assert_eq!(ran.code, 1);
+        assert!(
+            ran.out
+                .contains("Error: gemini-4-argon-high can't run now."),
+            "{}",
+            ran.out
+        );
+        assert!(
+            ran.out
+                .contains("Gemini 4 Argon: week quota used up, resets in 3d 4h"),
+            "{}",
+            ran.out
+        );
+        assert_eq!(rig.agy.calls().len(), 0, "nothing was started");
+    }
+
+    #[test]
+    fn json_carries_the_same_error() {
+        let rig = gated();
+        quota::save(&rig.root.join("quota"), "antigravity", &argon_full());
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-argon", "--json", "--", "hello"],
+            None,
+        );
+        assert_eq!(ran.code, 1);
+        let v: Value = serde_json::from_str(&ran.out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("Gemini 4 Argon"));
+    }
+
+    #[test]
+    fn codex_out_of_credits_fails_at_once() {
+        let rig = gated();
+        let q = Quota {
+            pools: Vec::new(),
+            reached: Some(Reached::Credits),
+            ..argon_full()
+        };
+        quota::save(&rig.root.join("quota"), "codex", &q);
+        let ran = delegate(
+            &rig,
+            &["codex", "--model", "gpt-6-astra", "--", "hello"],
+            None,
+        );
+        assert_eq!(ran.code, 1);
+        assert!(ran.out.contains("Codex: out of credits"), "{}", ran.out);
+        assert!(rig.codex.specs().is_empty());
+    }
+
+    #[test]
+    fn another_pool_or_no_read_runs_as_before() {
+        let rig = gated();
+        rig.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+        quota::save(&rig.root.join("quota"), "antigravity", &argon_full());
+        let ran = delegate(&rig, &["codex", "--", "hi"], None);
+        assert_eq!(ran.code, 0, "{}", ran.out);
+        let plain = gated();
+        plain.codex.push(FakeRun::ok(&[STARTED, MESSAGE, DONE]));
+        assert_eq!(delegate(&plain, &["codex", "--", "hi"], None).code, 0);
+    }
+}
+
+#[test]
+fn delegate_models_shows_xhigh_only_for_the_models_that_list_it() {
+    let mut rig = rig(AcpFake::new());
+    rig.deps.capture = Arc::new(|_, _| {
+        Some("Fetching available models...\ngemini-4-neon-high\tH\ngemini-4-neon-xhigh\tX\ngemini-4-neon-low\tL\ngemini-4-argon-high\tH\ngemini-4-argon-medium\tM\n".into())
+    });
+    let mut out = Vec::new();
+    assert_eq!(models_listing(&["agy".to_string()], &rig.deps, &mut out), 0);
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("  gemini-4-neon  efforts: low, high, xhigh"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  gemini-4-argon  efforts: medium, high"),
+        "{text}"
+    );
+    assert!(!text.contains("argon  efforts: medium, high, xhigh"));
+
+    let mut out = Vec::new();
+    assert_eq!(
+        models_listing_json(&["agy".to_string()], &rig.deps, &mut out),
+        0
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        v["agy"]["models"][0]["efforts"],
+        serde_json::json!(["low", "high", "xhigh"])
+    );
+}
+
+mod said_out {
+    use super::*;
+    use crate::delegate::quota::{self, Source};
+
+    const NOW: f64 = 1_794_400_000.0;
+    const LINE: &str = "\u{26a0} Individual quota reached. Please upgrade your subscription\u{2026} Resets in 134h28m59s";
+
+    fn clock() -> f64 {
+        NOW
+    }
+
+    fn quota_agent() -> crate::tools::acp::fake::Responder {
+        Arc::new(|m: &Value, h: &crate::tools::acp::fake::FakeHandle| {
+            let id = m["id"].clone();
+            let reply =
+                |result: Value| h.push(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+            let config = json!([
+                {"id": "model", "name": "Model", "type": "select", "currentValue": "gemini-4-hydrogen",
+                 "options": [{"value": "gemini-4-hydrogen", "name": "H"}]},
+                {"id": "thought_level", "name": "Thinking", "type": "select", "currentValue": "medium",
+                 "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+            ]);
+            match m.get("method").and_then(Value::as_str) {
+                Some("initialize") => reply(json!({})),
+                Some("session/new") => reply(json!({"sessionId": "s1", "configOptions": config})),
+                Some("session/set_config_option") => reply(json!({})),
+                Some("session/prompt") => {
+                    h.push(
+                        &json!({"jsonrpc": "2.0", "method": "session/update", "params": {"update":
+                        {"sessionUpdate": "agent_message_chunk", "content": {"text": LINE}}}}),
+                    );
+                    reply(json!({"stopReason": "end_turn"}));
+                }
+                _ => {}
+            }
+        })
+    }
+
+    #[test]
+    fn an_antigravity_quota_line_fails_the_job_and_marks_the_pool_used_up() {
+        let mut rig = rig(AcpFake::with_responder(quota_agent()));
+        rig.deps.quota = Some(Source {
+            dir: rig.root.join("quota"),
+            clock,
+        });
+        let ran = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-hydrogen", "--", "review", "it"],
+            None,
+        );
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.out.contains("failed in "), "{}", ran.out);
+        assert!(
+            ran.out.contains(
+                "Error: gemini-4-hydrogen can't run now. Gemini Models: individual quota used up, resets in 5d 14h."
+            ),
+            "{}",
+            ran.out
+        );
+        assert!(!ran.out.contains(": done"), "{}", ran.out);
+        let saved = quota::load(&rig.root.join("quota"), Tool::Agy).expect("the pool is marked");
+        assert!(matches!(
+            quota::verdict(Some(&saved), Tool::Agy, "gemini-4-hydrogen", NOW),
+            quota::Verdict::Out(_)
+        ));
+
+        let again = delegate(
+            &rig,
+            &["agy", "--model", "gemini-4-hydrogen", "--", "review", "it"],
+            None,
+        );
+        assert_eq!(again.code, 1);
+        assert_eq!(
+            rig.agy.spawned().len(),
+            1,
+            "the second call never started agy"
+        );
+    }
+
+    #[test]
+    fn json_and_a_run_without_a_quota_folder_still_fail() {
+        let rig = rig(AcpFake::with_responder(quota_agent()));
+        let ran = delegate(&rig, &["agy", "--json", "--", "review", "it"], None);
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.out.contains("can't run now"), "{}", ran.out);
+    }
+}

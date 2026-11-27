@@ -1,0 +1,97 @@
+{
+  "arguments" : [
+    "attach",
+    "912dd4ac"
+  ],
+  "behavior" : "ctrl-k-burst-negative",
+  "byteCount" : 3265,
+  "claudeCode" : "v2.1.319",
+  "cols" : 200,
+  "phases" : [
+    {
+      "name" : "attach",
+      "offset" : 0,
+      "tMs" : 1
+    },
+    {
+      "name" : "ctrl-k burst",
+      "offset" : 3110,
+      "tMs" : 1063
+    }
+  ],
+  "program" : "~\/.local\/bin\/claude",
+  "recordedAt" : "2026-11-09T01:20:45Z",
+  "rows" : 50,
+  "screenAtEnd" : [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.319",
+    "▝▜██████▀  Haiku 5.5 · Claude Team",
+    " ▝▝   ▝▝   \/private\/var\/folders\/sh\/6ghv6gg90355tmg7jdk5cs0c0000gn\/T\/notchling-record-1794187123",
+    "",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Brewed for 2s · done 8:19 AM",
+    "",
+    "❯ Reply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Cooked for 2s · done 8:20 AM",
+    "",
+    "❯ stale draftReply with just OK.",
+    "",
+    "⏺ OK",
+    "",
+    "✻ Baked for 3s · done 8:20 AM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "                                                                                                                                                                          Ctrl+Y to paste deleted text",
+    "─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── record ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  notchling-record-1794187123 > Haiku 5.5 | 50.1k tokens > main | someone@example.invalid",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents"
+  ],
+  "steps" : [
+    {
+      "hex" : "1b5b3230307e6472616674206f6e651b5b3230317e",
+      "label" : "bracketed paste (draft)",
+      "offset" : 3045,
+      "tMs" : 649
+    },
+    {
+      "hex" : "050b050b",
+      "label" : "Ctrl+E Ctrl+K x2 in one write",
+      "offset" : 3110,
+      "tMs" : 1063
+    },
+    {
+      "hex" : "05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f05157f0515",
+      "label" : "clearInput (cleanup)",
+      "offset" : 3110,
+      "tMs" : 4090
+    }
+  ]
+}

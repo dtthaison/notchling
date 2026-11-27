@@ -1,0 +1,15 @@
+[
+  { "input": "tool:codex deploy", "chips": ["tool:codex"], "words": ["deploy"], "rest": "deploy" },
+  { "input": "in:notchling when:7d", "chips": ["project:notchling", "when:7d"], "words": [], "rest": "" },
+  { "input": "account:work s:", "chips": ["account:work", "category:settings"], "words": [], "rest": "" },
+  { "input": "when:bogus", "chips": [], "words": ["when", "bogus"], "rest": "when:bogus" },
+  { "input": "project:", "chips": [], "words": ["project"], "rest": "project:" },
+  { "input": "s: dark", "chips": ["category:settings"], "words": ["dark"], "rest": "dark" },
+  { "input": ">new tab", "chips": ["category:actions"], "words": ["new", "tab"], "rest": "new tab" },
+  { "input": "S:", "chips": ["category:settings"], "words": [], "rest": "" },
+  { "input": "x: y", "chips": [], "words": ["x", "y"], "rest": "x: y" },
+  { "input": "a:b", "chips": [], "words": ["a", "b"], "rest": "a:b" },
+  { "input": "fix tool:Codex bug when:Today", "chips": ["tool:codex", "when:today"], "words": ["fix", "bug"], "rest": "fix bug" },
+  { "input": "owner:me kind:Release state:open when:2026-11", "chips": ["owner:me", "kind:release", "state:open", "when:2026-11"], "words": [], "rest": "" },
+  { "input": "p: tool:agy notes", "chips": ["category:pages", "tool:agy"], "words": ["notes"], "rest": "notes" }
+]

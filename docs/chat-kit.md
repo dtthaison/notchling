@@ -1,6 +1,6 @@
 # Chat design kit
 
-Built with BAMA's `design-kit` method. Code: `Sources/Notchling/DesignKit/ChatKit.swift` (tokens, type, icons, parts, gallery). Screens: `Sources/Notchling/Chat/Views/`.
+Built with BAMA's `design-kit` method. Code: `crates/kit/` (tokens, type, icons, parts, gallery; the brand art is in `assets/brand/kit/`). Screens: `crates/app/src/chat/`.
 
 ## Feel
 
@@ -85,7 +85,9 @@ All of them become `nil` (no animation) under Reduce Motion.
 
 ## Icons (`KitIcon`)
 
-SF Symbols at one weight (medium), one size per place: 12 in rows and pills, 13 in buttons. Filled forms only for status badges. Claude's mark is `sparkle` on an orange disc.
+SF Symbols at one weight (medium), one size per place: 12 in rows and pills, 13 in buttons. Filled forms only for status badges. Claude's mark is a plain `sparkle` glyph. The app's own mark is the Sweep icon from `assets/brand/icon-1024.png`.
+
+The Rust app (`crates/kit`) draws the closest Lucide icon (ISC) in place of each symbol, since SF Symbols may ship only in apps for Apple's systems and that app also builds for Windows and Linux. Only the SVGs in use are vendored, in `crates/kit/assets/icons/` with Lucide's license; `Icon::svg` maps each icon to one, and an icon without one keeps its text glyph. An icon's box is 1.25 times the symbol's point size (`icon::SVG_SCALE`), so it looks the same size.
 
 ## Window
 
@@ -95,6 +97,8 @@ Title bar hidden and transparent, full-size content. Traffic lights stay where A
 
 ### Session row (`KitSessionRowStyle`)
 Avatar 30 with a status badge, name (heading), status line (meta, muted), age (meta, faint). Height 52, inset 8, radius md.
+
+The sidebar's row (Rust `session_row_marked`) has three lines: the tool icon (14) before the name, the account (9 pt person, or a branch in a lane, then the email; meta, faint), the status line (accent text while the session needs you). Height 66 whether or not the account is known. The Rust app also shows the active Codex and Antigravity account, which the Swift row leaves blank.
 
 | State | Fill | Border |
 | --- | --- | --- |
@@ -112,6 +116,10 @@ A question's answer: number badge (1, 2, 3, matching the terminal's digits), tit
 
 ### Composer
 Card fill, radius composer, hairline border (accent 60% while focused), soft shadow. Send is a 30 pt accent disc with an `arrow.up`, faint when empty.
+
+**Text editor** (the Rust app's `TextEditor`, `crates/kit/src/ui/text_editor/`): body type, 16 pt lines, one to eight then it scrolls with the caret kept in view. Caret 1.5 pt accent, on for half a second after anything happens, then blinking at 0.5 s while focused. Selection accent 35%. Text the input method is composing is underlined 1 pt in the text color; the candidate window sits under it. Placeholder in textFaint. Disabled: 50% opacity, no caret, no focus. A file dragged over the card turns its edge accent; dropped, its path goes in at the caret.
+
+**Scroll bar** (the Rust app's `scrollable`, `crates/kit/src/ui/scrollbar.rs`; GPUI draws none), an overlay like macOS's: a thumb 7 pt wide (9 under the pointer), 2 pt in from the right edge, textMuted at 55% (75% hovered or dragged), at least 24 pt long; no track at rest, a faint textFaint one while hovered or dragged. It shows while the content scrolls, stays 0.7 s, fades over 0.3 s, and shows whenever the pointer is in the 14 pt strip along the edge. Drag the thumb to scroll; a press in the track pages. It floats over the content (no layout space), is hidden when the content fits, and the pointer stays an arrow over it. The numbers are in `crates/kit/src/scrollbar.rs`. `NOTCHLING_RENDER_SCROLLBARS=1` pins it on in a `--render`.
 
 **Shell mode**, when the draft starts with `!`: a 1.5 pt shell border over a shellWash fill, a header row (`terminal` icon, "Shell command" in label type, then "runs in <folder> · Claude sees the output" in meta), the draft in mono, a shell-colored run disc, and the hint "Return runs it like ! in the terminal · delete the ! to send a message instead". A sent `! command` shows in a shellWash bubble, mono, with the `!` in shell. When putting a copied command back together changes it, a raised "Will run" box under the header shows the command as it will run.
 

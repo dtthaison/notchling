@@ -1,0 +1,5 @@
+⏺ When you run /model it asks:
+
+  Switch model?
+  ❯ 1. Yes, switch to Opus 5.5
+    2. No, go back

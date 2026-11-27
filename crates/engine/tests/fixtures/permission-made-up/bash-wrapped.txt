@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.319
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/work/api
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy && ls
+   Print a long line
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No, and tell Claude what to do differently (esc)

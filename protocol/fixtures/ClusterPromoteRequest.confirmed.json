@@ -1,0 +1,6 @@
+{
+  "confirmed": true,
+  "id": 53,
+  "node": "1111111111111111",
+  "op": "cluster.promote"
+}

@@ -1,0 +1,51 @@
+cursor 46 9 true
+
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Opus 5.5 with medium effort · Claude Ultra
+ ▝▝   ▝▝   ~/work/demo
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ❯ /chrome                                                      Open Claude in Chrome settings
+    /chrome-browser                                              Read this skill before the first step that uses Claude in Chrome
+                                                                 and the browser extension.
+    /built-in-browser                                            Read this skill before the first step that uses the built-in browser,
+                                                                 the browser pane inside the desktop app.
+───────────────────────────────────────────────────────────────────────────────────────────── demo ─
+❯ /chrome
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  demo > Opus 5.5 | 0 tokens > main
+  ⏵⏵ auto mode on (shift+tab to cycle)

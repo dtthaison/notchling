@@ -1,0 +1,6 @@
+⏺ The menu looks like this:
+
+  Pick a model
+  ❯ 1. Opus
+    2. Sonnet
+  Pick one and press Enter.

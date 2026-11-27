@@ -1,0 +1,5 @@
+⏺ The docs say to pick a model like this:
+
+  Choose a model
+  > 1. Opus for hard work
+  2. Sonnet for the rest

@@ -1,0 +1,1 @@
+{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Artifact","cwd":"WORK","tool_input":{"file_path":"report.html","title":"Cost Report"},"tool_response":{"output":"Published report.html to https://claude.ai/code/artifact/AbCdEfGhIjKlMnOpQrStUv (version id 1793506664-65e3)"}}

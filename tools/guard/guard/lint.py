@@ -1,0 +1,347 @@
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple
+
+from guard import locale_lint
+from guard.source import strip_code, strip_comments
+from guard.tomldeps import lines_naming_outside_macos
+from guard.zones import glob_regex
+
+EXCLUDE = ("tools/**", "apps/flutter/test/**", "crates/engine/tests/fixtures/notchling/**", "crates/engine/tests/fixtures/console/**")
+BASELINE = Path("tools/guard/lint-baseline.json")
+
+Found = List[Tuple[int, str]]
+Check = Callable[[str, List[str], Path], Found]
+
+
+@dataclass(frozen=True)
+class Rule:
+    id: str
+    why: str
+    paths: Tuple[str, ...]
+    check: Check
+    bad: Tuple[str, str]
+    good: Tuple[str, str]
+    exclude: Tuple[str, ...] = EXCLUDE
+    warn: bool = False
+    probe_files: Tuple[Tuple[str, str], ...] = ()
+
+    def applies(self, path: str) -> bool:
+        if any(glob_regex(g).match(path) for g in self.exclude):
+            return False
+        return any(glob_regex(g).match(path) for g in self.paths)
+
+
+@dataclass(frozen=True)
+class Violation:
+    rule: str
+    path: str
+    line: int
+    text: str
+    warn: bool = False
+
+
+def _code_matches(*patterns: str) -> Check:
+    regs = [re.compile(p) for p in patterns]
+
+    def check(path: str, lines: List[str], repo: Path) -> Found:
+        return [(i + 1, l.strip()) for i, l in enumerate(lines)
+                if any(r.search(strip_code(path, l)) for r in regs)]
+    return check
+
+
+def _gpui_macos_only(path: str, lines: List[str], repo: Path) -> Found:
+    return lines_naming_outside_macos(lines, "gpui")
+
+
+GENERATED_FILES = frozenset({
+    "crates/protocol/src/generated.rs",
+    "apps/flutter/lib/core/protocol/generated.dart",
+    "crates/locale/src/generated.rs",
+})
+GENERATED_DIRS = ("apps/flutter/lib/l10n/",)
+
+
+def _file_size(limit: int) -> Check:
+    def check(path: str, lines: List[str], repo: Path) -> Found:
+        if path in GENERATED_FILES or path.startswith(GENERATED_DIRS):
+            return []
+        return [(0, f"over {limit} lines")] if len(lines) > limit else []
+    return check
+
+
+KINDS_DIR = "crates/events/src/kinds/"
+KINDS_TEXT = [re.compile(p) for p in (r"\bString\b", r"\bstr\b", r"\bValue\b", r"Vec<u8>")]
+LOG_FIELD_IMPL = re.compile(r"^\s*impl\b.*\bLogField\b\s+for\b")
+FIELD_FILE = re.compile(r"crates/events/src/field[^/]*\.rs\Z")
+
+
+def _log_no_text(path: str, lines: List[str], repo: Path) -> Found:
+    if not path.endswith(".rs"):
+        return []
+    in_kinds = path.startswith(KINDS_DIR)
+    field_file = FIELD_FILE.match(path) is not None
+    out = []
+    for i, l in enumerate(lines):
+        code = strip_code(path, l)
+        if in_kinds and any(r.search(code) for r in KINDS_TEXT):
+            out.append((i + 1, l.strip()))
+        elif not field_file and LOG_FIELD_IMPL.search(code):
+            out.append((i + 1, l.strip()))
+    return out
+
+
+LOG_OUTPUT_FILES = tuple(f"crates/notchlingd/src/{n}.rs" for n in (
+    "clients", "pages_cli", "vault_cli", "delegate_cli", "settings_cli", "consent_cli", "models_cli", "shells_cli", "switch_cli", "session_cli", "jobs_cli", "cluster_admin_cli", "accounts_cli", "machines_cli", "service", "lib", "main")) + (
+    "crates/app/src/mac/render.rs", "crates/app/src/mac/bench.rs", "crates/app/src/chat/view/list_probe_run.rs", "crates/embed/src/main.rs")
+LOG_WRITER_EXCLUDE = EXCLUDE + ("crates/events/**", "**/*_tests.rs", "**/tests_*.rs", "**/tests.rs",
+                                "**/testutil.rs", "**/test_support.rs") + LOG_OUTPUT_FILES
+LOG_PRINT = [re.compile(p) for p in (r"(?<![\w:])e?print(ln)?!", r"(?<![\w:])(?:tracing|log)::\w+!",
+                                     r"^\s*use\s+(?:tracing|log)::")]
+TEST_MOD_OPEN = re.compile(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?mod\s+\w+\s*\{")
+
+
+def _test_module_start(lines: List[str]) -> int:
+    for i, l in enumerate(lines):
+        if l.strip() != "#[cfg(test)]":
+            continue
+        for nxt in lines[i + 1:i + 4]:
+            if not nxt.strip() or nxt.strip().startswith("#["):
+                continue
+            if TEST_MOD_OPEN.match(nxt):
+                return i
+            break
+    return len(lines)
+
+
+def _log_one_writer(path: str, lines: List[str], repo: Path) -> Found:
+    out = []
+    for i, l in enumerate(lines[:_test_module_start(lines)]):
+        code = strip_code(path, l)
+        if any(r.search(code) for r in LOG_PRINT):
+            out.append((i + 1, l.strip()))
+    return out
+
+
+UNBOUNDED_ALLOW = Path("tools/guard/unbounded-wait-allow.json")
+WAIT_CALLS = [re.compile(p) for p in (r"\.recv\(\)(?!\s*\.await)", r"\.join\(\)", r"\.wait\([a-z_]\w*\)\s*(?:$|[;?]|\.(?:unwrap\w*|expect|map_err|ok)\b)", r"\.wait_while\(")]
+SOCKET_OPEN = re.compile(r"\b(?:UnixStream|TcpStream)::(?:connect|pair)\b|\.accept\(\)")
+READ_TIMEOUT = re.compile(r"\bset_read_timeout\b|\bset_nonblocking\b|\bpoll\b")
+
+
+def unbounded_allow(repo: Path) -> List[dict]:
+    path = Path(repo) / UNBOUNDED_ALLOW
+    return json.loads(path.read_text())["entries"] if path.exists() else []
+
+
+def _unbounded_wait(path: str, lines: List[str], repo: Path) -> Found:
+    allowed = {(e["path"], " ".join(e["text"].split())) for e in unbounded_allow(repo) if e.get("reason")}
+    body = lines[:_test_module_start(lines)]
+    code = [strip_code(path, l) for l in body]
+    bounded = any(READ_TIMEOUT.search(c) for c in code)
+    out = []
+    for i, c in enumerate(code):
+        hit = any(r.search(c) for r in WAIT_CALLS) or (not bounded and SOCKET_OPEN.search(c))
+        if hit and (path, " ".join(body[i].split())) not in allowed:
+            out.append((i + 1, body[i].strip()))
+    return out
+
+
+CLAUDE_FILE_STRICT = re.compile(r"\bserde_json\s*::\s*(?:de\s*::\s*)?from_(?:slice|str|reader)\b")
+CLAUDE_FILE_BARE = re.compile(r"(?<![\w:.])from_(?:slice|str|reader)\b")
+CLAUDE_FILE_DE = re.compile(r"(?<![\w:.])de\s*::\s*from_(?:slice|str|reader)\b")
+CLAUDE_FILE_FN = re.compile(r"\bfn\s+from_(?:slice|str|reader)\b")
+CLAUDE_FILE_NAMED = re.compile(r"state\.json|\"respawnFlags\"|\"inFlight\"")
+SESSIONS_DIR = re.compile(r"\.join\(\s*\"sessions\"\s*\)")
+USE_STATEMENT = re.compile(r"(?<![\w])use\s+([^;]*);")
+SERDE_JSON_USE = re.compile(r"\s*serde_json\s*::")
+SERDE_JSON_GLOB = re.compile(r"\s*serde_json\s*::\s*\*\s*\Z")
+CLAUDE_FILE_ALLOW = Path("tools/guard/claude-file-parse-allow.json")
+
+
+def claude_file_allow(repo: Path) -> List[dict]:
+    path = Path(repo) / CLAUDE_FILE_ALLOW
+    return json.loads(path.read_text())["entries"] if path.exists() else []
+
+
+def _use_statements(code: List[str]) -> List[Tuple[int, int, str]]:
+    text = "\n".join(code)
+    out = []
+    for m in USE_STATEMENT.finditer(text):
+        first = text.count("\n", 0, m.start())
+        out.append((first, first + m.group(0).count("\n"), m.group(1)))
+    return out
+
+
+def _claude_file_parse(path: str, lines: List[str], repo: Path) -> Found:
+    body = lines[:_test_module_start(lines)]
+    kept = [strip_comments(path, l) for l in body]
+    names_session_file = any(CLAUDE_FILE_NAMED.search(k) for k in kept) or (
+        any(SESSIONS_DIR.search(k) for k in kept) and any(".json" in k for k in kept))
+    if not names_session_file:
+        return []
+    code = [strip_code(path, l) for l in body]
+    uses = _use_statements(code)
+    serde = [clause for _, _, clause in uses if SERDE_JSON_USE.match(clause)]
+    bare = any(re.search(r"\bfrom_(?:slice|str|reader)\b", c) or SERDE_JSON_GLOB.match(c) for c in serde)
+    de = any(re.search(r"\bde\b", c) or SERDE_JSON_GLOB.match(c) for c in serde)
+    in_use = {i for first, last, _ in uses for i in range(first, last + 1)}
+    allowed = {(e["path"], " ".join(e["text"].split())) for e in claude_file_allow(repo) if e.get("reason", "").strip()}
+    out = []
+    for i, c in enumerate(code):
+        if i in in_use:
+            continue
+        hit = (CLAUDE_FILE_STRICT.search(c)
+               or (bare and CLAUDE_FILE_BARE.search(c) and not CLAUDE_FILE_FN.search(c))
+               or (de and CLAUDE_FILE_DE.search(c)))
+        if hit and (path, " ".join(body[i].split())) not in allowed:
+            out.append((i + 1, body[i].strip()))
+    return out
+
+
+TEST_FILES = EXCLUDE + ("**/*_tests.rs", "**/tests_*.rs", "**/tests.rs", "**/tests/**", "**/testutil.rs", "**/test_support.rs")
+RULES: List[Rule] = [
+    Rule("LINT-NO-APPLESCRIPT", "No NSAppleScript or osascript (notifications show Script Editor's name)",
+         ("crates/**/*.rs",), _code_matches(r"\bNSAppleScript\b", r"\bosascript\b"),
+         ("crates/app/src/a.rs", "use osascript::run;\n"),
+         ("crates/app/src/a.rs", "// never osascript\n")),
+    Rule("LINT-GPUI-MACOS-ONLY", "gpui is a dependency only under [target.'cfg(target_os = \"macos\")'.dependencies] "
+         "(Linux needs system libraries CI doesn't install yet; Windows is unverified)",
+         ("Cargo.toml", "crates/**/Cargo.toml"), _gpui_macos_only,
+         ("crates/kit/Cargo.toml", '[dependencies]\ngpui = { version = "=0.2.2", features = ["runtime_shaders"] }\n'),
+         ("crates/kit/Cargo.toml", '[target.\'cfg(target_os = "macos")\'.dependencies]\ngpui = { version = "=0.2.2" }\n')),
+    Rule("LINT-FILE-SIZE", "Files stay under 1,000 lines",
+         ("crates/**", "apps/flutter/lib/**"), _file_size(1000),
+         ("crates/app/src/a.rs", "x\n" * 1001), ("crates/app/src/a.rs", "x\n" * 1000)),
+    Rule("LINT-FILE-SIZE-WARN", "Files over 600 lines should be split",
+         ("crates/**", "apps/flutter/lib/**"), _file_size(600),
+         ("crates/app/src/a.rs", "x\n" * 601), ("crates/app/src/a.rs", "x\n" * 600), warn=True),
+    Rule("LINT-LOCALE-LITERAL", "In an area that has moved to locales/, words come from a message, not a string literal",
+         ("crates/app/src/**/*.rs", "crates/kit/src/**/*.rs", "apps/flutter/lib/**/*.dart"), locale_lint.literal,
+         ("crates/app/src/notch/a.rs", 'fn f() { div().child("Reply to Claude") }\n'),
+         ("crates/app/src/notch/a.rs", "fn f() { div().child(t::notch::reply()) }\n"),
+         exclude=EXCLUDE + ("**/*_tests.rs", "**/tests_*.rs", "**/tests/**", "**/renders*.rs",
+                            "crates/app/src/chat/bench_fixture.rs", "crates/app/src/testutil.rs",
+                            "apps/flutter/lib/l10n/**", "apps/flutter/lib/core/protocol/generated.dart"),
+         probe_files=((locale_lint.AREAS, locale_lint.AREAS_MOVED),)),
+    Rule("LINT-LOCALE-CONSENT", "A message that grants, refuses or pairs something belongs in consent.ftl, which the maintainer reviews",
+         ("locales/en/**/*.ftl",), locale_lint.consent,
+         ("locales/en/mac/chat.ftl", "chat-allow = Allow\n"), ("locales/en/mac/chat.ftl", "chat-reply = Reply\n"),
+         exclude=EXCLUDE + ("locales/en/consent.ftl",), warn=True),
+    Rule("LINT-LOG-NO-TEXT", "Log kinds hold no free text",
+         ("crates/events/src/kinds/**", "crates/**"), _log_no_text,
+         ("crates/events/src/kinds/x.rs", "fields { note: String }\n"),
+         ("crates/events/src/kinds/x.rs", "fields { n: Count }\n")),
+    Rule("LINT-LOG-ONE-WRITER", "Only the log writes logs",
+         ("crates/*/src/**",), _log_one_writer,
+         ("crates/app/src/x.rs", 'eprintln!("x");\n'),
+         ("crates/app/src/x.rs", 'diag!(Level::Warn, "x");\n'),
+         exclude=LOG_WRITER_EXCLUDE),
+    Rule("LINT-NO-UNBOUNDED-WAIT", "A wait in the daemon or engine has a deadline: use recv_timeout, wait_timeout and a read timeout; "
+         "a join, recv or wait without one hung a build 13 hours",
+         ("crates/notchlingd/src/**/*.rs", "crates/engine/src/**/*.rs"), _unbounded_wait,
+         ("crates/engine/src/x.rs", "fn f() { let v = rx.recv(); }\n"),
+         ("crates/engine/src/x.rs", "fn f() { let v = rx.recv_timeout(d); }\n"),
+         exclude=TEST_FILES),
+    Rule("LINT-CLAUDE-FILE-PARSE", "A file Claude Code rewrites in place (sessions/<pid>.json, jobs/<id>/state.json) is read with "
+         "parse_object or parse_leading, never a strict serde_json parse: a shorter rewrite leaves stray closing braces; "
+         "a file that names one has no strict parse at all",
+         ("crates/**/*.rs",), _claude_file_parse,
+         ("crates/engine/src/x.rs", 'fn f(d: &Path) { let p = d.join("sessions").join("1.json"); let v: Value = serde_json::from_slice(&read(p)).unwrap(); }\n'),
+         ("crates/engine/src/x.rs", 'fn f(d: &Path) { let p = d.join("sessions").join("1.json"); let v = parse_object(&read(p)); }\n'),
+         exclude=TEST_FILES + ("crates/engine/src/guard/**",)),
+]
+
+
+def rule(rule_id: str) -> Rule:
+    return next(r for r in RULES if r.id == rule_id)
+
+
+def _tracked(repo: Path) -> List[str]:
+    out = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"], check=True, capture_output=True).stdout
+    return [p for p in out.decode("utf-8", errors="replace").split("\0") if p]
+
+
+def run(repo: Path, paths: Optional[List[str]] = None) -> List[Violation]:
+    found: List[Violation] = []
+    for path in paths if paths is not None else _tracked(repo):
+        rules = [r for r in RULES if r.applies(path)]
+        if not rules:
+            continue
+        try:
+            lines = (Path(repo) / path).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for r in rules:
+            for line_no, text in r.check(path, lines, Path(repo)):
+                found.append(Violation(r.id, path, line_no, text, r.warn))
+    return found
+
+
+def fingerprint(v: Violation) -> str:
+    return f"{v.rule}|{v.path}|{' '.join(v.text.split())}"
+
+
+def new_violations(found: List[Violation], baseline: List[str]) -> List[Violation]:
+    left = Counter(baseline)
+    out = []
+    for v in found:
+        fp = fingerprint(v)
+        if left[fp] > 0:
+            left[fp] -= 1
+        else:
+            out.append(v)
+    return out
+
+
+def read_baseline(path: Path) -> List[str]:
+    return json.loads(path.read_text())["entries"] if path.exists() else []
+
+
+def write_baseline(path: Path, entries: List[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "_comment": "Generated by python3 -m guard lint. Existing violations; it may only shrink "
+                    "(python3 -m guard lint --update-baseline). Changing it is a protected change.",
+        "entries": sorted(entries),
+    }, indent=1, ensure_ascii=False) + "\n")
+
+
+def main(repo: Path, write_new: bool = False, update: bool = False, show_warnings: bool = False) -> int:
+    found = run(repo)
+    errors = [v for v in found if not v.warn]
+    warnings = [v for v in found if v.warn]
+    path = Path(repo) / BASELINE
+    if write_new:
+        if path.exists():
+            print(f"GUARD-BASELINE: {BASELINE} already exists; it can only shrink (--update-baseline)")
+            return 1
+        write_baseline(path, [fingerprint(v) for v in errors])
+        counts = Counter(v.rule for v in errors)
+        print(f"wrote {BASELINE}: " + ", ".join(f"{k} {n}" for k, n in sorted(counts.items())))
+        return 0
+    baseline = read_baseline(path)
+    new = new_violations(errors, baseline)
+    if update:
+        if new:
+            for v in new:
+                print(f"{v.path}:{v.line}: {v.rule} {rule(v.rule).why}")
+            print("GUARD-BASELINE: the baseline can only shrink; fix these instead")
+            return 1
+        kept = Counter(fingerprint(v) for v in errors) & Counter(baseline)
+        write_baseline(path, list(kept.elements()))
+        print(f"baseline: {len(baseline)} → {sum(kept.values())}")
+        return 0
+    for v in new:
+        print(f"{v.path}:{v.line}: {v.rule} {rule(v.rule).why}")
+    if show_warnings:
+        for v in warnings:
+            print(f"{v.path}: warning {v.rule} {rule(v.rule).why}")
+    print(f"lint: {len(new)} new, {len(errors) - len(new)} in the baseline, {len(warnings)} warnings")
+    return 1 if new else 0

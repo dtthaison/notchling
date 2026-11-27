@@ -1,0 +1,624 @@
+import 'json.dart';
+
+enum SessionState {
+  needsInput,
+  running,
+  done,
+  exited;
+
+  static SessionState parse(String raw) => switch (raw) {
+    'needsInput' => SessionState.needsInput,
+    'running' => SessionState.running,
+    'exited' => SessionState.exited,
+    _ => SessionState.done,
+  };
+}
+
+enum SessionControl {
+  console,
+  job,
+  viewOnly;
+
+  static SessionControl parse(String raw) => switch (raw) {
+    'console' => SessionControl.console,
+    'job' => SessionControl.job,
+    _ => SessionControl.viewOnly,
+  };
+}
+
+DateTime _fromMillis(double ms) =>
+    DateTime.fromMillisecondsSinceEpoch(ms.round());
+
+class Subagent {
+  const Subagent({
+    required this.id,
+    required this.type,
+    required this.description,
+    required this.model,
+    required this.finished,
+    required this.running,
+    required this.lastActivity,
+  });
+
+  factory Subagent.fromJson(Json json) => Subagent(
+    id: json.str('id'),
+    type: json.str('type'),
+    description: json.str('description'),
+    model: json.str('model'),
+    finished: json.boolean('finished'),
+    running: json.str('state') == 'running',
+    lastActivity: _fromMillis(json.number('lastActivity')),
+  );
+
+  final String id;
+  final String type;
+  final String description;
+  final String model;
+  final bool finished;
+  final bool running;
+  final DateTime lastActivity;
+}
+
+class PromptQuestion {
+  const PromptQuestion({
+    required this.header,
+    required this.question,
+    required this.options,
+    required this.multiSelect,
+  });
+
+  factory PromptQuestion.fromJson(Json json) => PromptQuestion(
+    header: json.strOrNull('header') ?? '',
+    question: json.str('question'),
+    options: json.strings('options'),
+    multiSelect: json.boolean('multiSelect'),
+  );
+
+  final String header;
+  final String question;
+  final List<String> options;
+  final bool multiSelect;
+}
+
+class PendingPrompt {
+  const PendingPrompt({
+    required this.requestId,
+    required this.sessionId,
+    required this.isPermission,
+    required this.toolName,
+    required this.summary,
+    required this.questions,
+  });
+
+  factory PendingPrompt.fromJson(Json json) => PendingPrompt(
+    requestId: json.str('requestId'),
+    sessionId: json.str('sessionId'),
+    isPermission: json.str('kind') == 'permission',
+    toolName: json.strOrNull('toolName') ?? '',
+    summary: json.strOrNull('summary') ?? '',
+    questions: json.objects('questions').map(PromptQuestion.fromJson).toList(),
+  );
+
+  final String requestId;
+  final String sessionId;
+  final bool isPermission;
+  final String toolName;
+  final String summary;
+  final List<PromptQuestion> questions;
+
+  bool get hasMultiSelect => questions.any((PromptQuestion q) => q.multiSelect);
+}
+
+class InboxAction {
+  const InboxAction({required this.id, required this.label, required this.primary});
+
+  factory InboxAction.fromJson(Json json) => InboxAction(
+    id: json.str('id'),
+    label: json.strOrNull('label') ?? '',
+    primary: json.boolean('primary'),
+  );
+
+  final String id;
+  final String label;
+  final bool primary;
+}
+
+class InboxOutcome {
+  const InboxOutcome({required this.state, required this.atMs, this.reason});
+
+  factory InboxOutcome.fromJson(Json json) => InboxOutcome(
+    state: json.strOrNull('state') ?? '',
+    atMs: json.integer('atMs', orElse: 0),
+    reason: json.strOrNull('reason'),
+  );
+
+  final String state;
+  final int atMs;
+  final String? reason;
+}
+
+class InboxPlace {
+  const InboxPlace({this.machineName, this.sessionName, this.branch});
+
+  factory InboxPlace.fromJson(Json json) => InboxPlace(
+    machineName: json.strOrNull('machineName'),
+    sessionName: json.strOrNull('sessionName'),
+    branch: json.strOrNull('branch'),
+  );
+
+  final String? machineName;
+  final String? sessionName;
+  final String? branch;
+
+  List<String> get labels => <String>[
+    for (final String? label in <String?>[machineName, sessionName, branch])
+      if (label != null && label.isNotEmpty) label,
+  ];
+}
+
+class InboxItem {
+  const InboxItem({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.detail,
+    required this.createdMs,
+    required this.actions,
+    required this.state,
+    this.session,
+    this.answer,
+    this.answeredBy,
+    this.seen = false,
+    this.expiresMs,
+    this.blocking,
+    this.waitingSince,
+    this.waiter,
+    this.note,
+    this.outcome,
+    this.place,
+  });
+
+  factory InboxItem.fromJson(Json json) => InboxItem(
+    id: json.str('id'),
+    kind: json.strOrNull('kind') ?? 'notice',
+    title: json.strOrNull('title') ?? '',
+    detail: json.strOrNull('detail') ?? '',
+    createdMs: json.integer('createdMs', orElse: 0),
+    actions: json.objects('actions').map(InboxAction.fromJson).toList(),
+    state: json.strOrNull('state') ?? 'open',
+    session: json['source'] is Map<Object?, Object?> ? json.object('source').strOrNull('session') : null,
+    answer: json.strOrNull('answer'),
+    answeredBy: json.strOrNull('answeredBy'),
+    seen: json.boolean('seen'),
+    expiresMs: json['expiresMs'] is num ? json.integer('expiresMs', orElse: 0) : null,
+    blocking: json['blocking'] is bool ? json['blocking'] as bool : null,
+    waitingSince: json['waitingSince'] is num ? json.integer('waitingSince', orElse: 0) : null,
+    waiter: json.strOrNull('waiter'),
+    note: json.strOrNull('note'),
+    outcome: json['outcome'] is Map<Object?, Object?> ? InboxOutcome.fromJson(json.object('outcome')) : null,
+    place: json['place'] is Map<Object?, Object?> ? InboxPlace.fromJson(json.object('place')) : null,
+  );
+
+  final String id;
+  final String kind;
+  final String title;
+  final String detail;
+  final int createdMs;
+  final List<InboxAction> actions;
+  final String state;
+  final String? session;
+  final String? answer;
+  final String? answeredBy;
+  final bool seen;
+  final int? expiresMs;
+  final bool? blocking;
+  final int? waitingSince;
+  final String? waiter;
+  final String? note;
+  final InboxOutcome? outcome;
+  final InboxPlace? place;
+
+  bool get isOpen => state == 'open';
+  bool get isBlocking => isOpen && blocking == true;
+
+  InboxItem closed({required String state, String? answer, String? answeredBy}) => InboxItem(
+    id: id,
+    kind: kind,
+    title: title,
+    detail: detail,
+    createdMs: createdMs,
+    actions: actions,
+    state: state,
+    session: session,
+    answer: answer,
+    answeredBy: answeredBy,
+    seen: seen,
+    expiresMs: expiresMs,
+    blocking: blocking,
+    waitingSince: waitingSince,
+    waiter: waiter,
+    note: note,
+    outcome: outcome,
+    place: place,
+  );
+
+  String? answerLabel() {
+    for (final InboxAction action in actions) {
+      if (action.id == answer) return action.label;
+    }
+    return null;
+  }
+}
+
+class TakeoverInfo {
+  const TakeoverInfo({
+    required this.available,
+    this.reason,
+    this.stoppable = false,
+    this.busy = false,
+  });
+
+  factory TakeoverInfo.fromJson(Json json) => TakeoverInfo(
+    available: json['available'] == true,
+    reason: json.strOrNull('reason'),
+    stoppable: json['stoppable'] == true,
+    busy: json['busy'] == true,
+  );
+
+  final bool available;
+  final String? reason;
+
+  final bool stoppable;
+
+  final bool busy;
+}
+
+class LastMessage {
+  const LastMessage({required this.id, required this.text});
+  factory LastMessage.fromJson(Json json) => LastMessage(id: json.str('id'), text: json.strOrNull('text') ?? '');
+  final String id;
+  final String text;
+}
+
+class ModelChoice {
+  const ModelChoice({required this.id, required this.name});
+
+  static List<ModelChoice>? listOrNull(Object? raw) {
+    if (raw is! List<Object?>) return null;
+    final List<ModelChoice> models = <ModelChoice>[];
+    for (final Object? item in raw) {
+      if (item is! Map<Object?, Object?>) continue;
+      final Json json = item.cast<String, Object?>();
+      final String id = json.strOrNull('id') ?? '';
+      if (id.isEmpty) continue;
+      final String name = json.strOrNull('name') ?? '';
+      models.add(ModelChoice(id: id, name: name.isEmpty ? id : name));
+    }
+    return models.isEmpty ? null : models;
+  }
+
+  final String id;
+  final String name;
+}
+
+class LimitMeter {
+  const LimitMeter({required this.label, required this.percent, this.resetsAt});
+
+  factory LimitMeter.fromJson(Json json) => LimitMeter(
+    label: json.str('label'),
+    percent: json.number('percent'),
+    resetsAt: json['resetsAt'] is num
+        ? _fromMillis((json['resetsAt']! as num).toDouble())
+        : null,
+  );
+
+  final String label;
+  final double percent;
+  final DateTime? resetsAt;
+}
+
+class SessionFacts {
+  const SessionFacts({
+    this.contextTokens,
+    this.contextWindow,
+    this.model,
+    this.effort,
+    this.limits = const <LimitMeter>[],
+  });
+
+  factory SessionFacts.fromJson(Json json) => SessionFacts(
+    contextTokens: json['contextTokens'] is num
+        ? (json['contextTokens']! as num).toInt()
+        : null,
+    contextWindow: json['contextWindow'] is num
+        ? (json['contextWindow']! as num).toInt()
+        : null,
+    model: json.strOrNull('model'),
+    effort: json.strOrNull('effort'),
+    limits: json['limits'] is List<Object?>
+        ? json.objects('limits').map(LimitMeter.fromJson).toList()
+        : const <LimitMeter>[],
+  );
+
+  final int? contextTokens;
+  final int? contextWindow;
+  final String? model;
+  final String? effort;
+  final List<LimitMeter> limits;
+
+  double? get contextFraction =>
+      contextTokens == null || contextWindow == null || contextWindow == 0
+      ? null
+      : (contextTokens! / contextWindow!).clamp(0, 1).toDouble();
+}
+
+class SessionNode {
+  const SessionNode({required this.id, required this.name, this.online = true});
+
+  static SessionNode? tryParse(Object? raw) {
+    if (raw is! Map<Object?, Object?>) return null;
+    final Json json = raw.cast<String, Object?>();
+    final String id = json.strOrNull('id') ?? '';
+    final String name = json.strOrNull('name') ?? '';
+    if (id.isEmpty && name.isEmpty) return null;
+    return SessionNode(
+      id: id,
+      name: name.isEmpty ? id : name,
+      online: json.boolean('online', orElse: true),
+    );
+  }
+
+  final String id;
+  final String name;
+  final bool online;
+}
+
+class Session {
+  const Session({
+    required this.id,
+    required this.name,
+    required this.project,
+    required this.cwd,
+    required this.entrypoint,
+    required this.state,
+    required this.control,
+    required this.lastActivity,
+    this.subagents = const <Subagent>[],
+    this.pending,
+    this.takeover,
+    this.activity,
+    this.facts,
+    this.lastMessage,
+    this.node,
+    this.tool = 'claude',
+  });
+
+  factory Session.fromJson(Json json) {
+    final Object? pending = json['pending'];
+    return Session(
+      id: json.str('id'),
+      name: json.str('name'),
+      project: json.str('project'),
+      cwd: json.str('cwd'),
+      entrypoint: json.str('entrypoint'),
+      state: SessionState.parse(json.str('state')),
+      control: SessionControl.parse(json.str('control')),
+      lastActivity: _fromMillis(json.number('lastActivity')),
+      subagents: json.objects('subagents').map(Subagent.fromJson).toList(),
+      pending: pending is Map<Object?, Object?>
+          ? PendingPrompt.fromJson(pending.cast<String, Object?>())
+          : null,
+      takeover: json['takeover'] is Map<Object?, Object?>
+          ? TakeoverInfo.fromJson(json.object('takeover'))
+          : null,
+      activity: json.strOrNull('activity'),
+      lastMessage: json['lastMessage'] is Map<Object?, Object?> ? LastMessage.fromJson(json.object('lastMessage')) : null,
+      facts: json['facts'] is Map<Object?, Object?>
+          ? SessionFacts.fromJson(json.object('facts'))
+          : null,
+      node: SessionNode.tryParse(json['node']),
+      tool: json.strOrNull('tool') ?? 'claude',
+    );
+  }
+
+  final String id;
+  final String name;
+  final String project;
+  final String cwd;
+  final String entrypoint;
+  final SessionState state;
+  final SessionControl control;
+  final DateTime lastActivity;
+  final List<Subagent> subagents;
+  final PendingPrompt? pending;
+
+  final TakeoverInfo? takeover;
+
+  final String? activity;
+
+  final SessionFacts? facts;
+
+  final LastMessage? lastMessage;
+
+  final SessionNode? node;
+
+  final String tool;
+
+  int get runningSubagents => subagents.where((Subagent s) => s.running).length;
+  bool get canMessage => control != SessionControl.viewOnly;
+}
+
+enum ChatRole {
+  user,
+  assistant,
+  tools;
+
+  static ChatRole parse(String raw) => switch (raw) {
+    'user' => ChatRole.user,
+    'tools' => ChatRole.tools,
+    _ => ChatRole.assistant,
+  };
+}
+
+class ChatImage {
+  const ChatImage({
+    required this.id,
+    required this.mediaType,
+    this.width,
+    this.height,
+    this.bytes = 0,
+  });
+
+  factory ChatImage.fromJson(Json json) => ChatImage(
+    id: json.str('id'),
+    mediaType: json.str('mediaType'),
+    width: json['width'] is num ? (json['width']! as num).toInt() : null,
+    height: json['height'] is num ? (json['height']! as num).toInt() : null,
+    bytes: json['bytes'] is num ? (json['bytes']! as num).toInt() : 0,
+  );
+
+  Json toJson() => <String, Object?>{
+    'id': id,
+    'mediaType': mediaType,
+    'width': width,
+    'height': height,
+    'bytes': bytes,
+  };
+
+  final String id;
+  final String mediaType;
+  final int? width;
+  final int? height;
+  final int bytes;
+
+  double? get aspect =>
+      width != null && height != null && height! > 0 ? width! / height! : null;
+}
+
+class ChatMessage {
+  const ChatMessage({
+    required this.id,
+    required this.role,
+    required this.text,
+    required this.time,
+    this.toolSummary,
+    this.queued = false,
+    this.images = const <ChatImage>[],
+    this.kind = ChatKind.text,
+    this.steps = const <ToolStep>[],
+    this.output,
+  });
+
+  factory ChatMessage.fromJson(Json json) => ChatMessage(
+    id: json.str('id'),
+    role: ChatRole.parse(json.str('role')),
+    text: json.str('text'),
+    time: _fromMillis(json.number('time')),
+    toolSummary: json.strOrNull('toolSummary'),
+    queued: json['queued'] == true,
+    images: json['images'] is List<Object?>
+        ? json.objects('images').map(ChatImage.fromJson).toList()
+        : const <ChatImage>[],
+    kind: ChatKind.parse(json.strOrNull('kind')),
+    steps: json['steps'] is List<Object?>
+        ? json.objects('steps').map(ToolStep.fromJson).toList()
+        : const <ToolStep>[],
+    output: json.strOrNull('output'),
+  );
+
+  Json toJson() => <String, Object?>{
+    'id': id,
+    'role': role.name,
+    'text': text,
+    'time': time.millisecondsSinceEpoch,
+    'toolSummary': toolSummary,
+    'queued': queued,
+    'images': images.map((ChatImage i) => i.toJson()).toList(),
+    'kind': kind.name,
+    'steps': steps.map((ToolStep t) => t.toJson()).toList(),
+    'output': output,
+  };
+
+  final String id;
+  final ChatRole role;
+  final String text;
+  final DateTime time;
+  final String? toolSummary;
+
+  final bool queued;
+
+  final List<ChatImage> images;
+
+  final ChatKind kind;
+
+  final List<ToolStep> steps;
+  final String? output;
+}
+
+enum ChatKind {
+  text,
+  shell,
+  compaction;
+
+  static ChatKind parse(String? raw) => switch (raw) {
+    'shell' => ChatKind.shell,
+    'compaction' => ChatKind.compaction,
+    _ => ChatKind.text,
+  };
+}
+
+enum DiffKind { context, added, removed }
+
+class DiffLine {
+  const DiffLine(this.kind, this.text);
+  final DiffKind kind;
+  final String text;
+}
+
+class ToolStep {
+  const ToolStep({
+    required this.name,
+    required this.summary,
+    this.output,
+    this.path,
+    this.diff = const <DiffLine>[],
+  });
+
+  factory ToolStep.fromJson(Json json) => ToolStep(
+    name: json.str('name'),
+    summary: json.str('summary'),
+    output: json.strOrNull('output'),
+    path: json.strOrNull('path'),
+    diff: json['diff'] is List<Object?>
+        ? <DiffLine>[
+            for (final Object? row in json['diff']! as List<Object?>)
+              if (row is String && row.isNotEmpty)
+                DiffLine(
+                  row[0] == '+'
+                      ? DiffKind.added
+                      : (row[0] == '-' ? DiffKind.removed : DiffKind.context),
+                  row.substring(1),
+                ),
+          ]
+        : const <DiffLine>[],
+  );
+
+  Json toJson() => <String, Object?>{
+    'name': name,
+    'summary': summary,
+    'output': output,
+    'path': path,
+    'diff': <String>[
+      for (final DiffLine l in diff)
+        '${l.kind == DiffKind.added ? '+' : (l.kind == DiffKind.removed ? '-' : ' ')}${l.text}',
+    ],
+  };
+
+  final String name;
+  final String summary;
+  final String? output;
+  final String? path;
+  final List<DiffLine> diff;
+
+  bool get isEdit => diff.isNotEmpty;
+}

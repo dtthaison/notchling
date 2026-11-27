@@ -1,0 +1,66 @@
+{
+  "user_id": "redacted-id",
+  "account_id": "redacted-id",
+  "email": "user@example.com",
+  "plan_type": "team",
+  "rate_limit": {
+    "allowed": false,
+    "limit_reached": true,
+    "primary_window": {
+      "used_percent": 100,
+      "limit_window_seconds": 18000,
+      "reset_after_seconds": 7718,
+      "reset_at": 1794742031
+    },
+    "secondary_window": {
+      "used_percent": 33,
+      "limit_window_seconds": 604800,
+      "reset_after_seconds": 496863,
+      "reset_at": 1795231176
+    }
+  },
+  "code_review_rate_limit": null,
+  "additional_rate_limits": null,
+  "model_usage": {
+    "gpt-6-astra": {
+      "available": false,
+      "available_at": "2026-11-15T11:27:11.420811Z",
+      "credits_would_enable": true
+    }
+  },
+  "credits": {
+    "has_credits": false,
+    "unlimited": false,
+    "overage_limit_reached": false,
+    "balance": null,
+    "approx_local_messages": null,
+    "approx_cloud_messages": null
+  },
+  "spend_control": {
+    "reached": false,
+    "individual_limit": null
+  },
+  "rate_limit_reached_type": {
+    "type": "workspace_owner_credits_depleted",
+    "details": null
+  },
+  "rate_limit_upsell": {
+    "banner_type": "workspace_owner_credits_depleted",
+    "title": "You're out of credits",
+    "description": "Your workspace is out of credits. Add credits to continue using Codex.",
+    "ctas": [
+      {
+        "action": "add_credits",
+        "label": "Add Credits"
+      }
+    ],
+    "reset_at": 1794742031,
+    "referral": null,
+    "request_url": null
+  },
+  "promo": null,
+  "rate_limit_reset_credits": {
+    "available_count": 1,
+    "applicable_available_count": 1
+  }
+}

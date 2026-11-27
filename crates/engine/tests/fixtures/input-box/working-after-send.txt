@@ -1,0 +1,51 @@
+cursor 46 2 true
+
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~/work
+
+
+❯ Reply with just the word ok.
+
+⏺ ok
+
+✻ Worked for 2s · done 12:09 PM
+
+❯ Say only the word seen. /tmp/shots/one.png /tmp/shots/two.jpg
+
+⏺ seen
+
+✻ Worked for 2s · done 12:11 PM
+
+❯ [Image #1] [Image #2]Say only the word seen.
+  ⎿  [Image #1]
+  ⎿  [Image #2]
+
+⏺ seen
+
+✻ Crunched for 2s · done 12:11 PM
+
+❯ [Image #3] [Image #4]Say only the word big.
+  ⎿  [Image #3]
+  ⎿  [Image #4]
+
+⏺ big
+
+✻ Worked for 3s · done 12:13 PM
+
+❯ [Image #5] [Image #6]Say only the word race.
+  ⎿  [Image #5]
+  ⎿  [Image #6]
+
+
+
+
+
+
+✽ Billowing…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  work > Haiku 5.5 | 59.3k tokens | someone@example.invalid
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent

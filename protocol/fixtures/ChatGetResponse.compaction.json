@@ -1,0 +1,18 @@
+{
+  "data": {
+    "hasMore": false,
+    "messages": [
+      {
+        "id": "0A000000-0000-4000-8000-000000000007",
+        "images": [],
+        "kind": "compaction",
+        "queued": false,
+        "role": "assistant",
+        "text": "Conversation compacted.",
+        "time": 1793541465000
+      }
+    ]
+  },
+  "id": 4,
+  "ok": true
+}

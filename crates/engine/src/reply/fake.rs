@@ -1,0 +1,465 @@
+use super::exec::Pty;
+use super::keys::{self, ENTER, PASTE_END, PASTE_START};
+use crate::terminal::{input_box, Shade};
+use std::time::Duration;
+
+pub const RULE: &str = "────────────────────────────────────────";
+pub const PROMPT: [&str; 4] = [RULE, "❯ ", RULE, "  ? for shortcuts"];
+pub const STARTING: &str =
+    "  Session is starting — showing its transcript until it appears. Ctrl+Z to detach";
+
+#[derive(Clone, Debug, Default)]
+pub struct FakePrompt {
+    before: Vec<String>,
+    after: Vec<String>,
+    boxed: bool,
+    text: String,
+    hint: String,
+    ghost: String,
+    clock: u64,
+    paste_ms: u64,
+    landing: Option<(u64, String)>,
+    deaf: bool,
+    stuck: bool,
+    starting_ms: u64,
+    notice: String,
+    noisy: bool,
+    fold_at: usize,
+    reads_pictures: bool,
+    own_cursor: bool,
+    chips: u32,
+    human: Vec<(u64, String)>,
+    dialog: Vec<String>,
+    dialog_up: bool,
+    on_command: bool,
+    pub writes: Vec<String>,
+    pub sent: Vec<String>,
+    pub picked: Vec<String>,
+}
+
+impl FakePrompt {
+    pub fn new(lines: &[&str]) -> FakePrompt {
+        let lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        let Some((top, bottom)) = input_box::span(&lines) else {
+            return FakePrompt {
+                before: lines,
+                ..FakePrompt::default()
+            };
+        };
+        let rows: Vec<&str> = lines[top + 1..bottom]
+            .iter()
+            .enumerate()
+            .map(|(i, row)| match i {
+                0 => row.strip_prefix('❯').unwrap_or(row).trim_start(),
+                _ => row.trim_start(),
+            })
+            .collect();
+        FakePrompt {
+            before: lines[..=top].to_vec(),
+            after: lines[bottom..].to_vec(),
+            boxed: true,
+            text: rows.join("\n").trim_end().to_string(),
+            ..FakePrompt::default()
+        }
+    }
+
+    pub fn idle() -> FakePrompt {
+        FakePrompt::new(&PROMPT)
+    }
+
+    pub fn pasting_for(mut self, ms: u64) -> FakePrompt {
+        self.paste_ms = ms;
+        self
+    }
+
+    pub fn deaf(mut self) -> FakePrompt {
+        self.deaf = true;
+        self
+    }
+
+    pub fn stuck(mut self) -> FakePrompt {
+        self.stuck = true;
+        self
+    }
+
+    pub fn starting_for(mut self, ms: u64) -> FakePrompt {
+        self.starting_ms = ms;
+        self.notice = STARTING.to_string();
+        self
+    }
+
+    pub fn noting(mut self, notice: &str) -> FakePrompt {
+        self.notice = notice.to_string();
+        self
+    }
+
+    pub fn starting(&self) -> bool {
+        self.clock < self.starting_ms
+    }
+
+    pub fn noisy(mut self) -> FakePrompt {
+        self.noisy = true;
+        self
+    }
+
+    pub fn folding(mut self, chars: usize) -> FakePrompt {
+        self.fold_at = chars;
+        self
+    }
+
+    pub fn reading_pictures(mut self) -> FakePrompt {
+        self.reads_pictures = true;
+        self
+    }
+
+    pub fn typing(mut self, at_ms: u64, text: &str) -> FakePrompt {
+        self.human.push((at_ms, text.to_string()));
+        self
+    }
+
+    pub fn with_dialog(mut self, lines: &[&str]) -> FakePrompt {
+        self.dialog = lines.iter().map(|l| l.to_string()).collect();
+        self.dialog_up = true;
+        self
+    }
+
+    pub fn opening_dialog_on_command(mut self, lines: &[&str]) -> FakePrompt {
+        self.dialog = lines.iter().map(|l| l.to_string()).collect();
+        self.on_command = true;
+        self
+    }
+
+    pub fn dialog_shown(&self) -> bool {
+        self.dialog_up
+    }
+
+    pub fn holding(mut self, text: &str) -> FakePrompt {
+        self.text = text.to_string();
+        self
+    }
+
+    pub fn hinting(mut self, hint: &str) -> FakePrompt {
+        self.hint = hint.to_string();
+        self
+    }
+
+    pub fn drawing_its_cursor(mut self) -> FakePrompt {
+        self.own_cursor = true;
+        self
+    }
+
+    pub fn suggesting(mut self, ghost: &str) -> FakePrompt {
+        self.ghost = ghost.to_string();
+        self.own_cursor = true;
+        self
+    }
+
+    pub fn held(&self) -> Option<&str> {
+        self.boxed.then_some(self.text.as_str())
+    }
+
+    fn rows(&self) -> Vec<String> {
+        if self.text.is_empty() {
+            return vec![format!("❯ {}", self.hint)];
+        }
+        if self.fold_at > 0 && self.text.chars().count() > self.fold_at {
+            let lines = self.text.matches('\n').count() + 1;
+            return vec![format!("❯ [Pasted text #1 +{lines} lines]")];
+        }
+        let last = self.text.matches('\n').count();
+        self.text
+            .split('\n')
+            .enumerate()
+            .map(|(i, line)| {
+                let mut row = match (i, line.strip_prefix('!')) {
+                    (0, Some(rest)) => format!("! {rest}"),
+                    (0, None) => format!("❯ {line}"),
+                    _ => format!("  {line}"),
+                };
+                if i == last {
+                    row.push_str(&self.ghost);
+                }
+                row
+            })
+            .collect()
+    }
+
+    fn pass(&mut self, ms: u64) {
+        self.clock += ms;
+        let clock = self.clock;
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.human)
+            .into_iter()
+            .partition(|(at, _)| *at <= clock);
+        self.human = later;
+        if self.boxed && !self.starting() {
+            for (_, text) in due {
+                self.text.push_str(&text);
+            }
+        }
+        if let Some((due, text)) = self.landing.take() {
+            if self.clock < due {
+                self.landing = Some((due, text));
+            } else if self.boxed {
+                let shown = self.landed(&text);
+                self.text.push_str(&shown);
+            }
+        }
+    }
+
+    fn landed(&mut self, text: &str) -> String {
+        if !self.reads_pictures {
+            return text.to_string();
+        }
+        let mut chips: Vec<String> = Vec::new();
+        let mut rest: Vec<String> = Vec::new();
+        for line in text.split('\n') {
+            let mut pieces: Vec<String> = Vec::new();
+            for word in line.split(' ') {
+                match (
+                    word.starts_with('/') || word.starts_with("'/"),
+                    pieces.last_mut(),
+                ) {
+                    (false, Some(last)) => {
+                        last.push(' ');
+                        last.push_str(word);
+                    }
+                    _ => pieces.push(word.to_string()),
+                }
+            }
+            pieces.retain(|piece| !piece.trim().is_empty());
+            let paths = pieces
+                .iter()
+                .all(|piece| piece.starts_with('/') || piece.starts_with("'/"));
+            if pieces.len() > 1 && !paths {
+                rest.push(line.to_string());
+                continue;
+            }
+            for piece in pieces {
+                let bare = piece.trim_matches('\'').to_ascii_lowercase();
+                let picture = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+                    .iter()
+                    .any(|ext| bare.ends_with(ext));
+                match picture && bare.starts_with('/') {
+                    true => {
+                        self.chips += 1;
+                        chips.push(format!("[Image #{}]", self.chips));
+                    }
+                    false => rest.push(piece),
+                }
+            }
+        }
+        format!("{}{}", chips.join(" "), rest.join("\n"))
+    }
+
+    fn entered(&mut self) {
+        if self.deaf || self.landing.is_some() || !self.boxed || self.text.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.text);
+        if self.on_command && text.starts_with('/') {
+            self.dialog_up = true;
+        }
+        self.sent.push(text);
+    }
+}
+
+impl Pty for FakePrompt {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let typed = String::from_utf8_lossy(bytes).into_owned();
+        if self.starting() {
+            self.writes.push(typed);
+            return Ok(());
+        }
+        if self.dialog_up {
+            if typed.len() == 1 && typed.chars().all(|c| c.is_ascii_digit()) {
+                self.dialog_up = false;
+                self.picked.push(typed.clone());
+            } else if typed == keys::ESC {
+                self.dialog_up = false;
+            }
+            self.writes.push(typed);
+            return Ok(());
+        }
+        if typed == keys::clear_input() {
+            if !self.stuck {
+                self.text.clear();
+            }
+        } else if typed == ENTER {
+            self.entered();
+        } else if let Some(text) = typed
+            .strip_prefix(PASTE_START)
+            .and_then(|t| t.strip_suffix(PASTE_END))
+        {
+            self.landing = Some((self.clock + self.paste_ms, text.to_string()));
+            self.pass(0);
+        }
+        self.writes.push(typed);
+        Ok(())
+    }
+
+    fn wait_quiet(&mut self, quiet: Duration, timeout: Duration) -> bool {
+        let spent = if self.noisy { timeout } else { quiet };
+        self.pass(spent.as_millis() as u64);
+        true
+    }
+
+    fn wait_attached(&mut self, quiet: Duration, timeout: Duration, busy: Duration) -> bool {
+        super::exec::wait_attached(self, quiet, timeout, busy)
+    }
+
+    fn screen(&mut self) -> Vec<String> {
+        if self.dialog_up {
+            return self.dialog.clone();
+        }
+        if self.starting() {
+            return ["⏺ ok", "", RULE, "❯", RULE, self.notice.as_str()]
+                .map(String::from)
+                .to_vec();
+        }
+        let mut lines = self.before.clone();
+        if self.boxed {
+            lines.extend(self.rows());
+        }
+        lines.extend(self.after.iter().cloned());
+        lines
+    }
+
+    fn shades(&mut self) -> Vec<Vec<Shade>> {
+        if !self.own_cursor || !self.boxed || self.starting() || self.dialog_up {
+            return Vec::new();
+        }
+        let hinted = self.text.is_empty() && !self.hint.is_empty();
+        let rows = self.rows();
+        let last = rows.len() - 1;
+        let mut shades = vec![Vec::new(); self.before.len()];
+        for (n, row) in rows.iter().enumerate() {
+            let mut cells: Vec<Shade> = row.chars().map(|_| Shade::Plain).collect();
+            let ghost = match n == last && !self.text.is_empty() {
+                true => self.ghost.chars().count(),
+                false => 0,
+            };
+            match (hinted, n == last) {
+                (true, _) => {
+                    cells[2] = Shade::Cursor;
+                    cells[3..].fill(Shade::Faint);
+                }
+                (false, true) if ghost > 0 => {
+                    let from = cells.len() - ghost;
+                    cells[from] = Shade::Cursor;
+                    cells[from + 1..].fill(Shade::Faint);
+                }
+                (false, true) => cells.push(Shade::Cursor),
+                (false, false) => {}
+            }
+            shades.push(cells);
+        }
+        shades.resize(shades.len() + self.after.len(), Vec::new());
+        shades
+    }
+
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        if !self.boxed || self.starting() || self.own_cursor || self.dialog_up {
+            return None;
+        }
+        let rows = self.rows();
+        let typed = match self.fold_at > 0 && self.text.chars().count() > self.fold_at {
+            true => rows[0].chars().count() - 2,
+            false => {
+                let line = self.text.rsplit('\n').next().unwrap_or("");
+                match self.text.contains('\n') {
+                    true => line.chars().count(),
+                    false => line.strip_prefix('!').unwrap_or(line).chars().count(),
+                }
+            }
+        };
+        Some((self.before.len() + rows.len() - 1, 2 + typed))
+    }
+
+    fn sleep(&mut self, duration: Duration) {
+        self.pass(duration.as_millis() as u64);
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.clock
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_paste_lands_in_the_box_and_enter_sends_it() {
+        let mut pty = FakePrompt::idle();
+        pty.write(keys::bracketed("hi\nthere").as_bytes()).unwrap();
+        assert_eq!(pty.held(), Some("hi\nthere"));
+        assert_eq!(pty.screen()[1..3], ["❯ hi", "  there"]);
+        assert_eq!(pty.cursor(), Some((2, 7)));
+        pty.write(ENTER.as_bytes()).unwrap();
+        assert_eq!(pty.sent, ["hi\nthere"]);
+        assert_eq!(pty.held(), Some(""));
+        assert_eq!(pty.screen(), PROMPT);
+        assert_eq!(pty.cursor(), Some((1, 2)));
+    }
+
+    #[test]
+    fn an_enter_before_the_paste_lands_is_spent_on_an_empty_box() {
+        let mut pty = FakePrompt::idle().pasting_for(400);
+        pty.write(keys::bracketed("hi").as_bytes()).unwrap();
+        pty.sleep(Duration::from_millis(150));
+        pty.write(ENTER.as_bytes()).unwrap();
+        pty.sleep(Duration::from_millis(250));
+        assert!(pty.sent.is_empty());
+        assert_eq!(pty.held(), Some("hi"));
+        pty.write(ENTER.as_bytes()).unwrap();
+        assert_eq!(pty.sent, ["hi"]);
+    }
+
+    #[test]
+    fn a_hint_shows_in_an_empty_box_with_the_cursor_at_its_start() {
+        let mut pty = FakePrompt::idle().hinting("Try \"fix the test\"");
+        assert_eq!(pty.screen()[1], "❯ Try \"fix the test\"");
+        assert_eq!(pty.cursor(), Some((1, 2)));
+        assert_eq!(pty.held(), Some(""));
+        pty.write(ENTER.as_bytes()).unwrap();
+        assert!(pty.sent.is_empty());
+    }
+
+    #[test]
+    fn a_starting_session_shows_the_attachs_wait_and_drops_what_is_typed() {
+        let mut pty = FakePrompt::idle().starting_for(300);
+        assert_eq!(pty.screen()[2..], [RULE, "❯", RULE, STARTING]);
+        assert_eq!(pty.cursor(), None);
+        pty.write(keys::bracketed("lost").as_bytes()).unwrap();
+        pty.write(ENTER.as_bytes()).unwrap();
+        pty.sleep(Duration::from_millis(300));
+        assert_eq!(pty.screen(), PROMPT);
+        assert_eq!(pty.cursor(), Some((1, 2)));
+        assert_eq!(pty.held(), Some(""));
+        assert!(pty.sent.is_empty());
+        assert_eq!(pty.writes.len(), 2);
+        pty.write(keys::bracketed("hi").as_bytes()).unwrap();
+        assert_eq!(pty.held(), Some("hi"));
+    }
+
+    #[test]
+    fn a_draft_on_the_screen_is_read_and_cleared() {
+        let mut pty = FakePrompt::new(&["⏺ ok", RULE, "❯ stale", "  draft", RULE]);
+        assert_eq!(pty.held(), Some("stale\ndraft"));
+        pty.write(keys::clear_input().as_bytes()).unwrap();
+        assert_eq!(pty.held(), Some(""));
+        assert_eq!(pty.screen(), ["⏺ ok", RULE, "❯ ", RULE]);
+    }
+
+    #[test]
+    fn a_screen_with_no_box_holds_nothing() {
+        let mut pty = FakePrompt::new(&["Do you want to proceed?", " 1. Yes"]);
+        pty.write(keys::bracketed("hi").as_bytes()).unwrap();
+        pty.write(ENTER.as_bytes()).unwrap();
+        assert_eq!(pty.held(), None);
+        assert_eq!(pty.cursor(), None);
+        assert!(pty.sent.is_empty());
+        assert_eq!(pty.writes.len(), 2);
+        assert_eq!(pty.screen(), ["Do you want to proceed?", " 1. Yes"]);
+    }
+}

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSWindow Frame ChatWindow</key>
+	<string>100 100 1040 720 0 0 1920 1080 </string>
+	<key>mode</key>
+	<string>whileWorking</string>
+	<key>keepDisplayOn</key>
+	<true/>
+	<key>showPet</key>
+	<false/>
+	<key>hideNotch</key>
+	<integer>1</integer>
+	<key>notchWidth</key>
+	<string>large</string>
+	<key>limitMode</key>
+	<string>notify</string>
+	<key>limitSwitchAt</key>
+	<integer>120</integer>
+	<key>chatPageWidth</key>
+	<real>480.5</real>
+	<key>chatProjectFolders</key>
+	<array>
+		<string>/work/notchling</string>
+		<string>/work/api &amp; tools</string>
+	</array>
+	<key>dismissed</key>
+	<dict>
+		<key>job-a</key>
+		<real>1794150000</real>
+	</dict>
+	<key>accounts</key>
+	<data>
+	W3siZW1haWwiOiJtZUBleGFtcGxlLmNvbSIsIm5hbWUiOiJNZSJ9XQ==
+	</data>
+	<key>chatOpen</key>
+	<true/>
+	<key>askedAccessibility</key>
+	<date>2026-11-01T10:00:00Z</date>
+	<key>vaultReminderSent</key>
+	<dict/>
+</dict>
+</plist>

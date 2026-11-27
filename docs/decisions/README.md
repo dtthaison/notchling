@@ -1,0 +1,99 @@
+# Decision records
+
+One record per decision: why Notchling is built the way it is. [ARCHITECTURE.md](../../ARCHITECTURE.md) says how the parts fit; these say why.
+
+Most of them come from the design, [revision 2](https://github.com/dtthaison/notchling/blob/d285219/docs/superpowers/specs/2026-11-07-agent-run-open-source-design.md), which the maintainer approved on 2026-11-07.
+
+## Index
+
+| # | Decision | Status |
+| --- | --- | --- |
+| [0001](0001-gpui-spike.md) | GPUI spike: the rebuild goes ahead | Accepted |
+| [0002](0002-the-line.md) | The line: agents merge only in named safe areas; everything else waits for `maintainer-gate` | Accepted |
+| [0003](0003-agent-instructions-in-agents-md.md) | Agent instructions live in `AGENTS.md`; `CLAUDE.md` is one line, `@AGENTS.md` | Accepted, amended by 0017 |
+| [0004](0004-notchlingd-engine-service.md) | The Rust engine runs as the always-on `notchlingd` service | Accepted |
+| [0005](0005-gpui-desktop-app.md) | GPUI for every desktop app, web content in `wry` windows | Accepted |
+| [0006](0006-flutter-phone-generated-types.md) | Flutter phone with generated protocol types and no Rust | Proposed |
+| [0007](0007-local-api-tiers.md) | Local API with an app tier and an agent tier, callers known by executable path | Accepted, amended by 0020 |
+| [0008](0008-mit-permissive-crates.md) | Stay MIT; only MIT, Apache and BSD crates, enforced by `cargo-deny` | Accepted, noted by XXXX |
+| [0009](0009-rulesets-as-code.md) | Rulesets as code in `.github/rulesets/`, applied by the maintainer | Accepted |
+| [0010](0010-build-then-sign-beta-then-stable.md) | Build, then sign apart; Beta daily, Stable by one click | Accepted |
+| [0011](0011-one-owner-per-resource.md) | One owner per resource while the Swift app and the daemon run side by side | Accepted |
+| [0012](0012-remote-computers.md) | Remote computers: identity by certificate, host-qualified session ids, nothing replicated | Proposed |
+| [0013](0013-page-panel-web-view.md) | A web view in Chat's page panel, and the live claude.ai page | Proposed |
+| [0014](0014-app-data-in-sqlite.md) | The app's own data in SQLite, and search by bm25 | Accepted |
+| [0015](0015-one-chat-interface-per-tool.md) | Chat's parts are shared; each tool is one adapter behind one interface | Proposed, amended by 0016 |
+| [0016](0016-provider-interface-in-the-engine.md) | One provider interface per tool, in the engine, and model data from a catalog | Proposed |
+| [0017](0017-rust-notes-load-by-default.md) | The Rust notes load by default; the Swift notes are read on demand | Proposed, amended by 0021 |
+| [0018](0018-chat-state-per-area.md) | Chat's state per screen area, the transcript as a log, selection on the model, the conversation as a list | Proposed |
+| [0019](0019-agent-instructions-per-tool.md) | The skills, rules and hooks Notchling installs in each agent tool, owned file by file | Proposed |
+| [0020](0020-agents-change-settings-by-class.md) | Agents read every setting and change one by its class: free at once, ask through the Inbox, never the switches | Proposed |
+| [0021](0021-notes-read-on-demand.md) | The root `AGENTS.md` is one page and imports nothing; the working notes are one file per topic in `docs/notes/`, read on demand | Proposed |
+| [0022](0022-ask.md) | Ask: an agent asks the person with `notchling ask`, the answer goes straight to the waiting command, only the person answers by default | Proposed |
+| [0023](0023-semantic-search-models-disk-is-the-truth.md) | Semantic Search models: the daemon loads what is complete on disk and the app shows what the daemon reports, so there is one source of truth | Accepted |
+| [0024](0024-search-reach-user-everything-agents-fourteen-days.md) | Search reach: the user everything on disk, an agent its organization's last 14 days, masked | Accepted |
+| [0025](0025-hybrid-search-ships-with-granite.md) | Hybrid search ships with text + Granite, Granite floor 0.80; the static floor and the Large tier wait for their models | Proposed |
+| [XXXX](XXXX-localization-fluent-source.md) | One English source in Fluent, every platform's words generated from it | Accepted |
+| [XXXX](XXXX-one-typed-event-stream.md) | One typed event stream: kinds in a registry, fields from a closed list with no text, the daemon the only writer, a sealed Audit | Proposed |
+| [XXXX](XXXX-provider-capability-contract.md) | One capability contract for every tool: 39 capabilities in four states, two shrink-only files, a conformance suite and a generated matrix | Proposed |
+| [XXXX](XXXX-tool-versions-follow-the-mac.md) | Tool versions follow the Mac: workers run the Mac's checked versions, rolled out by one click | Proposed |
+| [XXXX](XXXX-workers-follow-the-mac-on-click.md) | Workers follow the Mac's tool versions on the user's click: exact versions only, never automatic, never a failed version; amends the line above | Accepted |
+| [XXXX](XXXX-workers-get-their-own-tool-logins.md) | A Worker gets its own Codex login by device sign-in approved on this Mac, never a copied login; missing tools are installed on the user's click | Accepted |
+| [XXXX](XXXX-sparkle-and-one-release-key.md) | Sparkle for the Rust app, and one EdDSA key for the appcast and the worker manifest; amends 0010 | Proposed |
+| [XXXX](XXXX-cluster-v1-nodes.md) | Cluster v1 nodes: one primary, standbys and workers, a journaled state and a node tier | Proposed |
+| [XXXX](XXXX-cluster-failover-and-fencing.md) | Cluster v1 failover and fencing: a long lease from one Standby, a gate at every tool call, claims and side copies that are never deleted | Proposed |
+| [XXXX](XXXX-cluster-standby-and-handover.md) | Cluster v1 Standby and handover: sets at every turn end, only pushed sessions move, a Standby relays or holds the phone's commands | Proposed |
+| [XXXX](XXXX-skills-follow-the-app-data-follows-the-source.md) | Skills follow the app, data follows the source: skill text without changing data, commands as the stable contract, model data from catalog, override and live lists | Accepted |
+| [XXXX](XXXX-phone-push.md) | Phone push: FCM, ids only, sent by the primary or by any Can Be Master machine while it is silent; dropped for v1 (no phone push) | Dropped |
+| [XXXX](XXXX-outbox.md) | The Outbox: messages to a session saved first, one postman per session, delivered like the terminal, never twice | Proposed |
+| [XXXX](XXXX-cluster-secrets-and-logins.md) | Cluster secrets and Worker logins: one vault on the vault node, grants as private files, nothing renewed | Proposed |
+| [XXXX](XXXX-ssh-join.md) | Add Machine over SSH: machines added from the Cluster sheet run only the headless daemon as a service and join through an app-tier invite bound to one node id | Accepted |
+| [XXXX](XXXX-agents-first.md) | Agents first: an agent path for every feature, the user's yes by a consent request the app applies, a switch requested but turned on only by the app, every acting agent call recorded; amends 0007 and 0020 | Accepted |
+
+0001 was written before records had a Status section. Its status is Accepted.
+
+## Status
+
+- **Proposed**: written down, not settled. The record says what would settle it.
+- **Accepted**: in force. The maintainer decided it (*(decided)* in the design), or it came from the reviews (*(review)*) and is part of the approved revision 2.
+- **Superseded by NNNN**: a newer record replaced it.
+- **Dropped**: the maintainer decided not to build it. The record stays so the reasoning isn't lost and can be picked up again.
+
+The design marks some choices *(my call)*: the designer's, open to change. A record whose core is one of those is Proposed. An Accepted record that contains one names it in its Status.
+
+## Changing a decision
+
+A decision isn't edited in place. To change one, write a new record with the next number. Say which record it replaces and why. Then set the old record's status to "Superseded by NNNN"; that is the only edit the old record gets.
+
+The other edit a record gets is Proposed to Accepted, when the maintainer accepts it.
+
+Everything under `docs/decisions/` is protected, so a new record or a status change waits for the maintainer ([0002](0002-the-line.md)).
+
+## Template
+
+File name: `NNNN-short-slug.md`, with the next free number.
+
+```markdown
+# NNNN: Short title
+
+## Context
+
+What forces the decision. Facts first. Link the design section, issue or record it comes from.
+
+## Decision
+
+What we do, in short sentences or a list.
+
+## Consequences
+
+What follows, good and bad. What exists today and what is planned.
+
+## Status
+
+Proposed, Accepted, or Superseded by NNNN. Who decided it.
+For Proposed: what would settle it.
+
+## Date
+
+YYYY-MM-DD
+```

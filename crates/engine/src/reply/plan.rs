@@ -1,0 +1,348 @@
+use super::keys::{self, timing::*, ENTER, ESC, SUBMIT, UP};
+use super::question::{page_keys, Choice, PendingQuestion};
+use super::shell;
+pub use crate::terminal::permission_dialog::{self, Decision, Expected};
+pub use crate::terminal::screen_dialog::DialogPick;
+use crate::transcript::stored::precleaned;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Step {
+    WaitQuiet {
+        quiet_ms: u64,
+        timeout_ms: u64,
+        required: bool,
+    },
+    RefuseDialog,
+    RequireDialog,
+    RequireAnyDialog,
+    RequireAtPrompt,
+    AwaitBoot {
+        timeout_ms: u64,
+    },
+    AwaitInput {
+        timeout_ms: u64,
+    },
+    AwaitEmpty {
+        timeout_ms: u64,
+    },
+    Keys(String),
+    Paste(String),
+    AwaitPaste {
+        timeout_ms: u64,
+    },
+    Submit {
+        timeout_ms: u64,
+    },
+    Pause(u64),
+    WalkBackTo {
+        question: String,
+        tries: usize,
+    },
+    ExpectQuestion(String),
+    WaitFor {
+        until: Until,
+        timeout_ms: u64,
+    },
+    SubmitIfReview {
+        timeout_ms: u64,
+    },
+    MarkQueue,
+    AwaitPopAll {
+        text: String,
+        timeout_ms: u64,
+    },
+    EndUnlessTaken,
+    PressPermission {
+        decision: Decision,
+        expect: Expected,
+    },
+    PressDialog {
+        pick: DialogPick,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Until {
+    Shows(String),
+    ReviewOrGone,
+    PermissionGone,
+    DialogGone,
+    DialogClosed,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Plan {
+    pub steps: Vec<Step>,
+    pub detach: Vec<Step>,
+}
+
+impl Step {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Step::WaitQuiet { .. } => "wait quiet",
+            Step::RefuseDialog => "refuse dialog",
+            Step::RequireDialog => "require dialog",
+            Step::RequireAnyDialog => "require any dialog",
+            Step::RequireAtPrompt => "require at prompt",
+            Step::AwaitBoot { .. } => "await input",
+            Step::AwaitInput { .. } => "await input",
+            Step::AwaitEmpty { .. } => "await empty",
+            Step::Keys(_) => "keys",
+            Step::Paste(_) => "paste",
+            Step::AwaitPaste { .. } => "await paste",
+            Step::Submit { .. } => "submit",
+            Step::Pause(_) => "pause",
+            Step::WalkBackTo { .. } => "walk back",
+            Step::ExpectQuestion(_) => "expect question",
+            Step::WaitFor { .. } => "wait for",
+            Step::SubmitIfReview { .. } => "submit review",
+            Step::MarkQueue => "mark queue",
+            Step::AwaitPopAll { .. } => "await pop all",
+            Step::EndUnlessTaken => "end unless taken",
+            Step::PressPermission { .. } => "press permission",
+            Step::PressDialog { .. } => "press dialog",
+        }
+    }
+}
+
+impl Plan {
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+
+    pub fn reply_text(&self) -> Option<&str> {
+        let waits = |s: &Step| matches!(s, Step::AwaitPaste { .. });
+        let pasted = self.steps.iter().find_map(|s| match s {
+            Step::Paste(text) => Some(text.as_str()),
+            _ => None,
+        });
+        pasted.filter(|_| self.steps.iter().any(waits))
+    }
+
+    pub fn reply_chars(&self) -> Option<usize> {
+        self.reply_text().map(|text| text.chars().count())
+    }
+
+    pub fn writes(&self) -> Vec<String> {
+        self.steps
+            .iter()
+            .chain(&self.detach)
+            .filter_map(|s| match s {
+                Step::Keys(k) => Some(k.clone()),
+                Step::Paste(t) => Some(keys::bracketed(t)),
+                Step::Submit { .. } => Some(ENTER.to_string()),
+                Step::SubmitIfReview { .. } => Some(SUBMIT.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlanError {
+    NotWorking,
+}
+
+fn attach(settle: Option<u64>) -> Step {
+    match settle {
+        Some(settle) => Step::WaitQuiet {
+            quiet_ms: ATTACH_QUIET_MS,
+            timeout_ms: settle + SETTLE_SLACK_MS,
+            required: false,
+        },
+        None => Step::WaitQuiet {
+            quiet_ms: ATTACH_QUIET_MS,
+            timeout_ms: ATTACH_TIMEOUT_MS,
+            required: true,
+        },
+    }
+}
+
+fn detach() -> Vec<Step> {
+    vec![Step::WaitQuiet {
+        quiet_ms: DETACH_QUIET_MS,
+        timeout_ms: DETACH_TIMEOUT_MS,
+        required: false,
+    }]
+}
+
+pub fn reply(text: &str) -> Plan {
+    let text = shell::normalize(&precleaned(text));
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::RefuseDialog,
+            Step::AwaitInput {
+                timeout_ms: INPUT_WAIT_MS,
+            },
+            Step::Keys(keys::clear_input()),
+            Step::Pause(KEY_PAUSE_MS),
+            Step::RefuseDialog,
+            Step::AwaitEmpty {
+                timeout_ms: CLEAR_WAIT_MS,
+            },
+            Step::Paste(text),
+            Step::AwaitPaste {
+                timeout_ms: PASTE_WAIT_MS,
+            },
+            Step::Submit {
+                timeout_ms: SENT_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}
+
+pub fn reply_waking(text: &str) -> Plan {
+    let mut plan = reply(text);
+    let at = plan
+        .steps
+        .iter()
+        .position(|step| matches!(step, Step::AwaitInput { .. }))
+        .unwrap_or(0);
+    plan.steps.insert(
+        at,
+        Step::AwaitBoot {
+            timeout_ms: WAKE_WAIT_MS,
+        },
+    );
+    plan
+}
+
+pub fn reply_in(text: &str) -> Plan {
+    let mut plan = reply(text);
+    plan.steps.remove(0);
+    plan.detach.clear();
+    plan
+}
+
+pub fn interrupt(working: bool) -> Result<Plan, PlanError> {
+    if !working {
+        return Err(PlanError::NotWorking);
+    }
+    Ok(Plan {
+        steps: vec![
+            attach(Some(SETTLE_MS)),
+            Step::Keys(ESC.into()),
+            Step::Pause(KEY_PAUSE_MS),
+        ],
+        detach: detach(),
+    })
+}
+
+pub fn dismiss() -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::RequireAnyDialog,
+            Step::RequireAtPrompt,
+            Step::Keys(ESC.into()),
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::DialogClosed,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}
+
+pub fn take_back(latest: &str, keep: &[String]) -> Plan {
+    let mut steps = vec![
+        attach(Some(SETTLE_MS)),
+        Step::RefuseDialog,
+        Step::Keys(keys::clear_input()),
+        Step::Pause(TAKE_BACK_PAUSE_MS),
+        Step::MarkQueue,
+        Step::Keys(UP.into()),
+        Step::AwaitPopAll {
+            text: latest.to_string(),
+            timeout_ms: POP_ALL_WAIT_MS,
+        },
+        Step::Keys(keys::clear_input()),
+        Step::Pause(TAKE_BACK_PAUSE_MS),
+        Step::EndUnlessTaken,
+    ];
+    for text in keep {
+        steps.extend([
+            Step::Paste(text.clone()),
+            Step::Pause(TAKE_BACK_PAUSE_MS),
+            Step::Keys(ENTER.into()),
+            Step::Pause(TAKE_BACK_PAUSE_MS),
+        ]);
+    }
+    Plan {
+        steps,
+        detach: detach(),
+    }
+}
+
+pub fn answer(choices: &[Choice], question: &PendingQuestion) -> Plan {
+    let items = &question.items;
+    let Some(first) = items.first() else {
+        return Plan::default();
+    };
+    let mut steps = vec![
+        attach(None),
+        Step::RequireDialog,
+        Step::WalkBackTo {
+            question: first.question.clone(),
+            tries: items.len() + 1,
+        },
+    ];
+    for (index, (item, choice)) in items.iter().zip(choices).enumerate() {
+        steps.push(Step::ExpectQuestion(item.question.clone()));
+        for key in page_keys(choice, item) {
+            steps.push(Step::Keys(key));
+            steps.push(Step::Pause(KEY_PAUSE_MS));
+        }
+        let until = match items.get(index + 1) {
+            Some(next) => Until::Shows(next.question.clone()),
+            None => Until::ReviewOrGone,
+        };
+        steps.push(Step::WaitFor {
+            until,
+            timeout_ms: PAGE_WAIT_MS,
+        });
+    }
+    steps.push(Step::SubmitIfReview {
+        timeout_ms: SUBMIT_WAIT_MS,
+    });
+    Plan {
+        steps,
+        detach: detach(),
+    }
+}
+
+pub fn permission(decision: Decision, expect: &Expected) -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::PressPermission {
+                decision,
+                expect: expect.clone(),
+            },
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::PermissionGone,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}
+
+pub fn dialog(pick: &DialogPick) -> Plan {
+    Plan {
+        steps: vec![
+            attach(None),
+            Step::PressDialog { pick: pick.clone() },
+            Step::Pause(KEY_PAUSE_MS),
+            Step::WaitFor {
+                until: Until::DialogGone,
+                timeout_ms: PERMISSION_WAIT_MS,
+            },
+        ],
+        detach: detach(),
+    }
+}

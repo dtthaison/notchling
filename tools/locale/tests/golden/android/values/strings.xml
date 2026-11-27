@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Button that allows one use. -->
+    <string name="consent_allow_once">Allow Once</string>
+    <!-- Button that refuses. -->
+    <string name="consent_deny">Deny</string>
+    <!-- Title of a secret approval. $names are the secrets, $command what runs. -->
+    <string name="consent_secret_approval">Allow %1$s for %2$s</string>
+    <!-- A label with a number sign. $count is how many. -->
+    <string name="item_number_sign"># of items: %1$s</string>
+    <!-- The language's own name, as its speakers write it. -->
+    <string name="language_name">English</string>
+    <!-- Shown when no Mac answers. -->
+    <string name="pairing_cant_find">Can\'t find your Mac</string>
+    <!-- Files a device shared. $count is how many, $name the device. -->
+    <plurals name="pairing_files">
+        <item quantity="one">%2$s shared %1$d file, 100%% done</item>
+        <item quantity="other">%2$s shared %1$d files, 100%% done</item>
+    </plurals>
+    <!-- Step counter. $total is the number of steps. -->
+    <string name="pairing_step">Step # of %1$s</string>
+    <!-- Title of the pairing screen. -->
+    <string name="pairing_title">Pair with your Mac</string>
+    <!-- Title of the Subagents section while some still run. $count is how many run. -->
+    <plurals name="session_subagents_running">
+        <item quantity="one">%1$d subagent running</item>
+        <item quantity="other">%1$d subagents running</item>
+    </plurals>
+    <!-- Shown when the app is not running. -->
+    <string name="state_not_running">Notchling isn\'t running</string>
+    <!-- Shown while a session works. -->
+    <string name="state_working">Working</string>
+</resources>

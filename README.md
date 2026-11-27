@@ -1,170 +1,158 @@
 # Notchling
 
-[![Tests](https://github.com/dtthaison/notchling/actions/workflows/build.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/build.yml)
+[![Tests](https://github.com/dtthaison/notchling/actions/workflows/rust.yml/badge.svg)](https://github.com/dtthaison/notchling/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A small macOS menu bar app for people who run several [Claude Code](https://claude.com/claude-code) agents at once. It keeps the Mac awake while agents work and turns the camera notch into a live view of every session. From the notch you can read conversations, answer Claude's questions, approve permission prompts and reply to background agents without hunting for the right terminal.
+A macOS menu bar app for people who run several coding agents at once. It shows every Claude Code, Codex and Antigravity session in the camera notch and in one Chat window, keeps the Mac awake while agents work, and switches accounts when a limit runs out. You can read a session, answer its questions and permission prompts, and reply to it without hunting for the right terminal.
 
-Notchling is free and open source, and isn't affiliated with Anthropic or Google.
+Notchling is free and open source, and isn't affiliated with Anthropic, OpenAI or Google.
 
-![Notchling peeking out when an agent finishes, listing sessions by Input, Working and Done, approving a permission prompt, and replying to a background agent](docs/demo.gif)
+Notchling 2.0 is written in Rust and replaces the Swift app, which is retired. It is for Macs with Apple silicon. [CHANGELOG.md](CHANGELOG.md) says what is new.
 
-<sub>Rendered from the real views with made-up agents by `Demo/make-demo.sh`.</sub>
+**Some parts are off until you turn them on.** The daemon starts with its switches off, every time: **Act on Sessions**, **Phone Bridge**, **Logins and Lanes**, **Secret Vault**, **Install Hooks and Skills** and the cluster. The first five are in Settings, in the Daemon section; the cluster has a **Turn On** button in the Machines sheet. A feature below says which switch it needs.
 
 ## What it does
 
-- **Keeps the Mac awake.** Off, Always On, or only While Agents Are Working. Optionally keeps the display on too. Closing the lid still sleeps; when the Mac wakes, background agents cut off mid-reply are told to continue.
-- **Shows agents in the notch.** Hovering over the notch opens a list in three tabs: **Input** (waiting on you), **Working** and **Done**. Each row shows the session name, where it runs (Background, VS Code, Terminal, `claude -p`), when it last changed, your last prompt and what it's doing now.
-- **Peeks when something happens.** When an agent finishes or needs you, the notch slides open briefly with a short summary and plays a sound.
-- **Shows conversations like the terminal.** Click a row to see `❯` prompts, `⏺` replies and `⎿` tool summaries ("Read 2 files, ran 1 shell command").
-- **Replies to background agents.** The reply box sends text, including slash commands with completion, to agents started with `claude --bg`. Turn it off in Settings to keep replying in the terminal; the notch then just opens the agent there.
-- **Answers prompts.** Questions (`AskUserQuestion`) and permission requests from any session can be answered from the notch with ⌘1–9 or a click. Allow, Always allow and Deny all work, and so does typing your own answer.
-- **Manages sessions.** Right-click a row to **Hide** it, or **Remove Agent…** to delete a background agent (`claude rm`). **Clear all** in the Done tab hides every finished item.
-- **Switches Claude Code accounts.** Every account you sign in to is saved, and one click (in Settings, or in a session's account menu in Chat) points Claude Code at another one without signing in again. Each account shows its 5-hour and weekly limits and when they reset.
-- **Watches the usage limit.** When the account Claude Code is using reaches 90%, then 100%, of its 5-hour or weekly limit, Notchling says so once per window: a notch peek with a sound and a notification (macOS's own when it allows one, otherwise a Notchling banner at the top right). In the default **Notify and Switch** mode it also switches to the saved account with the most room as soon as a window reaches the **Switch At** point (95% by default, 80-99% in Settings; at 90% or below the separate 90% warning is skipped) or a background agent stops on "You've hit your ... limit". It only switches to an account whose limits were fetched in the last 10 minutes and are both under 80%, at most once every 30 minutes, and never back to the account it just left until that window resets; with no such account it only notifies. After a switch, background agents that stopped on the limit are restarted (`claude respawn`) and told to continue. Set it to **Notify** or **Off** instead.
-- **Switches Claude Desktop accounts.** The Claude desktop app's account is swapped too (by restoring its saved session and restarting it). Accounts are shared with the Claude Code list; an account can be switched to once it has been signed in to in Desktop at least once.
-- **Runs Codex sessions in Chat.** New Session picks a Claude Code or Codex account and a folder (adding an account right there if needed). Codex sessions from the last two weeks are listed beside Claude's, readable with their commands and edits. A message runs the next turn with `codex exec`, in the workspace-write sandbox (the folder is writable, nothing else is; the network is open so the Secret Vault and API calls work, and Settings > Allow Network in Codex Turns turns that off). Stop ends a turn.
-- **Switches Codex CLI accounts.** Each ChatGPT account the Codex CLI signs in with is saved. Switching points Codex at another one without signing in again, and each account shows its Codex limits and when they reset. Add Account signs in through `codex login` while Codex stays on the account in use.
-- **Switches Antigravity accounts.** Each Google account you sign in to Antigravity with is saved too. Switching restarts Antigravity on the other account, with no new sign-in. The account in use shows its Gemini, Claude/GPT and Gemini 4 Argon limits while Antigravity is open.
-- **Shows token cost.** What your Claude Code use would cost at API prices: today, the last 7 or 30 days or all time, a 14-day chart, and totals by channel (Claude Code or Desktop), account, model and project.
-- **Has a pet.** A little green monster web-swings along the whole menu bar while agents work: at the top of each swing it lets go, tumbles through the air, shoots a strand of silk to the edge ahead and swings on that. It picks a spot along the bar, heads there with long hops and short ones, rests to wave or doze when it arrives, then picks another. Each strand gets its own length, swing and poses. It holds an orange badge with the number waiting on you, and goes faster while that's above zero. When no agent is working it swings over to the frontmost window and sits on its title bar next to the traffic lights, looking around, yawning and dozing, then swings back out when work starts. Sitting on windows needs Accessibility access (asked for once). Turn the movement off with **Animate Pet**.
+### The notch
 
-![Switching Claude Code from a nearly used-up account to another in one click, then Claude Desktop the same way](docs/accounts.gif)
+The notch lists your sessions in three tabs: **Input** (waiting on you), **Working** and **Done**. When an agent needs you or finishes, the notch peeks open for a moment. A small pet in the notch moves while agents work; **Animate pet** in Settings turns it off. Settings also has **Show agents in the notch** and the notch's width.
 
-<sub>Made-up accounts, rendered from the real Accounts window by `Demo/make-demo.sh accounts`.</sub>
+Questions and permission prompts can be answered from the notch. That needs **Act on Sessions** and **Install Hooks and Skills** on, and **Answer prompts from the notch** (a setting that starts on).
+
+### Chat
+
+Chat is the full-size window for a session. Open it from the menu bar cup with **Open Chat** (⌘O).
+
+- **Sidebar.** Your sessions, with Claude Code, Codex and Antigravity side by side. **New Session** starts one on an account and in a folder you pick. Sessions on other machines of your cluster show here too, with the machine's name.
+- **The conversation.** Messages as Markdown, tool steps folded into one line each, file edits as diffs, and the model and effort pickers under the reply box.
+- **Details Panel.** On the right: **Tasks**, **Session**, **Subagents**, **Shells** and **Git**. The Git section lists every worktree of the session's repository. A click opens **Changes**, and **Branches** sorts the repository's branches into **Working**, **Not Merged** and **Merged**.
+- **Second Opinion.** Ask Codex or Antigravity to review an edit or a reply.
+- The footer of the Sidebar holds the buttons for Settings, Accounts, the Secret Vault and the Cluster. The cup in the menu bar has **Settings…** (⌘,) too.
+- **Search.** ⌃⌥P opens a search box from any app (change it in Settings under **Search Shortcut**, or turn it off). It finds saved Artifact pages and conversations.
+
+### Replying
+
+The reply box types into the session through `claude attach`, so it needs **Act on Sessions** on. **Return** sends; Option-Return or Shift-Return adds a line. A message you send while the session is working is kept as **Queued**, and goes in as soon as the session can take it. **Edit** takes your newest queued message back into the box. Stop (or Esc) ends the turn. A reply is never typed into an open question or permission dialog: Chat shows that dialog as a card to answer.
+
+### Ask and the Inbox
+
+An agent can put a question to you with `notchling ask`. It shows as a card under the session in Chat and in the notch, and your answer goes straight back to the waiting command, so the agent spends no tokens while it waits.
+
+The bell in Chat is the **Inbox**: what needs you, in one list. It holds questions, vault approvals, limit notices and messages that didn't go in. In a cluster it collects items from every machine, and answering one anywhere answers it once.
+
+When an agent stops and waits for your answer, the item is **Blocking**: it shows in red in the notch, the menu bar and the Dock, and as a banner you can answer from. **Attention** in Settings says how hard Notchling tries to reach you: **Calm** is a silent banner and a short notch, **Normal** adds a tone and a few reminders, **Urgent** keeps the notch open and sounds twice until you answer or press Later. **Change…** is a Deny with a note: you say what to do instead, and the agent reads it and asks again.
+
+### Accounts and limits
+
+Accounts for **Claude Code**, **Claude Desktop**, **Codex** and **Antigravity** are saved, and one click switches to another without signing in again. Each account shows its limits and when they reset. The Accounts window also has a **Token Cost** tab: what your use would cost at API prices.
+
+Switching needs **Logins and Lanes** on. For the Claude Code account in use, Settings has a limit choice: **Off**, **Notify** or **Notify and Switch**, which moves to the saved account with the most room. Codex and Antigravity have their own limit choices. A **lane** is a Claude Code config folder signed in to another account, so sessions on two accounts can run at once.
+
+Notchling never renews the token of the account in use, because the session holding the old one would be signed out. Claude Desktop and Antigravity read their login when they start, so switching them restarts them.
+
+### Keep the Mac awake
+
+The menu bar cup has **Keep Mac Awake**: **Off**, **Always On** or **While Agents Are Working**, and **Keep Display On**. The cup is filled while the Mac is being kept awake. Closing the lid still puts the Mac to sleep. With **Continue agents after sleep** on, background agents whose reply sleep cut off are told to continue.
+
+### Secret Vault
+
+Passwords and API tokens that agents can use without seeing. Values live in one Keychain item, and an agent runs a command with a secret in its environment (`notchling secret <name> -- <command>`); the value is hidden in the output. An entry can be set to **Ask me before an agent uses it**. An agent can ask you for a missing secret with `notchling secret-request`. It needs **Secret Vault** on, and the `notchling-vault` skill (installed with **Install Hooks and Skills**) teaches agents to use it.
+
+### Delegation
+
+`notchling delegate codex` and `notchling delegate agy` hand a job to another tool, wait for it and print the reply, with `--model` and `--effort` to pick them. A delegated job is read-only unless you pass `--write`. `notchling delegate-models` lists what each tool offers. `notchling delegate agy --machine <name>` runs it on another machine of your cluster.
+
+### Cluster and Machines
+
+Your own Macs and Linux machines can join one cluster over Tailscale, and you see and answer their sessions from one place. The Cluster button in Chat's Sidebar opens the sheet. The cluster is off until you press **Turn On** there, and you start one with **Create Cluster** or join one with a join token.
+
+- **Add Machine…** takes `user@host`, checks the machine over ssh and shows a plan, each step with its commands first. Install and Join sets the machine up. A Mac runs the daemon as a system service as your user, with no app; a Linux machine runs a user service. For Linux, the app takes Notchling's Linux build from the release and checks it against the release's SHA-256 before it installs it. Machines is the list of machines Notchling can reach over ssh that Add Machine saves into.
+- A machine's role is **Primary**, **Standby** or **Worker**. **Update N Machines** brings machines to this Mac's build, one at a time.
+- **Run On** in New Session starts a Claude Code session or a shell job on a Worker, and you can bring its work back as a branch that is never merged for you.
+- **Standby.** A machine marked **Can Be Master** that is ready (disk encryption on, the same user and home folder, enough space, the same tool versions) gets a copy of your Claude Code and Codex sessions at every turn end. It never holds your code. **Move to <machine> Now…** hands the primary over to it, and a Standby can take the primary from its last copy when the primary can't be reached. A move that would resume sessions is refused until the resume proof is recorded, so failover is by hand and isn't something to rely on yet. **Automatic Failover** isn't offered.
+- Secrets reach a Worker for a job only if you allow them: each machine has a list of allowed names, empty at first.
+
+### The phone app
+
+`apps/flutter/` is a phone app that follows your sessions through the Mac, to read them, reply and answer prompts. You build it from source; it isn't part of this release. On the Mac it needs **Phone Bridge** on.
+
+## Install
+
+Download `Notchling-<version>.dmg` from the [latest release](https://github.com/dtthaison/notchling/releases/latest) and drag Notchling to Applications. It needs macOS 13 or later on a Mac with Apple silicon.
+
+The app is ad hoc signed, not notarized, so macOS blocks the first launch. Open System Settings > Privacy & Security and choose **Open Anyway**, or run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Notchling.app
+```
+
+Linux machines for the cluster need nothing downloaded by hand: **Add Machine** in the Machines sheet installs Notchling's Linux build on them, taken from the release and checked against its SHA-256.
 
 ## Requirements
 
-- macOS 13 or later; built for Apple Silicon and Intel. Designed around a notched MacBook screen. Without a notch it hangs under the menu bar.
+- macOS 13 or later on Apple silicon. Designed around a notched MacBook screen. Without a notch it hangs under the menu bar.
 - Claude Code installed at `~/.local/bin/claude` (or `/usr/local/bin/claude`).
-- Xcode Command Line Tools (`swiftc`). No Xcode project is needed.
+- To build it yourself: Rust (the version in `rust-toolchain.toml`, installed by `rustup`).
 
-## Build and install
-
-```sh
-./build.sh            # builds build/Notchling.app
-./build.sh --install  # also quits the running copy, installs to /Applications and opens it
-```
-
-`build.sh` compiles every file under `Sources/Notchling/` for arm64 and x86_64, joins them with `lipo`, re-renders the icon when `Icon/make-icon.swift` changes, and signs the app ad hoc.
-
-To start at login, turn on **Launch at Login** in Settings, or run:
+## Build from source
 
 ```sh
-/Applications/Notchling.app/Contents/MacOS/Notchling --enable-login-item
+tools/bundle-next.sh            # builds build/next/Notchling.app
+tools/bundle-next.sh --install  # also quits the running copy and installs it to /Applications
 ```
+
+`tools/bundle-next.sh` builds the app, its daemon and its terminal host with `cargo` and signs the app ad hoc. `--install` refuses to replace an app that is still the Swift one. Linux node binaries for development come from `tools/build-node.sh`.
+
+To start it at login, add Notchling in System Settings > General > Login Items.
 
 ## Menu
 
-Click the cup in the menu bar (filled while the Mac is being kept awake):
+Click the cup in the menu bar:
 
 | Item | What it does |
 |---|---|
-| Claude Code | The account in use, with its 5-hour and weekly limits |
-| Open Chat (⌘O) | The Chat window, where everything else lives (below) |
-| Keep Mac Awake → Off / Always On / While Agents Are Working, Keep Display On | Holds a power assertion so the Mac doesn't idle-sleep |
-| Settings… (⌘,) | Accounts for every tool, token cost and every setting |
+| Claude Code | The account in use |
+| Open Chat (⌘O) | The Chat window |
+| Keep Mac Awake | Off, Always On, While Agents Are Working, and Keep Display On |
+| Settings… (⌘,) | Accounts, token cost and every setting |
+| About | About Notchling, and Welcome… |
+| Update Available: <version>… | Only when a newer release is out; opens its page |
 | Quit Notchling | |
-
-The bar at the bottom of Chat's sidebar opens the rest: **Machines**, **Artifacts**, **Secret Vault** and **Settings** (accounts, lanes, limit watching, token cost, the notch, hooks, Launch at Login). The **?** at its left names every part on screen.
-
-**What each feature is for and how to use it: [docs/features.md](docs/features.md).**
 
 ## How it works
 
-Notchling reads files Claude Code already writes. The only network calls are for accounts: with your own login it asks Anthropic which account a login belongs to (`/api/oauth/profile`), how much of each limit is used (`/api/oauth/usage`, every 5 minutes), and renews the token of a saved account that isn't in use.
+Notchling reads the files your agents already write, and talks to the Mac's daemon, `notchling daemon`, over a local socket. It sends no telemetry. With your own logins it asks Anthropic and OpenAI for account limits, and it reads one public file from GitHub to see whether a newer release is out. The phone bridge, the tunnel and the cluster make calls only when you turn them on. [docs/policies/privacy.md](docs/policies/privacy.md) lists every call.
 
-| Source | Used for |
-|---|---|
-| `~/.claude/sessions/<pid>.json` | Live sessions and their status (busy, waiting, idle) |
-| `~/.claude/jobs/<id>/state.json` | Background agents: state, summary, what they need from you |
-| `~/.claude/projects/<project>/<session>.jsonl` | Conversation text, current activity, open questions (last ~2 MB only) |
+**Update check.** Notchling checks for a newer release when it starts and then at most once a day, by reading the release feed on GitHub. When one is out, the menu bar cup gets an **Update Available** item and **About Notchling** shows the version, both linking to the release page. Nothing is downloaded or installed for you. Turn it off with **Check for updates automatically** in Settings, or by starting the app with `NOTCHLING_RELEASES=off`. A development build doesn't check.
 
-**Replying** to a background agent runs `claude attach <id>` in a hidden pseudo-terminal, types the text and detaches. Terminal and VS Code sessions can't take typed replies from outside their window; the ↗ button jumps to the right tab or window instead.
+**The hook.** **Install Hooks and Skills** adds Notchling's entries to `~/.claude/settings.json` (a backup is kept, and your other hooks stay). The hook never holds Claude Code up: with no app, no daemon or any error, it prints nothing and Claude Code asks in its own terminal. **Welcome…**, under **About** in the cup menu, shows what will change before anything does.
 
-**Answering prompts** uses a Claude Code hook. Turning on **Answer Prompts from the Notch** adds two entries to `~/.claude/settings.json` (a backup is saved as `settings.json.notchling-backup`):
+More: [docs/features.md](docs/features.md) is a guide to each feature, [docs/goals.md](docs/goals.md) says what Notchling will never do, and [ARCHITECTURE.md](ARCHITECTURE.md) says how it is built.
 
-- `PermissionRequest` (all tools) and `PreToolUse` for `AskUserQuestion`, both running `Notchling --hook`.
+## Logs
 
-The hook writes the request to `~/Library/Application Support/Notchling/requests/` and waits up to 290 seconds for an answer in `responses/`. If you don't answer, or the app isn't running (no heartbeat in the last 15 seconds), the hook steps aside and Claude Code asks in the terminal as usual. Headless `claude -p` sessions are always left alone.
+Every log stays on your Mac. `Notchling` below is `~/Library/Application Support/Notchling`.
 
-**Local pages.** Claude Code Artifacts (`claude.ai/artifact/...`) are private to the login that published them, so after you switch accounts the earlier pages return 404, and the source file often sat in a background agent's tmp folder that went away with it. **Keep Local Copies of Artifacts** adds a `PostToolUse` hook (matcher `Artifact`, 10-second timeout, installed on its own, separate from the prompt hooks) that runs `Notchling --hook` after each publish. It copies the page to `~/Library/Application Support/Notchling/pages/<slug>/index.html` (or `.md`) with any supporting files named in the publish, wraps fragments in a doctype so they render from disk, and records title, claude.ai link, source path, project, the account active at the time and the date in `pages/pages.json`. A republish of the same artifact overwrites its folder. `pages/index.html` lists everything, newest first. It works without the app running, prints nothing, and always exits 0. Pages published before this was on can't be recovered unless their source file still exists.
+| File | What it holds | Size |
+| --- | --- | --- |
+| `Notchling/audit/YYYY-MM.jsonl` | The Audit log: what agents, the app and phones did that matters (a secret used, a setting changed, a session replied to, an account switched), one sealed line each. A line is a kind of event and its fields, never message text, and not the polls that succeed. | One file a month, kept a year, 500 MB at most |
+| `Notchling/daemon/events.db` | The Activity store: the same events with their titles, for the Activity page. | Old rows expire by kind |
+| `Notchling/notchlingd.log` (and `.1`) | The daemon's own output: start, errors, a missing price. | Rotates at 5 MB, one old copy |
+| `AgentConsole/bridge/remote-log.jsonl` | Only if the daemon was down when a phone acted: the device, the operation, never a message. The daemon reads it in when it starts. | Grows rarely |
+| `Notchling/account-log.json` | The old record of when each account became the active one. It is read once into the Activity store and no longer written. | Does not grow |
+| `Notchling/logs/crash.log` | A panic's message and place. It can quote what the app was showing. | Grows only on a crash |
+| `Notchling/permission-screen.txt` | The last permission prompt the daemon could not read. | One screen |
+| `Notchling/reply-screen.txt` | The last reply the daemon could not type into a session: why, and the terminal screen it ended on. What the input box held is masked, so your message is not in it. | One screen |
 
-The **Artifacts** window lists every saved page with search, a filter by account and a green dot on pages owned by the account in use, and shows the selected page in place. **Open on claude.ai** warns when that link belongs to another account. Removing a local copy leaves the page on claude.ai alone. Pages that use live Artifact features (shared data, asking Claude) show only what they can do from a local file.
-
-**Accounts.** Claude Code keeps its login in the Keychain item `Claude Code-credentials` and the account's profile under `oauthAccount` in `~/.claude.json`. **Add Account** runs the same OAuth sign-in as `claude auth login` (PKCE, with the browser sending the code back to a listener on 127.0.0.1), but saves the result without touching Claude Code's current login. Notchling also copies each login it sees into its own Keychain items (`Notchling Accounts`, one per account). Switching writes the saved login back into Claude Code's item (MCP logins in it are kept) and replaces `oauthAccount` (the previous file is kept as `~/.claude.json.notchling-backup`). The login Claude Code is using is never renewed by Notchling, since that would sign Claude Code out.
-
-**Antigravity.** Antigravity and Antigravity IDE both read one Google login, `~/.gemini/jetski-standalone-oauth-token`, at launch, so only one account is ever signed in. Notchling keeps several and swaps which one is in that file.
-
-- **Saving.** On launch and every 60 seconds, Notchling reads the login file, decodes its id token for the account's Google id and email, and copies the whole login into its own Keychain items (`Notchling Antigravity`, one per account). So any account you sign into while Notchling is running is remembered; the account list is in Notchling's preferences, the tokens only in the Keychain.
-- **Switching** saves the current login, quits Antigravity and Antigravity IDE (they only read the file at startup), writes the chosen account's saved login into the file, and reopens whichever apps were running. It asks first when Antigravity is open, since running agents stop. Google refresh tokens don't rotate, so a set-aside login keeps working.
-- **Add Account** saves the current login, deletes the file, and restarts Antigravity at its sign-in screen. Notchling watches the file and saves the new login as soon as you finish signing in; cancelling puts the previous account back.
-- **Limits and plan.** While Antigravity is open, Notchling reads the active account's limits and plan from Antigravity's own local language server (the source of its View Usage panel): it finds the process, its CSRF token and port, and calls `RetrieveUserQuotaSummary` and `GetUserStatus` over localhost. Nothing goes over the network for Antigravity.
-
-Unlike Claude Code, switching here **restarts** Antigravity rather than being seamless, limits and plan show only while it is open, and an account appears only after it has been signed in while Notchling was running.
-
-**Codex.** The Codex CLI, its background app server and the ChatGPT app's Codex share one login, `~/.codex/auth.json` (ChatGPT OAuth tokens, with an id token naming the account and workspace).
-
-- **Saving.** On launch and every 60 seconds, Notchling copies that file into its own Keychain items (`Notchling Codex`, one per account and workspace).
-- **Switching** saves the live file back to its account first, since Codex renews tokens in place. It then writes the chosen account's copy under Codex's own `auth.lock` and restarts the app server (`codex app-server daemon restart`) so it reads the new login. If the ChatGPT app is open it quits and reopens it. It asks first when any of that is running. Codex sessions already open in a terminal keep the old account until you start them again.
-- **Add Account** runs `codex login` with a scratch `CODEX_HOME`, so the browser sign-in lands there and the account in use stays signed in. The new login is saved, and the scratch folder deleted.
-- **Limits and plan** come from `chatgpt.com/backend-api/wham/usage`, the endpoint Codex's `/status` reads, called with each account's own access token. Notchling never renews a Codex token, because refresh tokens rotate and a running session holding the old one would be signed out. So a saved account's limits show only while its token is still good, about 10 days after Codex last used it.
-
-**Claude Desktop.** The desktop app (`com.anthropic.claudefordesktop`) is a separate login from Claude Code, though the OAuth tokens are the same system. What decides its account is the claude.ai **web session cookies** in `~/Library/Application Support/Claude/Cookies`, not the token — so, like Antigravity, Notchling captures the whole Cookies file while an account is active and restores it to switch, setting `lastKnownAccountUuid` and restarting the app. Accounts are matched to the Claude Code list by account UUID. **Add Account** reopens Desktop signed out (the Cookies file is removed, backed up as `Cookies.notchling-backup`) so you can sign in to another account, which is then captured; cancelling puts the previous account back. An account can only be switched to after it has been signed in to in Desktop once, since that is the only way its cookies exist. Captured sessions live in `~/Library/Application Support/Notchling/desktop/<uuid>.cookies`.
-
-**Claude token cost** is estimated from the `usage` of every assistant message in the transcripts, across the whole history, each message counted once, with cache writes and reads priced separately. It reads Claude Code's transcripts (`~/.claude/projects`) and the Claude desktop app's own Claude Code transcripts (under its Application Support folder), tagging each as the **Claude Code** or **Desktop** channel — so Desktop cost only appears when you run Claude Code agents in it; normal Desktop chat is web-based and has no local token record. The window has a Last 7 Days / Last 30 Days / All Time selector and breaks cost down by channel, account, model (with each model's input/output/cache token totals and its share of the cost) and project. Each message is counted once (deduplicated by id), so totals are lower than Claude Code's `/stats`, which counts a message again each time a conversation is compacted or resumed. Totals, token counts and read positions are cached in `cost-cache.json`, so only new lines are read after the first scan.
-
-## Project layout
-
-```
-Package.swift             SwiftPM manifest, used for `swift test` (build.sh builds the app)
-Sources/Notchling/
-  App/        main.swift (--hook, login item flags, app start), AppDelegate (menu bar item,
-              settings menu, polling loop), DockPresence, AwakeController (IOKit power
-              assertion), WakeResumer (continues agents cut off by sleep)
-  Notch/      NotchModel (state, sizes, actions), NotchController (panel and mouse
-              handling), NotchView (SwiftUI views and the pet), PetLayer, TabPerch
-  Agents/     AgentMonitor (sessions and jobs into Agent values), TranscriptReader,
-              ReplySender (claude attach), AgentActions (open a session's window),
-              SlashCommands
-  Hook/       HookBridge: the --hook process and installing hooks into settings.json
-  Accounts/   saved logins and switching (Accounts, Antigravity, ClaudeDesktop),
-              AccountLogin (OAuth), AccountsWindow, CostTracker, UsageMenuViews
-  Limits/     LimitWatcher: limit alerts, automatic switch, restarting stopped agents
-  Lanes/      Lanes: Claude Code config folders used with CLAUDE_CONFIG_DIR
-  Chat/       ChatWindow, ChatParts, ChatMarkdown, ConversationReader
-  DesignKit/  ChatKit: tokens, type, icons and parts used by the windows
-  Pages/      PageLibrary (local Artifact copies), PagesWindow, PageSkill, OwnerPublish
-  Search/     SearchPanel (⌘⇧P)
-Tests/NotchlingTests/     unit tests (`swift test`), with transcript fixtures
-Icon/make-icon.swift      draws the app icon
-Pet/                      the pet's drawings (swing, sit, look, yawn, doze, hop poses)
-Demo/                     renders docs/demo.gif from the real views with made-up agents
-```
+**Settings > Activity** shows the Activity store, newest first: refusals and failures stand out, and you can filter by kind and search. Open a row for its event and outcome, and **Check Against the Audit Log** compares it with its sealed line. Each Audit line is sealed with a key kept in your Keychain, so a line that was edited or cut shows as broken; this is tamper-evident, not tamper-proof.
 
 ## Uninstall
 
-1. Turn off **Answer Prompts from the Notch** and **Keep Local Copies of Artifacts** so the hook entries are removed from `~/.claude/settings.json`.
-2. Turn off **Launch at Login**, then quit Notchling.
+1. Turn off **Install Hooks and Skills**, so Notchling's entries are removed from `~/.claude/settings.json`.
+2. Quit Notchling, and remove it from System Settings > General > Login Items if you added it.
 3. Delete `/Applications/Notchling.app` and `~/Library/Application Support/Notchling`.
-4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access, and remove `~/Library/Application Support/Notchling/` (captured Claude Desktop sessions).
-
-## Planned
-
-- [ ] **Auto Warmup.** The 5-hour limit window starts with your first message, so starting it early means it resets sooner and you get more windows in a day. At a time you pick, before you start work, Notchling sends a one-word prompt with the smallest model to each saved account to start its window. It can also send one again as soon as a window resets.
-- [ ] **Limit warnings with a switch.** When an account passes about 90% of its 5-hour or weekly limit, peek with "Switch to <account>?". It always asks first and never switches on its own.
-- [ ] **Jump to more terminals.** Go to the exact tab in Ghostty, Warp, kitty and WezTerm, not just Terminal and iTerm, and to the right window in Zed and JetBrains IDEs.
-- [ ] **Quiet when you're looking.** No peek or sound when that session's terminal or editor is already in front.
-- [ ] **More agent states.** Errors (`StopFailure`) peek in red, a Compacting state, and subagents shown under their session, pushed instantly by hooks instead of polling.
-- [ ] **Auto Update.** Notchling checks GitHub for a newer release at launch and once a day. When one is out, the menu shows **Update to <version>**; one click downloads it, replaces the app and relaunches it. Turn off **Check for Updates Automatically** to only check from the menu.
-- [ ] **Notarized releases.** Developer ID signing and a Homebrew cask, so new users don't get Gatekeeper warnings.
-- [ ] **Notification Center fallback.** A system notification when the notch is hidden or you're on an external display.
-- [ ] **Permission-mode badge.** Show plan or auto-accept mode on each row.
-- [ ] **Replies to Terminal and VS Code sessions.** Today only background agents (`claude --bg`) take typed replies; the others only get the ↗ jump button.
-- [ ] **Antigravity limits while it's closed.** They come from its local language server, so they show only while Antigravity is open.
-- [ ] **Seamless Antigravity and Claude Desktop switching.** Both apps read their login at launch, so switching restarts them.
-
-Have an idea? Open an issue.
+4. To drop saved logins, delete the `Notchling Accounts` and `Notchling Antigravity` items in Keychain Access.
+5. For a machine you added to a cluster, see [docs/notes/cluster.md](docs/notes/cluster.md) (Taking a machine out).
 
 ## Contributing
 

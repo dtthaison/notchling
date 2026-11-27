@@ -1,0 +1,33 @@
+{
+  "data": {
+    "machines": [
+      {
+        "canBeMaster": true,
+        "canResume": true,
+        "id": "1111111111111111",
+        "name": "m1",
+        "online": true,
+        "ready": true,
+        "setAt": 1793541465000
+      },
+      {
+        "canBeMaster": true,
+        "canResume": false,
+        "id": "3333333333333333",
+        "name": "m3",
+        "online": true,
+        "ready": true
+      },
+      {
+        "canBeMaster": false,
+        "canResume": false,
+        "id": "4444444444444444",
+        "name": "pi",
+        "online": true,
+        "ready": true
+      }
+    ]
+  },
+  "id": 51,
+  "ok": true
+}

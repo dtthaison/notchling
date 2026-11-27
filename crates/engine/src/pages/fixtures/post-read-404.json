@@ -1,0 +1,1 @@
+{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Artifact","cwd":"/w/proj","tool_input":{"action":"read","url":"https://claude.ai/code/artifact/AbCdEfGhIjKlMnOpQrStUv"},"tool_response":"Not found"}

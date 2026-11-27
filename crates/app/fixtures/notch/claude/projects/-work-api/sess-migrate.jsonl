@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": "Run the pending migrations against the local database."}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Three migrations are pending. I'll apply them in order."}]}}

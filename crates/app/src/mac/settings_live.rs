@@ -1,0 +1,87 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use gpui::App;
+use serde_json::Value;
+
+use super::shell::chat_window;
+use crate::search::panel::AppSearch;
+use crate::sheets::settings_semantic::settings_docs;
+use crate::switches::feed::SwitchFeed;
+use crate::switches::settings_changed::current;
+
+const TICK: Duration = Duration::from_millis(200);
+
+pub fn watch(cx: &mut App, feed: Arc<SwitchFeed>, data_dir: PathBuf) {
+    cx.spawn(async move |cx| loop {
+        cx.background_executor().timer(TICK).await;
+        if let Some(held) = feed.take_hold() {
+            if cx
+                .update(|cx| super::shell::on_awake_hold(cx, held))
+                .is_err()
+            {
+                return;
+            }
+        }
+        let keys = feed.take_settings();
+        if keys.is_empty() {
+            continue;
+        }
+        let dir = data_dir.clone();
+        let changes = cx
+            .background_executor()
+            .spawn(async move { current(&dir, &keys) })
+            .await;
+        if cx.update(|cx| apply(cx, &changes)).is_err() {
+            return;
+        }
+    })
+    .detach();
+}
+
+pub fn app_wide(key: &str, value: &Value, cx: &mut App) {
+    super::appearance::on_change(key, value, cx);
+    super::shell::on_search_setting(cx, key, value);
+    super::shell::on_awake_setting(cx, key, value);
+    super::shell::on_dock_setting(cx, key, value);
+    on_semantic_setting(cx, key, value);
+}
+
+fn on_semantic_setting(cx: &mut App, key: &str, value: &Value) {
+    if crate::sheets::search_rows::is_search_key(key) {
+        if let Some(search) = cx.try_global::<AppSearch>() {
+            search.0.forget();
+        }
+    }
+    if key != "semanticSearch" || value.as_bool() != Some(true) {
+        return;
+    }
+    let Some(search) = cx.try_global::<AppSearch>().map(|g| g.0.clone()) else {
+        return;
+    };
+    cx.background_executor()
+        .spawn(async move {
+            search.send_settings(&settings_docs()).ok();
+        })
+        .detach();
+}
+
+pub fn apply(cx: &mut App, changes: &[(String, Value)]) {
+    for (key, value) in changes {
+        match chat_window(cx) {
+            Some(handle) => {
+                handle
+                    .update(cx, |view, _, cx| {
+                        view.applied_setting(key, value, cx);
+                        view.show_setting(key, value, cx);
+                    })
+                    .ok();
+            }
+            None => {
+                crate::chat::history::on_change(key, value);
+                app_wide(key, value, cx);
+            }
+        }
+    }
+}

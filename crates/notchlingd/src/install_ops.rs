@@ -1,0 +1,580 @@
+use crate::late_emit::Events;
+use crate::layout::Layout;
+use crate::op_group::OpGroup;
+use crate::skills_index::{extra_specs, with_index};
+use crate::switches::{SwitchFlag, INSTALL_OFF};
+use notchling_engine::ask::skill::{text as ask_text, NAME as ASK_NAME};
+use notchling_engine::delegate::models_skill;
+use notchling_engine::delegate::skill::{content as delegate_text, SkillTool};
+use notchling_engine::install::{
+    self, Action, FileError, FilePlan, Found, SkillPlan, SkillSpec, ToolRoots, Want, Wanted,
+};
+use notchling_engine::pages::skill::content as pages_text;
+use notchling_engine::settings::skill as settings_skill;
+use notchling_engine::tools::codex::models;
+use notchling_events::kinds::choices::DoneOrFailed;
+use notchling_events::kinds::settings::{HookTarget, InstallAction, InstallHook};
+use notchling_events::spec::Outcome;
+use notchling_events::{scope, Event};
+use notchling_local_api::{ops, ApiError, Caller, ErrorCode, OpSpec};
+use notchling_platform::paths::Os;
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+pub const INSTALL_OPS: [&str; 3] = [ops::INSTALL_PLAN, ops::INSTALL_APPLY, ops::INSTALL_REMOVE];
+
+pub struct InstallSetup {
+    pub settings: PathBuf,
+    pub tools: ToolRoots,
+    pub binary: Option<PathBuf>,
+    pub os: Os,
+    pub skills: Vec<SkillSpec>,
+    pub guard_data: Option<PathBuf>,
+}
+
+impl InstallSetup {
+    pub fn from_layout(layout: &Layout, binary: Option<PathBuf>) -> InstallSetup {
+        let antigravity = layout
+            .antigravity_dir()
+            .parent()
+            .map(|gemini| gemini.join("config"))
+            .unwrap_or_else(|| layout.claude_dir.join("gemini-config"));
+        let tools = ToolRoots {
+            claude: layout.claude_dir.clone(),
+            codex: layout.codex_dir(),
+            antigravity,
+        };
+        let snapshot = layout.state_dir().join(models::SNAPSHOT);
+        let skills = binary
+            .as_deref()
+            .map(|b| default_skills_with(b, &tools.codex, Some(snapshot)))
+            .unwrap_or_default();
+        InstallSetup {
+            settings: layout.claude_dir.join("settings.json"),
+            tools,
+            binary,
+            os: Os::current(),
+            skills,
+            guard_data: Some(layout.data_dir.clone()),
+        }
+    }
+}
+
+pub fn default_skills(binary: &Path, codex_home: &Path) -> Vec<SkillSpec> {
+    default_skills_with(binary, codex_home, None)
+}
+
+pub fn default_skills_with(
+    binary: &Path,
+    codex_home: &Path,
+    snapshot: Option<PathBuf>,
+) -> Vec<SkillSpec> {
+    let for_delegate = binary.to_string_lossy().into_owned();
+    let for_models = for_delegate.clone();
+    let for_pages = for_delegate.clone();
+    let for_settings = for_delegate.clone();
+    let for_ask = for_delegate.clone();
+    let codex_home = codex_home.to_path_buf();
+    let for_index = for_delegate.clone();
+    let specs = vec![
+        SkillSpec {
+            name: notchling_engine::delegate::skill::NAME.to_string(),
+            tools: vec![SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity],
+            text: Box::new(move |tool| {
+                let model = models::load_with(&codex_home, snapshot.as_deref())
+                    .first()
+                    .map(|m| m.slug.clone());
+                delegate_text(&for_delegate, tool, model.as_deref())
+            }),
+        },
+        SkillSpec {
+            name: models_skill::NAME.to_string(),
+            tools: models_skill::TOOLS.to_vec(),
+            text: Box::new(move |tool| models_skill::content(&for_models, tool)),
+        },
+        SkillSpec {
+            name: notchling_engine::pages::skill::NAME.to_string(),
+            tools: vec![SkillTool::Claude],
+            text: Box::new(move |_| pages_text(&for_pages)),
+        },
+        SkillSpec {
+            name: settings_skill::NAME.to_string(),
+            tools: settings_skill::TOOLS.to_vec(),
+            text: Box::new(move |tool| settings_skill::content(&for_settings, tool)),
+        },
+        SkillSpec {
+            name: ASK_NAME.to_string(),
+            tools: vec![SkillTool::Claude, SkillTool::Codex, SkillTool::Antigravity],
+            text: Box::new(move |tool| ask_text(&for_ask, tool)),
+        },
+    ];
+    let mut specs: Vec<SkillSpec> = specs
+        .into_iter()
+        .map(|spec| with_index(&for_index, spec))
+        .collect();
+    specs.extend(extra_specs(&for_index));
+    specs
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Install,
+    Remove,
+}
+
+impl Direction {
+    fn want(self) -> Want {
+        match self {
+            Direction::Install => Want::Install,
+            Direction::Remove => Want::Remove,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Direction::Install => "install",
+            Direction::Remove => "remove",
+        }
+    }
+}
+
+struct Request {
+    direction: Direction,
+    prompt: Want,
+    pages: Want,
+    guard: Want,
+    skills: Vec<(String, Want)>,
+    with_swift_hooks: bool,
+}
+
+pub struct InstallOps {
+    setup: InstallSetup,
+    switch: Arc<SwitchFlag>,
+    clock: Box<dyn Fn() -> u64 + Send + Sync>,
+    writing: Mutex<()>,
+    events: Option<Events>,
+}
+
+fn system_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn failed(message: impl Into<String>) -> ApiError {
+    ApiError::new(ErrorCode::Failed, message)
+}
+
+impl InstallOps {
+    pub fn new(setup: InstallSetup, switch: Arc<SwitchFlag>) -> InstallOps {
+        InstallOps {
+            setup,
+            switch,
+            clock: Box::new(system_ms),
+            writing: Mutex::new(()),
+            events: None,
+        }
+    }
+
+    pub fn with_events(mut self, events: Events) -> InstallOps {
+        self.events = Some(events);
+        self
+    }
+
+    fn noted_direction(request: &Request) -> Direction {
+        let only_guard = request.prompt == Want::Leave && request.pages == Want::Leave;
+        if only_guard && request.guard == Want::Remove {
+            Direction::Remove
+        } else {
+            request.direction
+        }
+    }
+
+    fn note_hook(&self, direction: Direction, result: DoneOrFailed) {
+        let Some(events) = &self.events else {
+            return;
+        };
+        let action = match direction {
+            Direction::Install => InstallAction::Installed,
+            Direction::Remove => InstallAction::Removed,
+        };
+        events.push(Event::new(
+            &InstallHook {
+                target: HookTarget::Claude,
+                action,
+                result,
+            },
+            match result {
+                DoneOrFailed::Done => Outcome::Ok,
+                _ => Outcome::Failed,
+            },
+            crate::acting_ops::now_ms(),
+        ));
+        scope::mark_recorded();
+    }
+
+    pub fn with_skill(mut self, skill: SkillSpec) -> InstallOps {
+        self.setup.skills.push(skill);
+        self
+    }
+
+    pub fn with_clock(mut self, clock: Box<dyn Fn() -> u64 + Send + Sync>) -> InstallOps {
+        self.clock = clock;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold_writes(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.writing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn run(&self, op: &str, args: &Value) -> Result<Value, ApiError> {
+        let request = self.request(op, args)?;
+        if op == ops::INSTALL_PLAN {
+            let plan = self.plan(&request)?;
+            let mut out = envelope(self.switch.is_on(), false, None, &plan, None);
+            out["plan"]["parts"] = json!(self.parts_of(&plan));
+            return Ok(out);
+        }
+        let only = parts::only_of(args)?;
+        let shown = parts::after_of(args)?;
+        let _one_at_a_time = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        let plan = self.plan(&request)?;
+        if !self.switch.is_on() {
+            return Ok(envelope(false, false, Some(INSTALL_OFF), &plan, None));
+        }
+        if let Some(why) = &plan.blocked {
+            return Err(failed(why.clone()));
+        }
+        let fresh = if shown.is_some() {
+            self.parts_of(&plan)
+        } else {
+            Vec::new()
+        };
+        let (only, moved) = parts::drifted(only, shown.as_ref(), &fresh);
+        self.apply(&request, plan, only.as_ref(), &moved)
+    }
+
+    fn request(&self, op: &str, args: &Value) -> Result<Request, ApiError> {
+        let bad = |m: &str| ApiError::bad_request(m.to_string());
+        let direction = match op {
+            ops::INSTALL_REMOVE => Direction::Remove,
+            ops::INSTALL_PLAN => match args.get("action").and_then(Value::as_str) {
+                None | Some("install") => Direction::Install,
+                Some("remove") => Direction::Remove,
+                Some(_) => return Err(bad("action is \"install\" or \"remove\"")),
+            },
+            _ => Direction::Install,
+        };
+        let mut names: Vec<String> = vec![
+            install::PROMPT_HOOKS.into(),
+            install::PAGE_HOOKS.into(),
+            install::GUARD_HOOKS.into(),
+        ];
+        names.extend(self.setup.skills.iter().map(|s| s.name.clone()));
+        let chosen: Vec<String> = match args.get("what") {
+            None | Some(Value::Null) => names.clone(),
+            Some(Value::Array(items)) => {
+                let mut chosen = Vec::new();
+                for item in items {
+                    let name = item
+                        .as_str()
+                        .ok_or_else(|| bad("what is a list of names"))?;
+                    if !names.iter().any(|n| n == name) {
+                        return Err(ApiError::bad_request(format!(
+                            "no part named {name:?}; the parts are {}",
+                            names.join(", ")
+                        )));
+                    }
+                    chosen.push(name.to_string());
+                }
+                chosen
+            }
+            Some(_) => return Err(bad("what is a list of names")),
+        };
+        let want = |name: &str| {
+            if chosen.iter().any(|c| c == name) {
+                direction.want()
+            } else {
+                Want::Leave
+            }
+        };
+        let guard = match (want(install::GUARD_HOOKS), self.guard_open()) {
+            (Want::Install, false) => Want::Remove,
+            (other, _) => other,
+        };
+        let guard = match guard {
+            Want::Remove if parts::keep_guard(args) => Want::Leave,
+            other => other,
+        };
+        let flag = args.get("with_swift_hooks");
+        if flag.is_some_and(|f| !f.is_boolean() && !f.is_null()) {
+            return Err(bad("with_swift_hooks is true or false"));
+        }
+        Ok(Request {
+            direction,
+            prompt: want(install::PROMPT_HOOKS),
+            pages: want(install::PAGE_HOOKS),
+            guard,
+            skills: self
+                .setup
+                .skills
+                .iter()
+                .map(|s| (s.name.clone(), want(&s.name)))
+                .collect(),
+            with_swift_hooks: flag.and_then(Value::as_bool).unwrap_or(false),
+        })
+    }
+
+    fn guard_open(&self) -> bool {
+        self.setup
+            .guard_data
+            .as_deref()
+            .is_some_and(notchling_engine::cost_profile::guard::enabled)
+    }
+
+    fn wanted(&self, request: &Request) -> Result<Wanted, ApiError> {
+        let binary = self
+            .setup
+            .binary
+            .as_deref()
+            .ok_or_else(|| failed("can't find the path of this program, so no hook command"))?;
+        Ok(Wanted {
+            command: install::hook_command(binary, self.setup.os),
+            prompt: request.prompt,
+            pages: request.pages,
+            fence: request.prompt,
+            guard: request.guard,
+        })
+    }
+
+    fn plan(&self, request: &Request) -> Result<Plan, ApiError> {
+        let wanted = self.wanted(request)?;
+        let hooks = install::plan(&self.setup.settings, &wanted);
+        let blocked = match &hooks {
+            Ok(p) if request.direction == Direction::Install && !request.with_swift_hooks => {
+                let asked = request.prompt != Want::Leave || request.pages != Want::Leave;
+                let swift = p
+                    .hooks
+                    .found
+                    .iter()
+                    .any(|f| f.origin == install::Origin::Swift);
+                (asked && swift).then(|| {
+                    "the Swift app's hook is still in settings.json; two hooks would both answer \
+                     (retire the Swift app's first, or pass with_swift_hooks)"
+                        .to_string()
+                })
+            }
+            _ => None,
+        };
+        let skills = install::plan_skills(&self.setup.tools, &self.setup.skills, &request.skills);
+        Ok(Plan {
+            direction: request.direction,
+            settings: self.setup.settings.clone(),
+            hooks,
+            skills,
+            blocked,
+        })
+    }
+
+    fn apply(
+        &self,
+        request: &Request,
+        plan: Plan,
+        only: Option<&install::Only>,
+        moved: &[String],
+    ) -> Result<Value, ApiError> {
+        let wanted = self.wanted(request)?;
+        let mut backup = None;
+        let mut plan = plan;
+        let mut states: Vec<Value> = moved
+            .iter()
+            .map(|id| parts::state(id, "stale", None))
+            .collect();
+        let hooks_asked = request.prompt != Want::Leave
+            || request.pages != Want::Leave
+            || request.guard != Want::Leave;
+        let hooks_kept = only.is_none_or(|o| o.contains_key(parts::HOOKS));
+        if hooks_asked && hooks_kept {
+            let expect = only.and_then(|o| o.get(parts::HOOKS));
+            match install::apply_expecting(&self.setup.settings, &wanted, (self.clock)(), expect) {
+                Ok(done) => {
+                    if request.guard == Want::Install {
+                        if let Some(data) = self.setup.guard_data.as_deref() {
+                            notchling_engine::cost_profile::guard::ensure_policy(data);
+                        }
+                    }
+                    if done.wrote || request.prompt != Want::Leave || request.pages != Want::Leave {
+                        self.note_hook(Self::noted_direction(request), DoneOrFailed::Done);
+                    }
+                    states.push(parts::state(
+                        parts::HOOKS,
+                        if done.wrote { "written" } else { "unchanged" },
+                        None,
+                    ));
+                    backup = done.backup.map(|p| p.to_string_lossy().into_owned());
+                    plan.hooks = Ok(done.plan);
+                }
+                Err(install::FileError::Changed) if only.is_some() => {
+                    states.push(parts::state(parts::HOOKS, "stale", None));
+                }
+                Err(e) => {
+                    self.note_hook(Self::noted_direction(request), DoneOrFailed::Failed);
+                    if only.is_none() {
+                        return Err(failed(e.to_string()));
+                    }
+                    states.push(parts::state(parts::HOOKS, "failed", Some(e.to_string())));
+                }
+            }
+        }
+        let results = install::apply_skills_only(
+            &self.setup.tools,
+            &self.setup.skills,
+            &request.skills,
+            only,
+        );
+        let errors: Vec<String> = results
+            .iter()
+            .filter(|r| r.error.as_deref() != Some(install::STALE))
+            .filter_map(|r| {
+                r.error.as_ref().map(|e| {
+                    format!(
+                        "{} in {}: {e}",
+                        r.plan.name,
+                        install::skills::tool_name(r.plan.tool)
+                    )
+                })
+            })
+            .collect();
+        states.extend(
+            results
+                .iter()
+                .filter(|_| only.is_some())
+                .map(parts::skill_state),
+        );
+        plan.skills = results.iter().map(|r| r.plan.clone()).collect();
+        let mut value = envelope(true, true, None, &plan, backup);
+        if let Some(list) = value["plan"]["skills"].as_array_mut() {
+            for (item, result) in list.iter_mut().zip(&results) {
+                item["error"] = json!(result.error);
+            }
+        }
+        if only.is_some() {
+            value["parts"] = json!(states);
+        }
+        if errors.is_empty() {
+            Ok(value)
+        } else {
+            Err(failed(format!(
+                "the hooks were handled but some skills were not: {}",
+                errors.join("; ")
+            )))
+        }
+    }
+}
+
+impl OpGroup for InstallOps {
+    fn spec(&self, op: &str) -> Option<OpSpec> {
+        match op {
+            ops::INSTALL_PLAN => Some(OpSpec::AGENT_READ),
+            _ => INSTALL_OPS.contains(&op).then_some(OpSpec::APP),
+        }
+    }
+
+    fn call(&self, _caller: &Caller, op: &str, args: &Value) -> Result<Value, ApiError> {
+        self.run(op, args)
+    }
+}
+
+struct Plan {
+    direction: Direction,
+    settings: PathBuf,
+    hooks: Result<FilePlan, FileError>,
+    skills: Vec<SkillPlan>,
+    blocked: Option<String>,
+}
+
+fn found_json(f: &Found) -> Value {
+    json!({
+        "event": f.event,
+        "matcher": f.matcher,
+        "origin": f.origin.as_str(),
+        "command": f.command,
+        "managed": f.managed,
+    })
+}
+
+fn hooks_json(path: &Path, hooks: &Result<FilePlan, FileError>) -> Value {
+    let file = path.to_string_lossy();
+    match hooks {
+        Ok(p) => json!({
+            "file": file,
+            "state": p.state.as_str(),
+            "read_only": p.read_only,
+            "refused": null,
+            "changed": p.hooks.changed,
+            "changes": p.hooks.changes,
+            "notes": p.hooks.notes,
+            "present": p.hooks.found.iter().map(found_json).collect::<Vec<_>>(),
+        }),
+        Err(e) => json!({
+            "file": file,
+            "state": "refused",
+            "read_only": false,
+            "refused": e.to_string(),
+            "changed": false,
+            "changes": [],
+            "notes": [],
+            "present": [],
+        }),
+    }
+}
+
+fn skill_json(p: &SkillPlan) -> Value {
+    json!({
+        "name": p.name,
+        "tool": install::skills::tool_name(p.tool),
+        "path": p.dir.to_string_lossy(),
+        "action": p.action.as_str(),
+        "reason": p.reason,
+        "tool_missing": p.reason.as_deref() == Some(install::skills::TOOL_MISSING),
+        "error": null,
+    })
+}
+
+#[path = "install_parts.rs"]
+pub(crate) mod parts;
+
+fn envelope(
+    on: bool,
+    applied: bool,
+    message: Option<&str>,
+    plan: &Plan,
+    backup: Option<String>,
+) -> Value {
+    let hooks_changed = plan.hooks.as_ref().is_ok_and(|p| p.hooks.changed);
+    let skills_changed = plan
+        .skills
+        .iter()
+        .any(|s| matches!(s.action, Action::Write | Action::Update | Action::Remove));
+    let mut value = json!({
+        "on": on,
+        "applied": applied,
+        "plan": {
+            "action": plan.direction.name(),
+            "changed": hooks_changed || skills_changed,
+            "blocked": plan.blocked,
+            "hooks": hooks_json(&plan.settings, &plan.hooks),
+            "skills": plan.skills.iter().map(skill_json).collect::<Vec<_>>(),
+        },
+    });
+    if let Some(message) = message {
+        value["message"] = json!(message);
+    }
+    if let Some(backup) = backup {
+        value["backup"] = json!(backup);
+    }
+    value
+}

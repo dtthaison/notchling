@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Git Branches Mockup</title>
+<style>
+:root{--bg:#1b1a19;--panel:#161514;--line:#2a2826;--text:#e8e6e3;--mute:#8d8a86;--green:#7cc96f;--red:#e5735f;--acc:#e8925a;--chip:#262422}
+*{box-sizing:border-box}body{margin:0;background:#0f0e0d;color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;padding:24px 16px}
+h1{font-size:20px;margin:0 0 4px}p.lead{color:var(--mute);margin:0 0 24px;max-width:900px}
+.row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+.opt{flex:1 1 420px;max-width:620px}.opt h2{font-size:15px;margin:0 0 4px}.opt .why{color:var(--mute);font-size:13px;margin:0 0 12px}
+.win{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.sec{padding:14px 16px}.cap{color:var(--mute);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin:6px 0 6px}
+.b{display:grid;grid-template-columns:18px 1fr auto;gap:2px 8px;padding:7px 8px;border-radius:8px;align-items:center}
+.b:hover{background:var(--chip)}.b.cur{background:#221f1c;outline:1px solid #3a332c}
+.ic{color:var(--mute);font-size:12px;text-align:center}
+.name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sub{grid-column:2/4;color:var(--mute);font-size:12.5px}
+.num{font-variant-numeric:tabular-nums;font-size:13px;white-space:nowrap}.g{color:var(--green)}.r{color:var(--red)}.a{color:var(--acc)}
+.f{display:grid;grid-template-columns:18px 1fr auto;gap:0 8px;padding:4px 8px 4px 26px;font-size:13px}
+.f .st{font-family:ui-monospace,Menlo,monospace;font-size:12px}.f .when{color:var(--mute);font-size:12px;margin-left:6px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px;background:var(--acc);box-shadow:0 0 0 3px #e8925a33}
+.pill{font-size:11px;padding:1px 7px;border-radius:99px;background:var(--chip);color:var(--mute)}.pill.warn{color:var(--acc)}
+.more{color:var(--mute);font-size:13px;padding:5px 8px 5px 26px}
+.hdr{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}.hdr .t{font-weight:600}.hdr .x{margin-left:auto;color:var(--mute)}
+.tabs{display:flex;gap:6px;padding:10px 16px 0}.tab{padding:4px 10px;border-radius:7px;color:var(--mute);font-size:13px}.tab.on{background:var(--chip);color:var(--text)}
+.filter{margin:10px 16px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;color:var(--mute);font-size:13px}
+.grp{padding:0 16px 12px}
+.act{display:flex;gap:6px;grid-column:2/4;margin-top:4px}.btn{font-size:12px;padding:2px 9px;border-radius:6px;border:1px solid var(--line)}
+.note{color:var(--mute);font-size:12.5px;margin-top:10px}
+</style></head><body>
+<h1>Git: every branch and worktree, the current one short</h1>
+<p class="lead">Your two asks: show all branches and worktrees; the current branch shows only its 3 latest changes. Data shape is this repo's real state on 2026-11-17 (main checkout on agent-run-oss, two lanes in worktrees, 44 branches on GitHub, most merged). File names and numbers are made up. Orange dot = a session is working there now.</p>
+<p class="lead"><b>Approved 2026-11-17: C for the Details Panel, and B's Branches panel</b> (B's own Details section and option A are kept only as the options that were shown). Every row's right side is its work against its base; the current branch's uncommitted count and lines are in its sub-line (answer 2).</p>
+
+<div class="row">
+
+<div class="opt">
+<h2>A · All in the Details Panel's Git section</h2>
+<p class="why">Always visible next to the chat. Good for a few worktrees; the long tail of branches is one “more” row.</p>
+<div class="win"><div class="sec">
+<div class="cap">⌄ Git · 3 worktrees</div>
+
+<div class="b cur"><span class="ic">⎇</span><span class="name">agent-run-oss <span class="pill">this session</span></span><span class="num"><span class="g">+52</span> <span class="r">−9</span></span>
+<div class="sub">main checkout · even with origin · 5 changed</div></div>
+<div class="f"><span class="st a">M</span><span>outbox.rs <span class="when">2 m</span></span><span class="num g">+40 <span class="r">−3</span></span></div>
+<div class="f"><span class="st g">A</span><span>outbox_confirmed_tests.rs <span class="when">5 m</span></span><span class="num g">+210</span></div>
+<div class="f"><span class="st a">M</span><span>tools.rs <span class="when">9 m</span></span><span class="num g">+2 <span class="r">−1</span></span></div>
+<div class="more">2 more · Changes vs origin/main ›</div>
+
+<div class="b"><span class="ic">⎇</span><span class="name"><span class="dot"></span>agent/ask</span><span class="num"><span class="g">+1,240</span> <span class="r">−38</span></span>
+<div class="sub">lane-ask · 2 ahead · <span class="a">session running 41 m</span></div></div>
+
+<div class="b"><span class="ic">⎇</span><span class="name"><span class="dot"></span>agent/ssh-join</span><span class="num"><span class="g">+860</span> <span class="r">−12</span></span>
+<div class="sub">lane-ssh-join · 4 ahead · <span class="a">session running 44 m</span></div></div>
+
+<div class="more" style="padding-left:8px">main and 41 branches on GitHub ›</div>
+</div></div>
+</div>
+
+<div class="opt">
+<h2>C · Numbers only: one line per branch, no file list</h2>
+<p class="why">Shortest. The current branch shows only its numbers; files open in Changes on click.</p>
+<div class="win"><div class="sec">
+<div class="cap">⌄ Git · 3 worktrees</div>
+<div class="b cur"><span class="ic">⎇</span><span class="name">agent-run-oss <span class="pill">this session</span></span><span class="num"><span class="g">+501</span> <span class="r">−91</span></span>
+<div class="sub">5 uncommitted <span class="g">+52</span> <span class="r">−9</span> · last 2 m ago · even with origin · vs main</div></div>
+<div class="b"><span class="ic">⎇</span><span class="name"><span class="dot"></span>agent/ask</span><span class="num"><span class="g">+1,240</span> <span class="r">−38</span></span>
+<div class="sub">23 files · 2 ahead · <span class="a">running 41 m</span></div></div>
+<div class="b"><span class="ic">⎇</span><span class="name"><span class="dot"></span>agent/ssh-join</span><span class="num"><span class="g">+860</span> <span class="r">−12</span></span>
+<div class="sub">17 files · 4 ahead · <span class="a">running 44 m</span></div></div>
+<div class="more" style="padding-left:8px">main and 41 branches on GitHub ›</div>
+</div></div>
+</div>
+
+<div class="opt">
+<h2>B · Short in Details, a full Branches panel on click</h2>
+<p class="why">Details stays short. The panel opens where Changes opens today, with room for groups, a filter and “go there” buttons.</p>
+<div class="win"><div class="sec">
+<div class="cap">⌄ Git · 5</div>
+<div class="b cur"><span class="ic">⎇</span><span class="name">agent-run-oss</span><span class="num"><span class="g">+52</span> <span class="r">−9</span></span>
+<div class="sub">origin/agent-run-oss · even</div></div>
+<div class="f"><span class="st a">M</span><span>outbox.rs <span class="when">2 m</span></span><span class="num g">+40 <span class="r">−3</span></span></div>
+<div class="f"><span class="st g">A</span><span>outbox_confirmed_tests.rs <span class="when">5 m</span></span><span class="num g">+210</span></div>
+<div class="f"><span class="st a">M</span><span>tools.rs <span class="when">9 m</span></span><span class="num g">+2 <span class="r">−1</span></span></div>
+<div class="more">2 more · Changes vs origin/main ›</div>
+<div class="b"><span class="ic">⑂</span><span class="name">2 other worktrees · <span class="a">2 working</span> · 44 branches</span><span class="ic">›</span></div>
+</div></div>
+
+<div style="height:14px"></div>
+<div class="win">
+<div class="hdr"><span class="ic">⑂</span><span class="t">Branches</span><span class="pill">notchling</span><span class="x">✕</span></div>
+<div class="tabs"><span class="tab on">Working (3)</span><span class="tab">Not merged (6)</span><span class="tab">Merged (35)</span></div>
+<div class="filter">⌕ Filter branches</div>
+<div class="grp">
+<div class="cap">Worktrees</div>
+<div class="b cur"><span class="ic">⎇</span><span class="name">agent-run-oss</span><span class="num"><span class="g">+501</span> <span class="r">−91</span></span>
+<div class="sub">main checkout · this session · 5 uncommitted</div></div>
+<div class="b"><span class="ic">⎇</span><span class="name"><span class="dot"></span>agent/ask</span><span class="num"><span class="g">+1,240</span> <span class="r">−38</span></span>
+<div class="sub">.claude/worktrees/lane-ask · “Lane: build Ask” <span class="a">running</span> · last commit 6 m ago “ask: store and wait”</div>
+<div class="act"><span class="btn">Changes</span><span class="btn">Open Session</span><span class="btn">Show in Finder</span></div></div>
+<div class="b"><span class="ic">⎇</span><span class="name"><span class="dot"></span>agent/ssh-join</span><span class="num"><span class="g">+860</span> <span class="r">−12</span></span>
+<div class="sub">.claude/worktrees/lane-ssh-join · “Lane: build SSH join” <span class="a">running</span> · last commit 3 m ago</div></div>
+<div class="cap">No worktree</div>
+<div class="b"><span class="ic">⎇</span><span class="name">main</span><span class="num"></span><div class="sub">local · even with origin/main</div></div>
+<div class="b"><span class="ic">☁</span><span class="name">agent/held-reply-fix</span><span class="num"><span class="g">+42</span> <span class="r">−7</span></span>
+<div class="sub">GitHub only · <span class="pill warn">not merged</span> · 9 days old</div></div>
+<div class="more" style="padding-left:8px">35 merged into agent-run-oss ›</div>
+</div></div>
+<p class="note">Read-only to start. The buttons only take you somewhere; Merge, Delete or Push would be a later, separate step.</p>
+</div>
+
+</div>
+</body></html>

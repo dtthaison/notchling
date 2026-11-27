@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "not_reachable",
+    "message": "localhost:3000 is not running on the Mac."
+  },
+  "id": 9,
+  "ok": false
+}

@@ -1,0 +1,74 @@
+{
+  "hosts": ["huggingface.co", "*.huggingface.co", "hf.co", "*.hf.co"],
+  "models": [
+    {
+      "id": "granite-97m-r2@835ad14/p1",
+      "folder": "granite-97m-r2",
+      "tier": "standard",
+      "listed": true,
+      "recommended": true,
+      "message": "settings-model-standard",
+      "download_bytes": 220192456,
+      "kept_bytes": 220192456,
+      "files": [
+        {
+          "repo": "ibm-granite/granite-embedding-97m-multilingual-r2",
+          "revision": "835ad14087e140460703cf0fae09f97d469d65c2",
+          "path": "config.json",
+          "save_as": "config.json",
+          "size": 1216,
+          "sha256": "de948b0bdc6f356afad7a84b276d8dd7e7fe10fb9add1bb5e610621c28e41ebc",
+          "license": "Apache-2.0"
+        },
+        {
+          "repo": "ibm-granite/granite-embedding-97m-multilingual-r2",
+          "revision": "835ad14087e140460703cf0fae09f97d469d65c2",
+          "path": "model.safetensors",
+          "save_as": "model.safetensors",
+          "size": 194889568,
+          "sha256": "f3ea88b230492811046145513710e76b4cc8c2ad49e8708da0e7247e548903be",
+          "license": "Apache-2.0"
+        },
+        {
+          "repo": "ibm-granite/granite-embedding-97m-multilingual-r2",
+          "revision": "835ad14087e140460703cf0fae09f97d469d65c2",
+          "path": "tokenizer.json",
+          "save_as": "tokenizer.json",
+          "size": 25301672,
+          "sha256": "4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f",
+          "license": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "id": "static-mrl@b68f412/512i8/p1",
+      "folder": "static-mrl",
+      "tier": "helper",
+      "listed": true,
+      "recommended": true,
+      "message": "settings-model-accent-helper",
+      "download_bytes": 436243850,
+      "kept_bytes": 54000000,
+      "files": [
+        {
+          "repo": "sentence-transformers/static-similarity-mrl-multilingual-v1",
+          "revision": "b68f4122911bcffcd6e1f695f2d99cd6788972d8",
+          "path": "0_StaticEmbedding/model.safetensors",
+          "save_as": "table-f32.safetensors",
+          "size": 433680480,
+          "sha256": "8245ab78ee71dded845a82d2270fcb9e785b29dad0e1619f69d5390c47d9ba00",
+          "license": "Apache-2.0"
+        },
+        {
+          "repo": "sentence-transformers/static-similarity-mrl-multilingual-v1",
+          "revision": "b68f4122911bcffcd6e1f695f2d99cd6788972d8",
+          "path": "0_StaticEmbedding/tokenizer.json",
+          "save_as": "tokenizer.json",
+          "size": 2563370,
+          "sha256": "11aaf894a4ccf3d95e8830e27c0f8152791fbbff2b988e29a265580b86edd216",
+          "license": "Apache-2.0"
+        }
+      ]
+    }
+  ]
+}

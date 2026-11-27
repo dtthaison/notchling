@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "busy",
+    "message": "Just interrupted, wait a moment."
+  },
+  "id": 11,
+  "ok": false
+}

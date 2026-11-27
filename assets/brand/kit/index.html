@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notchling Brand Kit</title>
+<style>
+:root{--bg:#f4f2ee;--card:#fff;--text:#1d1b19;--mute:#6f6a64;--line:#e4e0da;--btn:#ece7df;--bar:#e9e6e1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121110;--card:#1b1a19;--text:#ece9e5;--mute:#8f8a84;--line:#2b2927;--btn:#2a2826;--bar:#2a2826}}
+:root[data-theme="dark"]{--bg:#121110;--card:#1b1a19;--text:#ece9e5;--mute:#8f8a84;--line:#2b2927;--btn:#2a2826;--bar:#2a2826}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;padding:28px 16px}
+main{max-width:1240px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:38px 0 4px}.lead{color:var(--mute);margin:0 0 16px;max-width:900px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+.card h3{font-size:15px;margin:0 0 2px}.feel{color:var(--mute);font-size:12.5px;margin:0 0 8px}
+.hero{width:100%;max-width:190px;display:block;margin:0 auto;filter:drop-shadow(0 10px 18px rgba(10,15,34,.28))}
+.why{font-size:13px;margin:6px 0 0}.when{display:inline-block;font-size:11.5px;background:var(--btn);border-radius:99px;padding:1px 8px;margin-top:6px}
+.sw{display:flex;gap:14px;flex-wrap:wrap}.sw div{width:140px}.sw i{display:block;height:70px;border-radius:12px;border:1px solid var(--line)}.sw b{display:block;margin-top:6px;font-size:13px}.sw span{font-size:12px;color:var(--mute);font-family:ui-monospace,Menlo,monospace}
+.row{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.sizes{display:flex;gap:12px;align-items:flex-end}.sizes figure{margin:0;text-align:center;font-size:11px;color:var(--mute)}
+.bar{display:inline-flex;align-items:center;gap:12px;background:var(--bar);border-radius:8px;padding:5px 12px;font-size:12px;color:var(--text)}
+.strip{display:flex;gap:6px;justify-content:center;margin:8px 0 4px}.strip svg{width:66px;height:66px}
+.pick{border:2px solid #ff9a5a}.badge{font-size:11px;background:#ff9a5a;color:#0a0f22;border-radius:99px;padding:1px 8px;margin-left:6px}
+.wm{display:flex;align-items:center;gap:14px;padding:18px 22px;border-radius:16px;background:var(--card);border:1px solid var(--line)}
+.wm span{font-size:40px;font-weight:800;letter-spacing:-.02em}
+.phone{width:120px;height:240px;border-radius:26px;background:#0a0f22;padding:10px;display:flex;align-items:center;justify-content:center}
+.phone .scr{width:100%;height:100%;border-radius:18px;background:linear-gradient(#a9d3ff,#6fb5ff);display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 10px;align-content:start}
+.phone .scr i{display:block;aspect-ratio:1;border-radius:22%;background:rgba(255,255,255,.4)}
+</style></head><body><main>
+<h1>Notchling brand kit</h1>
+<p class="lead">This is one system: the session-pill N, the three tool dots, and a faceless bot built only from those pieces. Every color comes from the three dots (Claude orange, Codex green, Antigravity blue), plus ink and white. The icon, the menu bar glyph, the phone icon, the shapes, the emotions and the actions are all drawn by the same code (brand.js), so they always match.</p>
+
+<h2>1 · Colors</h2>
+<div class="sw">
+<div><i style="background:#ff9a5a"></i><b>Claude orange</b><span>#FF9A5A</span></div>
+<div><i style="background:#7fd68b"></i><b>Codex green</b><span>#7FD68B</span></div>
+<div><i style="background:#6fb5ff"></i><b>Antigravity blue</b><span>#6FB5FF</span></div>
+<div><i style="background:#0a0f22"></i><b>Ink</b><span>#0A0F22</span></div>
+<div><i style="background:#fff"></i><b>White</b><span>#FFFFFF</span></div>
+</div>
+<p class="lead" style="margin-top:10px">Backgrounds use only the three dot colors: one color (with its own lighter tint at the top) or all three in a sweep. Ink is for the notch and outlines, and white is for the pills.</p>
+
+<h2>2 · App icon backgrounds</h2>
+<div class="grid" id="bgs"></div>
+
+<h2>3 · Logo, wordmark, menu bar and phone</h2>
+<div class="row">
+  <div class="wm"><svg id="wmIcon" width="64" height="64"></svg><span>notchling</span></div>
+  <div class="card"><h3>Menu bar glyph</h3><p class="feel">A template image: macOS tints it black or white</p>
+    <div class="row"><span class="bar">Light <span id="g1"></span> 9:41</span><span class="bar" style="background:#1d1b19;color:#fff">Dark <span id="g2" style="color:#fff"></span> 9:41</span><span class="bar" style="background:#f4f2ee;color:#1d1b19">Color <span id="g3"></span></span></div></div>
+  <div class="card"><h3>Phone</h3><p class="feel">The same icon on the home screen</p><div class="phone"><div class="scr" id="phone"></div></div></div>
+</div>
+
+<h2>4 · N becomes a bot (13 shapes)</h2>
+<p class="lead">Each shape loops: N, then transform, then live, then back to N. The strip shows N, halfway and the shape. Each one has a job in the app, so the bot changes shape to show what Notchling is doing.</p>
+<div class="grid" id="shapes"></div>
+
+<h2>5 · Emotions</h2>
+<p class="lead">Each emotion has two clear signals. <b>The pose</b> is exaggerated so the silhouette reads even small. <b>The three dots</b> make a sign anyone knows: a smile arc, a frown arc, a check mark, an ellipsis or an exclamation. There's no face, only pills and dots.</p>
+<div class="grid" id="emos"></div>
+
+<h2>6 · Actions</h2>
+<p class="lead">Notchling's real jobs, acted out by the Visor bot with the same three dots. Props use only ink, white and the three colors.</p>
+<div class="grid" id="acts"></div>
+</main>
+<script src="brand.js"></script>
+<script>
+const {NS,C,build,draw,morph,live,logo,glyph,lerp,ease,cl,seg,copy,SHAPES}=NB;
+const V={L:{cx:300,cy:620,w:96,h:280,r:30},D:{cx:512,cy:600,w:300,h:400,r:0,k:.32},R:{cx:724,cy:620,w:96,h:280,r:-30}};
+const mk=(bg,o)=>{const s=document.createElementNS(NS,"svg");build(s,bg,o);return s;};
+const bgsDesc={tri:["Sweep","All three tools in one icon. It's the brand's signature, and my pick for the app icon."],blue:["Blue","Calm and native-looking next to Apple's apps."],orange:["Orange","Warm and friendly. It stands out most in the Dock."],green:["Green","Fresh and \"all good\". It suits a status-first feel."]};
+for(const bg of["tri","blue","orange","green"]){const c=document.createElement("div");c.className="card"+(bg==="tri"?" pick":"");c.innerHTML=`<h3>${bgsDesc[bg][0]}${bg==="tri"?'<span class="badge">my pick</span>':''}</h3><p class="feel">${bgsDesc[bg][1]}</p>`;const h=mk(bg);h.setAttribute("class","hero");logo(h);c.appendChild(h);const sz=document.createElement("div");sz.className="sizes";sz.style.justifyContent="center";sz.style.marginTop="10px";for(const n of[64,32,16]){const f=document.createElement("figure");const s=mk(bg);s.setAttribute("width",n);s.setAttribute("height",n);logo(s);f.appendChild(s);f.append(n+"");sz.appendChild(f);}c.appendChild(sz);document.getElementById("bgs").appendChild(c);}
+const wi=document.getElementById("wmIcon");build(wi,"tri");logo(wi);
+document.getElementById("g1").innerHTML=glyph(true);document.getElementById("g2").innerHTML=glyph(true);document.getElementById("g3").innerHTML=glyph(false);
+const ph=document.getElementById("phone");for(let i=0;i<12;i++){if(i===4){const s=mk("tri");logo(s);s.style.width="100%";s.style.transform="scale(1.22)";ph.appendChild(s);}else ph.appendChild(document.createElement("i"));}
+
+const bgCycle=["tri","blue","green","orange"];const shapeBg=SHAPES.map((_,i)=>bgCycle[i%4]);
+const shapeWhy={
+ visor:["Upright body, arms out, and the dots as a visor that scans.","The notch pet and the default bot. It shows a session's state with the emotions below."],
+ tower:["A slim beacon. The dots stack like a traffic light, and the active tool glows.","Which tool is busy right now, and the limit meter (low, half, nearly full)."],
+ tripod:["A triangle machine. The dots pass a pulse around its corners.","Delegation: a job handed from one tool to another for a second opinion or review."],
+ drone:["A hovering body with rotor arms and running lights.","The notch itself: hovering over the camera while sessions run, and Keep Mac Awake."],
+ crew:["Three small bots, one per tool, bouncing in turn.","The Bot Room and the session list: many sessions working side by side."],
+ walker:["A body on two stepping legs, with the dots as a progress bar.","Long jobs and background agents: it walks while the work moves along."],
+ bridge:["Two pillars and a deck. The dots cross from one side to the other.","The phone bridge: messages travelling between the Mac and the phone app."],
+ vault:["The N closes into a padlock. The shackle lifts when it opens.","The Secret Vault: an agent asks for a credential and gets it without you pasting it."],
+ rocket:["A tall body with two fins. The dots are its windows, lighting in turn.","Updates and releases: a new Notchling version is ready to install."],
+ hourglass:["Two crossed pills on a base. The dots fall through the middle.","Usage limits: counting down to the reset, or waiting before a switch."],
+ rack:["The three strokes stack flat like servers, with a status light on each.","Machines and the cluster: each node's light shows if it's online, busy or gone."],
+ swap:["Two bars and a wheel. The dots circle and trade places.","Account switching: a limit is hit and Notchling swaps to the next login."],
+ tray:["The arms open into a tray. The dots drop in one by one.","The Inbox: replies, asks and finished jobs waiting for you."]
+};
+const sh=SHAPES.map((s,i)=>{const c=document.createElement("div");c.className="card"+(s.id==="visor"?" pick":"");c.innerHTML=`<h3>${s.t}${s.id==="visor"?'<span class="badge">main bot</span>':''}</h3>`;const h=mk(shapeBg[i]);h.setAttribute("class","hero");c.appendChild(h);const st=document.createElement("div");st.className="strip";for(const t of[0,.5,1]){const x=mk(shapeBg[i]);morph(x,s,t);st.appendChild(x);}c.appendChild(st);const p=document.createElement("p");p.className="why";p.textContent=shapeWhy[s.id][0];c.appendChild(p);const u=document.createElement("p");u.className="why";u.innerHTML="<b>Used for:</b> "+shapeWhy[s.id][1];c.appendChild(u);document.getElementById("shapes").appendChild(c);return[h,s];});
+
+const arc=(cx,cy,w,h,up)=>[0,1,2].map(i=>[cx+(i-1)*w,cy+(i===1?0:(up?-h:h))]);
+const E=[
+ {t:"Working",feel:"Busy, focused",when:"A session is running",bg:"blue",
+  sign:"A light sweeps across a straight visor line, like a scanner.",
+  f:s=>{const P=copy(V);P.D.r=8;P.L.r=60;P.L.cy=680;P.L.cx=330;P.R.r=-60;P.R.cy=680;P.R.cx=700;const p=(Math.sin(s*3)+1);return{P,tf:`translate(0 ${Math.sin(s*6)*3})`,dots:[0,1,2].map(i=>{const o=Math.max(0,1-Math.abs(p-i));return[452+i*60,505+i*8,22+6*o,.3+.7*o];})};}},
+ {t:"Happy",feel:"Glad, it worked",when:"A reply landed",bg:"orange",
+  sign:"The dots form a smile arc ◡. Arms fly up and out, and it hops.",
+  f:s=>{const b=Math.abs(Math.sin(s*4));const P=copy(V);P.L.r=125;P.R.r=-125;P.L.cy=470;P.R.cy=470;P.L.cx=330;P.R.cx=694;return{P,tf:`translate(0 ${-b*40})`,dots:arc(512,540,62,26,true).map(d=>[d[0],d[1],26,1])};}},
+ {t:"Waiting for you",feel:"Asking, needs an answer",when:"A permission prompt or Ask",bg:"tri",
+  sign:"The dots bounce as \"…\" like a chat typing bubble, and one hand is raised high.",
+  f:s=>{const P=copy(V);P.R.r=-172;P.R.cy=420;P.R.cx=690;P.R.h=320;P.L.r=20;return{P,dots:[0,1,2].map(i=>[452+i*60,520-Math.max(0,Math.sin(s*6-i*.9))*30,22,1])};}},
+ {t:"Done",feel:"Proud, finished",when:"A turn or job finished",bg:"green",
+  sign:"The dots make a check mark ✓. Both arms shoot up in a V.",
+  f:s=>{const P=copy(V);P.L.r=150;P.R.r=-150;P.L.cy=430;P.R.cy=430;P.L.cx=360;P.R.cx=664;P.L.h=320;P.R.h=320;const pop=1+.12*Math.max(0,Math.sin(s*3));return{P,dots:[[440,520,24*pop],[490,570,24*pop],[590,470,24*pop]]};}},
+ {t:"Sleepy",feel:"Idle, resting",when:"Nothing running",bg:"blue",
+  sign:"The body lies down on its side. The dots sit in a low flat line and breathe dimly. Z's float up.",
+  f:s=>{const br=(Math.sin(s*1.2)+1)/2;const P={D:{cx:512,cy:700,w:420,h:220,r:0,k:.4},L:{cx:330,cy:780,w:90,h:200,r:80},R:{cx:690,cy:790,w:90,h:200,r:-95}};return{P,dots:[0,1,2].map(i=>[452+i*60,690,16,.25+.35*br]),extra:`<g font-family="-apple-system,Helvetica" font-weight="800" fill="#0a0f22"><text x="640" y="${520-br*24}" font-size="70" opacity="${.35+.5*br}">z</text><text x="700" y="${430-br*24}" font-size="50" opacity="${.2+.4*br}">z</text></g>`};}},
+ {t:"Worried",feel:"Something went wrong",when:"An error or a send that failed",bg:"orange",
+  sign:"The dots form a frown arc ◠. It shrinks, puts its arms over its head and trembles.",
+  f:s=>{const sh=Math.sin(s*30)*(Math.sin(s*2)>0?7:0);const P=copy(V);P.D.h=330;P.D.cy=650;P.L.r=150;P.R.r=-150;P.L.cy=470;P.R.cy=470;P.L.cx=430;P.R.cx=594;P.L.h=220;P.R.h=220;return{P,tf:`translate(${sh} 0)`,dots:arc(512,580,62,26,false).map(d=>[d[0],d[1],24,1])};}},
+ {t:"Surprised",feel:"Whoa, something new",when:"A new session or message appears",bg:"tri",
+  sign:"The dots spread wide and grow big. It stretches tall with its arms flung out straight.",
+  f:s=>{const k=(Math.sin(s*2.5)+1)/2;const P=copy(V);P.D.h=lerp(440,500,k);P.D.cy=lerp(590,560,k);P.L.r=95;P.R.r=-95;P.L.cx=280;P.R.cx=744;P.L.cy=560;P.R.cy=560;return{P,dots:[[420,470,30+6*k],[512,470,30+6*k],[604,470,30+6*k]]};}},
+ {t:"Confused",feel:"Not sure, puzzled",when:"The session's state is unknown",bg:"green",
+  sign:"The dots climb crookedly up and to the side like a question. The body tilts, and a hand scratches its head.",
+  f:s=>{const P=copy(V);P.R.r=-150;P.R.cy=440;P.R.cx=660;const w=Math.sin(s*2)*8;return{P,tf:`rotate(${-10+w} 512 650)`,dots:[[470,560,20],[510,505,22],[560,470,26]].map((d,i)=>[d[0]+Math.sin(s*3+i)*4,d[1],d[2]])};}},
+ {t:"Excited",feel:"Can't wait, let's go",when:"A long job is about to start",bg:"orange",
+  sign:"The dots jump up in turn like a wave. The whole body bounces fast with its arms pumping.",
+  f:s=>{const b=Math.abs(Math.sin(s*8));const P=copy(V);P.L.r=lerp(60,140,b);P.R.r=-lerp(60,140,Math.abs(Math.sin(s*8+1.5)));P.L.cy=540;P.R.cy=540;return{P,tf:`translate(0 ${-b*22})`,dots:[0,1,2].map(i=>[452+i*60,500-Math.max(0,Math.sin(s*9-i*1.2))*36,24,1])};}},
+ {t:"Thankful",feel:"Grateful, warm",when:"You approved a request",bg:"tri",
+  sign:"The dots huddle into a small triangle that pulses like a heartbeat. The arms wrap around in a hug, and it bows a little.",
+  f:s=>{const h=1+.18*Math.max(0,Math.sin(s*6))*Math.max(0,Math.sin(s*1.5));const P=copy(V);P.L.r=-30;P.R.r=30;P.L.cx=400;P.R.cx=624;P.L.cy=640;P.R.cy=640;return{P,tf:`rotate(${Math.sin(s*1.5)*4} 512 780)`,dots:[[488,520,22*h],[536,520,22*h],[512,560,22*h]]};}}
+];
+const A=[
+ {t:"Hello",feel:"Waves when it wakes",when:"Notchling opens",bg:"orange",f:s=>{const P=copy(V);P.R.r=-150+Math.sin(s*7)*25;P.R.cy=470;P.R.cx=700;return{P,dots:[0,1,2].map(i=>[452+i*60,500,22,1])};}},
+ {t:"Sending",feel:"Carries your message up",when:"A reply goes out",bg:"blue",f:s=>{const p=(s*.7)%1;const P=copy(V);P.L.r=150;P.R.r=-150;P.L.cy=440;P.R.cy=440;P.L.cx=420;P.R.cx=604;const y=lerp(380,230,ease(p));return{P,dots:[0,1,2].map(i=>[452+i*60,500,18,.4]),extra:`<g opacity="${1-p*.6}"><rect x="452" y="${y-40}" width="120" height="80" rx="14" fill="#fff" stroke="#0a0f22" stroke-width="10"/><path d="M452 ${y-40}L512 ${y}L572 ${y-40}" fill="none" stroke="#0a0f22" stroke-width="10"/></g>`};}},
+ {t:"Typing",feel:"Working at the keys",when:"Notchling types into a terminal",bg:"tri",f:s=>{const P=copy(V);P.L.r=70;P.R.r=-70;P.L.cy=720-Math.max(0,Math.sin(s*14))*14;P.R.cy=720-Math.max(0,Math.sin(s*14+1.6))*14;P.L.cx=380;P.R.cx=644;return{P,dots:[0,1,2].map(i=>[452+i*60,500,20,(Math.floor(s*8)%3)===i?1:.4]),extra:`<rect x="300" y="770" width="424" height="60" rx="14" fill="#0a0f22"/><g fill="#fff" opacity=".85">${[0,1,2,3,4,5,6].map(i=>`<rect x="${320+i*56}" y="785" width="40" height="28" rx="6"/>`).join("")}</g>`};}},
+ {t:"Switching account",feel:"Swaps who's logged in",when:"A limit is hit",bg:"green",f:s=>{const a=ease(cl(((s*.5)%1)*2,0,1));const P=copy(V);return{P,tf:`rotate(${Math.sin(a*Math.PI)*6} 512 600)`,dots:[[lerp(452,572,a),500-Math.sin(a*Math.PI)*60,22],[512,500,22],[lerp(572,452,a),500+Math.sin(a*Math.PI)*60,22]]};}},
+ {t:"Handing off",feel:"Passes work to a teammate",when:"Delegating or a Bot Room hand-off",bg:"blue",f:s=>{const p=(s*.6)%1;const P=copy(V);Object.assign(P.D,{w:220,h:300,cx:380,cy:640});Object.assign(P.L,{cx:250,cy:660,h:200,w:80});Object.assign(P.R,{cx:520,cy:600,r:-80,h:200,w:80});const x=lerp(560,720,ease(p));return{P,dots:[[340,560,18],[x,560-Math.sin(p*Math.PI)*80,24],[420,560,18]],extra:`<rect x="680" y="560" width="180" height="250" rx="70" fill="#fff" stroke="#0a0f22" stroke-width="12"/><circle cx="770" cy="630" r="18" fill="#7fd68b" opacity="${p>.85?1:.25}"/>`};}},
+ {t:"Unlocking",feel:"Opens the Vault",when:"An agent gets a credential",bg:"orange",f:s=>{const p=(s*.5)%1;const rot=ease(cl((p-.3)*3,0,1))*90;const P=copy(V);P.R.r=-90;P.R.cx=650;P.R.cy=600;return{P,dots:[0,1,2].map(i=>[452+i*60,500,20,.5]),extra:`<g transform="translate(790 600)"><rect x="-70" y="-30" width="140" height="150" rx="24" fill="#0a0f22"/><path d="M-44 -30V-80A44 44 0 0 1 44 -80V${-30-ease(cl((p-.6)*3,0,1))*40}" stroke="#0a0f22" stroke-width="18" fill="none"/><g transform="rotate(${rot} 0 40)"><circle cx="0" cy="40" r="16" fill="#fff"/><rect x="-4" y="40" width="8" height="34" fill="#fff"/></g></g>`};}},
+ {t:"Travelling",feel:"Goes to another machine",when:"A machine joins over SSH",bg:"tri",f:s=>{const p=(s*.4)%1;const x=lerp(0,520,ease(p));const sc=lerp(1,.4,ease(p));const P=copy(V);return{P,tf:`translate(${x} ${-x*.15}) scale(${sc}) translate(${(1-sc)*512/sc} ${(1-sc)*620/sc})`,dots:[0,1,2].map(i=>[452+i*60,500,22,1]),extra:`<rect x="760" y="640" width="130" height="90" rx="12" fill="#fff" stroke="#0a0f22" stroke-width="8"/><rect x="740" y="730" width="170" height="14" rx="7" fill="#0a0f22"/><path d="M520 760Q660 700 760 690" stroke="#0a0f22" stroke-width="6" fill="none" stroke-dasharray="6 14"/>`};}},
+ {t:"Keeping awake",feel:"Holds the lid open",when:"Keep Mac Awake is on",bg:"blue",f:s=>{const P=copy(V);P.L.r=170;P.R.r=-170;P.L.cy=400;P.R.cy=400;P.L.cx=410;P.R.cx=614;P.L.h=300;P.R.h=300;const br=(Math.sin(s*2)+1)/2;return{P,tf:`translate(0 ${Math.sin(s*2)*6})`,dots:[0,1,2].map(i=>[452+i*60,530,20,.6+.4*br]),extra:`<rect x="300" y="250" width="424" height="16" rx="8" fill="#fff"/>`};}}
+];
+function addCard(id,x){const c=document.createElement("div");c.className="card";c.innerHTML=`<h3>${x.t}</h3><p class="feel">${x.feel}</p>`;const h=mk(x.bg);h.setAttribute("class","hero");c.appendChild(h);if(x.sign){const p=document.createElement("p");p.className="why";p.textContent=x.sign;c.appendChild(p);}const w=document.createElement("span");w.className="when";w.textContent="Shows when: "+x.when;c.appendChild(w);document.getElementById(id).appendChild(c);return[h,x];}
+const em=E.map(x=>addCard("emos",x)),ac=A.map(x=>addCard("acts",x));
+const t0=performance.now();
+function phase(ms){const T=7000,x=(ms%T)/T;if(x<.15)return 0;if(x<.3)return(x-.15)/.15;if(x<.8)return 1;if(x<.95)return 1-(x-.8)/.15;return 0;}
+function frame(now){const ms=now-t0,s=ms/1000;const t=phase(ms);
+  for(const[h,sp]of sh){if(t>=1)live(h,sp,s);else morph(h,sp,t);}
+  for(const[h,x]of em.concat(ac)){const r=x.f(s);draw(h,r.P,r.dots,r);}
+  requestAnimationFrame(frame);}
+for(const[h,sp]of sh)morph(h,sp,0);for(const[h,x]of em.concat(ac)){const r=x.f(0.4);draw(h,r.P,r.dots,r);}
+requestAnimationFrame(frame);
+</script>
+</body></html>

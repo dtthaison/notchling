@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "sources": [
+    {"url": "https://developers.openai.com/api/docs/pricing", "date": "2026-11-22",
+     "note": "Standard tier, short context, per 1M tokens: gpt-6-astra, gpt-6-luna, gpt-6.1-sol, gpt-6.1-terra, gpt-6.2-astra, gpt-6.2-sol. Long-context rates are not used."},
+    {"url": "https://aistudio.google.com/docs/pricing", "date": "2026-11-22",
+     "note": "Standard tier per 1M tokens: gemini-4-hydrogen, gemini-4-neon as listed. Gemini 4 Argon uses the list price from 2026-12-01 (2026 promotion: 2.00 / 10.00 / 0.10), Gemini 3.8 Flash the list price from 2027-01-01 (promotion: 0.75 / 3.75 / 0.075). Antigravity matches by id or by the display name its transcripts carry; Claude Opus 5.5 takes the Claude price."}
+  ],
+  "claude": {
+    "current": ["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5"],
+    "older": ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5",
+              "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"],
+    "efforts": ["low", "medium", "high", "xhigh", "max"],
+    "windows": {"claude-opus-5-5": 400000},
+    "prices": [
+      {"match": "fable-5-2", "input": 8.0, "output": 40.0, "cache_read": 0.20},
+      {"match": "mythos-5-2", "input": 8.0, "output": 40.0, "cache_read": 0.20},
+      {"match": "fable-5-1", "input": 10.0, "output": 50.0, "cache_read": 0.25},
+      {"match": "mythos-5-1", "input": 10.0, "output": 50.0, "cache_read": 0.25},
+      {"match": "fable", "input": 10.0, "output": 50.0, "cache_read": 1.0},
+      {"match": "mythos", "input": 10.0, "output": 50.0, "cache_read": 1.0},
+      {"match": "opus-5-5", "input": 4.0, "output": 20.0, "cache_read": 0.20},
+      {"match": "opus-5", "input": 5.0, "output": 25.0, "cache_read": 0.50},
+      {"match": "opus-4-8", "input": 5.0, "output": 25.0, "cache_read": 0.50},
+      {"match": "opus-4-7", "input": 5.0, "output": 25.0, "cache_read": 0.50},
+      {"match": "opus-4-6", "input": 5.0, "output": 25.0, "cache_read": 0.50},
+      {"match": "opus-4-5", "input": 5.0, "output": 25.0, "cache_read": 0.50},
+      {"match": "opus-4", "input": 15.0, "output": 75.0, "cache_read": 1.50},
+      {"match": "sonnet-5", "input": 2.0, "output": 10.0, "cache_read": 0.20},
+      {"match": "sonnet", "input": 3.0, "output": 15.0, "cache_read": 0.30},
+      {"match": "haiku-5-5", "input": 0.10, "output": 0.50, "cache_read": 0.01,
+       "over": {"tokens": 100000, "input": 0.50, "output": 2.50, "cache_read": 0.05}},
+      {"match": "haiku-4-5", "input": 1.0, "output": 5.0, "cache_read": 0.10},
+      {"match": "haiku", "input": 0.80, "output": 4.0, "cache_read": 0.08}
+    ]
+  },
+  "codex": {
+    "prices": [
+      {"id": "gpt-5", "input": 1.25, "output": 10.0, "cache_read": 0.125},
+      {"id": "gpt-5-codex", "input": 1.25, "output": 10.0, "cache_read": 0.125},
+      {"id": "gpt-5.1", "input": 1.25, "output": 10.0, "cache_read": 0.125},
+      {"id": "gpt-5.1-codex", "input": 1.25, "output": 10.0, "cache_read": 0.125},
+      {"id": "gpt-5.1-codex-max", "input": 1.25, "output": 10.0, "cache_read": 0.125},
+      {"id": "gpt-5-mini", "input": 0.25, "output": 2.0, "cache_read": 0.025},
+      {"id": "gpt-5.1-codex-mini", "input": 0.25, "output": 2.0, "cache_read": 0.025},
+      {"id": "gpt-5-nano", "input": 0.05, "output": 0.40, "cache_read": 0.005},
+      {"id": "gpt-4.1", "input": 2.0, "output": 8.0, "cache_read": 0.50},
+      {"id": "o3", "input": 2.0, "output": 8.0, "cache_read": 0.50},
+      {"id": "o4-mini", "input": 1.10, "output": 4.40, "cache_read": 0.275},
+      {"id": "gpt-6-astra", "input": 10.0, "output": 50.0, "cache_read": 1.0},
+      {"id": "gpt-6-luna", "input": 0.10, "output": 0.50, "cache_read": 0.01},
+      {"id": "gpt-6.1-sol", "input": 2.0, "output": 10.0, "cache_read": 0.10},
+      {"id": "gpt-6.1-terra", "input": 1.0, "output": 5.0, "cache_read": 0.05},
+      {"id": "gpt-6.2-astra", "input": 8.0, "output": 40.0, "cache_read": 0.40},
+      {"id": "gpt-6.2-sol", "input": 2.0, "output": 10.0, "cache_read": 0.10}
+    ],
+    "picks": [
+      {"model": "gpt-6-astra", "effort": "xhigh", "roles": ["review-final", "review-secrets"],
+       "use": "Final review of a branch; with gemini-4-argon high for code touching secrets, vault, auth or accounts. Can run git diff itself.",
+       "then": {
+         "review-final": [
+           {"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"}],
+         "review-secrets": [
+           {"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"}]}}
+    ],
+    "not_for": [
+      {"match": "terra", "roles": ["review"], "use": "Not for review."},
+      {"match": "luna", "roles": ["review"], "use": "Not for review."}
+    ]
+  },
+  "antigravity": {
+    "prices": [
+      {"id": "gemini-4-argon", "input": 4.0, "output": 20.0, "cache_read": 0.20},
+      {"id": "gemini 4 argon", "input": 4.0, "output": 20.0, "cache_read": 0.20},
+      {"id": "gemini-4-hydrogen", "input": 1.50, "output": 7.50, "cache_read": 0.075},
+      {"id": "gemini 4 hydrogen", "input": 1.50, "output": 7.50, "cache_read": 0.075},
+      {"id": "gemini-4-neon", "input": 3.0, "output": 15.0, "cache_read": 0.15},
+      {"id": "gemini 4 neon", "input": 3.0, "output": 15.0, "cache_read": 0.15},
+      {"id": "gemini-3-8-flash", "input": 1.50, "output": 7.50, "cache_read": 0.15},
+      {"id": "gemini 3.8 flash", "input": 1.50, "output": 7.50, "cache_read": 0.15},
+      {"id": "claude-opus-5-5", "input": 4.0, "output": 20.0, "cache_read": 0.20},
+      {"id": "claude opus 5.5", "input": 4.0, "output": 20.0, "cache_read": 0.20}
+    ],
+    "picks": [
+      {"model": "gemini-4-hydrogen", "effort": "high", "roles": ["review"],
+       "use": "Review after each task. Cannot run commands: put the diff and task text in files under .review/.",
+       "then": {
+         "review": [
+           {"tool": "codex", "model": "gpt-6-sol", "effort": "high"}]}},
+      {"model": "gemini-4-argon", "effort": "high", "roles": ["review-secrets", "spec-check"],
+       "use": "Builder check of a spec; second reviewer for code touching secrets, vault, auth or accounts. Cannot run commands: use files under .review/.",
+       "then": {
+         "review-secrets": [
+           {"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"}],
+         "spec-check": [
+           {"tool": "agy", "model": "gemini-4-hydrogen", "effort": "high"},
+           {"tool": "agy", "model": "claude-opus-5-5", "effort": "high"}]}}
+    ],
+    "not_for": [
+      {"match": "orchestrator", "roles": ["review"], "use": "Not for review."},
+      {"match": "flash", "roles": ["review"], "use": "Not for review."},
+      {"match": "claude", "roles": ["review"], "use": "Not for review."},
+      {"effort": "ultra", "roles": ["review"], "use": "Not for review."}
+    ]
+  }
+}

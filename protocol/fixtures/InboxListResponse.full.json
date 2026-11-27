@@ -1,0 +1,52 @@
+{
+  "data": {
+    "items": [
+      {
+        "actions": [
+          {
+            "id": "done",
+            "label": "Done",
+            "primary": true
+          }
+        ],
+        "alertActions": [
+          "allow",
+          "deny",
+          "change"
+        ],
+        "answer": "allow",
+        "answeredBy": "mac",
+        "blocking": true,
+        "closedMs": 1793541465009,
+        "createdMs": 1793541465005,
+        "detail": "",
+        "id": "consent-9",
+        "kind": "consent",
+        "note": "use the staging value",
+        "outcome": {
+          "atMs": 1793541465009,
+          "reason": "The setting could not be changed.",
+          "state": "failed"
+        },
+        "place": {
+          "branch": "main",
+          "machine": "0123456789abcdef",
+          "machineName": "build",
+          "session": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11",
+          "sessionName": "fix login"
+        },
+        "seen": true,
+        "source": {
+          "session": "5b6d9a30-6f0e-4d0a-9b57-0c1f3a2e8d11"
+        },
+        "state": "answered",
+        "title": "Claude Code asks to change a setting",
+        "waiter": "cli",
+        "waitingSince": 1793541465005
+      }
+    ],
+    "unread": 0
+  },
+  "id": 31,
+  "ok": true
+}

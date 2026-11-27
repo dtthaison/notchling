@@ -1,0 +1,7 @@
+{
+  "action": "deny",
+  "id": 33,
+  "itemId": "approval-2",
+  "note": "use the staging one",
+  "op": "inbox.answer"
+}
