@@ -115,6 +115,36 @@ fn job_status_is_the_live_session_files_status() {
 }
 
 #[test]
+fn a_stale_busy_job_status_reads_as_idle() {
+    let dir = TempDir::new("fresh-stale-busy");
+    let path = "claude/jobs/be50d36a/state.json";
+    let mut state: serde_json::Value = serde_json::from_str(&job("done", 0, "x")).unwrap();
+    state["updatedAt"] = json!("1970-01-01T00:05:01.000Z");
+    dir.write(path, &state.to_string());
+    let mut file: serde_json::Value = serde_json::from_str(&live("busy")).unwrap();
+    file["statusUpdatedAt"] = json!(1_000.0);
+    dir.write("claude/sessions/1.json", &file.to_string());
+    let probes = Probes::from_proc();
+    assert_eq!(
+        job_status(&roots(&dir), &probes, "be50d36a").as_deref(),
+        Some("idle")
+    );
+    file["statusUpdatedAt"] = json!(2_000.0);
+    dir.write("claude/sessions/1.json", &file.to_string());
+    assert_eq!(
+        job_status(&roots(&dir), &probes, "be50d36a").as_deref(),
+        Some("busy")
+    );
+    file["statusUpdatedAt"] = json!(1_000.0);
+    dir.write("claude/sessions/1.json", &file.to_string());
+    std::fs::remove_file(dir.path(path)).unwrap();
+    assert_eq!(
+        job_status(&roots(&dir), &probes, "be50d36a").as_deref(),
+        Some("busy")
+    );
+}
+
+#[test]
 fn job_process_is_the_pid_and_start_the_files_record() {
     let dir = TempDir::new("fresh-process");
     dir.write("claude/jobs/be50d36a/state.json", &job("done", 0, "x"));

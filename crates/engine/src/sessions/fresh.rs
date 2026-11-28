@@ -1,6 +1,6 @@
 use super::agent::Agent;
 use super::iso::parse_iso_ms;
-use super::jobs::{agent_from_job, pid_of, rank, read_json, read_sessions, Rank};
+use super::jobs::{agent_from_job, pid_of, rank, read_json, read_sessions, stale_busy, Rank};
 use super::lanes::{config_dirs, Roots};
 use super::monitor::Probes;
 use crate::transcript::util::modified_secs;
@@ -282,24 +282,36 @@ fn ms_of(at: &Value) -> Option<i64> {
         .or_else(|| at.as_str().and_then(parse_iso_ms))
 }
 
-fn live_file(roots: &Roots, alive: &dyn Fn(u32) -> bool, short_id: &str) -> Option<Value> {
+fn live_file(
+    roots: &Roots,
+    alive: &dyn Fn(u32) -> bool,
+    short_id: &str,
+) -> Option<(PathBuf, Value)> {
     if !named(short_id) {
         return None;
     }
     config_dirs(roots).into_iter().find_map(|config| {
-        read_sessions(&config.dir, alive)
+        let live = read_sessions(&config.dir, alive)
             .into_iter()
-            .find(|s| s.get("jobId").and_then(Value::as_str) == Some(short_id))
+            .find(|s| s.get("jobId").and_then(Value::as_str) == Some(short_id))?;
+        Some((config.dir, live))
     })
 }
 
 pub fn job_status(roots: &Roots, probes: &Probes, short_id: &str) -> Option<String> {
-    let live = live_file(roots, probes.is_alive, short_id)?;
-    live.get("status").and_then(Value::as_str).map(String::from)
+    let (dir, live) = live_file(roots, probes.is_alive, short_id)?;
+    let status = live.get("status").and_then(Value::as_str)?;
+    if status == "busy" {
+        let job = read_json(&dir.join("jobs").join(short_id).join("state.json"));
+        if job.is_some_and(|j| stale_busy(&j, Some(&live))) {
+            return Some("idle".to_string());
+        }
+    }
+    Some(status.to_string())
 }
 
 pub fn job_process(roots: &Roots, probes: &Probes, short_id: &str) -> Option<(u32, Option<i64>)> {
-    let live = live_file(roots, probes.is_alive, short_id)?;
+    let (_, live) = live_file(roots, probes.is_alive, short_id)?;
     let pid = live.get("pid").and_then(|n| {
         n.as_u64()
             .or_else(|| n.as_f64().map(|f| f as u64))

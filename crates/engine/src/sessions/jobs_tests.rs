@@ -454,4 +454,19 @@ fn a_busy_status_newer_than_the_job_still_wins() {
     let a = agent_from_job(&tasks, "ab", Some(&older), &none);
     assert_eq!(a.group, AgentGroup::Working);
     assert!(a.at_prompt);
+    let active = job(
+        "done",
+        json!({"tempo": "active", "updatedAt": "1970-01-01T00:05:01.000Z"}),
+    );
+    assert_eq!(
+        agent_from_job(&active, "ab", Some(&older), &none).group,
+        AgentGroup::Working
+    );
+    let idle_tempo = job(
+        "working",
+        json!({"tempo": "idle", "updatedAt": "1970-01-01T00:05:01.000Z"}),
+    );
+    let b = agent_from_job(&idle_tempo, "ab", Some(&older), &none);
+    assert_eq!(b.group, AgentGroup::Working);
+    assert!(!b.at_prompt);
 }

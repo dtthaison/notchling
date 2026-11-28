@@ -137,7 +137,7 @@ pub fn agent_from_job(
 
 pub const STALE_BUSY_MS: i64 = 5 * 60_000;
 
-fn stale_busy(job: &Value, live: Option<&Value>) -> bool {
+pub(crate) fn stale_busy(job: &Value, live: Option<&Value>) -> bool {
     let Some(live) = live else {
         return false;
     };
@@ -150,11 +150,11 @@ fn stale_busy(job: &Value, live: Option<&Value>) -> bool {
     let Some(job_ms) = str_field(job, "updatedAt").and_then(parse_iso_ms) else {
         return false;
     };
-    if job_ms - (live_ms as i64) < STALE_BUSY_MS || tasks_in_flight(job) > 0 {
+    if job_ms.saturating_sub(live_ms as i64) < STALE_BUSY_MS || tasks_in_flight(job) > 0 {
         return false;
     }
     matches!(str_field(job, "state"), Some("done" | "blocked"))
-        || matches!(str_field(job, "tempo"), Some("idle" | "blocked"))
+        && str_field(job, "tempo") != Some("active")
 }
 
 fn turn_is_over(job: &Value, status: Option<&str>) -> bool {
