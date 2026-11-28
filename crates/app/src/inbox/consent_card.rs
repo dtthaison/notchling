@@ -221,6 +221,7 @@ fn fact_line(line: &str, args: &Value) -> Option<String> {
         "consent-session-stop" => named(args, t::consent::card_fact_session_stop),
         "consent-session-interrupt" => named(args, t::consent::card_fact_session_interrupt),
         "consent-session-remove" => named(args, t::consent::card_fact_session_remove),
+        "consent-session-resume" => named(args, t::consent::card_fact_session_resume),
         "consent-session-choose" => named(args, t::consent::card_fact_session_choose),
         "consent-session-run" => named(args, t::consent::card_fact_session_run),
         "consent-session-pick" => named(args, t::consent::card_fact_session_pick),

@@ -100,3 +100,47 @@ fn agent_from_older_peer_reads() {
     let back: Agent = serde_json::from_value(row).unwrap();
     assert_eq!(back.worktree_path, None);
 }
+
+#[test]
+fn only_an_ended_local_non_headless_session_can_resume() {
+    let ended = sample(
+        AgentTarget::Resume {
+            session_id: "s1".into(),
+            cwd: "/work".into(),
+        },
+        None,
+    );
+    assert!(ended.can_resume());
+    assert!(!sample(AgentTarget::Job("ab".into()), None).can_resume());
+    assert!(!sample(AgentTarget::Process(7), None).can_resume());
+
+    let mut headless = ended.clone();
+    headless.headless = true;
+    assert!(!headless.can_resume());
+
+    let mut remote = ended.clone();
+    remote.node = Some(NodeRef {
+        id: "0123456789abcdef".into(),
+        name: "w1".into(),
+        online: true,
+    });
+    assert!(!remote.can_resume());
+
+    let no_id = sample(
+        AgentTarget::Resume {
+            session_id: String::new(),
+            cwd: "/work".into(),
+        },
+        None,
+    );
+    assert!(!no_id.can_resume());
+
+    let no_cwd = sample(
+        AgentTarget::Resume {
+            session_id: "s1".into(),
+            cwd: String::new(),
+        },
+        None,
+    );
+    assert!(!no_cwd.can_resume());
+}

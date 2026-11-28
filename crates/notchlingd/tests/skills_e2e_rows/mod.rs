@@ -188,6 +188,15 @@ pub(crate) fn sessions_rows() -> Vec<Example> {
             .fill()
             .run(r#"session reply {other} hello --reason ok --dry-run --json"#)
             .setup(Setup::SwitchOn("acting")),
+        ex(SESSIONS, r#"session resume <id> --dry-run --json"#)
+            .fill()
+            .setup(Setup::SwitchOn("acting"))
+            .parse_only("it resumes an ended Claude Code session; the fixture has none"),
+        ex(SESSIONS, r#"session resume <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]"#)
+            .fill()
+            .run(r#"session resume {other} --reason ok --dry-run --json"#)
+            .setup(Setup::SwitchOn("acting"))
+            .parse_only("it resumes an ended Claude Code session; the fixture has none"),
         ex(SESSIONS, r#"session stop <id> --dry-run --json"#)
             .sub("<id>", "{other}")
             .fill()

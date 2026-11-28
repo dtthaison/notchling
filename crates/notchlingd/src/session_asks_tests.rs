@@ -72,6 +72,7 @@ fn target(id: &str, folder: &str) -> Target {
         folder: folder.to_string(),
         name: format!("name of {id}"),
         remote: false,
+        state: TargetState::Running,
         also: Vec::new(),
     }
 }
@@ -138,6 +139,7 @@ fn rig_with(tag: &str, children: Arc<Children>) -> Rig {
         }
         Ok(match op {
             ops::SESSION_NEW => json!({"jobId": "job-new"}),
+            ops::SESSION_RESUME => json!({"jobId": "job-resumed"}),
             ops::SESSION_DIALOG => json!({"dialog": seen_dialog.lock().unwrap().clone()}),
             ops::SESSION_QUESTION => seen_question.lock().unwrap().clone(),
             _ => json!({"ok": true}),
@@ -714,3 +716,160 @@ mod acts;
 
 #[path = "session_dry_tests.rs"]
 mod dry;
+
+fn ended(id: &str, folder: &str) -> Target {
+    Target {
+        state: TargetState::Resumable,
+        ..target(id, folder)
+    }
+}
+
+#[test]
+fn resuming_an_ended_child_is_free_and_records_the_new_job_and_other_opens_a_card() {
+    let r = rig("resume");
+    {
+        let mut sessions = r.dir.sessions.lock().unwrap();
+        sessions.insert("ended-kid".to_string(), ended("ended-kid", "/work/a"));
+        sessions.insert("ended-other".to_string(), ended("ended-other", "/work/a"));
+    }
+    r.make_child("ended-kid", "parent");
+
+    let free = r
+        .call(ops::SESSION_RESUME, json!({"id": "ended-kid"}))
+        .unwrap();
+    assert_eq!(free["free"], json!(true));
+    assert_eq!(free["action"], "resume");
+    assert_eq!(free["session"], "ended-kid");
+    assert_eq!(free["result"], json!({"jobId": "job-resumed"}));
+    assert_eq!(
+        r.asks
+            .children()
+            .get("job-resumed")
+            .expect("recorded")
+            .started_by,
+        "parent"
+    );
+    assert_eq!(r.cards(), 0);
+    assert_eq!(r.ops_run(), [ops::SESSION_RESUME]);
+
+    let asked = r
+        .call(ops::SESSION_RESUME, json!({"id": "ended-other"}))
+        .unwrap();
+    let card_id = r.card_of(&asked);
+    assert_eq!(asked["request"]["kind"], "session");
+    assert_eq!(
+        asked["request"]["facts"],
+        json!([{
+            "line": "consent-session-resume",
+            "args": {"tool": "claude", "folder": "/work/a", "name": "name of ended-other"},
+        }])
+    );
+    let phone = r
+        .consent
+        .decide(&card_id, true, None, "phone", None)
+        .unwrap_err();
+    assert_eq!(phone.code, ErrorCode::Forbidden);
+    assert_eq!(r.allow(&card_id, "mac").state.as_str(), "applied");
+    assert_eq!(r.ops_run(), [ops::SESSION_RESUME, ops::SESSION_RESUME]);
+
+    let app_caller = Caller {
+        tier: Tier::App,
+        client: ClientKind::App,
+        peer: None,
+        pid: None,
+    };
+    let by_app = r
+        .asks
+        .call(
+            &app_caller,
+            ops::SESSION_RESUME,
+            &json!({"id": "ended-other"}),
+        )
+        .unwrap();
+    assert_eq!(by_app.get("free"), None);
+    assert_eq!(by_app["action"], "resume");
+    assert_eq!(by_app["session"], "ended-other");
+    assert_eq!(r.cards(), 0);
+}
+
+#[test]
+fn resume_refuses_running_headless_remote_and_other_tools_before_any_card() {
+    let r = rig("resume-errors");
+    {
+        let mut sessions = r.dir.sessions.lock().unwrap();
+        sessions.insert(
+            "headless".to_string(),
+            Target {
+                state: TargetState::Ended,
+                ..target("headless", "/work/a")
+            },
+        );
+        sessions.insert(
+            "codex-1".to_string(),
+            Target {
+                tool: "codex",
+                state: TargetState::Resumable,
+                ..target("codex-1", "/work/a")
+            },
+        );
+        sessions.insert(
+            "remote-1".to_string(),
+            Target {
+                remote: true,
+                state: TargetState::Resumable,
+                ..target("remote-1", "/work/a")
+            },
+        );
+        sessions.insert("ended-abroad".to_string(), ended("ended-abroad", "/work/b"));
+        sessions.insert("ended-race".to_string(), ended("ended-race", "/work/a"));
+    }
+
+    for running in ["parent", "other"] {
+        let e = r
+            .call(ops::SESSION_RESUME, json!({"id": running}))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest, "{running}");
+        assert_eq!(reason(&e), "usage", "{running}");
+        assert_eq!(e.message, "That session is still running.");
+    }
+
+    let headless = r
+        .call(ops::SESSION_RESUME, json!({"id": "headless"}))
+        .unwrap_err();
+    assert_eq!(headless.code, ErrorCode::BadRequest);
+    assert_eq!(reason(&headless), "usage");
+    assert_eq!(
+        headless.message,
+        "Only an ended Claude Code session can be resumed."
+    );
+
+    for other_tool in ["codex-1", "remote-1"] {
+        let e = r
+            .call(ops::SESSION_RESUME, json!({"id": other_tool}))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest, "{other_tool}");
+        assert_eq!(reason(&e), "not_yet", "{other_tool}");
+    }
+
+    let abroad = r
+        .call(ops::SESSION_RESUME, json!({"id": "ended-abroad"}))
+        .unwrap_err();
+    assert_eq!(abroad.code, ErrorCode::Forbidden);
+    assert_eq!(reason(&abroad), "other_organization");
+    assert_eq!(r.cards(), 0);
+    assert!(r.ops_run().is_empty());
+
+    let asked = r
+        .call(ops::SESSION_RESUME, json!({"id": "ended-race"}))
+        .unwrap();
+    let id = r.card_of(&asked);
+    r.dir
+        .sessions
+        .lock()
+        .unwrap()
+        .insert("ended-race".to_string(), target("ended-race", "/work/a"));
+    let _ = r.consent.decide(&id, true, None, "mac", None);
+    let row = r.consent.wait_for(&id, Duration::from_secs(5)).unwrap();
+    assert_eq!(row.state.as_str(), "withdrawn");
+    assert!(r.ops_run().is_empty());
+}

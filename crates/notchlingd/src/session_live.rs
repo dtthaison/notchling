@@ -1,12 +1,14 @@
 use crate::acting_ops::{now_ms, ActingOps};
 use crate::agy_ops::AgyOps;
 use crate::codex_ops::CodexOps;
+use crate::control_ops::agent_from_history;
 use crate::every_session::{tool_of, EverySession};
 use crate::op_group::OpGroup;
 use crate::outbox_ops::OutboxOps;
 use crate::reads_ops::ReadsOps;
-use crate::session_asks::{Directory, Runner, Target};
+use crate::session_asks::{Directory, Runner, Target, TargetState};
 use notchling_engine::delegate::agy_trust::claude_trusts;
+use notchling_engine::sessions::history::{self, History};
 use notchling_engine::sessions::{Agent, AgentTarget, Roots};
 use notchling_local_api::{ops, Caller, ClientKind, Tier};
 use serde_json::Value;
@@ -18,6 +20,7 @@ pub struct LiveDirectory {
     every: Arc<EverySession>,
     reads: Arc<ReadsOps>,
     roots: Roots,
+    history: History,
 }
 
 impl LiveDirectory {
@@ -32,6 +35,7 @@ impl LiveDirectory {
             every,
             reads,
             roots,
+            history: History::new(),
         }
     }
 
@@ -39,15 +43,31 @@ impl LiveDirectory {
         if matches!(tool_of(id), "codex" | "antigravity") {
             return self.every.agents(now_ms()).into_iter().find(|a| a.id == id);
         }
-        let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        list.as_array()?
-            .iter()
-            .find(|row| row["id"].as_str() == Some(id))
-            .and_then(|row| serde_json::from_value::<Agent>(row.clone()).ok())
+        let found = {
+            let list = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+            list.as_array()
+                .and_then(|rows| rows.iter().find(|row| row["id"].as_str() == Some(id)))
+                .and_then(|row| serde_json::from_value::<Agent>(row.clone()).ok())
+        };
+        if found.is_some() {
+            return found;
+        }
+        let sources = history::sources(&self.roots);
+        self.history.find(&sources, id).map(agent_from_history)
     }
 }
 
 fn target_of(agent: Agent) -> Target {
+    let state = if agent.can_resume() {
+        TargetState::Resumable
+    } else if !agent.headless
+        && agent.node.is_none()
+        && matches!(agent.target, AgentTarget::Job(_) | AgentTarget::Process(_))
+    {
+        TargetState::Running
+    } else {
+        TargetState::Ended
+    };
     let mut also: Vec<String> = agent.resume_session_id.iter().cloned().collect();
     if let AgentTarget::Job(job) = &agent.target {
         also.push(job.clone());
@@ -71,6 +91,7 @@ fn target_of(agent: Agent) -> Target {
         folder: agent.cwd,
         name,
         remote: agent.node.is_some(),
+        state,
         also,
     }
 }
@@ -125,6 +146,8 @@ pub fn runner(
             agy.call(op, args)
         } else if op == ops::SESSION_SEND {
             outbox.call(&the_app(), op, args)
+        } else if op == ops::SESSION_RESUME {
+            acting.resume_session(args)
         } else {
             acting.call(&the_app(), op, args)
         }

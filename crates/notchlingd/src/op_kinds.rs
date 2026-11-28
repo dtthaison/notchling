@@ -218,6 +218,7 @@ pub const HOMES: &[(&str, Home)] = &[
     (ops::SESSION_SAY, Home::Kind("agent.consent")),
     (ops::SESSION_HALT, Home::Kind("agent.consent")),
     (ops::SESSION_DISCARD, Home::Kind("agent.consent")),
+    (ops::SESSION_RESUME, Home::Kind("agent.consent")),
     (ops::SESSION_CHOOSE, Home::Kind("agent.consent")),
     (ops::SESSION_RUN, Home::Kind("agent.consent")),
     (ops::SESSION_PICK, Home::Kind("agent.consent")),

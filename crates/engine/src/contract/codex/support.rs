@@ -13,6 +13,9 @@ pub fn support(c: Capability) -> Support {
             Support::not_applicable("Nothing runs between Codex turns; Stop interrupts the turn")
         }
         Capability::SessionRemove => Support::native("codex delete"),
+        Capability::SessionResume => {
+            Support::not_applicable("Nothing runs between Codex turns; TurnSend resumes")
+        }
         Capability::SessionMove => Support::gap("phase 5: a lane needs its own CODEX_HOME"),
         Capability::FolderTrust => Support::not_applicable(
             "codex exec asks no trust question; the sandbox is set per turn",

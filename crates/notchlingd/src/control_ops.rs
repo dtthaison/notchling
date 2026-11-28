@@ -1,4 +1,5 @@
-use crate::acting_ops::{bad, text_arg, ActingOps, NoLog};
+use crate::acting::ACTING_OFF;
+use crate::acting_ops::{bad, switch_off, text_arg, ActingOps, NoLog};
 use crate::catalog_ops::CatalogService;
 use crate::outbox_ops::{SendArgs, NO_SESSION};
 use notchling_engine::catalog::Tool;
@@ -6,14 +7,16 @@ use notchling_engine::cluster::grant_files::GrantValue;
 use notchling_engine::control::session::home_of;
 use notchling_engine::control::slash::{route, Route};
 use notchling_engine::control::{
-    claude_json_for, execute, plan_move, plan_new_session, plan_remove, plan_stop,
+    claude_json_for, execute, plan_move, plan_new_session, plan_remove, plan_resume, plan_stop,
     plan_trust_folder, ControlError, NewSession, Outcome, Plan, PlanError, Step, LOGIN_TOKEN_VAR,
 };
 use notchling_engine::delegate::agy_trust::claude_trusts;
 use notchling_engine::limits::renew::renew_command;
 use notchling_engine::outbox::Via;
 use notchling_engine::reply::plan as keys_plan;
+use notchling_engine::sessions::history::{self, Item};
 use notchling_engine::sessions::lanes::lane_at_path;
+use notchling_engine::sessions::{Agent, AgentGroup, AgentTarget};
 use notchling_local_api::{ops, ApiError, Caller, ClientKind, ErrorCode};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -55,7 +58,75 @@ fn refused(e: PlanError) -> ApiError {
     bad(e.to_string())
 }
 
+pub(crate) fn agent_from_history(item: Item) -> Agent {
+    let project = Path::new(&item.folder)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Agent {
+        id: item.id.clone(),
+        name: if item.title.is_empty() {
+            project.clone()
+        } else {
+            item.title
+        },
+        project,
+        cwd: item.folder.clone(),
+        group: AgentGroup::Completed,
+        label: "Exited".to_string(),
+        detail: None,
+        since_ms: item.modified_ms,
+        target: AgentTarget::Resume {
+            session_id: item.id,
+            cwd: item.folder,
+        },
+        suggested_reply: None,
+        transcript_path: item.path,
+        host: String::new(),
+        headless: false,
+        config_dir: item.config_dir,
+        command: None,
+        resume_session_id: None,
+        at_prompt: false,
+        node: None,
+        worktree_path: None,
+    }
+}
+
 impl ActingOps {
+    pub(crate) fn resume_session(&self, args: &Value) -> Result<Value, ApiError> {
+        if !self.acting.is_on() {
+            return Err(switch_off("acting", ACTING_OFF));
+        }
+        let id = text_arg(args, "id")?;
+        let agent = match self.agent(args) {
+            Ok(agent) => agent,
+            Err(_) => {
+                let sources = history::sources(&self.roots);
+                history::History::new()
+                    .find(&sources, id)
+                    .map(agent_from_history)
+                    .ok_or_else(|| bad(NO_SESSION).with_reason("no_session"))?
+            }
+        };
+        let plan =
+            plan_resume(&agent, &self.roots).map_err(|e| bad(e.message()).with_reason("usage"))?;
+        self.onboard_lane(agent.config_dir.as_deref());
+        match self.run_raw(&plan) {
+            Ok(job) => Ok(json!({"jobId": job})),
+            Err(e) => {
+                if matches!(e, ControlError::Untrusted(_)) {
+                    if let Ok(real) = std::fs::canonicalize(&agent.cwd) {
+                        let mut refusals = self.refusals();
+                        refusals.retain(|_, at| at.elapsed() < TRUST_WINDOW);
+                        refusals.insert(real, Instant::now());
+                    }
+                }
+                Err(failed(e))
+            }
+        }
+    }
+
     pub(crate) fn control(
         &self,
         caller: &Caller,

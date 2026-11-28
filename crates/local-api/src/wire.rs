@@ -229,6 +229,7 @@ pub mod ops {
     pub const SESSION_SAY: &str = "session.say";
     pub const SESSION_HALT: &str = "session.halt";
     pub const SESSION_DISCARD: &str = "session.discard";
+    pub const SESSION_RESUME: &str = "session.resume";
     pub const SESSION_CHOOSE: &str = "session.choose";
     pub const SESSION_RUN: &str = "session.run";
     pub const SESSION_PICK: &str = "session.pick";

@@ -8,7 +8,7 @@ use std::time::Duration;
 const CALL_WAIT: Duration = Duration::from_secs(15);
 const POLL_MS: u64 = 25_000;
 
-pub const USAGE: &str = "Usage: notchling session new <folder> [--model <name>] [--message <text>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session reply <id> <text> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session stop <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session interrupt <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session remove <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session answer <id> --answers <json> [--question <json>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session command <id> <command> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session dialog <id> --pick <1-9>|--dismiss [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session chrome <id> on|off [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session options <id> <option> <value> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session reload <id|self> [--after-turn] [--json]";
+pub const USAGE: &str = "Usage: notchling session new <folder> [--model <name>] [--message <text>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session reply <id> <text> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session stop <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session interrupt <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session remove <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session resume <id> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session answer <id> --answers <json> [--question <json>] [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session command <id> <command> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session dialog <id> --pick <1-9>|--dismiss [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session chrome <id> on|off [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session options <id> <option> <value> [--reason <why>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]\n       notchling session reload <id|self> [--after-turn] [--json]";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verb {
@@ -17,6 +17,7 @@ pub enum Verb {
     Stop,
     Interrupt,
     Remove,
+    Resume,
     Answer,
     Command,
     Dialog,
@@ -32,6 +33,7 @@ impl Verb {
             "stop" => Some(Verb::Stop),
             "interrupt" => Some(Verb::Interrupt),
             "remove" => Some(Verb::Remove),
+            "resume" => Some(Verb::Resume),
             "answer" => Some(Verb::Answer),
             "command" => Some(Verb::Command),
             "dialog" => Some(Verb::Dialog),
@@ -47,6 +49,7 @@ impl Verb {
             Verb::Reply => ops::SESSION_SAY,
             Verb::Stop | Verb::Interrupt => ops::SESSION_HALT,
             Verb::Remove => ops::SESSION_DISCARD,
+            Verb::Resume => ops::SESSION_RESUME,
             Verb::Answer => ops::SESSION_CHOOSE,
             Verb::Command => ops::SESSION_RUN,
             Verb::Dialog => ops::SESSION_PICK,
@@ -135,7 +138,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         _ if tail.is_some() => return Err(USAGE.to_string()),
         (Verb::Reply, [_, id, text]) => (id.clone(), Some(text.clone())),
         (Verb::New, [_, folder]) => (folder.clone(), message),
-        (Verb::Stop | Verb::Interrupt | Verb::Remove, [_, id]) => (id.clone(), None),
+        (Verb::Stop | Verb::Interrupt | Verb::Remove | Verb::Resume, [_, id]) => (id.clone(), None),
         (Verb::Command, [_, id, command]) => (id.clone(), Some(command.clone())),
         (Verb::Answer | Verb::Dialog, [_, id]) => (id.clone(), None),
         (Verb::Chrome, [_, id, state]) if state == "on" || state == "off" => {
@@ -223,7 +226,7 @@ pub fn request_body(args: &Args) -> Value {
         Verb::Reply => json!({"id": args.target, "text": args.text}),
         Verb::Stop => json!({"id": args.target, "how": "stop"}),
         Verb::Interrupt => json!({"id": args.target, "how": "interrupt"}),
-        Verb::Remove => json!({"id": args.target}),
+        Verb::Remove | Verb::Resume => json!({"id": args.target}),
         _ => {
             let mut body = json!({"id": args.target});
             if let Some(map) = body.as_object_mut() {
@@ -258,6 +261,7 @@ pub fn done_line(verb: Verb, free: bool, session: &str) -> String {
         Verb::Stop => "Stopped the session",
         Verb::Interrupt => "Interrupted the session",
         Verb::Remove => "Removed the session",
+        Verb::Resume => "Resumed the session",
         Verb::Answer => "Answered the question in the session",
         Verb::Command => "Ran the command in the session",
         Verb::Dialog => "Answered the dialog of the session",
@@ -341,6 +345,7 @@ pub fn run(raw: &[String]) -> i32 {
     } else {
         let session = request
             .pointer("/result/session")
+            .or_else(|| request.pointer("/result/jobId"))
             .and_then(Value::as_str)
             .unwrap_or("");
         println!("{}", done_line(args.verb, false, session));

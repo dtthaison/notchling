@@ -59,6 +59,16 @@ impl Agent {
         matches!(self.target, AgentTarget::Job(_)) && self.command.is_none()
     }
 
+    pub fn can_resume(&self) -> bool {
+        !self.headless
+            && self.node.is_none()
+            && matches!(
+                &self.target,
+                AgentTarget::Resume { session_id, cwd }
+                    if !session_id.is_empty() && !cwd.is_empty()
+            )
+    }
+
     pub fn turn_running(&self) -> bool {
         self.group == AgentGroup::Working && !self.at_prompt
     }

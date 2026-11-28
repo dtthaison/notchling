@@ -165,3 +165,30 @@ fn a_remove_the_tool_supports_still_opens_its_card() {
         .unwrap();
     r.card_of(&stop);
 }
+
+#[test]
+fn a_dry_run_resume_reports_apply_for_a_child_and_ask_for_another() {
+    let r = rig("dry-resume");
+    {
+        let mut sessions = r.dir.sessions.lock().unwrap();
+        sessions.insert("ended-kid".to_string(), ended("ended-kid", "/work/a"));
+        sessions.insert("ended-other".to_string(), ended("ended-other", "/work/a"));
+    }
+    r.make_child("ended-kid", "parent");
+
+    let free = r
+        .call(ops::SESSION_RESUME, dry("ended-kid", json!({})))
+        .unwrap();
+    assert_eq!(free["dryRun"], json!(true));
+    assert_eq!(free["would"], "apply");
+    assert_eq!(free["op"], ops::SESSION_RESUME);
+    assert_eq!(free["change"]["action"], "resume");
+
+    let card = r
+        .call(ops::SESSION_RESUME, dry("ended-other", json!({})))
+        .unwrap();
+    assert_eq!(card["dryRun"], json!(true));
+    assert_eq!(card["would"], "ask");
+    assert_eq!(card["request"]["kind"], "session");
+    quiet(&r);
+}

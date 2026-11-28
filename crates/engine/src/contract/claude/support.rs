@@ -11,6 +11,7 @@ pub fn support(c: Capability) -> Support {
         Capability::SessionNew => Support::native("A claude job"),
         Capability::SessionStop => Support::native("claude stop"),
         Capability::SessionRemove => Support::native("claude rm"),
+        Capability::SessionResume => Support::native("claude --bg --resume"),
         Capability::SessionMove => Support::native("Lanes: Move and Move All"),
         Capability::FolderTrust => Support::native("Trust Folder"),
         Capability::ConversationRead => Support::native("The session's transcript"),

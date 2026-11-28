@@ -161,7 +161,58 @@ fn the_new_verbs_refuse_a_missing_or_clashing_part() {
         &["chrome", "abc"],
         &["options", "abc", "mode"],
         &["command", "abc"],
+        &["resume"],
+        &["resume", "a", "b"],
+        &["resume", "abc", "--model", "sonnet"],
+        &["resume", "abc", "--", "extra"],
     ] {
         assert!(parse(&words(args)).is_err(), "{args:?}");
     }
+}
+
+#[test]
+fn resume_names_a_session_and_its_flags() {
+    let a = parse(&words(&[
+        "resume",
+        "abc",
+        "--reason",
+        "continue work",
+        "--no-wait",
+        "--timeout",
+        "30",
+        "--expires-in",
+        "120",
+        "--key",
+        "k1",
+        "--retry-of",
+        "c0",
+        "--dry-run",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(a.verb, Verb::Resume);
+    assert_eq!(a.verb.op(), ops::SESSION_RESUME);
+    assert!(a.json && !a.flags.wait && a.flags.dry_run);
+    assert_eq!(a.flags.timeout, Duration::from_secs(30));
+    assert_eq!(
+        request_body(&a),
+        json!({
+            "id": "abc",
+            "dryRun": true,
+            "consent": {
+                "reason": "continue work",
+                "expiresInMs": 120_000,
+                "key": "k1",
+                "retryOf": "c0",
+            },
+        })
+    );
+    assert_eq!(
+        done_line(Verb::Resume, true, "s1"),
+        "Resumed the session s1."
+    );
+    assert_eq!(
+        done_line(Verb::Resume, false, "j1"),
+        "Resumed the session j1 (the user said yes)."
+    );
 }

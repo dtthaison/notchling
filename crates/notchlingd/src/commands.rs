@@ -469,6 +469,16 @@ const BASE_REST: &[Row] = &[
         "notchling-sessions",
     )),
     waits(row(
+        "session resume",
+        "notchling session resume <id> [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
+        "resume an ended Claude Code session as a background job; free for a session you started, a card for any other",
+        &[with_switch(acts("session.resume"), "acting")],
+        "own_free",
+        true,
+        ACT_EXITS,
+        "notchling-sessions",
+    )),
+    waits(row(
         "session answer",
         "notchling session answer <id> --answers <json> [--question <json>] [--reason <text>] [--no-wait] [--timeout <seconds>] [--expires-in <seconds>] [--key <text>] [--retry-of <id>] [--dry-run] [--json]",
         "answer the question a session is asking; the user says yes on a card that shows the question and the answers",

@@ -192,6 +192,7 @@ fn completed(
             )
             .opacity(OFFLINE_OPACITY)
             .on_click(cx.listener(move |this, _, _, cx| this.select(&id, cx)));
+            let row_el = super::row_menu::on_right_click(row_el, row.id.clone(), cx);
             list = list.child(row_el.part_at("Completed Row", Corner::Trailing, a, cx));
         }
         if c.more {

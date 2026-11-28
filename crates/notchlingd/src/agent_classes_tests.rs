@@ -95,7 +95,7 @@ const READS: [&str; 51] = [
     COST_REPORT,
 ];
 
-const ACTS: [&str; 36] = [
+const ACTS: [&str; 37] = [
     ops::MACHINES_REQUEST,
     ops::INSTALL_REQUEST,
     ops::COST_REQUEST,
@@ -127,6 +127,7 @@ const ACTS: [&str; 36] = [
     ops::SESSION_SAY,
     ops::SESSION_HALT,
     ops::SESSION_DISCARD,
+    ops::SESSION_RESUME,
     ops::SESSION_CHOOSE,
     ops::SESSION_RUN,
     ops::SESSION_PICK,
@@ -205,6 +206,7 @@ fn no_op_that_writes_runs_or_touches_the_vault_is_an_agent_read() {
         ops::SESSION_SAY,
         ops::SESSION_HALT,
         ops::SESSION_DISCARD,
+        ops::SESSION_RESUME,
         ops::SESSION_CHOOSE,
         ops::SESSION_RUN,
         ops::SESSION_PICK,
