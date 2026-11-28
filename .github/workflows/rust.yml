@@ -29,7 +29,6 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -37,11 +36,9 @@ jobs:
           persist-credentials: false
       - if: matrix.os == 'ubuntu-latest'
         run: cargo test --workspace --locked
-      - if: matrix.os == 'windows-latest'
-        run: cargo test --workspace --locked --no-fail-fast
-      # GitHub's macOS runners are slow enough that a timing test can miss once. Each failed test runs
-      # once more on its own; a real failure fails twice. Retried tests are listed in the log.
-      - if: matrix.os == 'macos-latest'
+      # GitHub's macOS and Windows runners are slow enough that a timing test can miss once. Each failed
+      # test runs once more on its own; a real failure fails twice. Retried tests are listed in the log.
+      - if: matrix.os != 'ubuntu-latest'
         name: cargo test, failed tests retried once
         shell: bash
         run: |
@@ -61,8 +58,7 @@ jobs:
           done < retry.tsv
           exit $status
 
-  # One required check for the whole matrix: it fails unless macOS and Linux passed. Windows runs but
-  # doesn't block until Notchling is ported there.
+  # One required check for the whole matrix: it fails unless macOS, Linux and Windows all passed.
   rust-test:
     needs: rust-matrix
     if: always()
