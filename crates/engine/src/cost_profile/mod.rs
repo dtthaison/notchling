@@ -36,6 +36,8 @@ pub use undo::{undo, undo_only, Outcome, UndoResult};
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_delegated;
+#[cfg(test)]
 mod tests_only;
 #[cfg(test)]
 mod tests_safe_io;

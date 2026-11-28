@@ -3,7 +3,7 @@ use super::apply::{apply_only, Applied, Only};
 use super::check::{check, resolve, Choice, Resolved, Row};
 use super::keys::Probe;
 use super::manifest::Manifest;
-use super::model::{Profile, Stored, APP_KEY, KEY_PICKS, KEY_PRESET, KEY_TOOLS};
+use super::model::{Profile, APP_KEY, KEY_PICKS, KEY_PRESET, KEY_TOOLS};
 use super::plan::plan;
 use super::resolve::Available;
 use super::undo::{current_hash, undo_only, UndoResult};
@@ -40,15 +40,7 @@ impl Service {
     }
 
     pub fn profile(&self) -> Profile {
-        match Settings::open(&self.settings_file()) {
-            Ok(store) => Profile::from_stored(&Stored {
-                preset: store.get_str(KEY_PRESET),
-                picks: store.get_str(KEY_PICKS),
-                tools: KEY_TOOLS.iter().map(|k| store.get_bool(k)).collect(),
-                app: store.raw(APP_KEY).cloned(),
-            }),
-            Err(_) => Profile::default(),
-        }
+        Profile::load(&self.settings_file())
     }
 
     pub fn save_profile(&self, profile: &Profile) -> Result<(), String> {
