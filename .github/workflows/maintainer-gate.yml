@@ -1,7 +1,9 @@
 name: Maintainer gate
 
 # Posts the `maintainer-gate` commit status on a PR's head: success when the PR touches nothing
-# protected, or when the maintainer approved that exact head; failure otherwise.
+# protected, or when the maintainer approved that exact head; failure otherwise. The status is the
+# verdict, so the job itself passes once the status is posted (it fails only when it can't decide or
+# post): a PR that waits for the maintainer is not a failed run, and sends no failed-run email.
 #
 # Safety: this runs with a write token (statuses), so it runs only the default branch's code. The
 # checkout names it (`ref:` is the repository's default branch, whatever the event or GitHub

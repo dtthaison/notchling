@@ -184,4 +184,5 @@ def main(repo: Path, base: str, head: str, reviews_file: Optional[Path], post: b
     print(("PASS " if decision.passed else "FAIL ") + decision.summary)
     if post:
         post_status(head_sha, decision, target_url)
+        return 0
     return 0 if decision.passed else 1
