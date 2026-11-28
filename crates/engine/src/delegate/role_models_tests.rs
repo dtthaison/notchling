@@ -451,3 +451,80 @@ fn an_agy_pick_at_xhigh_is_printed_where_the_model_lists_it_and_skipped_where_it
         "no xhigh on that model: the next step is used, never a silent high"
     );
 }
+
+fn set_picks(rig: &Rig, picks: &str) {
+    let file = rig.deps.settings_file().unwrap();
+    let mut store = crate::settings::Settings::open(&file).unwrap();
+    store.set("costPicks", json!(picks)).unwrap();
+}
+
+#[test]
+fn code_and_fix_report_no_model_marked_without_a_delegated_cost_profile_pick() {
+    let rig = with(Some(CODEX), Some(AGY));
+    for role in ["code", "fix"] {
+        let (code, text) = pick(&rig, role);
+        assert_eq!(code, 1, "{role}");
+        let want = format!("no model marked for {role}; run delegate-models");
+        assert!(text.starts_with(&want));
+    }
+    set_picks(&rig, "code.claude=opus high; fix.claude=opus xhigh");
+    assert_eq!(pick(&rig, "code").0, 1);
+    assert_eq!(pick(&rig, "fix").0, 1);
+    assert_eq!(
+        pick(&rig, "review"),
+        (0, "agy --model gemini-4-hydrogen --effort high\n".into())
+    );
+}
+
+#[test]
+fn cost_profile_picks_route_code_and_fix_to_agy_or_codex() {
+    let agy = "gemini-4-hydrogen-high\tH\ngemini-4-carbon-high\tK\n";
+    let rig = with(Some(CODEX), Some(agy));
+    set_picks(
+        &rig,
+        "code.agy=gemini-4-carbon high; fix.agy=gemini-4-carbon high",
+    );
+    assert_eq!(
+        pick(&rig, "code"),
+        (0, "agy --model gemini-4-carbon --effort high\n".into())
+    );
+    assert_eq!(
+        pick(&rig, "FIX"),
+        (0, "agy --model gemini-4-carbon --effort high\n".into())
+    );
+    let mut out = Vec::new();
+    let status = models_listing_json(&words(&["--for", "code"]), &rig.deps, &mut out);
+    assert_eq!(status, 0);
+    let v: Value = serde_json::from_slice(&out).unwrap();
+    let expected = json!({
+        "role": "code",
+        "picks": [{"tool": "agy", "model": "gemini-4-carbon", "effort": "high"}],
+        "notes": []
+    });
+    assert_eq!(v, expected);
+    assert_eq!(
+        pick(&rig, "review"),
+        (0, "agy --model gemini-4-hydrogen --effort high\n".into())
+    );
+    set_picks(&rig, "code.codex=gpt-6-astra xhigh");
+    assert_eq!(
+        pick(&rig, "code"),
+        (0, "codex --model gpt-6-astra --effort xhigh\n".into())
+    );
+    assert_eq!(pick(&rig, "fix").0, 1);
+    let newer_agy = "gemini-4.1-carbon-high\tK\n";
+    let rig2 = with(Some(CODEX), Some(newer_agy));
+    set_picks(&rig2, "fix.agy=gemini-4-carbon high");
+    assert_eq!(
+        pick(&rig2, "fix"),
+        (
+            0,
+            "agy --model gemini-4.1-carbon --effort high\nnote: gemini-4-carbon is gone; using gemini-4.1-carbon (same family, newer)\n"
+                .into()
+        )
+    );
+    let file2 = rig2.deps.settings_file().unwrap();
+    let mut store = crate::settings::Settings::open(&file2).unwrap();
+    store.set("costAgy", json!(false)).unwrap();
+    assert_eq!(pick(&rig2, "fix").0, 1);
+}

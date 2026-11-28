@@ -4,6 +4,8 @@ use super::family::{self, Newest};
 use super::options::Tool;
 use super::quota::{self, Verdict};
 use crate::catalog::roles::{covers, Pick, Roles, ToolRoles};
+use crate::catalog::Tool as CatalogTool;
+use crate::cost_profile::{Profile, Role as ProfileRole};
 use crate::tools::codex::models;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -406,6 +408,33 @@ fn finish(before: Vec<Cand>, chosen: Cand, now: f64) -> (Cand, Vec<String>) {
     (chosen, notes)
 }
 
+fn profile_steps(role: &str, deps: &Deps) -> Vec<(Tool, String, String)> {
+    let Some(picked @ (ProfileRole::Code | ProfileRole::Fix)) = ProfileRole::parse(role) else {
+        return Vec::new();
+    };
+    let Some(file) = deps.settings_file() else {
+        return Vec::new();
+    };
+    let profile = Profile::load(&file);
+    let mut steps = Vec::new();
+    for (cat_tool, run_tool) in [
+        (CatalogTool::Antigravity, Tool::Agy),
+        (CatalogTool::Codex, Tool::Codex),
+    ] {
+        if !profile.is_on(cat_tool) {
+            continue;
+        }
+        let Some(cell) = profile.picks.get(&(picked, cat_tool)) else {
+            continue;
+        };
+        let Some(model) = &cell.model else {
+            continue;
+        };
+        steps.push((run_tool, model.clone(), cell.effort.clone()));
+    }
+    steps
+}
+
 pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
     let role = role.to_lowercase();
     let mut found = Found {
@@ -418,33 +447,45 @@ pub fn find(role: &str, roles: &Roles, deps: &Deps) -> Found {
     let mut short = false;
     let mut lives = Lives::default();
     let mut taken = Taken { picks: Vec::new() };
-    for tool in [Tool::Codex, Tool::Agy] {
-        let tool_roles = roles.tool(catalog_name(tool));
-        let picks = tool_roles.picks_for(&role);
-        if picks.is_empty() {
-            continue;
-        }
+    let custom = profile_steps(&role, deps);
+    if !custom.is_empty() {
         marked = true;
-        seats += picks.len();
-        for pick in picks {
-            let steps = ladder_of(&role, pick, tool, roles);
-            let (cand, notes) = match choose(&role, steps, roles, deps, &mut lives, &taken) {
-                Ok(chosen) => chosen,
-                Err(Some(notes)) if !found.picks.is_empty() => {
-                    short = true;
-                    found.notes.extend(notes);
-                    continue;
-                }
-                Err(_) => continue,
-            };
-            taken
+        seats = 1;
+        if let Ok((cand, notes)) = choose(&role, custom, roles, deps, &mut lives, &taken) {
+            found
                 .picks
-                .push((cand.tool, cand.model.clone(), cand.stand_in));
-            let one = (cand.tool.raw().to_string(), cand.model, cand.effort);
-            if !found.picks.contains(&one) {
-                found.picks.push(one);
-            }
+                .push((cand.tool.raw().to_string(), cand.model, cand.effort));
             found.notes.extend(notes);
+        }
+    } else {
+        for tool in [Tool::Codex, Tool::Agy] {
+            let tool_roles = roles.tool(catalog_name(tool));
+            let picks = tool_roles.picks_for(&role);
+            if picks.is_empty() {
+                continue;
+            }
+            marked = true;
+            seats += picks.len();
+            for pick in picks {
+                let steps = ladder_of(&role, pick, tool, roles);
+                let (cand, notes) = match choose(&role, steps, roles, deps, &mut lives, &taken) {
+                    Ok(chosen) => chosen,
+                    Err(Some(notes)) if !found.picks.is_empty() => {
+                        short = true;
+                        found.notes.extend(notes);
+                        continue;
+                    }
+                    Err(_) => continue,
+                };
+                taken
+                    .picks
+                    .push((cand.tool, cand.model.clone(), cand.stand_in));
+                let one = (cand.tool.raw().to_string(), cand.model, cand.effort);
+                if !found.picks.contains(&one) {
+                    found.picks.push(one);
+                }
+                found.notes.extend(notes);
+            }
         }
     }
     if seats >= 2 && short && found.picks.len() == 1 {

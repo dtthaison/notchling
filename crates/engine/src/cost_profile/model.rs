@@ -2,6 +2,7 @@ use crate::catalog::Tool;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
 
 pub const VERSION: u64 = 1;
 pub const KEY_PRESET: &str = "costPreset";
@@ -306,6 +307,18 @@ impl Profile {
 
     pub fn is_custom(&self) -> bool {
         !self.picks.is_empty() || !self.habit_edits.is_empty()
+    }
+
+    pub fn load(settings_file: &Path) -> Profile {
+        match crate::settings::Settings::open(settings_file) {
+            Ok(store) => Profile::from_stored(&Stored {
+                preset: store.get_str(KEY_PRESET),
+                picks: store.get_str(KEY_PICKS),
+                tools: KEY_TOOLS.iter().map(|k| store.get_bool(k)).collect(),
+                app: store.raw(APP_KEY).cloned(),
+            }),
+            Err(_) => Profile::default(),
+        }
     }
 
     pub fn from_stored(stored: &Stored) -> Profile {

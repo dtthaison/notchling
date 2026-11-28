@@ -39,6 +39,12 @@ impl Deps {
             .map(|f| f.with_file_name(crate::tools::codex::models::SNAPSHOT))
     }
 
+    pub fn settings_file(&self) -> Option<PathBuf> {
+        self.catalog_file
+            .as_ref()
+            .map(|f| f.with_file_name("settings.json"))
+    }
+
     pub const CANCEL_GRACE: Duration = Duration::from_secs(2);
     pub const TERMINATE_AFTER: Duration = Duration::from_secs(5);
 }

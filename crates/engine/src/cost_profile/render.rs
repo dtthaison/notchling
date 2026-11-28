@@ -9,6 +9,8 @@ pub const READER: &str = "notchling-reader";
 pub const REVIEWER: &str = "notchling-reviewer";
 pub const ORCHESTRATOR: &str = "notchling-orchestrator";
 pub const FENCE_ID: &str = "notchling-cost";
+pub const NOTCHLING_BIN: &str = "/Applications/Notchling.app/Contents/MacOS/notchling";
+pub const DELEGATE_TIMEOUT_SECS: u64 = 1400;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Features {
@@ -84,6 +86,121 @@ fn claude(profile: &Profile, role: Role, avail: &Available) -> Option<Resolved> 
     resolve(profile, role, Tool::Claude, avail)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Delegated {
+    tool: Tool,
+    model: String,
+    effort: String,
+}
+
+fn tool_label(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Antigravity => "Antigravity",
+        Tool::Codex => "Codex",
+        Tool::Claude => "Claude",
+    }
+}
+
+fn delegate_cmd(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Antigravity => "agy",
+        Tool::Codex => "codex",
+        Tool::Claude => "claude",
+    }
+}
+
+fn delegated_agent(tool: Tool) -> String {
+    let label = tool_label(tool);
+    let cmd = delegate_cmd(tool);
+    format!("{label} (`notchling delegate {cmd}`)")
+}
+
+fn delegated(profile: &Profile, role: Role, avail: &Available) -> Option<Delegated> {
+    if !matches!(role, Role::Code | Role::Fix) {
+        return None;
+    }
+    for tool in [Tool::Antigravity, Tool::Codex] {
+        if !profile.picks.contains_key(&(role, tool)) {
+            continue;
+        }
+        let Some(r) = resolve(profile, role, tool, avail) else {
+            continue;
+        };
+        let Some(model) = r.model else {
+            continue;
+        };
+        return Some(Delegated {
+            tool,
+            model,
+            effort: r.effort,
+        });
+    }
+    None
+}
+
+fn delegate_command(d: &Delegated) -> String {
+    let cmd = delegate_cmd(d.tool);
+    let (model, effort) = (&d.model, &d.effort);
+    format!("`{NOTCHLING_BIN} delegate {cmd} --model {model} --effort {effort} --write --folder <worktree> --timeout {DELEGATE_TIMEOUT_SECS} -- \"<brief>\"`")
+}
+
+fn delegated_bullet(profile: &Profile, avail: &Available) -> Option<String> {
+    let code = delegated(profile, Role::Code, avail);
+    let fix = delegated(profile, Role::Fix, avail);
+    if code.is_none() && fix.is_none() {
+        return None;
+    }
+    let fallback = claude(profile, Role::Code, avail)
+        .and_then(|r| r.model)
+        .unwrap_or_else(|| "sonnet".to_string());
+    let uses_agy = code.as_ref().is_some_and(|d| d.tool == Tool::Antigravity)
+        || fix.as_ref().is_some_and(|d| d.tool == Tool::Antigravity);
+    let agy_note = if uses_agy {
+        " Antigravity can't run commands: the brief says to use only file tools, and you build, test and commit yourself."
+    } else {
+        ""
+    };
+    let lead = match (&code, &fix) {
+        (Some(c), Some(f)) if c == f => {
+            let (name, run) = (tool_label(c.tool), delegate_command(c));
+            format!(
+                "Code and fixes go to {name}, not a Claude subagent: {run}, run in the background."
+            )
+        }
+        (Some(c), None) => {
+            let (name, run) = (tool_label(c.tool), delegate_command(c));
+            format!("Code goes to {name}, not a Claude subagent: {run}, run in the background.")
+        }
+        (None, Some(f)) => {
+            let (name, run) = (tool_label(f.tool), delegate_command(f));
+            format!("Fixes go to {name}, not a Claude subagent: {run}, run in the background.")
+        }
+        (Some(c), Some(f)) if c.tool == f.tool => {
+            let name = tool_label(c.tool);
+            let (c_run, f_run) = (delegate_command(c), delegate_command(f));
+            let (cm, ce, fm, fe) = (&c.model, &c.effort, &f.model, &f.effort);
+            format!("Code ({cm} {ce}) and fixes ({fm} {fe}) go to {name}, not a Claude subagent: {c_run} for code and {f_run} for fixes, run in the background.")
+        }
+        (Some(c), Some(f)) => {
+            let (c_name, f_name) = (tool_label(c.tool), tool_label(f.tool));
+            let (c_run, f_run) = (delegate_command(c), delegate_command(f));
+            format!("Code goes to {c_name} ({c_run}) and fixes go to {f_name} ({f_run}), not a Claude subagent; run in the background.")
+        }
+        (None, None) => return None,
+    };
+    let when = match (&code, &fix) {
+        (Some(c), Some(f)) if c.tool != f.tool => {
+            let (a, b) = (tool_label(c.tool), tool_label(f.tool));
+            format!("{a} or {b}")
+        }
+        (Some(c), _) => tool_label(c.tool).to_string(),
+        (None, Some(f)) => tool_label(f.tool).to_string(),
+        (None, None) => return None,
+    };
+    let line = format!("- {lead}{agy_note} Use a {BUILDER} ({fallback}) only when {when} fails or is out of quota, and say so.\n");
+    Some(line)
+}
+
 fn kept_section(profile: &Profile) -> String {
     let mut out = String::new();
     for imported in &profile.imports {
@@ -127,18 +244,22 @@ pub fn claude_rule(profile: &Profile, avail: &Available, features: Features) -> 
     out.push_str("Start each Agent description with its role, like `[code] add the search field`, and pass `model` and `effort`. To go above the table, say why: `[code up: two fixes failed]`.\n\n");
     out.push_str("| Role | For | Agent type | Model | Effort |\n|---|---|---|---|---|\n");
     for row in &CLAUDE_ROWS {
-        if let Some(r) = claude(profile, row.role, avail) {
-            out.push_str(&format!(
-                "| {} | {} | {} | {} | {} |\n",
-                row.role.name(),
-                row.uses,
-                row.agent,
-                r.model.as_deref().unwrap_or(""),
-                r.effort
-            ));
+        let (role, uses) = (row.role.name(), row.uses);
+        if let Some(d) = delegated(profile, row.role, avail) {
+            let (agent, model, effort) = (delegated_agent(d.tool), d.model, d.effort);
+            let line = format!("| {role} | {uses} | {agent} | {model} | {effort} |\n");
+            out.push_str(&line);
+        } else if let Some(r) = claude(profile, row.role, avail) {
+            let model = r.model.as_deref().unwrap_or("");
+            let (agent, effort) = (row.agent, &r.effort);
+            let line = format!("| {role} | {uses} | {agent} | {model} | {effort} |\n");
+            out.push_str(&line);
         }
     }
     out.push('\n');
+    if let Some(bullet) = delegated_bullet(profile, avail) {
+        out.push_str(&bullet);
+    }
     out.push_str("- Reviews: `notchling delegate-models --for review` names the tool, model and effort; hand the diff to `notchling delegate`. Once per branch, at the end; re-review only the fix diff. No review subagents; if delegation fails, use one notchling-reviewer.\n");
     out.push_str(&format!(
         "- One task per builder. Near {} tool calls or {}k context, write the handoff (goal, state, decisions, next step, files, checks) and hand back. The hard stop is {} turns.\n",
