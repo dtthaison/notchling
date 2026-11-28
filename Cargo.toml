@@ -12,3 +12,12 @@ publish = false
 # had already truncated, and a window resize panicked slicing a string mid-character.
 [patch.crates-io]
 gpui = { path = "vendor/gpui" }
+
+# Debug and test builds keep file and line numbers for Notchling's crates and drop the rest of the
+# debug info, and dependencies carry none: full debug info was most of a 129 GB build folder, and
+# it slowed every link. Release builds are not affected.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
