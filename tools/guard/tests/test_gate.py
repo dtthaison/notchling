@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 from guard.__main__ import main
 from guard.changes import Change, diff
@@ -280,6 +281,16 @@ class GateCliTests(unittest.TestCase):
         code, out = self.run_cli(["gate", "--repo", str(repo), "--base", base, "--head", head])
         self.assertEqual(code, 1)
         self.assertIn("ZONE: build.sh", out)
+
+    def test_cli_posting_exits_zero_and_posts_the_failure(self):
+        repo, base, head = self.repo_with_zones({"build.sh": "echo 2\n"})
+        posted = []
+        with mock.patch("guard.gate.post_status", lambda sha, d, url=None: posted.append((sha, d.passed))):
+            code, out = self.run_cli(["gate", "--repo", str(repo), "--base", base, "--head", head, "--post"])
+        self.assertEqual(code, 0)
+        self.assertIn("FAIL Needs the maintainer", out)
+        self.assertEqual(len(posted), 1)
+        self.assertFalse(posted[0][1])
 
     def test_cli_passes_with_reviews_file(self):
         repo, base, head = self.repo_with_zones({"build.sh": "echo 2\n"})
