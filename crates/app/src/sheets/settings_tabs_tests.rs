@@ -121,6 +121,7 @@ fn every_row_there_was_is_in_exactly_one_place() {
         "antigravityChannel",
         "antigravityRemoteIn",
         "chatHistory",
+        "keepFinishedSessions",
         "attentionLevel",
     ];
     let mut places: BTreeMap<&str, usize> = BTreeMap::new();

@@ -10617,839 +10617,863 @@ pub mod settings {
         KEEP_DISPLAY_ON.get()
     }
 
-    pub const KEEP_PAGES: Text = Text(1959);
+    pub const KEEP_FINISHED_SESSIONS: Text = Text(1959);
+
+    pub fn keep_finished_sessions() -> &'static str {
+        KEEP_FINISHED_SESSIONS.get()
+    }
+
+    pub const KEEP_FINISHED_SESSIONS_V1D: Text = Text(1960);
+
+    pub fn keep_finished_sessions_v1d() -> &'static str {
+        KEEP_FINISHED_SESSIONS_V1D.get()
+    }
+
+    pub const KEEP_FINISHED_SESSIONS_V30D: Text = Text(1961);
+
+    pub fn keep_finished_sessions_v30d() -> &'static str {
+        KEEP_FINISHED_SESSIONS_V30D.get()
+    }
+
+    pub const KEEP_FINISHED_SESSIONS_V7D: Text = Text(1962);
+
+    pub fn keep_finished_sessions_v7d() -> &'static str {
+        KEEP_FINISHED_SESSIONS_V7D.get()
+    }
+
+    pub const KEEP_PAGES: Text = Text(1963);
 
     pub fn keep_pages() -> &'static str {
         KEEP_PAGES.get()
     }
 
-    pub const LIMIT_MODE: Text = Text(1960);
+    pub const LIMIT_MODE: Text = Text(1964);
 
     pub fn limit_mode() -> &'static str {
         LIMIT_MODE.get()
     }
 
-    pub const LIMIT_MODE_NOTIFY: Text = Text(1961);
+    pub const LIMIT_MODE_NOTIFY: Text = Text(1965);
 
     pub fn limit_mode_notify() -> &'static str {
         LIMIT_MODE_NOTIFY.get()
     }
 
-    pub const LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(1962);
+    pub const LIMIT_MODE_NOTIFY_AND_SWITCH: Text = Text(1966);
 
     pub fn limit_mode_notify_and_switch() -> &'static str {
         LIMIT_MODE_NOTIFY_AND_SWITCH.get()
     }
 
-    pub const LIMIT_MODE_OFF: Text = Text(1963);
+    pub const LIMIT_MODE_OFF: Text = Text(1967);
 
     pub fn limit_mode_off() -> &'static str {
         LIMIT_MODE_OFF.get()
     }
 
-    pub const LIMIT_SWITCH_AT: Text = Text(1964);
+    pub const LIMIT_SWITCH_AT: Text = Text(1968);
 
     pub fn limit_switch_at() -> &'static str {
         LIMIT_SWITCH_AT.get()
     }
 
-    pub const LOGINS_AND_LANES: Text = Text(1965);
+    pub const LOGINS_AND_LANES: Text = Text(1969);
 
     pub fn logins_and_lanes() -> &'static str {
         LOGINS_AND_LANES.get()
     }
 
-    pub const MACHINES_FOR_AGENTS: Text = Text(1966);
+    pub const MACHINES_FOR_AGENTS: Text = Text(1970);
 
     pub fn machines_for_agents() -> &'static str {
         MACHINES_FOR_AGENTS.get()
     }
 
-    pub const MODE: Text = Text(1967);
+    pub const MODE: Text = Text(1971);
 
     pub fn mode() -> &'static str {
         MODE.get()
     }
 
-    pub const MODE_OFF: Text = Text(1968);
+    pub const MODE_OFF: Text = Text(1972);
 
     pub fn mode_off() -> &'static str {
         MODE_OFF.get()
     }
 
-    pub const MODE_ON: Text = Text(1969);
+    pub const MODE_ON: Text = Text(1973);
 
     pub fn mode_on() -> &'static str {
         MODE_ON.get()
     }
 
-    pub const MODE_WHILE_WORKING: Text = Text(1970);
+    pub const MODE_WHILE_WORKING: Text = Text(1974);
 
     pub fn mode_while_working() -> &'static str {
         MODE_WHILE_WORKING.get()
     }
 
-    pub const MODEL_ACCENT_HELPER: Text = Text(1971);
+    pub const MODEL_ACCENT_HELPER: Text = Text(1975);
 
     pub fn model_accent_helper() -> &'static str {
         MODEL_ACCENT_HELPER.get()
     }
 
-    pub const MODEL_ACCENT_HELPER_ABOUT: Text = Text(1972);
+    pub const MODEL_ACCENT_HELPER_ABOUT: Text = Text(1976);
 
     pub fn model_accent_helper_about() -> &'static str {
         MODEL_ACCENT_HELPER_ABOUT.get()
     }
 
-    pub const MODEL_CANCEL: Text = Text(1973);
+    pub const MODEL_CANCEL: Text = Text(1977);
 
     pub fn model_cancel() -> &'static str {
         MODEL_CANCEL.get()
     }
 
-    pub const MODEL_DOWNLOAD: Text = Text(1974);
+    pub const MODEL_DOWNLOAD: Text = Text(1978);
 
     pub fn model_download() -> &'static str {
         MODEL_DOWNLOAD.get()
     }
 
     pub fn model_downloading(done: impl Into<Num>, total: impl Into<Num>) -> String {
-        crate::format(Text(1975), &[Arg::Num(done.into()), Arg::Num(total.into())])
+        crate::format(Text(1979), &[Arg::Num(done.into()), Arg::Num(total.into())])
     }
 
     pub fn model_effort(tool: &str, effort: &str) -> String {
-        crate::format(Text(1976), &[Arg::Str(tool), Arg::Str(effort)])
+        crate::format(Text(1980), &[Arg::Str(tool), Arg::Str(effort)])
     }
 
     pub fn model_failed(why: &str) -> String {
-        crate::format(Text(1977), &[Arg::Str(why)])
+        crate::format(Text(1981), &[Arg::Str(why)])
     }
 
-    pub const MODEL_GEMMA: Text = Text(1978);
+    pub const MODEL_GEMMA: Text = Text(1982);
 
     pub fn model_gemma() -> &'static str {
         MODEL_GEMMA.get()
     }
 
-    pub const MODEL_HOSTS: Text = Text(1979);
+    pub const MODEL_HOSTS: Text = Text(1983);
 
     pub fn model_hosts() -> &'static str {
         MODEL_HOSTS.get()
     }
 
-    pub const MODEL_LARGE: Text = Text(1980);
+    pub const MODEL_LARGE: Text = Text(1984);
 
     pub fn model_large() -> &'static str {
         MODEL_LARGE.get()
     }
 
-    pub const MODEL_LARGE_ABOUT: Text = Text(1981);
+    pub const MODEL_LARGE_ABOUT: Text = Text(1985);
 
     pub fn model_large_about() -> &'static str {
         MODEL_LARGE_ABOUT.get()
     }
 
-    pub const MODEL_NO_PICK: Text = Text(1982);
+    pub const MODEL_NO_PICK: Text = Text(1986);
 
     pub fn model_no_pick() -> &'static str {
         MODEL_NO_PICK.get()
     }
 
-    pub const MODEL_NONE: Text = Text(1983);
+    pub const MODEL_NONE: Text = Text(1987);
 
     pub fn model_none() -> &'static str {
         MODEL_NONE.get()
     }
 
-    pub const MODEL_READY: Text = Text(1984);
+    pub const MODEL_READY: Text = Text(1988);
 
     pub fn model_ready() -> &'static str {
         MODEL_READY.get()
     }
 
-    pub const MODEL_RECOMMENDED: Text = Text(1985);
+    pub const MODEL_RECOMMENDED: Text = Text(1989);
 
     pub fn model_recommended() -> &'static str {
         MODEL_RECOMMENDED.get()
     }
 
-    pub const MODEL_REMOVE: Text = Text(1986);
+    pub const MODEL_REMOVE: Text = Text(1990);
 
     pub fn model_remove() -> &'static str {
         MODEL_REMOVE.get()
     }
 
-    pub const MODEL_SOURCE_BUILT_IN: Text = Text(1987);
+    pub const MODEL_SOURCE_BUILT_IN: Text = Text(1991);
 
     pub fn model_source_built_in() -> &'static str {
         MODEL_SOURCE_BUILT_IN.get()
     }
 
-    pub const MODEL_SOURCE_LIVE: Text = Text(1988);
+    pub const MODEL_SOURCE_LIVE: Text = Text(1992);
 
     pub fn model_source_live() -> &'static str {
         MODEL_SOURCE_LIVE.get()
     }
 
-    pub const MODEL_SOURCE_OVERRIDE: Text = Text(1989);
+    pub const MODEL_SOURCE_OVERRIDE: Text = Text(1993);
 
     pub fn model_source_override() -> &'static str {
         MODEL_SOURCE_OVERRIDE.get()
     }
 
-    pub const MODEL_STANDARD: Text = Text(1990);
+    pub const MODEL_STANDARD: Text = Text(1994);
 
     pub fn model_standard() -> &'static str {
         MODEL_STANDARD.get()
     }
 
-    pub const MODEL_STANDARD_ABOUT: Text = Text(1991);
+    pub const MODEL_STANDARD_ABOUT: Text = Text(1995);
 
     pub fn model_standard_about() -> &'static str {
         MODEL_STANDARD_ABOUT.get()
     }
 
-    pub const MODEL_UNCHECKED: Text = Text(1992);
+    pub const MODEL_UNCHECKED: Text = Text(1996);
 
     pub fn model_unchecked() -> &'static str {
         MODEL_UNCHECKED.get()
     }
 
-    pub const MODELS_CHECKING: Text = Text(1993);
+    pub const MODELS_CHECKING: Text = Text(1997);
 
     pub fn models_checking() -> &'static str {
         MODELS_CHECKING.get()
     }
 
-    pub const MODELS_DETACHED: Text = Text(1994);
+    pub const MODELS_DETACHED: Text = Text(1998);
 
     pub fn models_detached() -> &'static str {
         MODELS_DETACHED.get()
     }
 
-    pub const MODELS_FOOTER: Text = Text(1995);
+    pub const MODELS_FOOTER: Text = Text(1999);
 
     pub fn models_footer() -> &'static str {
         MODELS_FOOTER.get()
     }
 
-    pub const MODELS_REFRESH: Text = Text(1996);
+    pub const MODELS_REFRESH: Text = Text(2000);
 
     pub fn models_refresh() -> &'static str {
         MODELS_REFRESH.get()
     }
 
     pub fn models_refresh_efforts(count: impl Into<Num>) -> String {
-        crate::format(Text(1997), &[Arg::Num(count.into())])
+        crate::format(Text(2001), &[Arg::Num(count.into())])
     }
 
     pub fn models_refresh_failed(why: &str) -> String {
-        crate::format(Text(1998), &[Arg::Str(why)])
+        crate::format(Text(2002), &[Arg::Str(why)])
     }
 
-    pub const MODELS_REFRESH_FOOTER: Text = Text(1999);
+    pub const MODELS_REFRESH_FOOTER: Text = Text(2003);
 
     pub fn models_refresh_footer() -> &'static str {
         MODELS_REFRESH_FOOTER.get()
     }
 
     pub fn models_refresh_gone(count: impl Into<Num>) -> String {
-        crate::format(Text(2000), &[Arg::Num(count.into())])
+        crate::format(Text(2004), &[Arg::Num(count.into())])
     }
 
     pub fn models_refresh_new(count: impl Into<Num>) -> String {
-        crate::format(Text(2001), &[Arg::Num(count.into())])
+        crate::format(Text(2005), &[Arg::Num(count.into())])
     }
 
     pub fn models_refresh_picks(count: impl Into<Num>) -> String {
-        crate::format(Text(2002), &[Arg::Num(count.into())])
+        crate::format(Text(2006), &[Arg::Num(count.into())])
     }
 
     pub fn models_refresh_unpriced(count: impl Into<Num>) -> String {
-        crate::format(Text(2003), &[Arg::Num(count.into())])
+        crate::format(Text(2007), &[Arg::Num(count.into())])
     }
 
     pub fn models_refresh_unread(tools: &str) -> String {
-        crate::format(Text(2004), &[Arg::Str(tools)])
+        crate::format(Text(2008), &[Arg::Str(tools)])
     }
 
-    pub const MODELS_REFRESHED: Text = Text(2005);
+    pub const MODELS_REFRESHED: Text = Text(2009);
 
     pub fn models_refreshed() -> &'static str {
         MODELS_REFRESHED.get()
     }
 
-    pub const MODELS_REFRESHED_NONE: Text = Text(2006);
+    pub const MODELS_REFRESHED_NONE: Text = Text(2010);
 
     pub fn models_refreshed_none() -> &'static str {
         MODELS_REFRESHED_NONE.get()
     }
 
-    pub const MODELS_REFRESHING: Text = Text(2007);
+    pub const MODELS_REFRESHING: Text = Text(2011);
 
     pub fn models_refreshing() -> &'static str {
         MODELS_REFRESHING.get()
     }
 
-    pub const MODELS_TITLE: Text = Text(2008);
+    pub const MODELS_TITLE: Text = Text(2012);
 
     pub fn models_title() -> &'static str {
         MODELS_TITLE.get()
     }
 
-    pub const NOTCH_WIDTH: Text = Text(2009);
+    pub const NOTCH_WIDTH: Text = Text(2013);
 
     pub fn notch_width() -> &'static str {
         NOTCH_WIDTH.get()
     }
 
-    pub const NOTCH_WIDTH_LARGE: Text = Text(2010);
+    pub const NOTCH_WIDTH_LARGE: Text = Text(2014);
 
     pub fn notch_width_large() -> &'static str {
         NOTCH_WIDTH_LARGE.get()
     }
 
-    pub const NOTCH_WIDTH_MEDIUM: Text = Text(2011);
+    pub const NOTCH_WIDTH_MEDIUM: Text = Text(2015);
 
     pub fn notch_width_medium() -> &'static str {
         NOTCH_WIDTH_MEDIUM.get()
     }
 
-    pub const NOTCH_WIDTH_SMALL: Text = Text(2012);
+    pub const NOTCH_WIDTH_SMALL: Text = Text(2016);
 
     pub fn notch_width_small() -> &'static str {
         NOTCH_WIDTH_SMALL.get()
     }
 
     pub fn override_failed(why: &str) -> String {
-        crate::format(Text(2013), &[Arg::Str(why)])
+        crate::format(Text(2017), &[Arg::Str(why)])
     }
 
-    pub const OVERRIDE_FOOTER: Text = Text(2014);
+    pub const OVERRIDE_FOOTER: Text = Text(2018);
 
     pub fn override_footer() -> &'static str {
         OVERRIDE_FOOTER.get()
     }
 
-    pub const OVERRIDE_FOUND: Text = Text(2015);
+    pub const OVERRIDE_FOUND: Text = Text(2019);
 
     pub fn override_found() -> &'static str {
         OVERRIDE_FOUND.get()
     }
 
-    pub const OVERRIDE_MISSING: Text = Text(2016);
+    pub const OVERRIDE_MISSING: Text = Text(2020);
 
     pub fn override_missing() -> &'static str {
         OVERRIDE_MISSING.get()
     }
 
-    pub const OVERRIDE_OPEN: Text = Text(2017);
+    pub const OVERRIDE_OPEN: Text = Text(2021);
 
     pub fn override_open() -> &'static str {
         OVERRIDE_OPEN.get()
     }
 
-    pub const OVERRIDE_RELOAD: Text = Text(2018);
+    pub const OVERRIDE_RELOAD: Text = Text(2022);
 
     pub fn override_reload() -> &'static str {
         OVERRIDE_RELOAD.get()
     }
 
-    pub const OVERRIDE_TITLE: Text = Text(2019);
+    pub const OVERRIDE_TITLE: Text = Text(2023);
 
     pub fn override_title() -> &'static str {
         OVERRIDE_TITLE.get()
     }
 
-    pub const OVERRIDE_UNREADABLE: Text = Text(2020);
+    pub const OVERRIDE_UNREADABLE: Text = Text(2024);
 
     pub fn override_unreadable() -> &'static str {
         OVERRIDE_UNREADABLE.get()
     }
 
-    pub const PAGE_ACTIVITY: Text = Text(2021);
+    pub const PAGE_ACTIVITY: Text = Text(2025);
 
     pub fn page_activity() -> &'static str {
         PAGE_ACTIVITY.get()
     }
 
-    pub const PAGE_AGENTS: Text = Text(2022);
+    pub const PAGE_AGENTS: Text = Text(2026);
 
     pub fn page_agents() -> &'static str {
         PAGE_AGENTS.get()
     }
 
-    pub const PAGE_COSTS: Text = Text(2023);
+    pub const PAGE_COSTS: Text = Text(2027);
 
     pub fn page_costs() -> &'static str {
         PAGE_COSTS.get()
     }
 
-    pub const PAGE_GENERAL: Text = Text(2024);
+    pub const PAGE_GENERAL: Text = Text(2028);
 
     pub fn page_general() -> &'static str {
         PAGE_GENERAL.get()
     }
 
-    pub const PAGE_SKILLS: Text = Text(2025);
+    pub const PAGE_SKILLS: Text = Text(2029);
 
     pub fn page_skills() -> &'static str {
         PAGE_SKILLS.get()
     }
 
-    pub const PHONE_BRIDGE: Text = Text(2026);
+    pub const PHONE_BRIDGE: Text = Text(2030);
 
     pub fn phone_bridge() -> &'static str {
         PHONE_BRIDGE.get()
     }
 
-    pub const REPLY_FROM_NOTCH: Text = Text(2027);
+    pub const REPLY_FROM_NOTCH: Text = Text(2031);
 
     pub fn reply_from_notch() -> &'static str {
         REPLY_FROM_NOTCH.get()
     }
 
-    pub const REPLY_UNREADABLE: Text = Text(2028);
+    pub const REPLY_UNREADABLE: Text = Text(2032);
 
     pub fn reply_unreadable() -> &'static str {
         REPLY_UNREADABLE.get()
     }
 
-    pub const ROLE_REVIEW: Text = Text(2029);
+    pub const ROLE_REVIEW: Text = Text(2033);
 
     pub fn role_review() -> &'static str {
         ROLE_REVIEW.get()
     }
 
-    pub const ROLE_REVIEW_FINAL: Text = Text(2030);
+    pub const ROLE_REVIEW_FINAL: Text = Text(2034);
 
     pub fn role_review_final() -> &'static str {
         ROLE_REVIEW_FINAL.get()
     }
 
-    pub const ROLE_REVIEW_SECRETS: Text = Text(2031);
+    pub const ROLE_REVIEW_SECRETS: Text = Text(2035);
 
     pub fn role_review_secrets() -> &'static str {
         ROLE_REVIEW_SECRETS.get()
     }
 
-    pub const ROLE_SPEC_CHECK: Text = Text(2032);
+    pub const ROLE_SPEC_CHECK: Text = Text(2036);
 
     pub fn role_spec_check() -> &'static str {
         ROLE_SPEC_CHECK.get()
     }
 
-    pub const SEARCH_CATEGORIES: Text = Text(2033);
+    pub const SEARCH_CATEGORIES: Text = Text(2037);
 
     pub fn search_categories() -> &'static str {
         SEARCH_CATEGORIES.get()
     }
 
-    pub const SEARCH_CATEGORY_ACTIONS: Text = Text(2034);
+    pub const SEARCH_CATEGORY_ACTIONS: Text = Text(2038);
 
     pub fn search_category_actions() -> &'static str {
         SEARCH_CATEGORY_ACTIONS.get()
     }
 
-    pub const SEARCH_CATEGORY_INBOX: Text = Text(2035);
+    pub const SEARCH_CATEGORY_INBOX: Text = Text(2039);
 
     pub fn search_category_inbox() -> &'static str {
         SEARCH_CATEGORY_INBOX.get()
     }
 
-    pub const SEARCH_CATEGORY_ORDER: Text = Text(2036);
+    pub const SEARCH_CATEGORY_ORDER: Text = Text(2040);
 
     pub fn search_category_order() -> &'static str {
         SEARCH_CATEGORY_ORDER.get()
     }
 
-    pub const SEARCH_CATEGORY_PAGES: Text = Text(2037);
+    pub const SEARCH_CATEGORY_PAGES: Text = Text(2041);
 
     pub fn search_category_pages() -> &'static str {
         SEARCH_CATEGORY_PAGES.get()
     }
 
-    pub const SEARCH_CATEGORY_SESSIONS: Text = Text(2038);
+    pub const SEARCH_CATEGORY_SESSIONS: Text = Text(2042);
 
     pub fn search_category_sessions() -> &'static str {
         SEARCH_CATEGORY_SESSIONS.get()
     }
 
-    pub const SEARCH_CATEGORY_SETTINGS: Text = Text(2039);
+    pub const SEARCH_CATEGORY_SETTINGS: Text = Text(2043);
 
     pub fn search_category_settings() -> &'static str {
         SEARCH_CATEGORY_SETTINGS.get()
     }
 
-    pub const SEARCH_CATEGORY_VAULT: Text = Text(2040);
+    pub const SEARCH_CATEGORY_VAULT: Text = Text(2044);
 
     pub fn search_category_vault() -> &'static str {
         SEARCH_CATEGORY_VAULT.get()
     }
 
-    pub const SEARCH_INDEX_RANGE: Text = Text(2041);
+    pub const SEARCH_INDEX_RANGE: Text = Text(2045);
 
     pub fn search_index_range() -> &'static str {
         SEARCH_INDEX_RANGE.get()
     }
 
-    pub const SEARCH_INDEX_RANGE_ALL: Text = Text(2042);
+    pub const SEARCH_INDEX_RANGE_ALL: Text = Text(2046);
 
     pub fn search_index_range_all() -> &'static str {
         SEARCH_INDEX_RANGE_ALL.get()
     }
 
-    pub const SEARCH_INDEX_RANGE_V14D: Text = Text(2043);
+    pub const SEARCH_INDEX_RANGE_V14D: Text = Text(2047);
 
     pub fn search_index_range_v14d() -> &'static str {
         SEARCH_INDEX_RANGE_V14D.get()
     }
 
-    pub const SEARCH_INDEX_RANGE_V30D: Text = Text(2044);
+    pub const SEARCH_INDEX_RANGE_V30D: Text = Text(2048);
 
     pub fn search_index_range_v30d() -> &'static str {
         SEARCH_INDEX_RANGE_V30D.get()
     }
 
-    pub const SEARCH_SHORTCUT: Text = Text(2045);
+    pub const SEARCH_SHORTCUT: Text = Text(2049);
 
     pub fn search_shortcut() -> &'static str {
         SEARCH_SHORTCUT.get()
     }
 
-    pub const SECRET_VAULT: Text = Text(2046);
+    pub const SECRET_VAULT: Text = Text(2050);
 
     pub fn secret_vault() -> &'static str {
         SECRET_VAULT.get()
     }
 
-    pub const SECTION_ACCOUNT_LIMIT: Text = Text(2047);
+    pub const SECTION_ACCOUNT_LIMIT: Text = Text(2051);
 
     pub fn section_account_limit() -> &'static str {
         SECTION_ACCOUNT_LIMIT.get()
     }
 
-    pub const SECTION_ANTIGRAVITY: Text = Text(2048);
+    pub const SECTION_ANTIGRAVITY: Text = Text(2052);
 
     pub fn section_antigravity() -> &'static str {
         SECTION_ANTIGRAVITY.get()
     }
 
-    pub const SECTION_ATTENTION: Text = Text(2049);
+    pub const SECTION_ATTENTION: Text = Text(2053);
 
     pub fn section_attention() -> &'static str {
         SECTION_ATTENTION.get()
     }
 
-    pub const SECTION_CHAT: Text = Text(2050);
+    pub const SECTION_CHAT: Text = Text(2054);
 
     pub fn section_chat() -> &'static str {
         SECTION_CHAT.get()
     }
 
-    pub const SECTION_CLAUDE_CODE: Text = Text(2051);
+    pub const SECTION_CLAUDE_CODE: Text = Text(2055);
 
     pub fn section_claude_code() -> &'static str {
         SECTION_CLAUDE_CODE.get()
     }
 
-    pub const SECTION_CLUSTER: Text = Text(2052);
+    pub const SECTION_CLUSTER: Text = Text(2056);
 
     pub fn section_cluster() -> &'static str {
         SECTION_CLUSTER.get()
     }
 
-    pub const SECTION_CODEX: Text = Text(2053);
+    pub const SECTION_CODEX: Text = Text(2057);
 
     pub fn section_codex() -> &'static str {
         SECTION_CODEX.get()
     }
 
-    pub const SECTION_DAEMON: Text = Text(2054);
+    pub const SECTION_DAEMON: Text = Text(2058);
 
     pub fn section_daemon() -> &'static str {
         SECTION_DAEMON.get()
     }
 
-    pub const SECTION_GENERAL: Text = Text(2055);
+    pub const SECTION_GENERAL: Text = Text(2059);
 
     pub fn section_general() -> &'static str {
         SECTION_GENERAL.get()
     }
 
-    pub const SECTION_KEEP_MAC_AWAKE: Text = Text(2056);
+    pub const SECTION_KEEP_MAC_AWAKE: Text = Text(2060);
 
     pub fn section_keep_mac_awake() -> &'static str {
         SECTION_KEEP_MAC_AWAKE.get()
     }
 
-    pub const SECTION_NOTCH: Text = Text(2057);
+    pub const SECTION_NOTCH: Text = Text(2061);
 
     pub fn section_notch() -> &'static str {
         SECTION_NOTCH.get()
     }
 
-    pub const SECTION_SEARCH: Text = Text(2058);
+    pub const SECTION_SEARCH: Text = Text(2062);
 
     pub fn section_search() -> &'static str {
         SECTION_SEARCH.get()
     }
 
     pub fn semantic_indexing(done: impl Into<Num>, total: impl Into<Num>) -> String {
-        crate::format(Text(2059), &[Arg::Num(done.into()), Arg::Num(total.into())])
+        crate::format(Text(2063), &[Arg::Num(done.into()), Arg::Num(total.into())])
     }
 
-    pub const SEMANTIC_PAUSE: Text = Text(2060);
+    pub const SEMANTIC_PAUSE: Text = Text(2064);
 
     pub fn semantic_pause() -> &'static str {
         SEMANTIC_PAUSE.get()
     }
 
-    pub const SEMANTIC_RESUME: Text = Text(2061);
+    pub const SEMANTIC_RESUME: Text = Text(2065);
 
     pub fn semantic_resume() -> &'static str {
         SEMANTIC_RESUME.get()
     }
 
-    pub const SEMANTIC_SEARCH: Text = Text(2062);
+    pub const SEMANTIC_SEARCH: Text = Text(2066);
 
     pub fn semantic_search() -> &'static str {
         SEMANTIC_SEARCH.get()
     }
 
-    pub const SEMANTIC_SEARCH_ABOUT: Text = Text(2063);
+    pub const SEMANTIC_SEARCH_ABOUT: Text = Text(2067);
 
     pub fn semantic_search_about() -> &'static str {
         SEMANTIC_SEARCH_ABOUT.get()
     }
 
-    pub const SHORTCUT_NEEDS_KEY: Text = Text(2064);
+    pub const SHORTCUT_NEEDS_KEY: Text = Text(2068);
 
     pub fn shortcut_needs_key() -> &'static str {
         SHORTCUT_NEEDS_KEY.get()
     }
 
-    pub const SHORTCUT_OFF: Text = Text(2065);
+    pub const SHORTCUT_OFF: Text = Text(2069);
 
     pub fn shortcut_off() -> &'static str {
         SHORTCUT_OFF.get()
     }
 
-    pub const SHORTCUT_RECORD: Text = Text(2066);
+    pub const SHORTCUT_RECORD: Text = Text(2070);
 
     pub fn shortcut_record() -> &'static str {
         SHORTCUT_RECORD.get()
     }
 
-    pub const SHORTCUT_RECORDING: Text = Text(2067);
+    pub const SHORTCUT_RECORDING: Text = Text(2071);
 
     pub fn shortcut_recording() -> &'static str {
         SHORTCUT_RECORDING.get()
     }
 
-    pub const SHOW_IN_DOCK: Text = Text(2068);
+    pub const SHOW_IN_DOCK: Text = Text(2072);
 
     pub fn show_in_dock() -> &'static str {
         SHOW_IN_DOCK.get()
     }
 
-    pub const SHOW_LAST_REPLY: Text = Text(2069);
+    pub const SHOW_LAST_REPLY: Text = Text(2073);
 
     pub fn show_last_reply() -> &'static str {
         SHOW_LAST_REPLY.get()
     }
 
-    pub const SHOW_PET: Text = Text(2070);
+    pub const SHOW_PET: Text = Text(2074);
 
     pub fn show_pet() -> &'static str {
         SHOW_PET.get()
     }
 
-    pub const SIDECAR_CANCEL: Text = Text(2071);
+    pub const SIDECAR_CANCEL: Text = Text(2075);
 
     pub fn sidecar_cancel() -> &'static str {
         SIDECAR_CANCEL.get()
     }
 
-    pub const SIDECAR_CONFIRM: Text = Text(2072);
+    pub const SIDECAR_CONFIRM: Text = Text(2076);
 
     pub fn sidecar_confirm() -> &'static str {
         SIDECAR_CONFIRM.get()
     }
 
-    pub const SIDECAR_CONFIRM_NOTE: Text = Text(2073);
+    pub const SIDECAR_CONFIRM_NOTE: Text = Text(2077);
 
     pub fn sidecar_confirm_note() -> &'static str {
         SIDECAR_CONFIRM_NOTE.get()
     }
 
-    pub const SIDECAR_DONE: Text = Text(2074);
+    pub const SIDECAR_DONE: Text = Text(2078);
 
     pub fn sidecar_done() -> &'static str {
         SIDECAR_DONE.get()
     }
 
-    pub const SIDECAR_NOTE: Text = Text(2075);
+    pub const SIDECAR_NOTE: Text = Text(2079);
 
     pub fn sidecar_note() -> &'static str {
         SIDECAR_NOTE.get()
     }
 
-    pub const SIDECAR_STATE_BLOCKED: Text = Text(2076);
+    pub const SIDECAR_STATE_BLOCKED: Text = Text(2080);
 
     pub fn sidecar_state_blocked() -> &'static str {
         SIDECAR_STATE_BLOCKED.get()
     }
 
-    pub const SIDECAR_STATE_CHECKING: Text = Text(2077);
+    pub const SIDECAR_STATE_CHECKING: Text = Text(2081);
 
     pub fn sidecar_state_checking() -> &'static str {
         SIDECAR_STATE_CHECKING.get()
     }
 
-    pub const SIDECAR_STATE_NO_APP: Text = Text(2078);
+    pub const SIDECAR_STATE_NO_APP: Text = Text(2082);
 
     pub fn sidecar_state_no_app() -> &'static str {
         SIDECAR_STATE_NO_APP.get()
     }
 
-    pub const SIDECAR_STATE_OFF: Text = Text(2079);
+    pub const SIDECAR_STATE_OFF: Text = Text(2083);
 
     pub fn sidecar_state_off() -> &'static str {
         SIDECAR_STATE_OFF.get()
     }
 
-    pub const SIDECAR_STATE_ON: Text = Text(2080);
+    pub const SIDECAR_STATE_ON: Text = Text(2084);
 
     pub fn sidecar_state_on() -> &'static str {
         SIDECAR_STATE_ON.get()
     }
 
-    pub const SIDECAR_STATE_PARTIAL: Text = Text(2081);
+    pub const SIDECAR_STATE_PARTIAL: Text = Text(2085);
 
     pub fn sidecar_state_partial() -> &'static str {
         SIDECAR_STATE_PARTIAL.get()
     }
 
-    pub const SIDECAR_STATE_WAITING: Text = Text(2082);
+    pub const SIDECAR_STATE_WAITING: Text = Text(2086);
 
     pub fn sidecar_state_waiting() -> &'static str {
         SIDECAR_STATE_WAITING.get()
     }
 
-    pub const SIDECAR_TURN_OFF: Text = Text(2083);
+    pub const SIDECAR_TURN_OFF: Text = Text(2087);
 
     pub fn sidecar_turn_off() -> &'static str {
         SIDECAR_TURN_OFF.get()
     }
 
-    pub const SIDECAR_TURN_ON: Text = Text(2084);
+    pub const SIDECAR_TURN_ON: Text = Text(2088);
 
     pub fn sidecar_turn_on() -> &'static str {
         SIDECAR_TURN_ON.get()
     }
 
     pub fn skill_error(skill: &str, why: &str) -> String {
-        crate::format(Text(2085), &[Arg::Str(skill), Arg::Str(why)])
+        crate::format(Text(2089), &[Arg::Str(skill), Arg::Str(why)])
     }
 
-    pub const SKILL_INSTALLED: Text = Text(2086);
+    pub const SKILL_INSTALLED: Text = Text(2090);
 
     pub fn skill_installed() -> &'static str {
         SKILL_INSTALLED.get()
     }
 
-    pub const SKILL_LEFT_ALONE: Text = Text(2087);
+    pub const SKILL_LEFT_ALONE: Text = Text(2091);
 
     pub fn skill_left_alone() -> &'static str {
         SKILL_LEFT_ALONE.get()
     }
 
-    pub const SKILL_NOT_INSTALLED: Text = Text(2088);
+    pub const SKILL_NOT_INSTALLED: Text = Text(2092);
 
     pub fn skill_not_installed() -> &'static str {
         SKILL_NOT_INSTALLED.get()
     }
 
-    pub const SKILL_OUT_OF_DATE: Text = Text(2089);
+    pub const SKILL_OUT_OF_DATE: Text = Text(2093);
 
     pub fn skill_out_of_date() -> &'static str {
         SKILL_OUT_OF_DATE.get()
     }
 
-    pub const SKILL_TOOL_MISSING: Text = Text(2090);
+    pub const SKILL_TOOL_MISSING: Text = Text(2094);
 
     pub fn skill_tool_missing() -> &'static str {
         SKILL_TOOL_MISSING.get()
     }
 
-    pub const SKILLS_CHECKING: Text = Text(2091);
+    pub const SKILLS_CHECKING: Text = Text(2095);
 
     pub fn skills_checking() -> &'static str {
         SKILLS_CHECKING.get()
     }
 
-    pub const SKILLS_DETACHED: Text = Text(2092);
+    pub const SKILLS_DETACHED: Text = Text(2096);
 
     pub fn skills_detached() -> &'static str {
         SKILLS_DETACHED.get()
     }
 
-    pub const SKILLS_FOOTER: Text = Text(2093);
+    pub const SKILLS_FOOTER: Text = Text(2097);
 
     pub fn skills_footer() -> &'static str {
         SKILLS_FOOTER.get()
     }
 
-    pub const SKILLS_REINSTALL: Text = Text(2094);
+    pub const SKILLS_REINSTALL: Text = Text(2098);
 
     pub fn skills_reinstall() -> &'static str {
         SKILLS_REINSTALL.get()
     }
 
-    pub const SKILLS_REINSTALLED: Text = Text(2095);
+    pub const SKILLS_REINSTALLED: Text = Text(2099);
 
     pub fn skills_reinstalled() -> &'static str {
         SKILLS_REINSTALLED.get()
     }
 
-    pub const SKILLS_REINSTALLING: Text = Text(2096);
+    pub const SKILLS_REINSTALLING: Text = Text(2100);
 
     pub fn skills_reinstalling() -> &'static str {
         SKILLS_REINSTALLING.get()
     }
 
-    pub const SKILLS_SWITCH_OFF: Text = Text(2097);
+    pub const SKILLS_SWITCH_OFF: Text = Text(2101);
 
     pub fn skills_switch_off() -> &'static str {
         SKILLS_SWITCH_OFF.get()
     }
 
-    pub const SKILLS_TITLE: Text = Text(2098);
+    pub const SKILLS_TITLE: Text = Text(2102);
 
     pub fn skills_title() -> &'static str {
         SKILLS_TITLE.get()
     }
 
-    pub const TITLE: Text = Text(2099);
+    pub const TITLE: Text = Text(2103);
 
     pub fn title() -> &'static str {
         TITLE.get()
     }
 
-    pub const TOOL_ANTIGRAVITY: Text = Text(2100);
+    pub const TOOL_ANTIGRAVITY: Text = Text(2104);
 
     pub fn tool_antigravity() -> &'static str {
         TOOL_ANTIGRAVITY.get()
     }
 
-    pub const TOOL_CLAUDE_CODE: Text = Text(2101);
+    pub const TOOL_CLAUDE_CODE: Text = Text(2105);
 
     pub fn tool_claude_code() -> &'static str {
         TOOL_CLAUDE_CODE.get()
     }
 
-    pub const TOOL_CODEX: Text = Text(2102);
+    pub const TOOL_CODEX: Text = Text(2106);
 
     pub fn tool_codex() -> &'static str {
         TOOL_CODEX.get()
@@ -11460,38 +11484,38 @@ pub mod tray {
     use crate::{Arg, Num, Text};
 
     pub fn a11y_blocked(count: &str) -> String {
-        crate::format(Text(2103), &[Arg::Str(count)])
+        crate::format(Text(2107), &[Arg::Str(count)])
     }
 
-    pub const A11Y_IDLE: Text = Text(2104);
+    pub const A11Y_IDLE: Text = Text(2108);
 
     pub fn a11y_idle() -> &'static str {
         A11Y_IDLE.get()
     }
 
     pub fn a11y_waiting(count: impl Into<Num>) -> String {
-        crate::format(Text(2105), &[Arg::Num(count.into())])
+        crate::format(Text(2109), &[Arg::Num(count.into())])
     }
 
-    pub const A11Y_WORKING: Text = Text(2106);
+    pub const A11Y_WORKING: Text = Text(2110);
 
     pub fn a11y_working() -> &'static str {
         A11Y_WORKING.get()
     }
 
     pub fn blocking_header(count: impl Into<Num>) -> String {
-        crate::format(Text(2107), &[Arg::Num(count.into())])
+        crate::format(Text(2111), &[Arg::Num(count.into())])
     }
 
     pub fn blocking_row(title: &str, who: &str, waited: &str) -> String {
-        crate::format(Text(2108), &[Arg::Str(title), Arg::Str(who), Arg::Str(waited)])
+        crate::format(Text(2112), &[Arg::Str(title), Arg::Str(who), Arg::Str(waited)])
     }
 
     pub fn blocking_row_alone(title: &str, waited: &str) -> String {
-        crate::format(Text(2109), &[Arg::Str(title), Arg::Str(waited)])
+        crate::format(Text(2113), &[Arg::Str(title), Arg::Str(waited)])
     }
 
-    pub const OPEN_IN_INBOX: Text = Text(2110);
+    pub const OPEN_IN_INBOX: Text = Text(2114);
 
     pub fn open_in_inbox() -> &'static str {
         OPEN_IN_INBOX.get()
@@ -11502,325 +11526,325 @@ pub mod units {
     use crate::{Arg, Num, Text};
 
     pub fn age_days(n: impl Into<Num>) -> String {
-        crate::format(Text(2111), &[Arg::Num(n.into())])
+        crate::format(Text(2115), &[Arg::Num(n.into())])
     }
 
     pub fn age_hours(n: impl Into<Num>) -> String {
-        crate::format(Text(2112), &[Arg::Num(n.into())])
+        crate::format(Text(2116), &[Arg::Num(n.into())])
     }
 
     pub fn age_minutes(n: impl Into<Num>) -> String {
-        crate::format(Text(2113), &[Arg::Num(n.into())])
+        crate::format(Text(2117), &[Arg::Num(n.into())])
     }
 
-    pub const AGE_NOW: Text = Text(2114);
+    pub const AGE_NOW: Text = Text(2118);
 
     pub fn age_now() -> &'static str {
         AGE_NOW.get()
     }
 
-    pub const AM: Text = Text(2115);
+    pub const AM: Text = Text(2119);
 
     pub fn am() -> &'static str {
         AM.get()
     }
 
     pub fn clock(hour: impl Into<Num>, minute: &str, suffix: &str) -> String {
-        crate::format(Text(2116), &[Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
+        crate::format(Text(2120), &[Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
     }
 
     pub fn date_full(weekday: &str, month: &str, day: &str, year: &str, time: &str) -> String {
-        crate::format(Text(2117), &[Arg::Str(weekday), Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(time)])
+        crate::format(Text(2121), &[Arg::Str(weekday), Arg::Str(month), Arg::Str(day), Arg::Str(year), Arg::Str(time)])
     }
 
     pub fn date_short(month: &str, day: &str) -> String {
-        crate::format(Text(2118), &[Arg::Str(month), Arg::Str(day)])
+        crate::format(Text(2122), &[Arg::Str(month), Arg::Str(day)])
     }
 
     pub fn date_year(month: &str, day: &str, year: &str) -> String {
-        crate::format(Text(2119), &[Arg::Str(month), Arg::Str(day), Arg::Str(year)])
+        crate::format(Text(2123), &[Arg::Str(month), Arg::Str(day), Arg::Str(year)])
     }
 
     pub fn duration_hours(hours: impl Into<Num>, minutes: impl Into<Num>) -> String {
-        crate::format(Text(2120), &[Arg::Num(hours.into()), Arg::Num(minutes.into())])
+        crate::format(Text(2124), &[Arg::Num(hours.into()), Arg::Num(minutes.into())])
     }
 
     pub fn duration_minutes(minutes: impl Into<Num>, seconds: &str) -> String {
-        crate::format(Text(2121), &[Arg::Num(minutes.into()), Arg::Str(seconds)])
+        crate::format(Text(2125), &[Arg::Num(minutes.into()), Arg::Str(seconds)])
     }
 
     pub fn duration_seconds(n: impl Into<Num>) -> String {
-        crate::format(Text(2122), &[Arg::Num(n.into())])
+        crate::format(Text(2126), &[Arg::Num(n.into())])
     }
 
     pub fn hours_ago(count: impl Into<Num>) -> String {
-        crate::format(Text(2123), &[Arg::Num(count.into())])
+        crate::format(Text(2127), &[Arg::Num(count.into())])
     }
 
-    pub const JUST_NOW: Text = Text(2124);
+    pub const JUST_NOW: Text = Text(2128);
 
     pub fn just_now() -> &'static str {
         JUST_NOW.get()
     }
 
-    pub const LIST_SEPARATOR: Text = Text(2125);
+    pub const LIST_SEPARATOR: Text = Text(2129);
 
     pub fn list_separator() -> &'static str {
         LIST_SEPARATOR.get()
     }
 
     pub fn millions(value: &str) -> String {
-        crate::format(Text(2126), &[Arg::Str(value)])
+        crate::format(Text(2130), &[Arg::Str(value)])
     }
 
     pub fn minutes_ago(count: impl Into<Num>) -> String {
-        crate::format(Text(2127), &[Arg::Num(count.into())])
+        crate::format(Text(2131), &[Arg::Num(count.into())])
     }
 
-    pub const MONTH_APR: Text = Text(2128);
+    pub const MONTH_APR: Text = Text(2132);
 
     pub fn month_apr() -> &'static str {
         MONTH_APR.get()
     }
 
-    pub const MONTH_AUG: Text = Text(2129);
+    pub const MONTH_AUG: Text = Text(2133);
 
     pub fn month_aug() -> &'static str {
         MONTH_AUG.get()
     }
 
-    pub const MONTH_DEC: Text = Text(2130);
+    pub const MONTH_DEC: Text = Text(2134);
 
     pub fn month_dec() -> &'static str {
         MONTH_DEC.get()
     }
 
-    pub const MONTH_FEB: Text = Text(2131);
+    pub const MONTH_FEB: Text = Text(2135);
 
     pub fn month_feb() -> &'static str {
         MONTH_FEB.get()
     }
 
-    pub const MONTH_JAN: Text = Text(2132);
+    pub const MONTH_JAN: Text = Text(2136);
 
     pub fn month_jan() -> &'static str {
         MONTH_JAN.get()
     }
 
-    pub const MONTH_JUL: Text = Text(2133);
+    pub const MONTH_JUL: Text = Text(2137);
 
     pub fn month_jul() -> &'static str {
         MONTH_JUL.get()
     }
 
-    pub const MONTH_JUN: Text = Text(2134);
+    pub const MONTH_JUN: Text = Text(2138);
 
     pub fn month_jun() -> &'static str {
         MONTH_JUN.get()
     }
 
-    pub const MONTH_LONG_APR: Text = Text(2135);
+    pub const MONTH_LONG_APR: Text = Text(2139);
 
     pub fn month_long_apr() -> &'static str {
         MONTH_LONG_APR.get()
     }
 
-    pub const MONTH_LONG_AUG: Text = Text(2136);
+    pub const MONTH_LONG_AUG: Text = Text(2140);
 
     pub fn month_long_aug() -> &'static str {
         MONTH_LONG_AUG.get()
     }
 
-    pub const MONTH_LONG_DEC: Text = Text(2137);
+    pub const MONTH_LONG_DEC: Text = Text(2141);
 
     pub fn month_long_dec() -> &'static str {
         MONTH_LONG_DEC.get()
     }
 
-    pub const MONTH_LONG_FEB: Text = Text(2138);
+    pub const MONTH_LONG_FEB: Text = Text(2142);
 
     pub fn month_long_feb() -> &'static str {
         MONTH_LONG_FEB.get()
     }
 
-    pub const MONTH_LONG_JAN: Text = Text(2139);
+    pub const MONTH_LONG_JAN: Text = Text(2143);
 
     pub fn month_long_jan() -> &'static str {
         MONTH_LONG_JAN.get()
     }
 
-    pub const MONTH_LONG_JUL: Text = Text(2140);
+    pub const MONTH_LONG_JUL: Text = Text(2144);
 
     pub fn month_long_jul() -> &'static str {
         MONTH_LONG_JUL.get()
     }
 
-    pub const MONTH_LONG_JUN: Text = Text(2141);
+    pub const MONTH_LONG_JUN: Text = Text(2145);
 
     pub fn month_long_jun() -> &'static str {
         MONTH_LONG_JUN.get()
     }
 
-    pub const MONTH_LONG_MAR: Text = Text(2142);
+    pub const MONTH_LONG_MAR: Text = Text(2146);
 
     pub fn month_long_mar() -> &'static str {
         MONTH_LONG_MAR.get()
     }
 
-    pub const MONTH_LONG_MAY: Text = Text(2143);
+    pub const MONTH_LONG_MAY: Text = Text(2147);
 
     pub fn month_long_may() -> &'static str {
         MONTH_LONG_MAY.get()
     }
 
-    pub const MONTH_LONG_NOV: Text = Text(2144);
+    pub const MONTH_LONG_NOV: Text = Text(2148);
 
     pub fn month_long_nov() -> &'static str {
         MONTH_LONG_NOV.get()
     }
 
-    pub const MONTH_LONG_OCT: Text = Text(2145);
+    pub const MONTH_LONG_OCT: Text = Text(2149);
 
     pub fn month_long_oct() -> &'static str {
         MONTH_LONG_OCT.get()
     }
 
-    pub const MONTH_LONG_SEP: Text = Text(2146);
+    pub const MONTH_LONG_SEP: Text = Text(2150);
 
     pub fn month_long_sep() -> &'static str {
         MONTH_LONG_SEP.get()
     }
 
-    pub const MONTH_MAR: Text = Text(2147);
+    pub const MONTH_MAR: Text = Text(2151);
 
     pub fn month_mar() -> &'static str {
         MONTH_MAR.get()
     }
 
-    pub const MONTH_MAY: Text = Text(2148);
+    pub const MONTH_MAY: Text = Text(2152);
 
     pub fn month_may() -> &'static str {
         MONTH_MAY.get()
     }
 
-    pub const MONTH_NOV: Text = Text(2149);
+    pub const MONTH_NOV: Text = Text(2153);
 
     pub fn month_nov() -> &'static str {
         MONTH_NOV.get()
     }
 
-    pub const MONTH_OCT: Text = Text(2150);
+    pub const MONTH_OCT: Text = Text(2154);
 
     pub fn month_oct() -> &'static str {
         MONTH_OCT.get()
     }
 
-    pub const MONTH_SEP: Text = Text(2151);
+    pub const MONTH_SEP: Text = Text(2155);
 
     pub fn month_sep() -> &'static str {
         MONTH_SEP.get()
     }
 
-    pub const PM: Text = Text(2152);
+    pub const PM: Text = Text(2156);
 
     pub fn pm() -> &'static str {
         PM.get()
     }
 
     pub fn reset_clock(weekday: &str, hour: impl Into<Num>, minute: &str, suffix: &str) -> String {
-        crate::format(Text(2153), &[Arg::Str(weekday), Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
+        crate::format(Text(2157), &[Arg::Str(weekday), Arg::Num(hour.into()), Arg::Str(minute), Arg::Str(suffix)])
     }
 
     pub fn thousands(value: &str) -> String {
-        crate::format(Text(2154), &[Arg::Str(value)])
+        crate::format(Text(2158), &[Arg::Str(value)])
     }
 
-    pub const WEEKDAY_FRI: Text = Text(2155);
+    pub const WEEKDAY_FRI: Text = Text(2159);
 
     pub fn weekday_fri() -> &'static str {
         WEEKDAY_FRI.get()
     }
 
-    pub const WEEKDAY_LONG_FRIDAY: Text = Text(2156);
+    pub const WEEKDAY_LONG_FRIDAY: Text = Text(2160);
 
     pub fn weekday_long_friday() -> &'static str {
         WEEKDAY_LONG_FRIDAY.get()
     }
 
-    pub const WEEKDAY_LONG_MONDAY: Text = Text(2157);
+    pub const WEEKDAY_LONG_MONDAY: Text = Text(2161);
 
     pub fn weekday_long_monday() -> &'static str {
         WEEKDAY_LONG_MONDAY.get()
     }
 
-    pub const WEEKDAY_LONG_SATURDAY: Text = Text(2158);
+    pub const WEEKDAY_LONG_SATURDAY: Text = Text(2162);
 
     pub fn weekday_long_saturday() -> &'static str {
         WEEKDAY_LONG_SATURDAY.get()
     }
 
-    pub const WEEKDAY_LONG_SUNDAY: Text = Text(2159);
+    pub const WEEKDAY_LONG_SUNDAY: Text = Text(2163);
 
     pub fn weekday_long_sunday() -> &'static str {
         WEEKDAY_LONG_SUNDAY.get()
     }
 
-    pub const WEEKDAY_LONG_THURSDAY: Text = Text(2160);
+    pub const WEEKDAY_LONG_THURSDAY: Text = Text(2164);
 
     pub fn weekday_long_thursday() -> &'static str {
         WEEKDAY_LONG_THURSDAY.get()
     }
 
-    pub const WEEKDAY_LONG_TUESDAY: Text = Text(2161);
+    pub const WEEKDAY_LONG_TUESDAY: Text = Text(2165);
 
     pub fn weekday_long_tuesday() -> &'static str {
         WEEKDAY_LONG_TUESDAY.get()
     }
 
-    pub const WEEKDAY_LONG_WEDNESDAY: Text = Text(2162);
+    pub const WEEKDAY_LONG_WEDNESDAY: Text = Text(2166);
 
     pub fn weekday_long_wednesday() -> &'static str {
         WEEKDAY_LONG_WEDNESDAY.get()
     }
 
-    pub const WEEKDAY_MON: Text = Text(2163);
+    pub const WEEKDAY_MON: Text = Text(2167);
 
     pub fn weekday_mon() -> &'static str {
         WEEKDAY_MON.get()
     }
 
-    pub const WEEKDAY_SAT: Text = Text(2164);
+    pub const WEEKDAY_SAT: Text = Text(2168);
 
     pub fn weekday_sat() -> &'static str {
         WEEKDAY_SAT.get()
     }
 
-    pub const WEEKDAY_SUN: Text = Text(2165);
+    pub const WEEKDAY_SUN: Text = Text(2169);
 
     pub fn weekday_sun() -> &'static str {
         WEEKDAY_SUN.get()
     }
 
-    pub const WEEKDAY_THU: Text = Text(2166);
+    pub const WEEKDAY_THU: Text = Text(2170);
 
     pub fn weekday_thu() -> &'static str {
         WEEKDAY_THU.get()
     }
 
-    pub const WEEKDAY_TUE: Text = Text(2167);
+    pub const WEEKDAY_TUE: Text = Text(2171);
 
     pub fn weekday_tue() -> &'static str {
         WEEKDAY_TUE.get()
     }
 
-    pub const WEEKDAY_WED: Text = Text(2168);
+    pub const WEEKDAY_WED: Text = Text(2172);
 
     pub fn weekday_wed() -> &'static str {
         WEEKDAY_WED.get()
     }
 
     pub fn yesterday(time: &str) -> String {
-        crate::format(Text(2169), &[Arg::Str(time)])
+        crate::format(Text(2173), &[Arg::Str(time)])
     }
 }
 
@@ -11828,17 +11852,17 @@ pub mod update {
     use crate::{Arg, Text};
 
     pub fn menu_available(version: &str) -> String {
-        crate::format(Text(2170), &[Arg::Str(version)])
+        crate::format(Text(2174), &[Arg::Str(version)])
     }
 
-    pub const OPEN_RELEASE: Text = Text(2171);
+    pub const OPEN_RELEASE: Text = Text(2175);
 
     pub fn open_release() -> &'static str {
         OPEN_RELEASE.get()
     }
 }
 
-pub(crate) const COUNT: usize = 2172;
+pub(crate) const COUNT: usize = 2176;
 
 pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("accounts-renew-failed", Text(0)),
@@ -13800,219 +13824,223 @@ pub(crate) static KEYS: [(&str, Text); COUNT] = [
     ("settings-how-title", Text(1956)),
     ("settings-install-hooks-and-skills", Text(1957)),
     ("settings-keep-display-on", Text(1958)),
-    ("settings-keep-pages", Text(1959)),
-    ("settings-limit-mode", Text(1960)),
-    ("settings-limit-mode-notify", Text(1961)),
-    ("settings-limit-mode-notify-and-switch", Text(1962)),
-    ("settings-limit-mode-off", Text(1963)),
-    ("settings-limit-switch-at", Text(1964)),
-    ("settings-logins-and-lanes", Text(1965)),
-    ("settings-machines-for-agents", Text(1966)),
-    ("settings-mode", Text(1967)),
-    ("settings-mode-off", Text(1968)),
-    ("settings-mode-on", Text(1969)),
-    ("settings-mode-while-working", Text(1970)),
-    ("settings-model-accent-helper", Text(1971)),
-    ("settings-model-accent-helper-about", Text(1972)),
-    ("settings-model-cancel", Text(1973)),
-    ("settings-model-download", Text(1974)),
-    ("settings-model-downloading", Text(1975)),
-    ("settings-model-effort", Text(1976)),
-    ("settings-model-failed", Text(1977)),
-    ("settings-model-gemma", Text(1978)),
-    ("settings-model-hosts", Text(1979)),
-    ("settings-model-large", Text(1980)),
-    ("settings-model-large-about", Text(1981)),
-    ("settings-model-no-pick", Text(1982)),
-    ("settings-model-none", Text(1983)),
-    ("settings-model-ready", Text(1984)),
-    ("settings-model-recommended", Text(1985)),
-    ("settings-model-remove", Text(1986)),
-    ("settings-model-source-built-in", Text(1987)),
-    ("settings-model-source-live", Text(1988)),
-    ("settings-model-source-override", Text(1989)),
-    ("settings-model-standard", Text(1990)),
-    ("settings-model-standard-about", Text(1991)),
-    ("settings-model-unchecked", Text(1992)),
-    ("settings-models-checking", Text(1993)),
-    ("settings-models-detached", Text(1994)),
-    ("settings-models-footer", Text(1995)),
-    ("settings-models-refresh", Text(1996)),
-    ("settings-models-refresh-efforts", Text(1997)),
-    ("settings-models-refresh-failed", Text(1998)),
-    ("settings-models-refresh-footer", Text(1999)),
-    ("settings-models-refresh-gone", Text(2000)),
-    ("settings-models-refresh-new", Text(2001)),
-    ("settings-models-refresh-picks", Text(2002)),
-    ("settings-models-refresh-unpriced", Text(2003)),
-    ("settings-models-refresh-unread", Text(2004)),
-    ("settings-models-refreshed", Text(2005)),
-    ("settings-models-refreshed-none", Text(2006)),
-    ("settings-models-refreshing", Text(2007)),
-    ("settings-models-title", Text(2008)),
-    ("settings-notch-width", Text(2009)),
-    ("settings-notch-width-large", Text(2010)),
-    ("settings-notch-width-medium", Text(2011)),
-    ("settings-notch-width-small", Text(2012)),
-    ("settings-override-failed", Text(2013)),
-    ("settings-override-footer", Text(2014)),
-    ("settings-override-found", Text(2015)),
-    ("settings-override-missing", Text(2016)),
-    ("settings-override-open", Text(2017)),
-    ("settings-override-reload", Text(2018)),
-    ("settings-override-title", Text(2019)),
-    ("settings-override-unreadable", Text(2020)),
-    ("settings-page-activity", Text(2021)),
-    ("settings-page-agents", Text(2022)),
-    ("settings-page-costs", Text(2023)),
-    ("settings-page-general", Text(2024)),
-    ("settings-page-skills", Text(2025)),
-    ("settings-phone-bridge", Text(2026)),
-    ("settings-reply-from-notch", Text(2027)),
-    ("settings-reply-unreadable", Text(2028)),
-    ("settings-role-review", Text(2029)),
-    ("settings-role-review-final", Text(2030)),
-    ("settings-role-review-secrets", Text(2031)),
-    ("settings-role-spec-check", Text(2032)),
-    ("settings-search-categories", Text(2033)),
-    ("settings-search-category-actions", Text(2034)),
-    ("settings-search-category-inbox", Text(2035)),
-    ("settings-search-category-order", Text(2036)),
-    ("settings-search-category-pages", Text(2037)),
-    ("settings-search-category-sessions", Text(2038)),
-    ("settings-search-category-settings", Text(2039)),
-    ("settings-search-category-vault", Text(2040)),
-    ("settings-search-index-range", Text(2041)),
-    ("settings-search-index-range-all", Text(2042)),
-    ("settings-search-index-range-v14d", Text(2043)),
-    ("settings-search-index-range-v30d", Text(2044)),
-    ("settings-search-shortcut", Text(2045)),
-    ("settings-secret-vault", Text(2046)),
-    ("settings-section-account-limit", Text(2047)),
-    ("settings-section-antigravity", Text(2048)),
-    ("settings-section-attention", Text(2049)),
-    ("settings-section-chat", Text(2050)),
-    ("settings-section-claude-code", Text(2051)),
-    ("settings-section-cluster", Text(2052)),
-    ("settings-section-codex", Text(2053)),
-    ("settings-section-daemon", Text(2054)),
-    ("settings-section-general", Text(2055)),
-    ("settings-section-keep-mac-awake", Text(2056)),
-    ("settings-section-notch", Text(2057)),
-    ("settings-section-search", Text(2058)),
-    ("settings-semantic-indexing", Text(2059)),
-    ("settings-semantic-pause", Text(2060)),
-    ("settings-semantic-resume", Text(2061)),
-    ("settings-semantic-search", Text(2062)),
-    ("settings-semantic-search-about", Text(2063)),
-    ("settings-shortcut-needs-key", Text(2064)),
-    ("settings-shortcut-off", Text(2065)),
-    ("settings-shortcut-record", Text(2066)),
-    ("settings-shortcut-recording", Text(2067)),
-    ("settings-show-in-dock", Text(2068)),
-    ("settings-show-last-reply", Text(2069)),
-    ("settings-show-pet", Text(2070)),
-    ("settings-sidecar-cancel", Text(2071)),
-    ("settings-sidecar-confirm", Text(2072)),
-    ("settings-sidecar-confirm-note", Text(2073)),
-    ("settings-sidecar-done", Text(2074)),
-    ("settings-sidecar-note", Text(2075)),
-    ("settings-sidecar-state-blocked", Text(2076)),
-    ("settings-sidecar-state-checking", Text(2077)),
-    ("settings-sidecar-state-no-app", Text(2078)),
-    ("settings-sidecar-state-off", Text(2079)),
-    ("settings-sidecar-state-on", Text(2080)),
-    ("settings-sidecar-state-partial", Text(2081)),
-    ("settings-sidecar-state-waiting", Text(2082)),
-    ("settings-sidecar-turn-off", Text(2083)),
-    ("settings-sidecar-turn-on", Text(2084)),
-    ("settings-skill-error", Text(2085)),
-    ("settings-skill-installed", Text(2086)),
-    ("settings-skill-left-alone", Text(2087)),
-    ("settings-skill-not-installed", Text(2088)),
-    ("settings-skill-out-of-date", Text(2089)),
-    ("settings-skill-tool-missing", Text(2090)),
-    ("settings-skills-checking", Text(2091)),
-    ("settings-skills-detached", Text(2092)),
-    ("settings-skills-footer", Text(2093)),
-    ("settings-skills-reinstall", Text(2094)),
-    ("settings-skills-reinstalled", Text(2095)),
-    ("settings-skills-reinstalling", Text(2096)),
-    ("settings-skills-switch-off", Text(2097)),
-    ("settings-skills-title", Text(2098)),
-    ("settings-title", Text(2099)),
-    ("settings-tool-antigravity", Text(2100)),
-    ("settings-tool-claude-code", Text(2101)),
-    ("settings-tool-codex", Text(2102)),
-    ("tray-a11y-blocked", Text(2103)),
-    ("tray-a11y-idle", Text(2104)),
-    ("tray-a11y-waiting", Text(2105)),
-    ("tray-a11y-working", Text(2106)),
-    ("tray-blocking-header", Text(2107)),
-    ("tray-blocking-row", Text(2108)),
-    ("tray-blocking-row-alone", Text(2109)),
-    ("tray-open-in-inbox", Text(2110)),
-    ("units-age-days", Text(2111)),
-    ("units-age-hours", Text(2112)),
-    ("units-age-minutes", Text(2113)),
-    ("units-age-now", Text(2114)),
-    ("units-am", Text(2115)),
-    ("units-clock", Text(2116)),
-    ("units-date-full", Text(2117)),
-    ("units-date-short", Text(2118)),
-    ("units-date-year", Text(2119)),
-    ("units-duration-hours", Text(2120)),
-    ("units-duration-minutes", Text(2121)),
-    ("units-duration-seconds", Text(2122)),
-    ("units-hours-ago", Text(2123)),
-    ("units-just-now", Text(2124)),
-    ("units-list-separator", Text(2125)),
-    ("units-millions", Text(2126)),
-    ("units-minutes-ago", Text(2127)),
-    ("units-month-apr", Text(2128)),
-    ("units-month-aug", Text(2129)),
-    ("units-month-dec", Text(2130)),
-    ("units-month-feb", Text(2131)),
-    ("units-month-jan", Text(2132)),
-    ("units-month-jul", Text(2133)),
-    ("units-month-jun", Text(2134)),
-    ("units-month-long-apr", Text(2135)),
-    ("units-month-long-aug", Text(2136)),
-    ("units-month-long-dec", Text(2137)),
-    ("units-month-long-feb", Text(2138)),
-    ("units-month-long-jan", Text(2139)),
-    ("units-month-long-jul", Text(2140)),
-    ("units-month-long-jun", Text(2141)),
-    ("units-month-long-mar", Text(2142)),
-    ("units-month-long-may", Text(2143)),
-    ("units-month-long-nov", Text(2144)),
-    ("units-month-long-oct", Text(2145)),
-    ("units-month-long-sep", Text(2146)),
-    ("units-month-mar", Text(2147)),
-    ("units-month-may", Text(2148)),
-    ("units-month-nov", Text(2149)),
-    ("units-month-oct", Text(2150)),
-    ("units-month-sep", Text(2151)),
-    ("units-pm", Text(2152)),
-    ("units-reset-clock", Text(2153)),
-    ("units-thousands", Text(2154)),
-    ("units-weekday-fri", Text(2155)),
-    ("units-weekday-long-friday", Text(2156)),
-    ("units-weekday-long-monday", Text(2157)),
-    ("units-weekday-long-saturday", Text(2158)),
-    ("units-weekday-long-sunday", Text(2159)),
-    ("units-weekday-long-thursday", Text(2160)),
-    ("units-weekday-long-tuesday", Text(2161)),
-    ("units-weekday-long-wednesday", Text(2162)),
-    ("units-weekday-mon", Text(2163)),
-    ("units-weekday-sat", Text(2164)),
-    ("units-weekday-sun", Text(2165)),
-    ("units-weekday-thu", Text(2166)),
-    ("units-weekday-tue", Text(2167)),
-    ("units-weekday-wed", Text(2168)),
-    ("units-yesterday", Text(2169)),
-    ("update-menu-available", Text(2170)),
-    ("update-open-release", Text(2171)),
+    ("settings-keep-finished-sessions", Text(1959)),
+    ("settings-keep-finished-sessions-v1d", Text(1960)),
+    ("settings-keep-finished-sessions-v30d", Text(1961)),
+    ("settings-keep-finished-sessions-v7d", Text(1962)),
+    ("settings-keep-pages", Text(1963)),
+    ("settings-limit-mode", Text(1964)),
+    ("settings-limit-mode-notify", Text(1965)),
+    ("settings-limit-mode-notify-and-switch", Text(1966)),
+    ("settings-limit-mode-off", Text(1967)),
+    ("settings-limit-switch-at", Text(1968)),
+    ("settings-logins-and-lanes", Text(1969)),
+    ("settings-machines-for-agents", Text(1970)),
+    ("settings-mode", Text(1971)),
+    ("settings-mode-off", Text(1972)),
+    ("settings-mode-on", Text(1973)),
+    ("settings-mode-while-working", Text(1974)),
+    ("settings-model-accent-helper", Text(1975)),
+    ("settings-model-accent-helper-about", Text(1976)),
+    ("settings-model-cancel", Text(1977)),
+    ("settings-model-download", Text(1978)),
+    ("settings-model-downloading", Text(1979)),
+    ("settings-model-effort", Text(1980)),
+    ("settings-model-failed", Text(1981)),
+    ("settings-model-gemma", Text(1982)),
+    ("settings-model-hosts", Text(1983)),
+    ("settings-model-large", Text(1984)),
+    ("settings-model-large-about", Text(1985)),
+    ("settings-model-no-pick", Text(1986)),
+    ("settings-model-none", Text(1987)),
+    ("settings-model-ready", Text(1988)),
+    ("settings-model-recommended", Text(1989)),
+    ("settings-model-remove", Text(1990)),
+    ("settings-model-source-built-in", Text(1991)),
+    ("settings-model-source-live", Text(1992)),
+    ("settings-model-source-override", Text(1993)),
+    ("settings-model-standard", Text(1994)),
+    ("settings-model-standard-about", Text(1995)),
+    ("settings-model-unchecked", Text(1996)),
+    ("settings-models-checking", Text(1997)),
+    ("settings-models-detached", Text(1998)),
+    ("settings-models-footer", Text(1999)),
+    ("settings-models-refresh", Text(2000)),
+    ("settings-models-refresh-efforts", Text(2001)),
+    ("settings-models-refresh-failed", Text(2002)),
+    ("settings-models-refresh-footer", Text(2003)),
+    ("settings-models-refresh-gone", Text(2004)),
+    ("settings-models-refresh-new", Text(2005)),
+    ("settings-models-refresh-picks", Text(2006)),
+    ("settings-models-refresh-unpriced", Text(2007)),
+    ("settings-models-refresh-unread", Text(2008)),
+    ("settings-models-refreshed", Text(2009)),
+    ("settings-models-refreshed-none", Text(2010)),
+    ("settings-models-refreshing", Text(2011)),
+    ("settings-models-title", Text(2012)),
+    ("settings-notch-width", Text(2013)),
+    ("settings-notch-width-large", Text(2014)),
+    ("settings-notch-width-medium", Text(2015)),
+    ("settings-notch-width-small", Text(2016)),
+    ("settings-override-failed", Text(2017)),
+    ("settings-override-footer", Text(2018)),
+    ("settings-override-found", Text(2019)),
+    ("settings-override-missing", Text(2020)),
+    ("settings-override-open", Text(2021)),
+    ("settings-override-reload", Text(2022)),
+    ("settings-override-title", Text(2023)),
+    ("settings-override-unreadable", Text(2024)),
+    ("settings-page-activity", Text(2025)),
+    ("settings-page-agents", Text(2026)),
+    ("settings-page-costs", Text(2027)),
+    ("settings-page-general", Text(2028)),
+    ("settings-page-skills", Text(2029)),
+    ("settings-phone-bridge", Text(2030)),
+    ("settings-reply-from-notch", Text(2031)),
+    ("settings-reply-unreadable", Text(2032)),
+    ("settings-role-review", Text(2033)),
+    ("settings-role-review-final", Text(2034)),
+    ("settings-role-review-secrets", Text(2035)),
+    ("settings-role-spec-check", Text(2036)),
+    ("settings-search-categories", Text(2037)),
+    ("settings-search-category-actions", Text(2038)),
+    ("settings-search-category-inbox", Text(2039)),
+    ("settings-search-category-order", Text(2040)),
+    ("settings-search-category-pages", Text(2041)),
+    ("settings-search-category-sessions", Text(2042)),
+    ("settings-search-category-settings", Text(2043)),
+    ("settings-search-category-vault", Text(2044)),
+    ("settings-search-index-range", Text(2045)),
+    ("settings-search-index-range-all", Text(2046)),
+    ("settings-search-index-range-v14d", Text(2047)),
+    ("settings-search-index-range-v30d", Text(2048)),
+    ("settings-search-shortcut", Text(2049)),
+    ("settings-secret-vault", Text(2050)),
+    ("settings-section-account-limit", Text(2051)),
+    ("settings-section-antigravity", Text(2052)),
+    ("settings-section-attention", Text(2053)),
+    ("settings-section-chat", Text(2054)),
+    ("settings-section-claude-code", Text(2055)),
+    ("settings-section-cluster", Text(2056)),
+    ("settings-section-codex", Text(2057)),
+    ("settings-section-daemon", Text(2058)),
+    ("settings-section-general", Text(2059)),
+    ("settings-section-keep-mac-awake", Text(2060)),
+    ("settings-section-notch", Text(2061)),
+    ("settings-section-search", Text(2062)),
+    ("settings-semantic-indexing", Text(2063)),
+    ("settings-semantic-pause", Text(2064)),
+    ("settings-semantic-resume", Text(2065)),
+    ("settings-semantic-search", Text(2066)),
+    ("settings-semantic-search-about", Text(2067)),
+    ("settings-shortcut-needs-key", Text(2068)),
+    ("settings-shortcut-off", Text(2069)),
+    ("settings-shortcut-record", Text(2070)),
+    ("settings-shortcut-recording", Text(2071)),
+    ("settings-show-in-dock", Text(2072)),
+    ("settings-show-last-reply", Text(2073)),
+    ("settings-show-pet", Text(2074)),
+    ("settings-sidecar-cancel", Text(2075)),
+    ("settings-sidecar-confirm", Text(2076)),
+    ("settings-sidecar-confirm-note", Text(2077)),
+    ("settings-sidecar-done", Text(2078)),
+    ("settings-sidecar-note", Text(2079)),
+    ("settings-sidecar-state-blocked", Text(2080)),
+    ("settings-sidecar-state-checking", Text(2081)),
+    ("settings-sidecar-state-no-app", Text(2082)),
+    ("settings-sidecar-state-off", Text(2083)),
+    ("settings-sidecar-state-on", Text(2084)),
+    ("settings-sidecar-state-partial", Text(2085)),
+    ("settings-sidecar-state-waiting", Text(2086)),
+    ("settings-sidecar-turn-off", Text(2087)),
+    ("settings-sidecar-turn-on", Text(2088)),
+    ("settings-skill-error", Text(2089)),
+    ("settings-skill-installed", Text(2090)),
+    ("settings-skill-left-alone", Text(2091)),
+    ("settings-skill-not-installed", Text(2092)),
+    ("settings-skill-out-of-date", Text(2093)),
+    ("settings-skill-tool-missing", Text(2094)),
+    ("settings-skills-checking", Text(2095)),
+    ("settings-skills-detached", Text(2096)),
+    ("settings-skills-footer", Text(2097)),
+    ("settings-skills-reinstall", Text(2098)),
+    ("settings-skills-reinstalled", Text(2099)),
+    ("settings-skills-reinstalling", Text(2100)),
+    ("settings-skills-switch-off", Text(2101)),
+    ("settings-skills-title", Text(2102)),
+    ("settings-title", Text(2103)),
+    ("settings-tool-antigravity", Text(2104)),
+    ("settings-tool-claude-code", Text(2105)),
+    ("settings-tool-codex", Text(2106)),
+    ("tray-a11y-blocked", Text(2107)),
+    ("tray-a11y-idle", Text(2108)),
+    ("tray-a11y-waiting", Text(2109)),
+    ("tray-a11y-working", Text(2110)),
+    ("tray-blocking-header", Text(2111)),
+    ("tray-blocking-row", Text(2112)),
+    ("tray-blocking-row-alone", Text(2113)),
+    ("tray-open-in-inbox", Text(2114)),
+    ("units-age-days", Text(2115)),
+    ("units-age-hours", Text(2116)),
+    ("units-age-minutes", Text(2117)),
+    ("units-age-now", Text(2118)),
+    ("units-am", Text(2119)),
+    ("units-clock", Text(2120)),
+    ("units-date-full", Text(2121)),
+    ("units-date-short", Text(2122)),
+    ("units-date-year", Text(2123)),
+    ("units-duration-hours", Text(2124)),
+    ("units-duration-minutes", Text(2125)),
+    ("units-duration-seconds", Text(2126)),
+    ("units-hours-ago", Text(2127)),
+    ("units-just-now", Text(2128)),
+    ("units-list-separator", Text(2129)),
+    ("units-millions", Text(2130)),
+    ("units-minutes-ago", Text(2131)),
+    ("units-month-apr", Text(2132)),
+    ("units-month-aug", Text(2133)),
+    ("units-month-dec", Text(2134)),
+    ("units-month-feb", Text(2135)),
+    ("units-month-jan", Text(2136)),
+    ("units-month-jul", Text(2137)),
+    ("units-month-jun", Text(2138)),
+    ("units-month-long-apr", Text(2139)),
+    ("units-month-long-aug", Text(2140)),
+    ("units-month-long-dec", Text(2141)),
+    ("units-month-long-feb", Text(2142)),
+    ("units-month-long-jan", Text(2143)),
+    ("units-month-long-jul", Text(2144)),
+    ("units-month-long-jun", Text(2145)),
+    ("units-month-long-mar", Text(2146)),
+    ("units-month-long-may", Text(2147)),
+    ("units-month-long-nov", Text(2148)),
+    ("units-month-long-oct", Text(2149)),
+    ("units-month-long-sep", Text(2150)),
+    ("units-month-mar", Text(2151)),
+    ("units-month-may", Text(2152)),
+    ("units-month-nov", Text(2153)),
+    ("units-month-oct", Text(2154)),
+    ("units-month-sep", Text(2155)),
+    ("units-pm", Text(2156)),
+    ("units-reset-clock", Text(2157)),
+    ("units-thousands", Text(2158)),
+    ("units-weekday-fri", Text(2159)),
+    ("units-weekday-long-friday", Text(2160)),
+    ("units-weekday-long-monday", Text(2161)),
+    ("units-weekday-long-saturday", Text(2162)),
+    ("units-weekday-long-sunday", Text(2163)),
+    ("units-weekday-long-thursday", Text(2164)),
+    ("units-weekday-long-tuesday", Text(2165)),
+    ("units-weekday-long-wednesday", Text(2166)),
+    ("units-weekday-mon", Text(2167)),
+    ("units-weekday-sat", Text(2168)),
+    ("units-weekday-sun", Text(2169)),
+    ("units-weekday-thu", Text(2170)),
+    ("units-weekday-tue", Text(2171)),
+    ("units-weekday-wed", Text(2172)),
+    ("units-yesterday", Text(2173)),
+    ("update-menu-available", Text(2174)),
+    ("update-open-release", Text(2175)),
 ];
 
 pub(crate) static EN: [Body; COUNT] = [
@@ -15975,6 +16003,10 @@ pub(crate) static EN: [Body; COUNT] = [
     Body::Plain("How It Works"),
     Body::Plain("Install Hooks and Skills"),
     Body::Plain("Keep display on"),
+    Body::Plain("Keep Finished Sessions"),
+    Body::Plain("1 Day"),
+    Body::Plain("30 Days"),
+    Body::Plain("7 Days"),
     Body::Plain("Keep local copies of artifacts"),
     Body::Plain("Claude Code"),
     Body::Plain("Notify"),

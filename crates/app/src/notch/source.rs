@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use notchling_engine::sessions::{Agent, Monitor, Probes, Roots};
 use notchling_engine::settings::dirs::{data_dir, DirEnv};
+use notchling_engine::settings::KeepFinished;
 use notchling_engine::transcript::codex;
 use notchling_engine::transcript::model::Conversation;
 use notchling_engine::transcript::snapshot::{self, Snapshot};
@@ -79,6 +80,14 @@ impl DataRoot {
     pub fn requests_dir(&self) -> PathBuf {
         self.data_dir.join("requests")
     }
+
+    pub fn completed_window_ms(&self) -> i64 {
+        if self.fixture.is_some() {
+            i64::MAX / 4
+        } else {
+            KeepFinished::window_ms_in(&self.data_dir)
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -93,6 +102,7 @@ pub type AgyReader = Arc<dyn Fn(&str) -> Option<Conversation> + Send + Sync>;
 pub struct Source {
     pub root: DataRoot,
     monitor: Monitor,
+    keep_everything: bool,
     locator: Locator,
     agy_list: AgyList,
     pub agy_reader: Option<AgyReader>,
@@ -100,11 +110,15 @@ pub struct Source {
 
 impl Source {
     pub fn new(root: DataRoot) -> Source {
+        let mut monitor = Monitor::default();
+        monitor.completed_window_ms = root.completed_window_ms();
+        let keep_everything = root.fixture.is_some();
         Source {
             locator: Locator::new(root.fixture.clone()),
             agy_list: AgyList::shared(root.antigravity_dir.clone(), root.antigravity_copy_dir()),
             root,
-            monitor: Monitor::default(),
+            monitor,
+            keep_everything,
             agy_reader: None,
         }
     }
@@ -114,9 +128,14 @@ impl Source {
         &self.agy_list
     }
 
+    pub fn completed_window_ms(&self) -> i64 {
+        self.monitor.completed_window_ms
+    }
+
     pub fn keeping_everything(root: DataRoot) -> Source {
         let mut source = Source::new(root);
         source.monitor.completed_window_ms = i64::MAX / 4;
+        source.keep_everything = true;
         source
     }
 
@@ -142,9 +161,15 @@ impl Source {
     ) -> Loaded {
         let mut agents = match claude {
             Some(agents) => agents,
-            None => self
-                .monitor
-                .poll(&self.root.roots(), &Probes::from_proc(), now_ms),
+            None => {
+                if !self.keep_everything {
+                    if let Some(keep) = KeepFinished::read(&self.root.data_dir) {
+                        self.monitor.completed_window_ms = keep.window_ms();
+                    }
+                }
+                self.monitor
+                    .poll(&self.root.roots(), &Probes::from_proc(), now_ms)
+            }
         };
         let projects = self.root.projects_dir();
         let mut snapshots = HashMap::new();
@@ -387,5 +412,54 @@ mod tests {
         let rows = source.foreign_rows(&ToolLive::default(), 1_794_160_000_000);
         let ids: Vec<&str> = rows.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, ["codex:mine"]);
+    }
+
+    #[test]
+    fn source_maps_keep_finished_sessions_and_updates_on_load() {
+        use crate::testutil::Scratch;
+        use notchling_engine::settings::{Settings, DAY_MS, KEEP_FINISHED_KEY};
+        use serde_json::json;
+
+        let s = Scratch::new("notch-keep-finished");
+        s.write(
+            "claude/jobs/aa11bb22/state.json",
+            r#"{"state":"done","sessionId":"three-days","cwd":"/w/p","updatedAt":"2026-10-31T10:00:00.000Z"}"#,
+        );
+        let root = DataRoot {
+            claude_dir: s.path().join("claude"),
+            data_dir: s.path().join("notchling"),
+            codex_dir: s.path().join("codex"),
+            antigravity_dir: s.path().join("antigravity-cli"),
+            fixture: None,
+        };
+        assert_eq!(Source::new(root.clone()).completed_window_ms(), DAY_MS);
+
+        let mut settings = Settings::open(&root.data_dir.join("settings.json")).unwrap();
+        settings.set(KEEP_FINISHED_KEY, json!("7d")).unwrap();
+        assert_eq!(Source::new(root.clone()).completed_window_ms(), 7 * DAY_MS);
+        settings.set(KEEP_FINISHED_KEY, json!("30d")).unwrap();
+        assert_eq!(Source::new(root.clone()).completed_window_ms(), 30 * DAY_MS);
+        settings
+            .set_unchecked(KEEP_FINISHED_KEY, json!("90d"))
+            .unwrap();
+        assert_eq!(Source::new(root.clone()).completed_window_ms(), DAY_MS);
+
+        settings.set(KEEP_FINISHED_KEY, json!("1d")).unwrap();
+        let now = 1_793_700_000_000;
+        let mut fixture_src = Source::new(DataRoot::fixture(s.path()));
+        assert_eq!(fixture_src.completed_window_ms(), i64::MAX / 4);
+        assert_eq!(fixture_src.load(now).agents.len(), 1);
+        assert_eq!(fixture_src.completed_window_ms(), i64::MAX / 4);
+
+        settings.set(KEEP_FINISHED_KEY, json!("7d")).unwrap();
+        let mut source = Source::new(root);
+        let kept = source.load(now);
+        assert_eq!(kept.agents.len(), 1);
+        assert_eq!(kept.agents[0].id, "three-days");
+
+        settings.set(KEEP_FINISHED_KEY, json!("1d")).unwrap();
+        let pruned = source.load(now);
+        assert_eq!(source.completed_window_ms(), DAY_MS);
+        assert!(pruned.agents.is_empty());
     }
 }
