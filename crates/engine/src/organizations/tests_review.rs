@@ -204,7 +204,6 @@ fn deleting_counts_the_machines_of_the_registry_it_is_given() {
     assert_eq!(rig.orgs.delete("acme", &rig.registry), Ok(()));
 }
 
-#[cfg(unix)]
 #[test]
 fn folders_overlap_on_the_expanded_and_resolved_form_and_on_case_where_the_disk_ignores_it() {
     use std::path::Path;

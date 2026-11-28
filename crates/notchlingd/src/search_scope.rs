@@ -23,7 +23,7 @@ pub struct Reach<'a> {
 }
 
 pub fn page_org(placing: &dyn Placing, cwd: &str, source: &str) -> Option<String> {
-    if Path::new(cwd).is_absolute() {
+    if notchling_engine::organizations::folders::standardize(Path::new(cwd)).is_some() {
         return Some(placing.org_of_folder(cwd));
     }
     if let Some(org) = placing.claimed_by(source) {

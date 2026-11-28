@@ -113,6 +113,33 @@ fn the_result_names_a_link_and_a_version() {
 }
 
 #[test]
+fn project_name_handles_windows_paths_and_worktrees() {
+    assert_eq!(project_name(r"C:\Users\me\proj"), "proj");
+    assert_eq!(project_name(r"c:\Users\me\proj\"), "proj");
+    assert_eq!(project_name(r"C:\Users\me\proj\\"), "proj");
+    assert_eq!(project_name("C:/Users/me/proj/"), "proj");
+    assert_eq!(
+        project_name(r"C:\Users\me\proj\.claude\worktrees\agent-1"),
+        "proj"
+    );
+    assert_eq!(
+        project_name(r"C:\Users\me\proj\.claude\worktrees\agent-1\"),
+        "proj"
+    );
+    assert_eq!(
+        project_name("C:/Users/me/proj/.claude/worktrees/agent-1"),
+        "proj"
+    );
+    assert_eq!(project_name(r"\\server\share\proj"), "proj");
+    assert_eq!(project_name(r"\\server\share\proj\"), "proj");
+    assert_eq!(project_name(r"C:\"), "");
+    assert_eq!(project_name("C:/"), "");
+    assert_eq!(project_name("C:"), "");
+    assert_eq!(project_name("/"), "");
+    assert_eq!(project_name("/w/notchling/"), "notchling");
+}
+
+#[test]
 fn only_plain_names_are_safe() {
     for ok in ["index.html", "cost-report-1a2b3c4d"] {
         assert!(safe_component(ok), "{ok}");
@@ -140,7 +167,6 @@ fn a_hand_edited_list_cannot_point_outside_the_library() {
     assert!(lib.describe(&entry("..", "x")).contains("damaged"));
 }
 
-#[cfg(unix)]
 #[test]
 fn a_publish_is_saved_wrapped_and_listed() {
     let dir = TempDir::new("pages-rec");
@@ -472,7 +498,6 @@ fn entries_are_newest_first_and_bad_ones_are_skipped() {
         .is_empty());
 }
 
-#[cfg(unix)]
 #[test]
 fn describe_names_the_copy_and_who_can_republish() {
     let dir = TempDir::new("pages-describe");

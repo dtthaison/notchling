@@ -260,7 +260,7 @@ fn link_spans(spans: &[Span], bases: &[PathBuf], probe: &dyn Probe) -> Vec<Span>
     if bases.is_empty()
         && !spans
             .iter()
-            .any(|s| s.text.contains('/') || s.link.is_some())
+            .any(|s| s.text.contains(['/', '\\']) || s.link.is_some())
     {
         return spans.to_vec();
     }

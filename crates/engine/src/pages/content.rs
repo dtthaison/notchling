@@ -131,10 +131,56 @@ pub fn looks_missing(response: &str) -> bool {
         .is_some_and(|r| r.is_match(response))
 }
 
+fn is_sep(b: u8) -> bool {
+    b == b'/' || b == b'\\'
+}
+
+fn strip_drive(path: &str) -> &str {
+    let b = path.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b.len() == 2 || is_sep(b[2]))
+    {
+        &path[2..]
+    } else {
+        path
+    }
+}
+
+fn strip_worktree(path: &str) -> &str {
+    const MARK: &[u8] = b".claude";
+    const SUB: &[u8] = b"worktrees";
+    let b = path.as_bytes();
+    let need = 1 + MARK.len() + 1 + SUB.len() + 1;
+    if b.len() < need {
+        return path;
+    }
+    for i in 0..=b.len() - need {
+        let m_end = i + 1 + MARK.len();
+        let s_end = m_end + 1 + SUB.len();
+        if is_sep(b[i])
+            && &b[i + 1..m_end] == MARK
+            && is_sep(b[m_end])
+            && &b[m_end + 1..s_end] == SUB
+            && is_sep(b[s_end])
+        {
+            return &path[..i];
+        }
+    }
+    path
+}
+
 pub fn project_name(cwd: &str) -> String {
-    let root = cwd.find("/.claude/worktrees/").map_or(cwd, |i| &cwd[..i]);
-    root.trim_end_matches('/')
-        .rsplit('/')
+    if cwd.starts_with('/') {
+        let root = cwd.find("/.claude/worktrees/").map_or(cwd, |i| &cwd[..i]);
+        return root
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
+    }
+    let root = strip_worktree(strip_drive(cwd));
+    root.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or("")
         .to_string()

@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::chat::drops::percent_decoded;
 use crate::chat::markdown::Span;
@@ -16,7 +16,8 @@ pub struct Disk {
 impl Disk {
     pub fn new() -> Disk {
         Disk {
-            home: std::env::var_os("HOME").map(PathBuf::from),
+            home: notchling_platform::paths::home()
+                .or_else(|| std::env::var_os("HOME").map(PathBuf::from)),
         }
     }
 }
@@ -43,12 +44,117 @@ fn splits(c: char) -> bool {
     c.is_whitespace() || "()[]<>\"'`,;|".contains(c)
 }
 
+fn is_sep(b: u8) -> bool {
+    b == b'/' || b == b'\\'
+}
+
+fn is_drive_any(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+fn is_drive_abs(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && is_sep(b[2])
+}
+
+fn split_unc(s: &str) -> Option<(&str, &str, &str)> {
+    let after = s.strip_prefix("\\\\")?;
+    let sep = ['\\', '/'];
+    let i = after.find(sep)?;
+    let server = &after[..i];
+    if server.is_empty() || server == "." || server == ".." {
+        return None;
+    }
+    let tail = &after[i + 1..];
+    if tail.starts_with(sep) {
+        return None;
+    }
+    let (share, rest) = match tail.find(sep) {
+        Some(j) => (&tail[..j], &tail[j + 1..]),
+        None => (tail, ""),
+    };
+    if share.is_empty() || share == "." || share == ".." {
+        return None;
+    }
+    Some((server, share, rest))
+}
+
+fn is_abs_token(s: &str) -> bool {
+    s.starts_with('/') || is_drive_abs(s) || split_unc(s).is_some()
+}
+
+fn is_windows_style(s: &str) -> bool {
+    is_drive_any(s) || s.contains('\\')
+}
+
+fn is_bad_or_bare_root(token: &str) -> bool {
+    if matches!(token, "/" | "~" | "~/" | "~\\") {
+        return true;
+    }
+    if is_drive_abs(token) && token[3..].trim_matches(['/', '\\']).is_empty() {
+        return true;
+    }
+    if is_drive_any(token) && !is_drive_abs(token) {
+        return true;
+    }
+    if token.starts_with('\\') {
+        return match split_unc(token) {
+            Some((_, _, rest)) => rest.trim_matches(['/', '\\']).is_empty(),
+            None => true,
+        };
+    }
+    false
+}
+
+fn fold_rooted<'a>(rest: &'a str, sep: &[char]) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    for part in rest.split(sep) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            p => parts.push(p),
+        }
+    }
+    parts
+}
+
+fn fold_relative<'a>(rest: &'a str, sep: &[char]) -> Vec<&'a str> {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in rest.split(sep) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if parts.last().is_some_and(|last| *last != "..") {
+                    parts.pop();
+                } else {
+                    parts.push("..");
+                }
+            }
+            p => parts.push(p),
+        }
+    }
+    parts
+}
+
+fn join_str(base: &str, rel: &str) -> PathBuf {
+    let sep = if is_windows_style(base) { '\\' } else { '/' };
+    let base = base.trim_end_matches(['/', '\\']);
+    if base.is_empty() {
+        PathBuf::from(format!("{sep}{rel}"))
+    } else {
+        PathBuf::from(format!("{base}{sep}{rel}"))
+    }
+}
+
 pub fn tokens(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
     let mut push = |from: usize, to: usize| {
         let token = text[from..to].trim_end_matches(['.', ':', '!', '?']);
-        if token.contains('/') {
+        if token.contains(['/', '\\']) {
             out.push((from..from + token.len(), token));
         }
     };
@@ -69,39 +175,63 @@ pub fn tokens(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
 }
 
 pub fn normalized(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in path.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let last = out.components().next_back();
-                if matches!(last, Some(Component::Normal(_))) {
-                    out.pop();
-                } else if !matches!(last, Some(Component::RootDir)) {
-                    out.push("..");
-                }
-            }
-            other => out.push(other.as_os_str()),
+    let s = path.to_string_lossy();
+    if let Some((server, share, rest)) = split_unc(&s) {
+        let parts = fold_rooted(rest, &['/', '\\']);
+        if parts.is_empty() {
+            return PathBuf::from(format!("\\\\{server}\\{share}"));
         }
+        let joined = parts.join("\\");
+        return PathBuf::from(format!("\\\\{server}\\{share}\\{joined}"));
     }
-    out
+    if is_drive_abs(&s) {
+        let drive = s.as_bytes()[0] as char;
+        let parts = fold_rooted(&s[3..], &['/', '\\']);
+        if parts.is_empty() {
+            return PathBuf::from(format!("{drive}:\\"));
+        }
+        return PathBuf::from(format!("{drive}:\\{}", parts.join("\\")));
+    }
+    if let Some(rest) = s.strip_prefix('/') {
+        let parts = fold_rooted(rest, &['/']);
+        if parts.is_empty() {
+            return PathBuf::from("/");
+        }
+        return PathBuf::from(format!("/{}", parts.join("/")));
+    }
+    if is_windows_style(&s) {
+        return PathBuf::from(fold_relative(&s, &['/', '\\']).join("\\"));
+    }
+    PathBuf::from(fold_relative(&s, &['/']).join("/"))
 }
 
 fn expanded(token: &str, probe: &dyn Probe) -> Option<PathBuf> {
     if token == "~" {
         return probe.home().map(Path::to_path_buf);
     }
-    match token.strip_prefix("~/") {
-        Some(rest) => probe.home().map(|h| h.join(rest)),
-        None if token.starts_with('~') => None,
-        None => Some(PathBuf::from(token)),
+    if let Some(rest) = token.strip_prefix("~/") {
+        return probe.home().map(|h| join_str(&h.to_string_lossy(), rest));
     }
+    if let Some(rest) = token.strip_prefix("~\\") {
+        return probe.home().map(|h| {
+            let hs = h.to_string_lossy();
+            if is_windows_style(&hs) {
+                join_str(&hs, rest)
+            } else {
+                join_str(&hs, &rest.replace('\\', "/"))
+            }
+        });
+    }
+    if token.starts_with('~') {
+        return None;
+    }
+    Some(PathBuf::from(token))
 }
 
 pub fn bases(text: &str, cwd: &str, probe: &dyn Probe) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     for (_, token) in tokens(text) {
-        if !(token.starts_with('/') || token.starts_with("~/")) {
+        if !(is_abs_token(token) || token.starts_with("~/") || token.starts_with("~\\")) {
             continue;
         }
         if let Some(path) = expanded(token, probe).map(|p| normalized(&p)) {
@@ -136,6 +266,9 @@ pub(crate) fn without_line(token: &str) -> Option<&str> {
         let Some(i) = token[..cut].rfind(':') else {
             break;
         };
+        if i == 1 && token.as_bytes()[0].is_ascii_alphabetic() {
+            break;
+        }
         if !digits(&token[i + 1..cut]) {
             break;
         }
@@ -147,10 +280,10 @@ pub(crate) fn without_line(token: &str) -> Option<&str> {
 
 pub fn resolve(token: &str, bases: &[PathBuf], bare: bool, probe: &dyn Probe) -> Option<PathBuf> {
     let direct = |token: &str| -> Option<PathBuf> {
-        if token.is_empty() || token.contains("://") || token == "/" || token == "~/" {
+        if token.is_empty() || token.contains("://") || is_bad_or_bare_root(token) {
             return None;
         }
-        let slashed = token.contains('/');
+        let slashed = token.contains(['/', '\\']);
         let named = bare
             && !slashed
             && !token.starts_with('~')
@@ -160,12 +293,12 @@ pub fn resolve(token: &str, bases: &[PathBuf], bare: bool, probe: &dyn Probe) ->
         if !slashed && !named {
             return None;
         }
-        if token.starts_with('/') || token.starts_with('~') {
+        if is_abs_token(token) || token.starts_with('~') {
             let path = normalized(&expanded(token, probe)?);
             return probe.exists(&path).then_some(path);
         }
         bases.iter().find_map(|base| {
-            let path = normalized(&base.join(token));
+            let path = normalized(&join_str(&base.to_string_lossy(), token));
             probe.exists(&path).then_some(path)
         })
     };
@@ -179,7 +312,13 @@ fn destination(url: &str) -> Option<String> {
         None if url.contains("://") || url.starts_with("mailto:") => return None,
         None => url,
     };
-    Some(percent_decoded(raw))
+    let decoded = percent_decoded(raw);
+    if let Some(after) = decoded.strip_prefix('/') {
+        if is_drive_abs(after) {
+            return Some(after.to_owned());
+        }
+    }
+    Some(decoded)
 }
 
 pub fn link_spans(spans: Vec<Span>, bases: &[PathBuf], probe: &dyn Probe) -> Vec<Span> {
@@ -308,7 +447,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_path_resolves_only_when_it_exists() {
         let s = Scratch::new("paths-resolve");
@@ -375,7 +513,6 @@ mod tests {
         assert_eq!(resolve("MISSING.md", &base, true, &probe), None);
     }
 
-    #[cfg(unix)]
     #[test]
     fn existing_paths_in_prose_and_code_become_links_and_the_rest_stays_text() {
         let s = Scratch::new("paths-link");
@@ -431,7 +568,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_markdown_destination_is_made_absolute_when_it_exists() {
         let s = Scratch::new("paths-dest");
@@ -454,7 +590,6 @@ mod tests {
         assert_eq!(got[4].link.as_deref(), Some("mailto:a@b.c"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_file_url_with_escaped_spaces_links_the_file() {
         let s = Scratch::new("paths-file-url");
@@ -470,5 +605,114 @@ mod tests {
         );
         let linked: Vec<_> = got.iter().filter_map(|s| s.link.as_deref()).collect();
         assert_eq!(linked, vec![&*prompt.to_string_lossy()]);
+    }
+
+    struct Fake {
+        home: PathBuf,
+        files: &'static [&'static str],
+        dirs: &'static [&'static str],
+    }
+    impl Probe for Fake {
+        fn exists(&self, path: &Path) -> bool {
+            let Some(s) = path.to_str() else {
+                return false;
+            };
+            self.files.contains(&s) || self.dirs.contains(&s)
+        }
+        fn is_dir(&self, path: &Path) -> bool {
+            path.to_str().is_some_and(|s| self.dirs.contains(&s))
+        }
+        fn home(&self) -> Option<&Path> {
+            Some(&self.home)
+        }
+    }
+
+    #[test]
+    fn windows_paths_tokens_bases_resolve_and_file_urls_work_on_any_os() {
+        let sample = r"See `film\plan.md`, (~\a\b\), and C:\Users\me\x.rs:12:";
+        let got: Vec<&str> = tokens(sample).into_iter().map(|(_, t)| t).collect();
+        assert_eq!(
+            got,
+            vec![r"film\plan.md", r"~\a\b\", r"C:\Users\me\x.rs:12"]
+        );
+        assert_eq!(
+            normalized(Path::new(r"C:\..\a\b\..\c\.\d")),
+            PathBuf::from(r"C:\a\c\d")
+        );
+        assert_eq!(
+            normalized(Path::new(r"\\srv\share\..\a\.\b")),
+            PathBuf::from(r"\\srv\share\a\b")
+        );
+
+        let probe = Fake {
+            home: PathBuf::from(r"C:\Users\me"),
+            files: &[
+                r"C:\Users\me\film\plan\colab\plan.md",
+                r"C:\Users\me\the batch\end.txt",
+                r"\\srv\share\docs\spec.md",
+            ],
+            dirs: &[
+                r"C:\Users\me\film",
+                r"C:\Users\me\film\plan\colab",
+                r"\\srv\share\docs",
+            ],
+        };
+        let text = r"In C:\Users\me\film\ and ~\film\ and \\srv\share\docs\ and C:\Users\me\nope\";
+        assert_eq!(
+            bases(text, r"C:\work\session", &probe),
+            vec![
+                PathBuf::from(r"C:\Users\me\film"),
+                PathBuf::from(r"\\srv\share\docs"),
+                PathBuf::from(r"C:\work\session"),
+            ]
+        );
+
+        let base = vec![PathBuf::from(r"C:\Users\me\film")];
+        let plan = PathBuf::from(r"C:\Users\me\film\plan\colab\plan.md");
+        for token in [
+            r"plan\colab\plan.md",
+            r".\plan\..\plan\colab\plan.md",
+            r"plan\colab\plan.md:12:3",
+            r"plan\colab\plan.md#L7-L9",
+            r"C:\Users\me\film\plan\colab\plan.md:9",
+            "C:/Users/me/film/plan/colab/plan.md",
+            r"~\film\plan\colab\plan.md",
+        ] {
+            assert_eq!(
+                resolve(token, &base, false, &probe),
+                Some(plan.clone()),
+                "{token}"
+            );
+        }
+        assert_eq!(
+            resolve(r"\\srv\share\docs\spec.md:4", &[], false, &probe),
+            Some(PathBuf::from(r"\\srv\share\docs\spec.md"))
+        );
+        for bad in [
+            r"C:\",
+            "C:/",
+            "C:",
+            r"C:plan\colab\plan.md",
+            r"~\",
+            r"~other\film\plan\colab\plan.md",
+            r"\\srv\share",
+            r"\Users\me\film\plan\colab\plan.md",
+        ] {
+            assert_eq!(resolve(bad, &base, false, &probe), None, "{bad}");
+        }
+
+        let a = "file:///C:/Users/me/the%20batch/end.txt";
+        let b = r"file://C:\Users\me\the%20batch\end.txt";
+        let md = format!(r"Saved [a]({a}) and [b]({b}) and `plan\colab\plan.md`.");
+        let got = link_spans(spans(&md), &base, &probe);
+        let linked: Vec<_> = got.iter().filter_map(|s| s.link.as_deref()).collect();
+        assert_eq!(
+            linked,
+            vec![
+                r"C:\Users\me\the batch\end.txt",
+                r"C:\Users\me\the batch\end.txt",
+                r"C:\Users\me\film\plan\colab\plan.md",
+            ]
+        );
     }
 }

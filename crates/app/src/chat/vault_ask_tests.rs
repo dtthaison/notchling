@@ -170,7 +170,6 @@ fn the_raised_ticket_is_shown_first_and_otherwise_the_oldest() {
     assert_eq!(pick(&["a", "b"], Some("gone")), Some(0));
 }
 
-#[cfg(unix)]
 #[test]
 fn a_known_session_gets_a_card_and_anything_else_gets_the_sheet() {
     let mut a = session("job-a", AgentGroup::Working, None, Tool::Claude);
@@ -215,7 +214,6 @@ fn a_row_waiting_on_the_vault_shows_the_needs_you_marker_like_a_question() {
     assert_eq!(model.clone().with_vault(&BTreeSet::new()), model);
 }
 
-#[cfg(unix)]
 #[test]
 fn the_card_needs_the_callers_real_folder_to_sit_in_the_rows_project() {
     assert!(cwd_within("/w/p", "/w/p"));
@@ -252,4 +250,37 @@ fn the_card_needs_the_callers_real_folder_to_sit_in_the_rows_project() {
         &[],
     );
     assert_eq!(place(&verified[0], &rows), Placement::Card("job-a".into()));
+}
+
+#[test]
+fn cwd_within_and_card_placement_handle_windows_paths() {
+    assert!(cwd_within(r"C:\a", r"C:\a"));
+    assert!(cwd_within(r"C:\a", r"C:\a\b"));
+    assert!(cwd_within(r"C:\a\", "c:/a/b/c"));
+    assert!(cwd_within(r"C:\a", r"\\?\C:\a\b"));
+    assert!(!cwd_within(r"C:\a", r"C:\ab"));
+    assert!(!cwd_within(r"C:\a\b", r"C:\a"));
+    assert!(!cwd_within(r"C:\a", r"D:\a\b"));
+    assert!(cwd_within(r"\\srv\share\a", r"\\SRV\SHARE\a\b"));
+    assert!(!cwd_within(r"\\srv\share\a", r"\\srv\share\ab"));
+    assert!(!cwd_within(r"a\b", r"a\b\c"));
+    assert!(!cwd_within("C:a", r"C:\a\b"));
+    assert!(!cwd_within(r"\a", r"\a\b"));
+
+    let mut a = session("job-win", AgentGroup::Working, None, Tool::Claude);
+    a.agent.cwd = r"C:\Users\me\proj".into();
+    a.agent.worktree_path = Some(r"C:\Users\me\proj\.claude\worktrees\wt".into());
+    a.agent.transcript_path = Some("/p/sess-win.jsonl".into());
+    let rows = vec![a];
+    let ok = Ticket {
+        id: "t1".into(),
+        session: Some("sess-win".into()),
+        cwd: Some(r"c:\Users\me\proj\crates\app".into()),
+    };
+    assert_eq!(place(&ok, &rows), Placement::Card("job-win".into()));
+    let sibling = Ticket {
+        cwd: Some(r"C:\Users\me\proj2".into()),
+        ..ok
+    };
+    assert_eq!(place(&sibling, &rows), Placement::Sheet);
 }

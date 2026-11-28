@@ -44,11 +44,10 @@ fn links(message: &Message) -> Vec<(String, Option<String>)> {
         .collect()
 }
 
-#[cfg(unix)]
 #[test]
 fn a_message_drawn_again_is_neither_parsed_nor_looked_up_again() {
     let s = Scratch::new("md-cache-hit");
-    s.write("src/a.rs", "");
+    let file = s.write("src/a.rs", "").to_string_lossy().into_owned();
     let folder = s.path().to_string_lossy().into_owned();
     let (mut cache, asked) = cache(&s);
     let text = "See `src/a.rs` and `src/b.rs`.\n\n- one\n- two";
@@ -58,7 +57,6 @@ fn a_message_drawn_again_is_neither_parsed_nor_looked_up_again() {
     let again = cache.message("m1", text, &folder);
     assert!(Rc::ptr_eq(&first, &again), "the same prepared message");
     assert_eq!(asked.get(), after_first, "no disk on a second draw");
-    let file = s.path().join("src/a.rs").to_string_lossy().into_owned();
     assert_eq!(
         links(&first),
         vec![
@@ -85,7 +83,6 @@ fn a_changed_text_or_folder_is_prepared_again() {
     assert!(!Rc::ptr_eq(&grown, &moved), "another folder links again");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_reload_asks_the_disk_again_and_finds_a_new_file() {
     let s = Scratch::new("md-cache-reload");

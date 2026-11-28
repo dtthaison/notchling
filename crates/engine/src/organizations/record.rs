@@ -433,17 +433,63 @@ fn slug(name: &str) -> String {
     }
 }
 
+enum FolderRoot<'a> {
+    Home,
+    Unix,
+    Drive(char),
+    Unc(&'a str, &'a str),
+}
+
+fn valid_unc_part(part: &str) -> bool {
+    !part.is_empty() && part != "." && part != ".." && !part.chars().any(char::is_control)
+}
+
+fn split_unc(after: &str) -> Option<(&str, &str, &str)> {
+    let sep = ['\\', '/'];
+    let i = after.find(sep)?;
+    let server = &after[..i];
+    if !valid_unc_part(server) {
+        return None;
+    }
+    let tail = &after[i + 1..];
+    if tail.starts_with(sep) {
+        return None;
+    }
+    let (share, rest) = match tail.find(sep) {
+        Some(j) => (&tail[..j], &tail[j + 1..]),
+        None => (tail, ""),
+    };
+    valid_unc_part(share).then_some((server, share, rest))
+}
+
 pub fn normalize_folder(folder: &str) -> Option<String> {
     let folder = folder.trim();
-    let (home, rest) = if folder == "~" {
-        (true, "")
+    let bytes = folder.as_bytes();
+    let (root, rest, win_sep) = if folder == "~" {
+        (FolderRoot::Home, "", false)
     } else if let Some(rest) = folder.strip_prefix("~/") {
-        (true, rest)
+        (FolderRoot::Home, rest, false)
+    } else if let Some(rest) = folder.strip_prefix("~\\") {
+        (FolderRoot::Home, rest, true)
+    } else if let Some(after) = folder.strip_prefix("\\\\") {
+        let (server, share, rest) = split_unc(after)?;
+        (FolderRoot::Unc(server, share), rest, true)
+    } else if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        (
+            FolderRoot::Drive((bytes[0] as char).to_ascii_uppercase()),
+            &folder[3..],
+            true,
+        )
     } else {
-        (false, folder.strip_prefix('/')?)
+        (FolderRoot::Unix, folder.strip_prefix('/')?, false)
     };
+    let sep: &[char] = if win_sep { &['/', '\\'] } else { &['/'] };
     let mut parts: Vec<&str> = Vec::new();
-    for part in rest.split('/') {
+    for part in rest.split(sep) {
         match part {
             "" | "." => {}
             ".." => {
@@ -453,10 +499,15 @@ pub fn normalize_folder(folder: &str) -> Option<String> {
             p => parts.push(p),
         }
     }
-    match (home, parts.is_empty()) {
-        (true, true) => Some("~".into()),
-        (true, false) => Some(format!("~/{}", parts.join("/"))),
-        (false, true) => None,
-        (false, false) => Some(format!("/{}", parts.join("/"))),
+    match (root, parts.is_empty()) {
+        (FolderRoot::Home, true) => Some("~".into()),
+        (FolderRoot::Home, false) => Some(format!("~/{}", parts.join("/"))),
+        (FolderRoot::Unix, true) | (FolderRoot::Drive(_), true) => None,
+        (FolderRoot::Unix, false) => Some(format!("/{}", parts.join("/"))),
+        (FolderRoot::Drive(d), false) => Some(format!("{d}:\\{}", parts.join("\\"))),
+        (FolderRoot::Unc(server, share), true) => Some(format!("\\\\{server}\\{share}")),
+        (FolderRoot::Unc(server, share), false) => {
+            Some(format!("\\\\{server}\\{share}\\{}", parts.join("\\")))
+        }
     }
 }

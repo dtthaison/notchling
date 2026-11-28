@@ -24,7 +24,6 @@ fn id(orgs: &[Organization], folder: &str, resolve: &dyn Fn(&Path) -> Option<Pat
     find(orgs, Path::new(folder), Path::new("/Users/me"), resolve).organization
 }
 
-#[cfg(unix)]
 #[test]
 fn a_folder_belongs_to_the_organization_whose_folder_holds_it() {
     let orgs = [
@@ -59,7 +58,6 @@ fn a_folder_belongs_to_the_organization_whose_folder_holds_it() {
     assert_eq!(id(&orgs, "", &none), PERSONAL_ID);
 }
 
-#[cfg(unix)]
 #[test]
 fn the_longest_folder_wins_wherever_it_is_listed() {
     let none = links(&[]);
@@ -89,7 +87,6 @@ fn the_longest_folder_wins_wherever_it_is_listed() {
     assert_eq!(found.folder.as_deref(), Some("~/work/aptusfit"));
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_to_a_folder_matches_through_the_file_system() {
     let orgs = [org(PERSONAL_ID, &[]), org("aptusfit", &["~/work/aptusfit"])];
@@ -132,7 +129,6 @@ fn the_real_file_system_resolves_a_link_the_same_way() {
     assert_eq!(by(&tmp.path("gone/aptus/app")), PERSONAL_ID);
 }
 
-#[cfg(unix)]
 #[test]
 fn the_home_marker_and_the_normal_form() {
     let home = Path::new("/Users/me");
@@ -156,7 +152,6 @@ fn the_home_marker_and_the_normal_form() {
     assert_eq!(normalize_folder("/a\nb"), None);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_document_places_a_folder_through_its_view() {
     let mut doc = Document::personal_only();
@@ -178,7 +173,6 @@ fn a_document_places_a_folder_through_its_view() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn the_deeper_real_folder_wins_over_a_link_that_looks_deeper_and_a_tie_is_settled_by_id() {
     let orgs = [
@@ -208,7 +202,6 @@ fn the_deeper_real_folder_wins_over_a_link_that_looks_deeper_and_a_tie_is_settle
     assert_eq!(id(&flipped, "/srv/x/app", &none), "alpha");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_session_matches_a_folder_in_any_case_only_where_the_disk_ignores_case() {
     let orgs = [org(PERSONAL_ID, &[]), org("acme", &["/Srv/X"])];
@@ -225,4 +218,53 @@ fn a_session_matches_a_folder_in_any_case_only_where_the_disk_ignores_case() {
     };
     assert_eq!(by(true), "acme");
     assert_eq!(by(false), PERSONAL_ID);
+}
+
+#[test]
+fn windows_folders_expand_standardize_and_match_without_host_path_rules() {
+    let home = Path::new(r"C:\Users\me");
+    assert_eq!(expand("~", home), Some(PathBuf::from(r"C:\Users\me")));
+    assert_eq!(
+        expand(r"~\work\acme\", home),
+        Some(PathBuf::from(r"C:\Users\me\work\acme"))
+    );
+    assert_eq!(
+        expand("c:/Work/./Acme/", home),
+        Some(PathBuf::from(r"C:\Work\Acme"))
+    );
+    assert_eq!(
+        expand(r"\\srv\share\proj\", home),
+        Some(PathBuf::from(r"\\srv\share\proj"))
+    );
+    assert_eq!(
+        standardize(Path::new(r"\\?\C:\Users\me\work\..\proj\")),
+        Some(PathBuf::from(r"C:\Users\me\proj"))
+    );
+    assert!(super::folders::within(
+        Path::new(r"c:\a\b"),
+        Path::new(r"C:\a"),
+        false
+    ));
+    assert!(!super::folders::within(
+        Path::new(r"C:\ab"),
+        Path::new(r"C:\a"),
+        true
+    ));
+
+    let orgs = [
+        org(PERSONAL_ID, &[]),
+        org("home-org", &[r"~\work\aptus"]),
+        org("drive-org", &[r"C:\srv\acme"]),
+        org("unc-org", &[r"\\fileserver\shared\proj"]),
+    ];
+    let none = links(&[]);
+    let by = |folder: &str, fold: bool| {
+        let m = super::folders::find_folded(&orgs, Path::new(folder), home, &none, fold);
+        m.organization
+    };
+    assert_eq!(by(r"c:\Users\me\work\aptus\fe", false), "home-org");
+    assert_eq!(by(r"c:\users\me\WORK\aptus\fe", true), "home-org");
+    assert_eq!(by("C:/srv/acme/app", false), "drive-org");
+    assert_eq!(by(r"C:\srv\acme2", true), PERSONAL_ID);
+    assert_eq!(by(r"\\FILESERVER\Shared\proj\sub", false), "unc-org");
 }

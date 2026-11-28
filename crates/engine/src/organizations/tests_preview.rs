@@ -30,7 +30,6 @@ fn run(doc: &Document, id: &str, wanted: &[&str], sessions: &[&str]) -> super::F
     preview(doc, id, &wanted, &sessions, &look)
 }
 
-#[cfg(unix)]
 #[test]
 fn a_new_folder_lists_the_sessions_that_would_change_organization() {
     let out = run(
@@ -57,7 +56,6 @@ fn a_new_folder_lists_the_sessions_that_would_change_organization() {
     assert!(out.overlaps.is_empty());
 }
 
-#[cfg(unix)]
 #[test]
 fn removing_a_folder_sends_its_sessions_back_to_personal() {
     let out = run(&doc(), "aptusfit", &[], &["/Users/me/work/aptusfit/fe"]);
@@ -72,7 +70,6 @@ fn removing_a_folder_sends_its_sessions_back_to_personal() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_folder_inside_another_organizations_folder_is_allowed_and_flagged() {
     let out = run(
@@ -104,7 +101,6 @@ fn a_folder_inside_another_organizations_folder_is_allowed_and_flagged() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_folder_that_holds_another_organizations_folder_leaves_that_one_alone() {
     let out = run(
@@ -132,7 +128,6 @@ fn a_folder_that_holds_another_organizations_folder_leaves_that_one_alone() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn the_same_folder_in_two_organizations_is_refused_with_who_has_it() {
     let out = run(&doc(), "acme", &["/Users/me/work/aptusfit"], &[]);
@@ -151,6 +146,52 @@ fn the_same_folder_in_two_organizations_is_refused_with_who_has_it() {
     );
     let out = run(&doc(), "nobody", &["/srv/x"], &[]);
     assert_eq!(out.problem, Some(Problem::IdUnknown("nobody".into())));
+}
+
+#[test]
+fn windows_folders_preview_moves_and_overlaps() {
+    let mut d = Document::personal_only();
+    d.create("AptusFIT", None, None).unwrap();
+    d.create("Acme", None, None).unwrap();
+    d.set_folders("aptusfit", &[r"~\work\aptusfit".to_owned()])
+        .unwrap();
+    let wanted = vec![r"C:\Users\me\work\aptusfit\vendor\acme\".to_owned()];
+    let sessions = vec![
+        PathBuf::from(r"C:\Users\me\work\aptusfit\vendor\acme\app"),
+        PathBuf::from(r"C:\Users\me\work\aptusfit\fe"),
+    ];
+    let home = Path::new(r"C:\Users\me");
+    let none = |_: &Path| None;
+    let key = |f: &str| match expand(f, home) {
+        Some(p) => p.to_string_lossy().into_owned(),
+        None => f.to_owned(),
+    };
+    let look = Lookup {
+        home,
+        resolve: &none,
+        fold: true,
+        key: &key,
+    };
+    let out = preview(&d, "acme", &wanted, &sessions, &look);
+    assert_eq!(out.problem, None);
+    assert_eq!(out.folders, [r"C:\Users\me\work\aptusfit\vendor\acme"]);
+    assert_eq!(
+        out.overlaps,
+        [Overlap {
+            folder: r"C:\Users\me\work\aptusfit\vendor\acme".into(),
+            organization: "aptusfit".into(),
+            other: "~/work/aptusfit".into(),
+            relation: Relation::Inside,
+        }]
+    );
+    assert_eq!(
+        out.moved,
+        [Moved {
+            folder: r"C:\Users\me\work\aptusfit\vendor\acme\app".into(),
+            from: "aptusfit".into(),
+            to: "acme".into(),
+        }]
+    );
 }
 
 #[test]
