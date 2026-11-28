@@ -399,3 +399,74 @@ fn empty_worktree_path_is_none() {
     let bare = job("working", json!({}));
     assert_eq!(agent_from_job(&bare, "ab", None, &none).worktree_path, None);
 }
+
+#[test]
+fn a_busy_status_older_than_the_turn_end_is_stale() {
+    let live = json!({"status": "busy", "statusUpdatedAt": 1_000.0});
+    let done = job(
+        "done",
+        json!({"tempo": "idle", "updatedAt": "1970-01-01T00:05:01.000Z"}),
+    );
+    let a = agent_from_job(&done, "ab12cd34", Some(&live), &none);
+    assert_eq!((a.group, a.label.as_str()), (AgentGroup::Completed, "Done"));
+    assert!(a.takes_held_text());
+    let blocked = job("blocked", json!({"updatedAt": "1970-01-01T00:05:01.000Z"}));
+    let b = agent_from_job(&blocked, "ab12cd34", Some(&live), &none);
+    assert_eq!(b.group, AgentGroup::NeedsInput);
+}
+
+#[test]
+fn a_busy_status_newer_than_the_job_still_wins() {
+    let newer = json!({"status": "busy", "statusUpdatedAt": 301_000.0});
+    let done = job(
+        "done",
+        json!({"tempo": "idle", "updatedAt": "1970-01-01T00:00:10.000Z"}),
+    );
+    assert_eq!(
+        agent_from_job(&done, "ab", Some(&newer), &none).group,
+        AgentGroup::Working
+    );
+    let older = json!({"status": "busy", "statusUpdatedAt": 1_000.0});
+    let working = job("working", json!({"updatedAt": "1970-01-01T00:05:01.000Z"}));
+    assert_eq!(
+        agent_from_job(&working, "ab", Some(&older), &none).group,
+        AgentGroup::Working
+    );
+    let busy = json!({"status": "busy"});
+    let bare = job("done", json!({"updatedAt": "1970-01-01T00:05:01.000Z"}));
+    assert_eq!(
+        agent_from_job(&bare, "ab", Some(&busy), &none).group,
+        AgentGroup::Working
+    );
+    let recent = json!({"status": "busy", "statusUpdatedAt": 2_000.0});
+    let just_done = job(
+        "done",
+        json!({"tempo": "idle", "updatedAt": "1970-01-01T00:05:01.000Z"}),
+    );
+    assert_eq!(
+        agent_from_job(&just_done, "ab", Some(&recent), &none).group,
+        AgentGroup::Working
+    );
+    let tasks = job(
+        "done",
+        json!({"tempo": "idle", "updatedAt": "1970-01-01T00:05:01.000Z", "inFlight": {"tasks": 2}}),
+    );
+    let a = agent_from_job(&tasks, "ab", Some(&older), &none);
+    assert_eq!(a.group, AgentGroup::Working);
+    assert!(a.at_prompt);
+    let active = job(
+        "done",
+        json!({"tempo": "active", "updatedAt": "1970-01-01T00:05:01.000Z"}),
+    );
+    assert_eq!(
+        agent_from_job(&active, "ab", Some(&older), &none).group,
+        AgentGroup::Working
+    );
+    let idle_tempo = job(
+        "working",
+        json!({"tempo": "idle", "updatedAt": "1970-01-01T00:05:01.000Z"}),
+    );
+    let b = agent_from_job(&idle_tempo, "ab", Some(&older), &none);
+    assert_eq!(b.group, AgentGroup::Working);
+    assert!(!b.at_prompt);
+}
