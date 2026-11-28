@@ -63,6 +63,7 @@ mod json_view_tests;
 pub mod jsonl_view;
 #[cfg(test)]
 mod jsonl_view_tests;
+pub mod keep_finished;
 pub mod lane_limits;
 pub mod limit_ring;
 pub mod link_target;

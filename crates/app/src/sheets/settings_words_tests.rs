@@ -45,6 +45,10 @@ fn kebab_keys() {
         "settings-chat-history-v2mb",
         "a word of a key starts with a letter"
     );
+    assert_eq!(
+        choice_key("keepFinishedSessions", "7d"),
+        "settings-keep-finished-sessions-v7d"
+    );
 }
 
 #[test]
@@ -103,7 +107,7 @@ fn choice_labels_are_per_setting() {
             choices += 1;
         }
     }
-    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4 + 2 + 4 + 3 + 3);
+    assert_eq!(choices, 3 + 3 + 3 * 3 + 3 + 4 + 2 + 4 + 3 + 3 + 3);
 }
 
 #[test]

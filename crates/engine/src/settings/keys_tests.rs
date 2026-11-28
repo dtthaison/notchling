@@ -43,3 +43,16 @@ fn attention_level_has_three_choices_and_is_free_for_agents() {
     assert_eq!(key.access, Access::Free);
     assert!(!key.from_awake);
 }
+
+#[test]
+fn keep_finished_sessions_has_three_choices_and_is_free_for_agents() {
+    let key = spec("keepFinishedSessions").expect("the keepFinishedSessions key");
+    assert_eq!(key.default, Fallback::Str("1d"));
+    assert_eq!(key.allowed, ["1d", "7d", "30d"]);
+    assert!(key.accepts(&json!("7d")));
+    assert!(key.accepts(&json!("30d")));
+    assert!(!key.accepts(&json!("14d")));
+    assert_eq!(key.from_text("7D"), json!("7d"));
+    assert_eq!(key.access, Access::Free);
+    assert!(!key.from_awake);
+}

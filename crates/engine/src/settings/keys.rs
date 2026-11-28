@@ -273,6 +273,8 @@ pub const KEYS: &[KeySpec] = &[
         .free("Page panel width", "Width in points of the page or file panel beside a conversation", "a display preference"),
     choice("chatHistory", "4mb", &["2mb", "4mb", "8mb", "16mb"], false, "How much of a conversation Chat loads: the newest 2, 4, 8 or 16 MB of its file")
         .free("Conversation history to load", "How much of a long conversation Chat loads: the newest 2, 4, 8 or 16 MB of its file", "a display and memory preference"),
+    choice("keepFinishedSessions", "1d", &["1d", "7d", "30d"], false, "How long finished sessions stay in Chat's Done list and the notch's Completed tab: 1, 7 or 30 days")
+        .free("Keep Finished Sessions", "How long finished sessions stay in Chat's Done list and the notch's Completed tab: 1, 7 or 30 days", "a display preference"),
     choice("appearance", "system", &["system", "light", "dark"], false, "How Notchling's windows look: System follows macOS, Light and Dark force it")
         .free("Appearance", "How Notchling's windows look: system follows macOS, light or dark forces it", "a display preference"),
     key("checkForUpdates", K::Bool, D::Bool(true), false, "Look for a newer Notchling release when the app starts and once a day; NOTCHLING_RELEASES=off turns it off whatever this says")

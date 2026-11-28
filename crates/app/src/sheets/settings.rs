@@ -8,7 +8,7 @@ use super::search_rows;
 use super::semantic::{self, SemanticModel};
 use crate::acting::Acting;
 use crate::appearance;
-use crate::chat::history;
+use crate::chat::{history, keep_finished};
 use crate::dock;
 use crate::search::shortcut;
 use crate::switches::restart::Area;
@@ -440,12 +440,20 @@ pub fn sections(read: &dyn Fn(&str) -> Option<Value>, daemon: &Daemon) -> Vec<Se
         ),
         Section {
             title: t::settings::section_chat(),
-            rows: vec![choice(
-                read,
-                history::KEY,
-                t::settings::chat_history(),
-                &history::CHOICES,
-            )],
+            rows: vec![
+                choice(
+                    read,
+                    history::KEY,
+                    t::settings::chat_history(),
+                    &history::CHOICES,
+                ),
+                choice(
+                    read,
+                    keep_finished::KEY,
+                    t::settings::keep_finished_sessions(),
+                    &keep_finished::CHOICES,
+                ),
+            ],
             footer: Some(t::settings::footer_chat()),
         },
     ]
@@ -716,6 +724,19 @@ mod tests {
             Some(("chatHistory", json!("16mb")))
         );
         assert_eq!(change(&history, "1gb"), None);
+        let keep = row(&rows, "keepFinishedSessions");
+        assert_eq!(keep.title, "Keep Finished Sessions");
+        let Field::Choice { selected, options } = keep.field.clone() else {
+            panic!()
+        };
+        assert_eq!(selected, "1d", "one day until chosen");
+        let values: Vec<&str> = options.iter().map(|(v, _)| *v).collect();
+        assert_eq!(values, ["1d", "7d", "30d"]);
+        assert_eq!(
+            change(&keep, "7d"),
+            Some(("keepFinishedSessions", json!("7d")))
+        );
+        assert_eq!(change(&keep, "90d"), None);
     }
 
     #[test]

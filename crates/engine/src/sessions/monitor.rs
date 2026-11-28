@@ -2,6 +2,7 @@ use super::agent::{Agent, AgentGroup};
 use super::exited_store::{ExitedStore, Row};
 use super::jobs::{agent_from_job, agent_from_session, rank, read_jobs, read_sessions, Rank};
 use super::lanes::{config_dirs, Roots};
+use crate::settings::KeepFinished;
 use crate::transcript::util::modified_secs;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -55,7 +56,7 @@ pub struct Monitor {
 impl Default for Monitor {
     fn default() -> Self {
         Monitor {
-            completed_window_ms: 24 * 3600 * 1000,
+            completed_window_ms: KeepFinished::default().window_ms(),
             last_live: HashMap::new(),
             exited: HashMap::new(),
             lane_of_session: HashMap::new(),

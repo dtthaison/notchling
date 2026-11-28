@@ -15,6 +15,7 @@ use notchling_engine::logs::KeyStore;
 use notchling_engine::machines::roots::MachineRoots;
 use notchling_engine::organizations::Organizations;
 use notchling_engine::sessions::{config_dirs, ExitedStore, Monitor, Probes};
+use notchling_engine::settings::KeepFinished;
 use notchling_events::kinds::choices::SwitchName;
 use notchling_events::kinds::diagnostics::OrganizationsChecked;
 use notchling_events::kinds::security::{DaemonStopped, StopCause, SwitchCause, SwitchChanged};
@@ -29,6 +30,7 @@ use notchling_platform::watch::{Batch, WatchConfig, Watcher};
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -153,18 +155,29 @@ struct Lister {
     monitor: Monitor,
 }
 
+pub(crate) fn completed_window_ms(layout: &Layout) -> i64 {
+    if layout.fixture {
+        i64::MAX / 4
+    } else {
+        KeepFinished::window_ms_in(&layout.data_dir)
+    }
+}
+
 impl Lister {
     fn new(layout: Layout) -> Lister {
         let mut monitor = Monitor::default().with_exited_store(ExitedStore::new(
             layout.data_dir.join("daemon").join("exited-sessions.json"),
         ));
-        if layout.fixture {
-            monitor.completed_window_ms = i64::MAX / 4;
-        }
+        monitor.completed_window_ms = completed_window_ms(&layout);
         Lister { layout, monitor }
     }
 
     fn poll(&mut self) -> Value {
+        if !self.layout.fixture {
+            if let Some(keep) = KeepFinished::read(&self.layout.data_dir) {
+                self.monitor.completed_window_ms = keep.window_ms();
+            }
+        }
         let agents = self
             .monitor
             .poll(&self.layout.roots(), &Probes::from_proc(), now_ms());
@@ -334,6 +347,11 @@ pub fn run(
         options.bridge_ports,
     );
     wired.set_events(logs.bus.clone(), logs.salt);
+    let rescan = Arc::new(AtomicBool::new(false));
+    wired.settings.bind_sessions_poke({
+        let rescan = rescan.clone();
+        Arc::new(move || rescan.store(true, Ordering::Relaxed))
+    });
     let checker = logs.checker(
         Arc::new(InboxWarnings::new(wired.inbox.clone(), Arc::new(wall_ms))),
         publish,
@@ -412,7 +430,8 @@ pub fn run(
                 false
             }
         };
-        if !changed && last_poll.elapsed() < options.rescan_every {
+        let poked = rescan.swap(false, Ordering::Relaxed);
+        if !changed && !poked && last_poll.elapsed() < options.rescan_every {
             continue;
         }
         last_poll = Instant::now();
@@ -620,6 +639,70 @@ mod tests {
         assert_eq!(rows[0]["id"], "gone");
         assert_eq!(rows[0]["label"], "Exited");
         assert_eq!(rows[0]["target"]["resume"]["session_id"], "gone");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn lister_maps_keep_finished_sessions_and_prunes_when_shortened() {
+        use notchling_engine::settings::{Settings, DAY_MS, KEEP_FINISHED_KEY};
+
+        let root = std::env::temp_dir().join(format!("nl-lister-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("claude/jobs")).unwrap();
+        std::fs::create_dir_all(root.join("data/daemon")).unwrap();
+        let layout = Layout {
+            claude_dir: root.join("claude"),
+            data_dir: root.join("data"),
+            socket: root.join("daemon.sock"),
+            socket_given: true,
+            fixture: false,
+        };
+        assert_eq!(completed_window_ms(&layout), DAY_MS);
+
+        let settings_path = layout.data_dir.join("settings.json");
+        let mut settings = Settings::open(&settings_path).unwrap();
+        settings.set(KEEP_FINISHED_KEY, json!("7d")).unwrap();
+        assert_eq!(completed_window_ms(&layout), 7 * DAY_MS);
+        settings.set(KEEP_FINISHED_KEY, json!("30d")).unwrap();
+        assert_eq!(completed_window_ms(&layout), 30 * DAY_MS);
+        settings
+            .set_unchecked(KEEP_FINISHED_KEY, json!("90d"))
+            .unwrap();
+        assert_eq!(completed_window_ms(&layout), DAY_MS);
+
+        settings.set(KEEP_FINISHED_KEY, json!("1d")).unwrap();
+        let fixture_layout = Layout {
+            claude_dir: layout.claude_dir.clone(),
+            data_dir: layout.data_dir.clone(),
+            socket: layout.socket.clone(),
+            socket_given: true,
+            fixture: true,
+        };
+        assert_eq!(completed_window_ms(&fixture_layout), i64::MAX / 4);
+
+        settings.set(KEEP_FINISHED_KEY, json!("7d")).unwrap();
+        let three_days_ago = now_ms() - 3 * DAY_MS;
+        let exited_file = layout.data_dir.join("daemon/exited-sessions.json");
+        std::fs::write(
+            &exited_file,
+            format!(
+                r#"{{"exited":[{{"id":"three-days","name":"app","project":"app","cwd":"/w/app","sinceMs":{three_days_ago}}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        let mut lister = Lister::new(layout);
+        assert_eq!(lister.monitor.completed_window_ms, 7 * DAY_MS);
+        let kept = lister.poll();
+        assert_eq!(kept.as_array().unwrap().len(), 1);
+        assert_eq!(kept[0]["id"], "three-days");
+
+        settings.set(KEEP_FINISHED_KEY, json!("1d")).unwrap();
+        let pruned = lister.poll();
+        assert_eq!(lister.monitor.completed_window_ms, DAY_MS);
+        assert!(pruned.as_array().unwrap().is_empty());
+        assert!(ExitedStore::new(exited_file).load().is_empty());
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }

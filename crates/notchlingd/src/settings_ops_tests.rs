@@ -724,3 +724,58 @@ fn asked_waits_in_milliseconds_when_given_wait_ms() {
         "{took:?}"
     );
 }
+
+#[test]
+fn keep_finished_sessions_is_free_and_wakes_the_session_scanner() {
+    let r = rig("keep-finished");
+    let pokes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = pokes.clone();
+    r.ops.bind_sessions_poke(Arc::new(move || {
+        seen.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    let list = r.call(&agent(), ops::SETTINGS_LIST, json!({})).unwrap();
+    let item = entry(&list, "keepFinishedSessions");
+    assert_eq!(item["class"], "free");
+    assert_eq!(item["value"], "1d");
+    assert_eq!(item["title"], "Keep Finished Sessions");
+    assert_eq!(item["allowed"], json!(["1d", "7d", "30d"]));
+
+    let reply = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "keepFinishedSessions", "value": "7D"}),
+        )
+        .unwrap();
+    assert_eq!(reply["state"], "applied");
+    assert_eq!(reply["value"], "7d");
+    assert_eq!(pokes.load(Ordering::SeqCst), 1);
+    assert_eq!(r.stored("keepFinishedSessions"), Some(json!("7d")));
+
+    let got = r
+        .call(
+            &agent(),
+            ops::SETTINGS_GET,
+            json!({"key": "keepFinishedSessions"}),
+        )
+        .unwrap();
+    assert_eq!(got["value"], "7d");
+
+    r.call(
+        &agent(),
+        ops::SETTINGS_SET,
+        json!({"key": "showPet", "value": false}),
+    )
+    .unwrap();
+    assert_eq!(pokes.load(Ordering::SeqCst), 1);
+
+    let bad = r
+        .call(
+            &agent(),
+            ops::SETTINGS_SET,
+            json!({"key": "keepFinishedSessions", "value": "14d"}),
+        )
+        .unwrap_err();
+    assert_eq!(bad.code, ErrorCode::BadRequest);
+}
