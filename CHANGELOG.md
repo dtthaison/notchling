@@ -4,6 +4,18 @@ Notable changes to Notchling. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-11-28
+
+### Added
+
+- Cost Profile picks for the code and fix roles can route work to Antigravity or Codex, updating the generated Claude Code rule and `notchling delegate-models --for`.
+- Keep Finished Sessions in Settings > Chat lets you keep finished sessions in Chat's Done list and the notch's Completed tab for 1, 7 or 30 days.
+- Ended Claude Code sessions on this Mac can now be resumed as background sessions from Chat and with `notchling session resume`.
+
+### Fixed
+
+- A message sent from Chat to a background session no longer waits forever under "Claude is replying" after the session has finished its turn.
+
 ## [2.0.1] - 2026-11-27
 
 ### Fixed
@@ -163,7 +175,8 @@ First public release.
 
 - The menu bar menu no longer lags or skips items when moving between them.
 
-[Unreleased]: https://github.com/dtthaison/notchling/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/dtthaison/notchling/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/dtthaison/notchling/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/dtthaison/notchling/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dtthaison/notchling/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/dtthaison/notchling/compare/v1.1.0...v1.2.0
