@@ -140,6 +140,65 @@ fn a_folder_is_in_one_organization_only_and_is_kept_in_one_form() {
 }
 
 #[test]
+fn windows_folders_are_accepted_normalized_and_relative_forms_are_refused() {
+    let mut doc = doc_with(&["Acme", "Beta"]);
+    doc.set_folders(
+        "acme",
+        &[
+            r"C:\Users\me\work\acme\".into(),
+            "c:/Users/./me/work/acme".into(),
+            r"~\clients\acme\".into(),
+            r"\\fileserver\shared\acme\".into(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        doc.find("acme").unwrap().folders,
+        vec![
+            r"C:\Users\me\work\acme",
+            "~/clients/acme",
+            r"\\fileserver\shared\acme",
+        ]
+    );
+    assert_eq!(
+        doc.set_folders("beta", &["C:/Users/me/work/acme".into()]),
+        Err(Problem::FolderTaken {
+            folder: r"C:\Users\me\work\acme".into(),
+            by: "acme".into(),
+        })
+    );
+    assert_eq!(
+        doc.set_folders("beta", &["~/clients/acme".into()]),
+        Err(Problem::FolderTaken {
+            folder: "~/clients/acme".into(),
+            by: "acme".into(),
+        })
+    );
+    for bad in [
+        r"work\acme",
+        r"\Users\me\work",
+        "C:",
+        "C:work",
+        r"C:\",
+        "C:/",
+        r"C:\x\..",
+        r"~\..",
+        r"~other\x",
+        r"\\",
+        r"\\server",
+        r"\\server\",
+        r"\\server\share\..",
+    ] {
+        assert_eq!(
+            doc.set_folders("beta", &[bad.into()]),
+            Err(Problem::FolderInvalid(bad.into())),
+            "{bad}"
+        );
+    }
+    assert!(doc.problems().is_empty());
+}
+
+#[test]
 fn color_owner_and_machine_settings_are_checked() {
     let mut doc = doc_with(&["Acme"]);
     assert_eq!(

@@ -62,22 +62,99 @@ pub fn row_for(sessions: &[Session], session: &str) -> Option<String> {
     matched(sessions, session).map(|s| s.agent.id.clone())
 }
 
-fn real(path: &str) -> std::path::PathBuf {
-    let path = std::path::Path::new(path);
-    for alias in ["tmp", "var", "etc"] {
-        if let Ok(rest) = path.strip_prefix(format!("/private/{alias}")) {
-            return std::path::Path::new("/").join(alias).join(rest);
+#[derive(PartialEq, Eq)]
+enum CwdRoot {
+    Unix,
+    Drive(u8),
+    Unc(String, String),
+}
+
+fn strip_verbatim(raw: &str) -> std::borrow::Cow<'_, str> {
+    if raw.len() >= 8 && raw[..8].eq_ignore_ascii_case(r"\\?\UNC\") {
+        return std::borrow::Cow::Owned(format!(r"\\{}", &raw[8..]));
+    }
+    if let Some(after) = raw.strip_prefix(r"\\?\") {
+        let b = after.as_bytes();
+        if b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && (b[2] == b'\\' || b[2] == b'/')
+        {
+            return std::borrow::Cow::Borrowed(after);
         }
     }
-    path.to_path_buf()
+    std::borrow::Cow::Borrowed(raw)
+}
+
+fn parse_cwd(raw: &str) -> Option<(CwdRoot, Vec<String>)> {
+    if raw.is_empty() {
+        return None;
+    }
+    let s = strip_verbatim(raw);
+    let b = s.as_bytes();
+    let (root, rest, win_sep) = if let Some(after) = s.strip_prefix("\\\\") {
+        let sep = ['\\', '/'];
+        let i = after.find(sep)?;
+        let server = &after[..i];
+        if server.is_empty() || server == "." || server == ".." {
+            return None;
+        }
+        let tail = &after[i + 1..];
+        if tail.starts_with(sep) {
+            return None;
+        }
+        let (share, rest) = match tail.find(sep) {
+            Some(j) => (&tail[..j], &tail[j + 1..]),
+            None => (tail, ""),
+        };
+        if share.is_empty() || share == "." || share == ".." {
+            return None;
+        }
+        (
+            CwdRoot::Unc(server.to_ascii_lowercase(), share.to_ascii_lowercase()),
+            rest,
+            true,
+        )
+    } else if b.len() >= 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b[2] == b'\\' || b[2] == b'/')
+    {
+        (CwdRoot::Drive(b[0].to_ascii_uppercase()), &s[3..], true)
+    } else {
+        (CwdRoot::Unix, s.strip_prefix('/')?, false)
+    };
+    let sep: &[char] = if win_sep { &['/', '\\'] } else { &['/'] };
+    let mut parts: Vec<String> = Vec::new();
+    for part in rest.split(sep) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            p => parts.push(p.to_owned()),
+        }
+    }
+    if root == CwdRoot::Unix
+        && parts.first().map(String::as_str) == Some("private")
+        && matches!(
+            parts.get(1).map(String::as_str),
+            Some("tmp" | "var" | "etc")
+        )
+    {
+        parts.remove(0);
+    }
+    Some((root, parts))
 }
 
 pub fn cwd_within(folder: &str, cwd: &str) -> bool {
-    if folder.is_empty() || cwd.is_empty() {
+    let Some((f_root, f_parts)) = parse_cwd(folder) else {
         return false;
-    }
-    let (folder, cwd) = (real(folder), real(cwd));
-    folder.is_absolute() && cwd.is_absolute() && cwd.starts_with(folder)
+    };
+    let Some((c_root, c_parts)) = parse_cwd(cwd) else {
+        return false;
+    };
+    f_root == c_root && f_parts.len() <= c_parts.len() && c_parts[..f_parts.len()] == f_parts[..]
 }
 
 fn lives_there(session: &Session, cwd: Option<&str>) -> bool {

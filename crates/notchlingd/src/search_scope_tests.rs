@@ -169,7 +169,6 @@ fn three_pages(dir: &Dir) {
     save_page(dir, "misc", "Gamma Report", C, now());
 }
 
-#[cfg(unix)]
 #[test]
 fn a_page_is_placed_by_its_cwd_then_by_its_source() {
     let dir = Dir::new("place");
@@ -179,6 +178,11 @@ fn a_page_is_placed_by_its_cwd_then_by_its_source() {
     assert_eq!(page_org(&folders, &inside, "").as_deref(), Some("work"));
     assert_eq!(
         page_org(&folders, outside, &format!("{inside}/x.html")).as_deref(),
+        Some("personal")
+    );
+    let win = r"C:\somewhere\else";
+    assert_eq!(
+        page_org(&folders, win, &format!("{inside}/x.html")).as_deref(),
         Some("personal")
     );
     assert_eq!(
